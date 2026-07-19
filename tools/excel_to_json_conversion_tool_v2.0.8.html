@@ -3890,26 +3890,27 @@ I/F = インターフェース"></textarea>
     };
   }
 
-  // 対象列以外の非管理列のテキストを周辺語コンテキストとして含める(trace_comparison_example_verification.js
-  // 129〜133行目・170〜179行目で既に確立した「行内の他フィールドをnearbyTextに含める」設計を、
-  // 単一列("設計項目")へのハードコードではなく汎用化したもの)。
-  function buildNearbyText(sourceRecord, targetColumn, scannable) {
-    const others = scannable
-      .filter(col => col !== targetColumn)
-      .map(col => String(sourceRecord[col] ?? "").trim())
-      .filter(Boolean);
-    const targetText = `${targetColumn}: ${String(sourceRecord[targetColumn] ?? "").trim()}`;
-    return [...others, targetText].join(" / ");
-  }
-
-  async function v12BuildQuantityAnalysesForColumn(text, traceId, sourceField, nearbyText) {
+  // 【フェーズA修正】当初nearbyTextに対象セル以外(同一行の他列の値・対象列の列見出し)まで
+  // 連結していたが(buildNearbyText())、レビューでこれがinterval_semantics候補生成の
+  // キーワード照合へそのまま漏れ込むことを指摘された。区切りに使っていた" / "はlocalClauseText()の
+  // 節区切り(、。，)として認識されないため、他列の文言・列見出し自体が対象数量の強いキーワード
+  // 根拠として誤って計上されてしまっていた(実際に"検討結果"という列見出しがACHIEVED_POINT_KEYWORD_
+  // PATTERNの"検討(?:の)?結果"に一致し、セル値の内容に関わらずachieved_point=0.75まで
+  // 誤って加点されることを実データで確認した)。周辺列を意味候補生成のキーワード照合対象に含める
+  // 設計(trace_comparison_example_verification.jsの先行実装)は、実際には設計特性・概念の
+  // 対応付け(generatePropertyCandidates()、フェーズB・比較エンジン側の責務)のためのものであり、
+  // フェーズAのinterval_semantics候補生成(quantity_extraction_prototype.js側の数量そのものの
+  // 形・語彙判定)には周辺列の文言を混ぜるべきではなかった。nearbyTextは対象セル自身の値のみとし、
+  // 列名は既存のctx.sourceColumn(ACTUAL_SEMANTICS_RULES内でcolumn_role根拠として0.05のみ
+  // 加点される、意図された唯一の列名由来の根拠)経由でのみ渡す。
+  async function v12BuildQuantityAnalysesForColumn(text, traceId, sourceField) {
     const quantities = extractQuantities(text || "");
     const occurrenceCounts = new Map();
     const analyses = [];
     for (const q of quantities) {
       const occurrenceIndex = occurrenceCounts.get(q.source_text) || 0;
       occurrenceCounts.set(q.source_text, occurrenceIndex + 1);
-      const ctx = { nearbyText, side: "B", sourceColumn: sourceField, isConditionValue: false, occurrenceIndex };
+      const ctx = { nearbyText: text, side: "B", sourceColumn: sourceField, isConditionValue: false, occurrenceIndex };
       const normalizedText = v12Normalize(q.source_text);
       analyses.push({
         quantity_id: await v12QuantityIdDigest(traceId, sourceField, q.source_span, normalizedText),
@@ -3922,7 +3923,7 @@ I/F = インターフェース"></textarea>
       });
       for (const cc of (q.condition_candidates || [])) {
         const ccRecord = v12NormalizeConditionAsRecord(cc);
-        const ccCtx = { nearbyText, side: "B", sourceColumn: sourceField, isConditionValue: true, occurrenceIndex: 0 };
+        const ccCtx = { nearbyText: text, side: "B", sourceColumn: sourceField, isConditionValue: true, occurrenceIndex: 0 };
         const ccNormalizedText = v12Normalize(cc.source_text);
         analyses.push({
           quantity_id: await v12QuantityIdDigest(traceId, sourceField, cc.source_span, ccNormalizedText),
@@ -3959,6 +3960,11 @@ I/F = インターフェース"></textarea>
   }
 
   async function buildQuantityAnnotationSidecarExcel(trace, sourceTraceFileName) {
+    // 列の登場順(全scannable列、数量の有無を問わない)は、表内位置による役割候補の根拠
+    // (baseline列からの距離)の計算にのみ内部的に使う。出力するcolumn_role_candidatesは、
+    // 実際に数量が1件以上検出された列だけに限定する(数量の所在が無い列にまで役割候補を
+    // 出すのは、quantity_annotation_schema_v1.jsonの「数量所在列ごと」という説明と食い違う、
+    // とレビューで指摘された)。
     const allColumns = new Set();
     const columnValuesByName = {};
     for (const r of trace._trace_records) {
@@ -3968,23 +3974,25 @@ I/F = インターフェース"></textarea>
       }
     }
     const allColumnsList = [...allColumns];
-    const columnRoleCandidates = allColumnsList.map((col, idx) => ({
-      column: col,
-      role_candidates: inferColumnRoleCandidates(col, idx, allColumnsList, columnValuesByName),
-    }));
 
     const datasetSignature = await v12ComputeDatasetSignature(trace._trace_records);
+    const columnsWithQuantities = new Set();
     const records = [];
     for (const r of trace._trace_records) {
       const scannable = scannableColumns(r.source_record);
       const analyses = [];
       for (const col of scannable) {
         const text = String(r.source_record[col] ?? "");
-        const nearbyText = buildNearbyText(r.source_record, col, scannable);
-        analyses.push(...await v12BuildQuantityAnalysesForColumn(text, r.trace_id, col, nearbyText));
+        const colAnalyses = await v12BuildQuantityAnalysesForColumn(text, r.trace_id, col);
+        if (colAnalyses.length) columnsWithQuantities.add(col);
+        analyses.push(...colAnalyses);
       }
       records.push({ trace_id: r.trace_id, content_hash: await v12ComputeRecordContentHash(r), analyses });
     }
+
+    const columnRoleCandidates = allColumnsList
+      .map((col, idx) => ({ column: col, role_candidates: inferColumnRoleCandidates(col, idx, allColumnsList, columnValuesByName) }))
+      .filter(entry => columnsWithQuantities.has(entry.column));
 
     return {
       schema_version: QA_SCHEMA_VERSION,

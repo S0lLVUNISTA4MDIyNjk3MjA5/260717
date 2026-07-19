@@ -260,6 +260,86 @@ async function clickQuantityAnnotationButton(page, tmpDir) {
     check('根拠の乏しい列は高確信度で自動確定しない(7、6節21番)',
       !synItemCol || synItemCol.role_candidates.every(c => c.confidence < 0.5), synItemCol);
 
+    // ── 7b. 意味候補への列見出し・他セルの漏れ込み防止(859349fへのレビューで発見された
+    //    高重大度の不具合の回帰テスト) ──
+    // 当初buildNearbyText()が対象セル以外(同一行の他列・対象列の列見出し自体)まで
+    // interval_semantics候補生成のキーワード照合対象に含めており、"検討結果"という列見出しが
+    // ACHIEVED_POINT_KEYWORD_PATTERNの"検討(?:の)?結果"に一致してしまい、セル値の内容に
+    // 関わらず強いキーワード根拠(weight 0.4)が加点されていた。修正後は対象セル自身の値のみを
+    // 意味候補生成へ渡し、列名はctx.sourceColumn経由の弱い根拠(weight 0.05)としてのみ働く。
+    const leakTestRecords = [
+      { '設計項目': '達成値混在テスト', '標準仕様': '10 kW', '検討結果': '12.5 kWに変更' },
+      { '設計項目': '実測語テスト', '標準仕様': '12.5 kWを実測', '検討結果': '' },
+      { '設計項目': '無関係語テスト', '標準仕様': '公称20 kW', '参考値列': '参考値25 kW、試験は非該当' },
+    ];
+    await loadWorkJson(page, workPackage(leakTestRecords), fixtureDir);
+    const runLeak = await clickQuantityAnnotationButton(page, fixtureDir);
+    const leakRows = runLeak.sidecar.records;
+    const findAnalysis = (rowIdx, field) => leakRows[rowIdx].analyses.find(a => a.source_field === field);
+
+    // 1. 検討結果="12.5 kWに変更"ではキーワード0.4が付かず、最大でも形状0.3+列役割0.05=0.35になる
+    const kentouKakou = findAnalysis(0, '検討結果');
+    const achievedKentou = kentouKakou.interval_semantics_candidates.find(c => c.value === 'achieved_point');
+    check('検討結果="12.5 kWに変更"はachieved_pointが0.4未満(最大0.35、キーワード漏れ防止)(回帰1)',
+      achievedKentou && achievedKentou.confidence <= 0.35 + 1e-9, achievedKentou);
+    check('検討結果="12.5 kWに変更"のevidenceにkeyword由来の根拠が含まれない(回帰1)',
+      !achievedKentou.evidence.some(e => e.type === 'keyword'), achievedKentou.evidence);
+
+    // 2. 検討結果="12.5 kWを実測"(2行目、標準仕様列)ではキーワード0.4が付く(セル自身の文言なので正当)
+    const jissokuHyoujun = findAnalysis(1, '標準仕様');
+    const achievedJissoku = jissokuHyoujun.interval_semantics_candidates.find(c => c.value === 'achieved_point');
+    check('セル自身に"実測"を含む場合はキーワード根拠(weight 0.4)が付く(回帰2)',
+      achievedJissoku && achievedJissoku.evidence.some(e => e.type === 'keyword' && e.weight === 0.4), achievedJissoku);
+
+    // 3. 標準仕様="10 kW"(1行目)には、同じ行の検討結果セルの文言が伝播しない
+    const hyoujunSpec = findAnalysis(0, '標準仕様');
+    const achievedHyoujun = hyoujunSpec.interval_semantics_candidates.find(c => c.value === 'achieved_point');
+    check('標準仕様="10 kW"には検討結果列からのキーワード根拠が伝播しない(回帰3)',
+      achievedHyoujun && achievedHyoujun.confidence < 0.4, achievedHyoujun);
+
+    // 4. 対象外セルの「公称」「参考値」「試験」が、同じセル内の対象数量以外へ伝播しない
+    //    (3行目: 標準仕様="公称20 kW"、参考値列="参考値25 kW、試験は非該当"。列をまたいだ伝播が
+    //    無いことを検証する。同一セル内の"公称"はそのセル自身の候補への正当な根拠になり得るため、
+    //    ここでは"他列からの伝播が無いこと"だけを検証する)
+    // 汎用の不変条件: あるセルのinterval_semantics_candidatesが持つevidenceのsource_textは、
+    // 常にそのセル自身の値の範囲内に収まっていなければならない(他セルの文言が混入していないこと)。
+    const koushouCol = findAnalysis(2, '標準仕様');
+    const sankoCol = findAnalysis(2, '参考値列');
+    const evidenceStaysWithinOwnCell = (analysis, ownCellText) =>
+      analysis.interval_semantics_candidates.every(c => c.evidence.every(e => e.type === 'baseline' || ownCellText.includes(e.source_text)));
+    check('「標準仕様」列(公称20 kW)のevidenceが、同じ行の「参考値列」の文言("参考値"/"試験")を含まない(回帰4)',
+      evidenceStaysWithinOwnCell(koushouCol, '公称20 kW'),
+      koushouCol.interval_semantics_candidates.flatMap(c => c.evidence));
+    check('「参考値列」(参考値25 kW、試験は非該当)のevidenceが、同じ行の「標準仕様」列の文言("公称")を含まない(回帰4)',
+      evidenceStaysWithinOwnCell(sankoCol, '参考値25 kW、試験は非該当'),
+      sankoCol.interval_semantics_candidates.flatMap(c => c.evidence));
+
+    // 5. 列名だけを"検討結果"から中立名(neutral_col)へ変えても、強いキーワード根拠(セル内の文言由来)は変わらない
+    const renamedRecords = [{ '設計項目': '達成値混在テスト', '標準仕様': '10 kW', 'neutral_col': '12.5 kWに変更' }];
+    await loadWorkJson(page, workPackage(renamedRecords), fixtureDir);
+    const runRenamed = await clickQuantityAnnotationButton(page, fixtureDir);
+    const renamedAnalysis = runRenamed.sidecar.records[0].analyses.find(a => a.source_field === 'neutral_col');
+    const achievedRenamed = renamedAnalysis.interval_semantics_candidates.find(c => c.value === 'achieved_point');
+    // セル内容("12.5 kWに変更")自体にはkeyword根拠(0.4)を発火させる語が無いため、列名が"検討結果"でも
+    // 中立名でもkeyword由来のevidenceは付かない、という点は共通のはず(強いキーワード根拠は
+    // セルの実内容だけで決まり、列名では動かない、という回帰5の主旨)。列名一致由来の弱い
+    // column_role根拠(0.05、ctx.sourceColumn === '検討結果'の場合のみ)は列名に連動して当然変わる
+    // ため、ここでは比較対象に含めない。
+    check('列名を"検討結果"から中立名に変えても、どちらもkeyword由来のevidenceを持たない(回帰5)',
+      !achievedRenamed.evidence.some(e => e.type === 'keyword') && !achievedKentou.evidence.some(e => e.type === 'keyword'),
+      { renamed: achievedRenamed.evidence, original: achievedKentou.evidence });
+
+    // ── 6b. 数量ゼロ件の列はcolumn_role_candidatesに含まれない(中重大度の指摘への回帰テスト) ──
+    const leakColumns = runLeak.sidecar.column_role_candidates.map(c => c.column);
+    check('数量が1件も検出されない列(設計項目)はcolumn_role_candidatesに含まれない(中重大度)', !leakColumns.includes('設計項目'), leakColumns);
+    check('数量が検出された列(標準仕様)はcolumn_role_candidatesに含まれる(中重大度)', leakColumns.includes('標準仕様'), leakColumns);
+    check('数量が検出された列(検討結果)はcolumn_role_candidatesに含まれる(中重大度)', leakColumns.includes('検討結果'), leakColumns);
+    const allBlankRecords = [{ '設計項目': 'A', '空列': '', '標準仕様': '10 kW' }, { '設計項目': 'B', '空列': '', '標準仕様': '11 kW' }];
+    await loadWorkJson(page, workPackage(allBlankRecords), fixtureDir);
+    const runAllBlank = await clickQuantityAnnotationButton(page, fixtureDir);
+    check('全行で空欄の列(空列)はcolumn_role_candidatesに含まれない(中重大度)',
+      !runAllBlank.sidecar.column_role_candidates.some(c => c.column === '空列'), runAllBlank.sidecar.column_role_candidates.map(c => c.column));
+
     // ── 8. 条件節 ──
     const rCond = runA.sidecar.records.find(r => r.analyses.some(a => a.is_condition_value === true));
     check('条件節(condition_candidates)がis_condition_value:trueの別analysesになる(8)', !!rCond);

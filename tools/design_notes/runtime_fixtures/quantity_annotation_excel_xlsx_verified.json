@@ -1,32 +1,32 @@
 {
-  "generated_at": "2026-07-19T15:55:30.102Z",
+  "generated_at": "2026-07-19T15:55:32.564Z",
   "sample_trace": {
-    "file_name": "customer_hvac_design_review.xlsx",
+    "file_name": "_tmp_quantity_annotation_excel_fixture.xlsx",
     "chapter_number": "TRACE",
-    "chapter_title": "customer_hvac_design_review",
+    "chapter_title": "_tmp_quantity_annotation_excel_fixture",
     "trace_format": "excel-row-trace-v1",
     "schema_version": "1.1",
-    "generated_at": "2026-07-19T15:55:24.646Z",
+    "generated_at": "2026-07-19T15:55:32.531Z",
     "generator": {
       "name": "Excel → JSON 変換・確認ツール",
       "version": "2.0.8"
     },
     "source": {
-      "file_name": "customer_hvac_design_review.xlsx",
+      "file_name": "_tmp_quantity_annotation_excel_fixture.xlsx",
       "sheet_name": "設計検討表",
-      "profile_name": "テスト様式",
+      "profile_name": "xlsxtest",
       "profile_version": "1.0"
     },
     "tag_policy": {
       "mode": "controlled",
-      "vocabulary_id": "test",
+      "vocabulary_id": "t",
       "tag_vocabulary_version": "1.0",
       "allow_free_input": false,
       "allowed_tags": [],
       "tag_aliases": {}
     },
     "statistics": {
-      "records": 4,
+      "records": 3,
       "tagged_records": 0,
       "unregistered_tags": 0,
       "reviewed_records": 0,
@@ -34,151 +34,118 @@
     },
     "_trace_adapter": {
       "kind": "excel_row_export",
-      "source_file": "customer_hvac_design_review.xlsx",
+      "source_file": "_tmp_quantity_annotation_excel_fixture.xlsx",
       "source_sheet": "設計検討表",
-      "record_count": 4,
-      "generated_at": "2026-07-19T15:55:24.646Z"
+      "record_count": 3,
+      "generated_at": "2026-07-19T15:55:32.531Z"
     },
     "_trace_records": [
       {
-        "trace_id": "excel-0d37a56d",
-        "parent_id": "sheet-c61f1f24",
+        "trace_id": "excel-c1ac217b",
+        "parent_id": "sheet-fba1625f",
         "trace_title": "1",
-        "trace_text": "冷房能力 / 10 kW / 12.5 kWに変更 / 1",
+        "trace_text": "12.5 kWに変更 / 10 kW / 冷房能力 / 1 / 12.5",
         "trace_content": [
-          "冷房能力 / 10 kW / 12.5 kWに変更 / 1"
+          "12.5 kWに変更 / 10 kW / 冷房能力 / 1 / 12.5"
         ],
         "trace_category": "excel_row",
-        "trace_key_text": "customer_hvac_design_review.xlsx 設計検討表 excel_row 1 冷房能力 / 10 kW / 12.5 kWに変更 / 1",
-        "source_file": "customer_hvac_design_review.xlsx",
+        "trace_key_text": "_tmp_quantity_annotation_excel_fixture.xlsx 設計検討表 excel_row 1 12.5 kWに変更 / 10 kW / 冷房能力 / 1 / 12.5",
+        "source_file": "_tmp_quantity_annotation_excel_fixture.xlsx",
         "source_sheet": "設計検討表",
         "source_row": 2,
         "source_path": "$._trace_records[0]",
-        "source_section_id": "sheet-c61f1f24",
+        "source_section_id": "sheet-fba1625f",
         "source_section_title": "設計検討表",
         "block_type": "excel_row",
         "tags": [],
         "unregistered_tags": [],
         "review_status": "unreviewed",
         "source_record": {
-          "設計項目": "冷房能力",
-          "標準機種情報": "10 kW",
           "検討結果": "12.5 kWに変更",
+          "標準機種情報": "10 kW",
+          "設計項目": "冷房能力",
           "No": 1,
+          "数値セル(単位付き書式)": 12.5,
           "review_status": "unreviewed",
           "tags": [],
           "unregistered_tags": []
         },
-        "stable_uid": "xrow-a5b11405",
-        "content_hash": "850ec4c4",
+        "stable_uid": "xrow-9e5fd2f2",
+        "content_hash": "eb6765f6",
         "review_method": "",
         "reviewed_at": "",
         "review_comment": "",
         "exclusion_reason": ""
       },
       {
-        "trace_id": "excel-ae2ef79f",
-        "parent_id": "sheet-c61f1f24",
+        "trace_id": "excel-868afa10",
+        "parent_id": "sheet-fba1625f",
         "trace_title": "2",
-        "trace_text": "付帯事項 / 変更なし / 2",
+        "trace_text": "変更なし / 付帯事項 / 2",
         "trace_content": [
-          "付帯事項 / 変更なし / 2"
+          "変更なし / 付帯事項 / 2"
         ],
         "trace_category": "excel_row",
-        "trace_key_text": "customer_hvac_design_review.xlsx 設計検討表 excel_row 2 付帯事項 / 変更なし / 2",
-        "source_file": "customer_hvac_design_review.xlsx",
+        "trace_key_text": "_tmp_quantity_annotation_excel_fixture.xlsx 設計検討表 excel_row 2 変更なし / 付帯事項 / 2",
+        "source_file": "_tmp_quantity_annotation_excel_fixture.xlsx",
         "source_sheet": "設計検討表",
         "source_row": 3,
         "source_path": "$._trace_records[1]",
-        "source_section_id": "sheet-c61f1f24",
+        "source_section_id": "sheet-fba1625f",
         "source_section_title": "設計検討表",
         "block_type": "excel_row",
         "tags": [],
         "unregistered_tags": [],
         "review_status": "unreviewed",
         "source_record": {
-          "設計項目": "付帯事項",
-          "標準機種情報": "",
           "検討結果": "変更なし",
+          "標準機種情報": "",
+          "設計項目": "付帯事項",
           "No": 2,
+          "数値セル(単位付き書式)": "",
           "review_status": "unreviewed",
           "tags": [],
           "unregistered_tags": []
         },
-        "stable_uid": "xrow-1134d48f",
-        "content_hash": "1c397353",
+        "stable_uid": "xrow-aedcd59c",
+        "content_hash": "f8e286b3",
         "review_method": "",
         "reviewed_at": "",
         "review_comment": "",
         "exclusion_reason": ""
       },
       {
-        "trace_id": "excel-24807b61",
-        "parent_id": "sheet-c61f1f24",
+        "trace_id": "excel-a467dec3",
+        "parent_id": "sheet-fba1625f",
         "trace_title": "3",
-        "trace_text": "実測条件 / 周囲温度50 °Cにおいて12.5 kWを実測 / 3",
+        "trace_text": "12.5 kWを実測 / 周囲温度50 °Cにおいて12.5 kWを実測 / 実測条件 / 3 / 20",
         "trace_content": [
-          "実測条件 / 周囲温度50 °Cにおいて12.5 kWを実測 / 3"
+          "12.5 kWを実測 / 周囲温度50 °Cにおいて12.5 kWを実測 / 実測条件 / 3 / 20"
         ],
         "trace_category": "excel_row",
-        "trace_key_text": "customer_hvac_design_review.xlsx 設計検討表 excel_row 3 実測条件 / 周囲温度50 °Cにおいて12.5 kWを実測 / 3",
-        "source_file": "customer_hvac_design_review.xlsx",
+        "trace_key_text": "_tmp_quantity_annotation_excel_fixture.xlsx 設計検討表 excel_row 3 12.5 kWを実測 / 周囲温度50 °Cにおいて12.5 kWを実測 / 実測条件 / 3 / 20",
+        "source_file": "_tmp_quantity_annotation_excel_fixture.xlsx",
         "source_sheet": "設計検討表",
         "source_row": 4,
         "source_path": "$._trace_records[2]",
-        "source_section_id": "sheet-c61f1f24",
+        "source_section_id": "sheet-fba1625f",
         "source_section_title": "設計検討表",
         "block_type": "excel_row",
         "tags": [],
         "unregistered_tags": [],
         "review_status": "unreviewed",
         "source_record": {
-          "設計項目": "実測条件",
+          "検討結果": "12.5 kWを実測",
           "標準機種情報": "周囲温度50 °Cにおいて12.5 kWを実測",
-          "検討結果": "",
+          "設計項目": "実測条件",
           "No": 3,
+          "数値セル(単位付き書式)": 20,
           "review_status": "unreviewed",
           "tags": [],
           "unregistered_tags": []
         },
-        "stable_uid": "xrow-84b8a1b1",
-        "content_hash": "e0ca5982",
-        "review_method": "",
-        "reviewed_at": "",
-        "review_comment": "",
-        "exclusion_reason": ""
-      },
-      {
-        "trace_id": "excel-4c8d3441",
-        "parent_id": "sheet-c61f1f24",
-        "trace_title": "4",
-        "trace_text": "試験 / 50 °Cと50 °Cの両方で実施 / 4",
-        "trace_content": [
-          "試験 / 50 °Cと50 °Cの両方で実施 / 4"
-        ],
-        "trace_category": "excel_row",
-        "trace_key_text": "customer_hvac_design_review.xlsx 設計検討表 excel_row 4 試験 / 50 °Cと50 °Cの両方で実施 / 4",
-        "source_file": "customer_hvac_design_review.xlsx",
-        "source_sheet": "設計検討表",
-        "source_row": 5,
-        "source_path": "$._trace_records[3]",
-        "source_section_id": "sheet-c61f1f24",
-        "source_section_title": "設計検討表",
-        "block_type": "excel_row",
-        "tags": [],
-        "unregistered_tags": [],
-        "review_status": "unreviewed",
-        "source_record": {
-          "設計項目": "試験",
-          "標準機種情報": "50 °Cと50 °Cの両方で実施",
-          "検討結果": "",
-          "No": 4,
-          "review_status": "unreviewed",
-          "tags": [],
-          "unregistered_tags": []
-        },
-        "stable_uid": "xrow-e6ca400f",
-        "content_hash": "8b140902",
+        "stable_uid": "xrow-6d7acf26",
+        "content_hash": "2d1b86d3",
         "review_method": "",
         "reviewed_at": "",
         "review_comment": "",
@@ -190,11 +157,11 @@
   "sample_sidecar": {
     "schema_version": "quantity-annotation/1.0-rc1",
     "side": "actual",
-    "source_trace_file": "customer_hvac_design_review_trace_v1.json",
+    "source_trace_file": "_tmp_quantity_annotation_excel_fixture_trace_v1.json",
     "hash_algorithm": "SHA-256",
     "id_hash_algorithm": "SHA-256/128",
-    "dataset_signature": "QA-SHA256:e73826eb1694bff21db9a6acc95e1519c936af88122e4323426b8b690f03c8b0",
-    "generated_at": "2026-07-19T15:55:24.646Z",
+    "dataset_signature": "QA-SHA256:206e7191878646b0f12c0f7e6e0975a406b2d82560d7f5ced8090e054cdaf69a",
+    "generated_at": "2026-07-19T15:55:32.531Z",
     "generator": {
       "tool": "quantity_extraction_prototype.js + semantic_mapping_prototype.js（本ツールへ統合）",
       "version": "v2.14 / v2.19"
@@ -209,6 +176,35 @@
       }
     },
     "column_role_candidates": [
+      {
+        "column": "検討結果",
+        "role_candidates": [
+          {
+            "role": "resolved_design",
+            "confidence": 0.85,
+            "evidence": [
+              {
+                "type": "column_name_keyword",
+                "role": "resolved_design",
+                "keyword": "検討",
+                "weight": 0.35
+              },
+              {
+                "type": "column_name_keyword",
+                "role": "resolved_design",
+                "keyword": "結果",
+                "weight": 0.35
+              },
+              {
+                "type": "value_distribution",
+                "role": "resolved_design",
+                "unique_ratio": 1,
+                "weight": 0.15
+              }
+            ]
+          }
+        ]
+      },
       {
         "column": "標準機種情報",
         "role_candidates": [
@@ -237,127 +233,15 @@
             ]
           }
         ]
-      },
-      {
-        "column": "検討結果",
-        "role_candidates": [
-          {
-            "role": "resolved_design",
-            "confidence": 0.99,
-            "evidence": [
-              {
-                "type": "column_name_keyword",
-                "role": "resolved_design",
-                "keyword": "検討",
-                "weight": 0.35
-              },
-              {
-                "type": "column_name_keyword",
-                "role": "resolved_design",
-                "keyword": "結果",
-                "weight": 0.35
-              },
-              {
-                "type": "position_near_baseline",
-                "role": "resolved_design",
-                "baseline_column": "標準機種情報",
-                "distance": 1,
-                "weight": 0.15
-              },
-              {
-                "type": "value_distribution",
-                "role": "resolved_design",
-                "unique_ratio": 1,
-                "weight": 0.15
-              }
-            ]
-          }
-        ]
       }
     ],
     "records": [
       {
-        "trace_id": "excel-0d37a56d",
-        "content_hash": "72cec98af54a3669553abcc7f6fc8ec8b57ea77c0c873414efec417874e9a49e",
+        "trace_id": "excel-c1ac217b",
+        "content_hash": "bd669d266ff3552f0b192c2de6f1b16ae300853248d2dda1225a3795ff29fa66",
         "analyses": [
           {
-            "quantity_id": "q-6d54b0324779902df9d3614f4b4e6ba0",
-            "source_field": "標準機種情報",
-            "occurrence_index": 0,
-            "source_span": {
-              "start": 0,
-              "end": 5
-            },
-            "normalized_text": "10 kW",
-            "quantity": {
-              "source_text": "10 kW",
-              "source_span": {
-                "start": 0,
-                "end": 5
-              },
-              "normalized_text": "10 kW",
-              "quantity": {
-                "kind": "interval",
-                "lower": {
-                  "value": 10,
-                  "inclusive": true
-                },
-                "upper": {
-                  "value": 10,
-                  "inclusive": true
-                }
-              },
-              "unit": {
-                "source": "kW",
-                "canonical": "kW",
-                "dimension": "power",
-                "standard_ref": {
-                  "standard": "JIS Z 8000-4",
-                  "category": "mechanics"
-                }
-              },
-              "context": {
-                "property": null,
-                "subject": null,
-                "state": null,
-                "tokens": []
-              },
-              "extraction": {
-                "confidence": 0.95,
-                "warnings": []
-              }
-            },
-            "interval_semantics_candidates": [
-              {
-                "value": "achieved_point",
-                "confidence": 0.3,
-                "evidence": [
-                  {
-                    "type": "quantity_shape",
-                    "value": "achieved_point",
-                    "source_text": "10 kW",
-                    "effect": "supports",
-                    "weight": 0.3
-                  }
-                ]
-              },
-              {
-                "value": "unknown",
-                "confidence": 0.15,
-                "evidence": [
-                  {
-                    "type": "baseline",
-                    "value": "unknown",
-                    "source_text": "(既定の受け皿。他候補が弱い場合の下限)",
-                    "effect": "supports",
-                    "weight": 0.15
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "quantity_id": "q-426737683506aef7e446ea5b7b5fd877",
+            "quantity_id": "q-db0b0c52286ecba928327b81909dff55",
             "source_field": "検討結果",
             "occurrence_index": 0,
             "source_span": {
@@ -438,20 +322,186 @@
                 ]
               }
             ]
+          },
+          {
+            "quantity_id": "q-bf5da7c48d1329eeaab6a25ad503fe1f",
+            "source_field": "標準機種情報",
+            "occurrence_index": 0,
+            "source_span": {
+              "start": 0,
+              "end": 5
+            },
+            "normalized_text": "10 kW",
+            "quantity": {
+              "source_text": "10 kW",
+              "source_span": {
+                "start": 0,
+                "end": 5
+              },
+              "normalized_text": "10 kW",
+              "quantity": {
+                "kind": "interval",
+                "lower": {
+                  "value": 10,
+                  "inclusive": true
+                },
+                "upper": {
+                  "value": 10,
+                  "inclusive": true
+                }
+              },
+              "unit": {
+                "source": "kW",
+                "canonical": "kW",
+                "dimension": "power",
+                "standard_ref": {
+                  "standard": "JIS Z 8000-4",
+                  "category": "mechanics"
+                }
+              },
+              "context": {
+                "property": null,
+                "subject": null,
+                "state": null,
+                "tokens": []
+              },
+              "extraction": {
+                "confidence": 0.95,
+                "warnings": []
+              }
+            },
+            "interval_semantics_candidates": [
+              {
+                "value": "achieved_point",
+                "confidence": 0.3,
+                "evidence": [
+                  {
+                    "type": "quantity_shape",
+                    "value": "achieved_point",
+                    "source_text": "10 kW",
+                    "effect": "supports",
+                    "weight": 0.3
+                  }
+                ]
+              },
+              {
+                "value": "unknown",
+                "confidence": 0.15,
+                "evidence": [
+                  {
+                    "type": "baseline",
+                    "value": "unknown",
+                    "source_text": "(既定の受け皿。他候補が弱い場合の下限)",
+                    "effect": "supports",
+                    "weight": 0.15
+                  }
+                ]
+              }
+            ]
           }
         ]
       },
       {
-        "trace_id": "excel-ae2ef79f",
-        "content_hash": "96a53537130de0982dbccbf24b0d2a05d4b8196e495b8f13b8a45dedfe04e729",
+        "trace_id": "excel-868afa10",
+        "content_hash": "ef024ddb01a1f60a355aa8dd5b59bf594bd9dd8b58d2a05fd2d87f7ab4102be1",
         "analyses": []
       },
       {
-        "trace_id": "excel-24807b61",
-        "content_hash": "5ac7cadc9e2c74f9e2a560144848a2eca9ad399f6a815841e3633e2ad9971f68",
+        "trace_id": "excel-a467dec3",
+        "content_hash": "481bc5267c63ffee4a8745f279bf73d40e38c02b4d5569e0ce631a8248723317",
         "analyses": [
           {
-            "quantity_id": "q-2a875fddcd944e7740ce777f4a8f2808",
+            "quantity_id": "q-80eda72df3656806bd3ededd77332663",
+            "source_field": "検討結果",
+            "occurrence_index": 0,
+            "source_span": {
+              "start": 0,
+              "end": 7
+            },
+            "normalized_text": "12.5 kW",
+            "quantity": {
+              "source_text": "12.5 kW",
+              "source_span": {
+                "start": 0,
+                "end": 7
+              },
+              "normalized_text": "12.5 kW",
+              "quantity": {
+                "kind": "interval",
+                "lower": {
+                  "value": 12.5,
+                  "inclusive": true
+                },
+                "upper": {
+                  "value": 12.5,
+                  "inclusive": true
+                }
+              },
+              "unit": {
+                "source": "kW",
+                "canonical": "kW",
+                "dimension": "power",
+                "standard_ref": {
+                  "standard": "JIS Z 8000-4",
+                  "category": "mechanics"
+                }
+              },
+              "context": {
+                "property": null,
+                "subject": null,
+                "state": null,
+                "tokens": []
+              },
+              "extraction": {
+                "confidence": 0.95,
+                "warnings": []
+              }
+            },
+            "interval_semantics_candidates": [
+              {
+                "value": "achieved_point",
+                "confidence": 0.75,
+                "evidence": [
+                  {
+                    "type": "quantity_shape",
+                    "value": "achieved_point",
+                    "source_text": "12.5 kWを実測",
+                    "effect": "supports",
+                    "weight": 0.3
+                  },
+                  {
+                    "type": "column_role",
+                    "value": "achieved_point",
+                    "source_text": "12.5 kWを実測",
+                    "effect": "supports",
+                    "weight": 0.05
+                  },
+                  {
+                    "type": "keyword",
+                    "value": "achieved_point",
+                    "source_text": "12.5 kWを実測",
+                    "effect": "supports",
+                    "weight": 0.4
+                  }
+                ]
+              },
+              {
+                "value": "unknown",
+                "confidence": 0.15,
+                "evidence": [
+                  {
+                    "type": "baseline",
+                    "value": "unknown",
+                    "source_text": "(既定の受け皿。他候補が弱い場合の下限)",
+                    "effect": "supports",
+                    "weight": 0.15
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "quantity_id": "q-3f4dc499689988a406aafd0a9cba5e85",
             "source_field": "標準機種情報",
             "occurrence_index": 0,
             "source_span": {
@@ -564,7 +614,7 @@
             ]
           },
           {
-            "quantity_id": "q-1f94b34a369c791ad2a2be6c32263ca4",
+            "quantity_id": "q-7ac67e25b0adf704fc26f986facf3e64",
             "source_field": "標準機種情報",
             "occurrence_index": 0,
             "source_span": {
@@ -610,164 +660,6 @@
             },
             "is_condition_value": true,
             "interval_semantics_candidates": [
-              {
-                "value": "unknown",
-                "confidence": 0.15,
-                "evidence": [
-                  {
-                    "type": "baseline",
-                    "value": "unknown",
-                    "source_text": "(既定の受け皿。他候補が弱い場合の下限)",
-                    "effect": "supports",
-                    "weight": 0.15
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "trace_id": "excel-4c8d3441",
-        "content_hash": "cd7d2693a51be8a4dc4352b814f6937cd0b8ec53b5042e7e77ea938c00aa27c1",
-        "analyses": [
-          {
-            "quantity_id": "q-cf8a785376fc1543d4caf5b760ea56f2",
-            "source_field": "標準機種情報",
-            "occurrence_index": 0,
-            "source_span": {
-              "start": 0,
-              "end": 5
-            },
-            "normalized_text": "50 °C",
-            "quantity": {
-              "source_text": "50 °C",
-              "source_span": {
-                "start": 0,
-                "end": 5
-              },
-              "normalized_text": "50 °C",
-              "quantity": {
-                "kind": "interval",
-                "lower": {
-                  "value": 50,
-                  "inclusive": true
-                },
-                "upper": {
-                  "value": 50,
-                  "inclusive": true
-                }
-              },
-              "unit": {
-                "source": "°C",
-                "canonical": "degC",
-                "dimension": "temperature",
-                "standard_ref": {
-                  "standard": "JIS Z 8000-5",
-                  "category": "thermodynamics"
-                }
-              },
-              "context": {
-                "property": null,
-                "subject": null,
-                "state": null,
-                "tokens": []
-              },
-              "extraction": {
-                "confidence": 0.95,
-                "warnings": []
-              }
-            },
-            "interval_semantics_candidates": [
-              {
-                "value": "achieved_point",
-                "confidence": 0.3,
-                "evidence": [
-                  {
-                    "type": "quantity_shape",
-                    "value": "achieved_point",
-                    "source_text": "50 °Cと50 °Cの両方で実施",
-                    "effect": "supports",
-                    "weight": 0.3
-                  }
-                ]
-              },
-              {
-                "value": "unknown",
-                "confidence": 0.15,
-                "evidence": [
-                  {
-                    "type": "baseline",
-                    "value": "unknown",
-                    "source_text": "(既定の受け皿。他候補が弱い場合の下限)",
-                    "effect": "supports",
-                    "weight": 0.15
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "quantity_id": "q-d9b4666dbeae8917b4ba502b30fc96fc",
-            "source_field": "標準機種情報",
-            "occurrence_index": 1,
-            "source_span": {
-              "start": 6,
-              "end": 11
-            },
-            "normalized_text": "50 °C",
-            "quantity": {
-              "source_text": "50 °C",
-              "source_span": {
-                "start": 6,
-                "end": 11
-              },
-              "normalized_text": "50 °C",
-              "quantity": {
-                "kind": "interval",
-                "lower": {
-                  "value": 50,
-                  "inclusive": true
-                },
-                "upper": {
-                  "value": 50,
-                  "inclusive": true
-                }
-              },
-              "unit": {
-                "source": "°C",
-                "canonical": "degC",
-                "dimension": "temperature",
-                "standard_ref": {
-                  "standard": "JIS Z 8000-5",
-                  "category": "thermodynamics"
-                }
-              },
-              "context": {
-                "property": null,
-                "subject": null,
-                "state": null,
-                "tokens": []
-              },
-              "extraction": {
-                "confidence": 0.95,
-                "warnings": []
-              }
-            },
-            "interval_semantics_candidates": [
-              {
-                "value": "achieved_point",
-                "confidence": 0.3,
-                "evidence": [
-                  {
-                    "type": "quantity_shape",
-                    "value": "achieved_point",
-                    "source_text": "50 °Cと50 °Cの両方で実施",
-                    "effect": "supports",
-                    "weight": 0.3
-                  }
-                ]
-              },
               {
                 "value": "unknown",
                 "confidence": 0.15,

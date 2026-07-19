@@ -1,0 +1,9 @@
+{
+  "name": "design-notes-verification-scripts",
+  "private": true,
+  "description": "このディレクトリの回帰テストスクリプト群は、プロジェクト全体の『依存パッケージなし』原則に従い、原則node <file>.jsだけで動く。唯一の例外は、実ブラウザでの検証が必要なスクリプト(Playwright、hash_3paths_verification.js・quantity_annotation_pdf_verification.js・quantity_annotation_excel_verification.js)と、実際の.xlsxバイナリ形式を生成・検証する必要があるスクリプト(xlsx、quantity_annotation_excel_xlsx_verification.js)。いずれも製品コード(tools/配下のツール本体)には一切影響しない、テスト実行時だけの依存。実行前にこのディレクトリで`npm install`が必要。",
+  "devDependencies": {
+    "playwright": "^1.56.1",
+    "xlsx": "0.18.5"
+  }
+}
