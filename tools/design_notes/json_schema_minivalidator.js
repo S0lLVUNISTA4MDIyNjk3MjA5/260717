@@ -4,6 +4,9 @@
 // 「依存ゼロ」原則によりnpm経由で導入できないため、必要な部分だけを自前で実装する)。
 // サポートするキーワード: type(文字列または配列、nullable表現用), const, enum, pattern,
 // minLength, minimum, maximum, required, properties, additionalProperties, items,
+// oneOf(判別可能な共用体の表現用。分岐が互いに排他である前提の簡易実装で、JSON Schema仕様の
+// 「ちょうど1つに一致」ではなく「1つ以上に一致すればよい」という緩い判定にしている。
+// quantity-annotation側は分岐をkindフィールドのconstで判別可能に設計しているため実用上問題ない)、
 // $ref(同一ドキュメント内の#/...のみ)。
 'use strict';
 
@@ -36,6 +39,13 @@ function typeMatches(expected, value) {
 function validateNode(schema, value, path, root, errors) {
   if (schema.$ref) {
     validateNode(resolveRef(root, schema.$ref), value, path, root, errors);
+    return;
+  }
+  if (schema.oneOf) {
+    const branchErrors = schema.oneOf.map(sub => { const e = []; validateNode(sub, value, path, root, e); return e; });
+    if (!branchErrors.some(e => e.length === 0)) {
+      errors.push(`${path}: oneOfのいずれの分岐にも一致しない (各分岐のエラー: ${JSON.stringify(branchErrors)})`);
+    }
     return;
   }
   if (schema.const !== undefined && value !== schema.const) {

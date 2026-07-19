@@ -117,13 +117,29 @@
         },
         "normalized_text": { "type": "string" },
         "quantity": {
-          "type": "object",
-          "required": ["kind", "lower", "upper"],
-          "properties": {
-            "kind": { "type": "string", "minLength": 1 },
-            "lower": { "$ref": "#/$defs/intervalBound" },
-            "upper": { "$ref": "#/$defs/intervalBound" }
-          }
+          "description": "kindによって形が変わる判別可能な共用体(quantity_extraction_prototype.jsの2種類の出力形、112〜452行目参照)。区間形式(kind:'interval')以外に、「12/15 kW」のような並列値(kind:'alternatives'、297行目。lower/upperを持たずoptions/selection_semanticsを持つ)も実際に生成される。レビューでconst:'interval'への変更を提案されたが、alternatives形を誤って拒否するため採用しなかった(修正時に実際に'12/15 kW'を抽出させ、alternatives形が生成されることを確認済み)。",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["kind", "lower", "upper"],
+              "additionalProperties": false,
+              "properties": {
+                "kind": { "const": "interval" },
+                "lower": { "$ref": "#/$defs/intervalBound" },
+                "upper": { "$ref": "#/$defs/intervalBound" }
+              }
+            },
+            {
+              "type": "object",
+              "required": ["kind", "options", "selection_semantics"],
+              "additionalProperties": false,
+              "properties": {
+                "kind": { "const": "alternatives" },
+                "options": { "type": "array" },
+                "selection_semantics": { "type": "string", "minLength": 1 }
+              }
+            }
+          ]
         },
         "unit": {
           "type": "object",
@@ -149,6 +165,8 @@
     },
     "intervalBound": {
       "type": ["object", "null"],
+      "required": ["value", "inclusive"],
+      "additionalProperties": false,
       "properties": {
         "value": { "type": "number" },
         "inclusive": { "type": "boolean" }

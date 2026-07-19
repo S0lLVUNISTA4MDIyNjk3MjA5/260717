@@ -278,6 +278,30 @@ async function clickAndDownloadBoth(page, selector, savePathTrace, savePathSidec
 
     check('新ボタンのend-to-end出力でもgenerated_atが一致する(8)', trace.generated_at === sidecar.generated_at);
 
+    // Schema外の不変条件検査(JSON Schemaでは表現できない、値同士の関係に関する検査)。
+    // 実際のブラウザ生成物(実データ)に対して検証する。
+    const traceById = new Map(trace._trace_records.map(r => [r.trace_id, r]));
+    let spanOrderOk = true, spanOrderDetail = null;
+    let sourceTextAlignedOk = true, sourceTextAlignedDetail = null;
+    for (const rec of sidecar.records) {
+      const traceRec = traceById.get(rec.trace_id);
+      for (const a of rec.analyses) {
+        if (!(a.source_span.end >= a.source_span.start)) {
+          spanOrderOk = false;
+          spanOrderDetail = { trace_id: rec.trace_id, source_span: a.source_span };
+        }
+        // is_condition_valueの場合、quantity.source_text=condition_candidatesの原文(=元quantityと
+        // 同じsource_raw_text内)であり、通常の数量と同じ規則でsource_raw_textから復元できる。
+        const expected = traceRec.source_raw_text.slice(a.source_span.start, a.source_span.end);
+        if (expected !== a.quantity.source_text) {
+          sourceTextAlignedOk = false;
+          sourceTextAlignedDetail = { trace_id: rec.trace_id, expected, actual: a.quantity.source_text, source_span: a.source_span };
+        }
+      }
+    }
+    check('全analysesでsource_span.end >= source_span.start(Schema外の不変条件、実データで検証)', spanOrderOk, spanOrderDetail);
+    check('全analysesでsource_textが元trace(source_raw_text)のsource_span位置と一致する(Schema外の不変条件、実データで検証)', sourceTextAlignedOk, sourceTextAlignedDetail);
+
     // 9. JSON Schema検証(実際にボタンクリックで得た生成物)
     const schemaResult = validate(SCHEMA, sidecar);
     check('実際のPDF生成物がJSON Schema(quantity_annotation_schema_v1.json)を満たす(9)', schemaResult.valid, schemaResult.errors);
