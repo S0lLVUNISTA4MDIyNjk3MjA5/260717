@@ -66,6 +66,17 @@ function buildFixtureWorkbook(unitFormat) {
   return wb;
 }
 
+function buildAllSheetsFixtureWorkbook() {
+  const wb = buildFixtureWorkbook('kW');
+  const ws2 = XLSX.utils.aoa_to_sheet([
+    ['設計項目', '標準機種情報', '検討結果', 'No'],
+    ['耐圧性能', '0.5 MPa', '0.6 MPaに変更', 1],
+    ['使用温度', '50 °C', '55 °Cに変更', 2],
+  ]);
+  XLSX.utils.book_append_sheet(wb, ws2, '追加検討表');
+  return wb;
+}
+
 async function withPage(fn) {
   const browser = await chromium.launch();
   const page = await browser.newPage();
@@ -167,8 +178,10 @@ function nodeRecomputeDatasetSignature(traceRecords) {
   fs.mkdirSync(fixtureDir, { recursive: true });
   const xlsxPathKw = path.join(fixtureDir, '_tmp_quantity_annotation_excel_fixture_kw.xlsx');
   const xlsxPathKpa = path.join(fixtureDir, '_tmp_quantity_annotation_excel_fixture_kpa.xlsx');
+  const xlsxPathAllSheets = path.join(fixtureDir, '_tmp_quantity_annotation_excel_fixture_all_sheets.xlsx');
   XLSX.writeFile(buildFixtureWorkbook('kW'), xlsxPathKw);
   XLSX.writeFile(buildFixtureWorkbook('kPa'), xlsxPathKpa);
+  XLSX.writeFile(buildAllSheetsFixtureWorkbook(), xlsxPathAllSheets);
 
   check('Node側requireしたxlsxパッケージのバージョンが期待どおり(ブラウザ側CDN差し替えコピーと同一)',
     require('xlsx/package.json').version === XLSX_EXPECTED_VERSION, require('xlsx/package.json').version);
@@ -367,8 +380,99 @@ function nodeRecomputeDatasetSignature(traceRecords) {
       pageErrors.every(e => /ERR_TUNNEL_CONNECTION_FAILED|net::/.test(e)), pageErrors);
   });
 
+  // ── 【今回のレビュー指摘への回帰テスト】全シート変換後のcurrentDataは選択中シート
+  //    だけを指すため、数量注釈ボタンがそのまま処理すると1シート分だけを全体出力のように
+  //    見せてしまう。全シート数量注釈はフェーズAの対象外とし、明確な案内を表示して
+  //    trace/sidecarのどちらもダウンロードしないことを、2シートの実.xlsxで確認する。
+  await withPage(async (page, pageErrors) => {
+    await page.setInputFiles('#excelFile', xlsxPathAllSheets);
+    await page.waitForTimeout(500);
+    await page.check('#allSheets');
+    await page.click('#convertBtn');
+    await page.waitForTimeout(300);
+    await page.click('[data-tab="profileTab"]');
+    await page.waitForTimeout(150);
+    await page.fill('#profileEditor', JSON.stringify({
+      profile_name: 'xlsxtest_all_sheets_guard', profile_version: '1.0',
+      output: { mode: 'array', preserve_unmapped: true },
+      tag_policy: { mode: 'controlled', vocabulary_id: 't', tag_vocabulary_version: '1.0', allow_free_input: false, allowed_tags: [] },
+    }, null, 2));
+    const downloads = [];
+    const onDownload = download => downloads.push(download);
+    page.on('download', onDownload);
+    await page.click('#buildQuantityAnnotationBtn');
+    await page.waitForTimeout(1500);
+    page.off('download', onDownload);
+    const message = await page.evaluate(() => document.getElementById('profileMessage').textContent);
+    check('2シートの全シートモードではtrace/sidecarを部分ダウンロードしない(全シートガード)',
+      downloads.length === 0, downloads.map(d => d.suggestedFilename()));
+    check('全シートモード停止時に「数量注釈はシート単位」と明確に案内する(全シートガード)',
+      /全シート/.test(message || '') && /数量注釈はシート単位で出力してください/.test(message || ''), message);
+    check('全シートガード検証中にページエラーが発生していない',
+      pageErrors.every(e => /ERR_TUNNEL_CONNECTION_FAILED|net::/.test(e)), pageErrors);
+  });
+
+  // ── 【今回のレビュー指摘への回帰テスト】UI上の列名変更とは別に、プロファイルの
+  //    columns[].source→targetを実際に通し、v12ColumnSourceAlias()がtarget列から
+  //    元のnumber formatを逆引きできることを確認する。
+  await withPage(async (page, pageErrors) => {
+    await page.setInputFiles('#excelFile', xlsxPathKw);
+    await page.waitForTimeout(500);
+    await page.click('#convertBtn');
+    await page.waitForTimeout(300);
+    await page.click('[data-tab="profileTab"]');
+    await page.waitForTimeout(150);
+    await page.fill('#profileEditor', JSON.stringify({
+      profile_name: 'xlsxtest_profile_column_mapping', profile_version: '1.0',
+      output: { mode: 'array', preserve_unmapped: false },
+      columns: [
+        { source: '数値セル(単位付き書式)', target: '測定能力', type: 'auto' },
+      ],
+      tag_policy: { mode: 'controlled', vocabulary_id: 't', tag_vocabulary_version: '1.0', allow_free_input: false, allowed_tags: [] },
+    }, null, 2));
+    const run = await clickQuantityAnnotationButton(page, fixtureDir);
+    const row = run.trace._trace_records.find(r => r.source_record['測定能力'] === 12.5);
+    check('プロファイル列マッピング後のsource_recordにtarget列「測定能力」が存在する',
+      !!row && row.source_record['数値セル(単位付き書式)'] === undefined, row?.source_record);
+    check('プロファイル列マッピング後もtarget列名で表示文字列を解決する(v12ColumnSourceAlias回帰)',
+      row?.source_record_display?.['測定能力'] === '12.5 kW', row?.source_record_display);
+    const analyses = run.sidecar.records.find(r => r.trace_id === row?.trace_id)?.analyses || [];
+    check('プロファイル列マッピング後のanalysis.source_fieldもtarget列名「測定能力」と一致する',
+      analyses.some(a => a.source_field === '測定能力' && a.source_value_text === '12.5 kW'), analyses);
+    check('プロファイル列マッピング検証中にページエラーが発生していない',
+      pageErrors.every(e => /ERR_TUNNEL_CONNECTION_FAILED|net::/.test(e)), pageErrors);
+  });
+
+  // ドット区切りtargetは現状の列単位数量走査では扱えないため、黙ってraw値だけへ
+  // フォールバックせず、trace側へ解決不能理由を残すことを確認する。
+  await withPage(async (page, pageErrors) => {
+    await page.setInputFiles('#excelFile', xlsxPathKw);
+    await page.waitForTimeout(500);
+    await page.click('#convertBtn');
+    await page.waitForTimeout(300);
+    await page.click('[data-tab="profileTab"]');
+    await page.waitForTimeout(150);
+    await page.fill('#profileEditor', JSON.stringify({
+      profile_name: 'xlsxtest_profile_path_mapping', profile_version: '1.0',
+      output: { mode: 'array', preserve_unmapped: false },
+      columns: [
+        { source: '数値セル(単位付き書式)', target: 'measurement.capacity', type: 'auto' },
+      ],
+      tag_policy: { mode: 'controlled', vocabulary_id: 't', tag_vocabulary_version: '1.0', allow_free_input: false, allowed_tags: [] },
+    }, null, 2));
+    const run = await clickQuantityAnnotationButton(page, fixtureDir);
+    const row = run.trace._trace_records.find(r => r.source_record?.measurement?.capacity === 12.5);
+    check('ドット区切り列マッピングは黙示的に処理せずpath_mapping_unsupported診断を残す',
+      row?.source_record_display_unresolved?.some(u => u.source_field === 'measurement.capacity'
+        && u.code === 'formatted_display_unavailable' && u.reason === 'path_mapping_unsupported'),
+      row?.source_record_display_unresolved);
+    check('ドット区切り列マッピング診断の検証中にページエラーが発生していない',
+      pageErrors.every(e => /ERR_TUNNEL_CONNECTION_FAILED|net::/.test(e)), pageErrors);
+  });
+
   fs.unlinkSync(xlsxPathKw);
   fs.unlinkSync(xlsxPathKpa);
+  fs.unlinkSync(xlsxPathAllSheets);
 
   console.log('\n=== quantity_annotation_excel_xlsx_verification 結果 ===');
   let fail = 0;

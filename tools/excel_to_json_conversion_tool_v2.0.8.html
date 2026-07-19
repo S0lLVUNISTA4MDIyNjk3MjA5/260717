@@ -4622,6 +4622,16 @@ I/F = インターフェース"></textarea>
     const display = {};
     const unresolved = [];
     if (!preTraceRow || !numberFormats) return { display: null, unresolved };
+    // 現行の数量注釈はsource_recordのトップレベル列を単位に走査するため、ドット区切り
+    // パスを含むプロファイルマッピングの表示文字列は安全に対応付けられない。元列に
+    // number formatがあり、マッピング後の値も実在する場合は、黙ってraw値だけへ
+    // フォールバックせず、targetパスを特定できる診断として残す。
+    for (const rule of profile?.columns || []) {
+      if (!rule || typeof rule.source !== 'string' || typeof rule.target !== 'string') continue;
+      if (!rule.source.includes('.') && !rule.target.includes('.')) continue;
+      if (!numberFormats[rule.source] || getByPath(record?.source_record, rule.target) === undefined) continue;
+      unresolved.push({ source_field: rule.target, code: 'formatted_display_unavailable', reason: 'path_mapping_unsupported' });
+    }
     for (const col of Object.keys(record?.source_record || {})) {
       const sourceCol = v12ColumnSourceAlias(profile, col);
       const fmt = numberFormats[sourceCol];
@@ -4647,6 +4657,15 @@ I/F = インターフェース"></textarea>
 
   async function exportQuantityAnnotationExcel(){
     clearMessage($('profileMessage'));
+    // フェーズAの数量注釈出力はシート単位だけを対象とする。全シート変換時の
+    // outputDataには全シートが入る一方、currentData/currentCellMetaは選択中シートだけを
+    // 指すため、このままtrace化すると1シート分だけを全体出力のように見せてしまう。
+    // allSheetsの現在値だけでなく、変換済みデータの由来を表す2つの状態も確認し、
+    // チェックを外しただけ・途中で様式適用した後でも、再変換なしの部分出力を許可しない。
+    if (allSheets.checked || outputModeAllSheets || originalWasAllSheets) {
+      showMessage($('profileMessage'), 'error', '全シート変換の数量注釈出力には対応していません。数量注釈はシート単位で出力してください。「全シートを一括変換」をオフにし、対象シートを選択して再変換してください。');
+      return;
+    }
     // 「同一スナップショットから生成する」を構造的に保証するため、この関数内で
     // applyProfileToCurrentData(true)を1回だけ呼び、以降は一切再生成せず、その結果(outputData、
     // 以降await一切を挟まず同期的に参照するローカル変数)から照合用JSON本体とsidecarの両方を
