@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-07-19T15:55:30.102Z",
+  "generated_at": "2026-07-19T16:28:43.885Z",
   "sample_trace": {
     "file_name": "customer_hvac_design_review.xlsx",
     "chapter_number": "TRACE",
     "chapter_title": "customer_hvac_design_review",
     "trace_format": "excel-row-trace-v1",
     "schema_version": "1.1",
-    "generated_at": "2026-07-19T15:55:24.646Z",
+    "generated_at": "2026-07-19T16:28:38.410Z",
     "generator": {
       "name": "Excel → JSON 変換・確認ツール",
       "version": "2.0.8"
@@ -37,7 +37,7 @@
       "source_file": "customer_hvac_design_review.xlsx",
       "source_sheet": "設計検討表",
       "record_count": 4,
-      "generated_at": "2026-07-19T15:55:24.646Z"
+      "generated_at": "2026-07-19T16:28:38.410Z"
     },
     "_trace_records": [
       {
@@ -194,7 +194,7 @@
     "hash_algorithm": "SHA-256",
     "id_hash_algorithm": "SHA-256/128",
     "dataset_signature": "QA-SHA256:e73826eb1694bff21db9a6acc95e1519c936af88122e4323426b8b690f03c8b0",
-    "generated_at": "2026-07-19T15:55:24.646Z",
+    "generated_at": "2026-07-19T16:28:38.410Z",
     "generator": {
       "tool": "quantity_extraction_prototype.js + semantic_mapping_prototype.js（本ツールへ統合）",
       "version": "v2.14 / v2.19"
@@ -278,11 +278,13 @@
     "records": [
       {
         "trace_id": "excel-0d37a56d",
-        "content_hash": "72cec98af54a3669553abcc7f6fc8ec8b57ea77c0c873414efec417874e9a49e",
+        "content_hash": "699dfe6e9b769fd8a6327b846e6b3a22d88d64dd8d525396239ebc199a11ffaf",
         "analyses": [
           {
             "quantity_id": "q-6d54b0324779902df9d3614f4b4e6ba0",
             "source_field": "標準機種情報",
+            "source_representation": "raw_value",
+            "source_value_text": "10 kW",
             "occurrence_index": 0,
             "source_span": {
               "start": 0,
@@ -359,6 +361,8 @@
           {
             "quantity_id": "q-426737683506aef7e446ea5b7b5fd877",
             "source_field": "検討結果",
+            "source_representation": "raw_value",
+            "source_value_text": "12.5 kWに変更",
             "occurrence_index": 0,
             "source_span": {
               "start": 0,
@@ -443,16 +447,18 @@
       },
       {
         "trace_id": "excel-ae2ef79f",
-        "content_hash": "96a53537130de0982dbccbf24b0d2a05d4b8196e495b8f13b8a45dedfe04e729",
+        "content_hash": "12ac17067d6d551e8debc297f26ffd588e39dab0ca1dc1c972f8c8e6c3ab6eda",
         "analyses": []
       },
       {
         "trace_id": "excel-24807b61",
-        "content_hash": "5ac7cadc9e2c74f9e2a560144848a2eca9ad399f6a815841e3633e2ad9971f68",
+        "content_hash": "5735c1268ca8d940d41cc328a0d977e8932755d473f3367a19a446518e4cc4b3",
         "analyses": [
           {
             "quantity_id": "q-2a875fddcd944e7740ce777f4a8f2808",
             "source_field": "標準機種情報",
+            "source_representation": "raw_value",
+            "source_value_text": "周囲温度50 °Cにおいて12.5 kWを実測",
             "occurrence_index": 0,
             "source_span": {
               "start": 13,
@@ -566,6 +572,8 @@
           {
             "quantity_id": "q-1f94b34a369c791ad2a2be6c32263ca4",
             "source_field": "標準機種情報",
+            "source_representation": "raw_value",
+            "source_value_text": "周囲温度50 °Cにおいて12.5 kWを実測",
             "occurrence_index": 0,
             "source_span": {
               "start": 4,
@@ -629,11 +637,13 @@
       },
       {
         "trace_id": "excel-4c8d3441",
-        "content_hash": "cd7d2693a51be8a4dc4352b814f6937cd0b8ec53b5042e7e77ea938c00aa27c1",
+        "content_hash": "27b4807a6d9c483f01432b21e6650659fc71bb11a136e8e216da4eccc59917c1",
         "analyses": [
           {
             "quantity_id": "q-cf8a785376fc1543d4caf5b760ea56f2",
             "source_field": "標準機種情報",
+            "source_representation": "raw_value",
+            "source_value_text": "50 °Cと50 °Cの両方で実施",
             "occurrence_index": 0,
             "source_span": {
               "start": 0,
@@ -710,6 +720,8 @@
           {
             "quantity_id": "q-d9b4666dbeae8917b4ba502b30fc96fc",
             "source_field": "標準機種情報",
+            "source_representation": "raw_value",
+            "source_value_text": "50 °Cと50 °Cの両方で実施",
             "occurrence_index": 1,
             "source_span": {
               "start": 6,

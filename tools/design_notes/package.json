@@ -1,9 +1,9 @@
 {
   "name": "design-notes-verification-scripts",
   "private": true,
-  "description": "このディレクトリの回帰テストスクリプト群は、プロジェクト全体の『依存パッケージなし』原則に従い、原則node <file>.jsだけで動く。唯一の例外は、実ブラウザでの検証が必要なスクリプト(Playwright、hash_3paths_verification.js・quantity_annotation_pdf_verification.js・quantity_annotation_excel_verification.js)と、実際の.xlsxバイナリ形式を生成・検証する必要があるスクリプト(xlsx、quantity_annotation_excel_xlsx_verification.js)。いずれも製品コード(tools/配下のツール本体)には一切影響しない、テスト実行時だけの依存。実行前にこのディレクトリで`npm install`が必要。",
+  "description": "このディレクトリの回帰テストスクリプト群は、プロジェクト全体の『依存パッケージなし』原則に従い、原則node <file>.jsだけで動く。唯一の例外は、実ブラウザでの検証が必要なスクリプト(Playwright、hash_3paths_verification.js・quantity_annotation_pdf_verification.js・quantity_annotation_excel_verification.js・quantity_annotation_excel_xlsx_verification.js)と、実際の.xlsxバイナリ形式を生成・検証する必要があるスクリプト(xlsx、quantity_annotation_excel_xlsx_verification.js)。いずれも製品コード(tools/配下のツール本体)には一切影響しない、テスト実行時だけの依存。実行前にこのディレクトリでnpm ci(package-lock.jsonをコミットしているため、npm installではなくnpm ciを使い、再現可能な依存関係を保証する)が必要。バージョンは完全固定(キャレット等の範囲指定なし)にしている。quantity_annotation_excel_xlsx_verification.js自身が、ブラウザ側(page.route()で差し替えるCDN版と同一バージョンをローカルに保持したもの)とNode側(このpackage.jsonが固定するもの)のxlsxバージョンが一致することを実行時に確認する。",
   "devDependencies": {
-    "playwright": "^1.56.1",
+    "playwright": "1.56.1",
     "xlsx": "0.18.5"
   }
 }

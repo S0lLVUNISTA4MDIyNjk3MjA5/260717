@@ -3903,7 +3903,11 @@ I/F = インターフェース"></textarea>
   // 形・語彙判定)には周辺列の文言を混ぜるべきではなかった。nearbyTextは対象セル自身の値のみとし、
   // 列名は既存のctx.sourceColumn(ACTUAL_SEMANTICS_RULES内でcolumn_role根拠として0.05のみ
   // 加点される、意図された唯一の列名由来の根拠)経由でのみ渡す。
-  async function v12BuildQuantityAnalysesForColumn(text, traceId, sourceField) {
+  // sourceRepresentation: "raw_value"(source_recordの生値をそのまま文字列化したもの)か
+  // "formatted_display"(セルの表示形式を適用した表示文字列。単位付き書式の数値セル等)かを
+  // 明示する。source_spanがどちらのテキストに対する位置なのか、生成物だけから判別できるようにする
+  // (レビュー指摘: 既定設定=数値保持のまま単位付き数値セルを見落とす問題への対応、下記参照)。
+  async function v12BuildQuantityAnalysesForColumn(text, traceId, sourceField, sourceRepresentation) {
     const quantities = extractQuantities(text || "");
     const occurrenceCounts = new Map();
     const analyses = [];
@@ -3915,6 +3919,8 @@ I/F = インターフェース"></textarea>
       analyses.push({
         quantity_id: await v12QuantityIdDigest(traceId, sourceField, q.source_span, normalizedText),
         source_field: sourceField,
+        source_representation: sourceRepresentation,
+        source_value_text: text,
         occurrence_index: occurrenceIndex,
         source_span: q.source_span,
         normalized_text: normalizedText,
@@ -3928,6 +3934,8 @@ I/F = インターフェース"></textarea>
         analyses.push({
           quantity_id: await v12QuantityIdDigest(traceId, sourceField, cc.source_span, ccNormalizedText),
           source_field: sourceField,
+          source_representation: sourceRepresentation,
+          source_value_text: text,
           occurrence_index: 0,
           source_span: cc.source_span,
           normalized_text: ccNormalizedText,
@@ -3944,8 +3952,10 @@ I/F = インターフェース"></textarea>
   // 1行に複数の数量候補列があり得るため、行全体(source_record丸ごと)+tags+source_rowを対象にする
   // (単一セル・単一列だけを対象にすると、他列の変更による意味候補への影響を検出できないため。
   // trace_comparison_example_verification.jsが検証済みの「本文だけでなく周辺情報も含める」原則)。
+  // source_record_display(セルの表示文字列。単位付き書式の数値セルがkW→W等に変わった場合、
+  // 生値は同じでも表示文字列が変わるため、これをハッシュ対象に含めることで陳腐化を検出できる)。
   async function v12ComputeRecordContentHash(record) {
-    const analysisInput = { trace_id: record.trace_id, source_record: record.source_record, tags: record.tags || [], source_row: record.source_row };
+    const analysisInput = { trace_id: record.trace_id, source_record: record.source_record, source_record_display: record.source_record_display || null, tags: record.tags || [], source_row: record.source_row };
     return v12HashParts("content-hash-v1", [JSON.stringify(canonicalValue(analysisInput))]);
   }
 
@@ -3982,8 +3992,17 @@ I/F = インターフェース"></textarea>
       const scannable = scannableColumns(r.source_record);
       const analyses = [];
       for (const col of scannable) {
-        const text = String(r.source_record[col] ?? "");
-        const colAnalyses = await v12BuildQuantityAnalysesForColumn(text, r.trace_id, col);
+        const rawValue = r.source_record[col];
+        // 数値型セル(数値・真偽値を保持=true、既定)は生値のまま(例: 12.5)保持されるため、
+        // "0.0\" kW\""のような単位付きセル書式を持つセルでも単位情報を含む文字列が失われる。
+        // source_record_display(v12DisplayedRowsForCurrentSheet()が別途、表示形式を適用した
+        // 文字列として捕捉したもの)が同じ列に存在し、かつ生値と異なる場合は、その表示文字列を
+        // 抽出対象にする(生値そのものは変更せず、抽出にだけ使う。レビュー指摘への対応)。
+        const displayValue = r.source_record_display?.[col];
+        const useDisplay = typeof rawValue === "number" && displayValue !== undefined && displayValue !== null && String(displayValue) !== String(rawValue);
+        const text = useDisplay ? String(displayValue) : String(rawValue ?? "");
+        const representation = useDisplay ? "formatted_display" : "raw_value";
+        const colAnalyses = await v12BuildQuantityAnalysesForColumn(text, r.trace_id, col, representation);
         if (colAnalyses.length) columnsWithQuantities.add(col);
         analyses.push(...colAnalyses);
       }
@@ -4543,6 +4562,26 @@ I/F = インターフェース"></textarea>
     ensureRowStates(); refreshAllViews();
   };
 
+  // 現在のシートを、セルの表示形式(number format)を適用した表示文字列版として再変換する。
+  // 数値・真偽値を保持(preserveTypes)は既定でtrueのため、単位付き書式("0.0\" kW\""等)を持つ
+  // 数値セルであっても、通常の変換では生値(例: 12.5)しか残らず単位情報が失われる。この関数は
+  // 既存のconvertSheet()をpreserveTypesだけ一時的にfalseへ切り替えて再利用し(呼び出し後は
+  // 必ず元の状態へ戻す。DOM上のチェックボックス表示や他の変換結果には影響しない)、
+  // 表示文字列版の行配列を得る。全シートモード・workbook未読込(作業中JSON経由等、実際の.xlsxを
+  // 経由していない場合)ではnullを返し、呼び出し側は生値のみにフォールバックする。
+  function v12DisplayedRowsForCurrentSheet() {
+    if (!workbook || !currentSheetName || outputModeAllSheets) return null;
+    const original = preserveTypes.checked;
+    preserveTypes.checked = false;
+    try {
+      return convertSheet(currentSheetName).data;
+    } catch (e) {
+      return null;
+    } finally {
+      preserveTypes.checked = original;
+    }
+  }
+
   async function exportQuantityAnnotationExcel(){
     clearMessage($('profileMessage'));
     // 「同一スナップショットから生成する」を構造的に保証するため、この関数内で
@@ -4556,10 +4595,16 @@ I/F = インターフェース"></textarea>
       showMessage($('profileMessage'), 'error', '照合用JSONの生成に失敗しました。様式・変換済みデータを確認してください。');
       return;
     }
-    const trace = outputData;
     try {
       const baseName = (sourceFile?.name || 'excel').replace(/\.[^.]+$/, '');
       const sourceTraceFileName = `${baseName}_trace_v1.json`;
+      // outputData自身は変更しない(既存の#downloadJsonBtnが後で同じoutputDataを別内容として
+      // 参照する可能性があるため、共有状態を汚染しないようdeepCloneしたコピーへ追加情報を載せる)。
+      const trace = deepClone(outputData);
+      const displayedRows = v12DisplayedRowsForCurrentSheet();
+      if (displayedRows && displayedRows.length === trace._trace_records.length) {
+        trace._trace_records.forEach((r, i) => { r.source_record_display = displayedRows[i]; });
+      }
       const sidecar = await buildQuantityAnnotationSidecarExcel(trace, sourceTraceFileName);
       downloadText(JSON.stringify(trace, null, 2), normalizeFileName(sourceTraceFileName), 'application/json');
       downloadText(JSON.stringify(sidecar, null, 2), normalizeFileName(`${baseName}_quantity_annotation_v1.json`), 'application/json');

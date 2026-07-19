@@ -1,18 +1,18 @@
 {
-  "generated_at": "2026-07-19T15:55:32.564Z",
+  "generated_at": "2026-07-19T16:28:46.338Z",
   "sample_trace": {
-    "file_name": "_tmp_quantity_annotation_excel_fixture.xlsx",
+    "file_name": "_tmp_quantity_annotation_excel_fixture_kw.xlsx",
     "chapter_number": "TRACE",
-    "chapter_title": "_tmp_quantity_annotation_excel_fixture",
+    "chapter_title": "_tmp_quantity_annotation_excel_fixture_kw",
     "trace_format": "excel-row-trace-v1",
     "schema_version": "1.1",
-    "generated_at": "2026-07-19T15:55:32.531Z",
+    "generated_at": "2026-07-19T16:28:46.296Z",
     "generator": {
       "name": "Excel → JSON 変換・確認ツール",
       "version": "2.0.8"
     },
     "source": {
-      "file_name": "_tmp_quantity_annotation_excel_fixture.xlsx",
+      "file_name": "_tmp_quantity_annotation_excel_fixture_kw.xlsx",
       "sheet_name": "設計検討表",
       "profile_name": "xlsxtest",
       "profile_version": "1.0"
@@ -34,27 +34,27 @@
     },
     "_trace_adapter": {
       "kind": "excel_row_export",
-      "source_file": "_tmp_quantity_annotation_excel_fixture.xlsx",
+      "source_file": "_tmp_quantity_annotation_excel_fixture_kw.xlsx",
       "source_sheet": "設計検討表",
       "record_count": 3,
-      "generated_at": "2026-07-19T15:55:32.531Z"
+      "generated_at": "2026-07-19T16:28:46.296Z"
     },
     "_trace_records": [
       {
-        "trace_id": "excel-c1ac217b",
-        "parent_id": "sheet-fba1625f",
+        "trace_id": "excel-6452ec03",
+        "parent_id": "sheet-a1e31ebc",
         "trace_title": "1",
-        "trace_text": "12.5 kWに変更 / 10 kW / 冷房能力 / 1 / 12.5",
+        "trace_text": "12.5 kWに変更 / 10 kW / 冷房能力 / 1 / 12.5 / 99",
         "trace_content": [
-          "12.5 kWに変更 / 10 kW / 冷房能力 / 1 / 12.5"
+          "12.5 kWに変更 / 10 kW / 冷房能力 / 1 / 12.5 / 99"
         ],
         "trace_category": "excel_row",
-        "trace_key_text": "_tmp_quantity_annotation_excel_fixture.xlsx 設計検討表 excel_row 1 12.5 kWに変更 / 10 kW / 冷房能力 / 1 / 12.5",
-        "source_file": "_tmp_quantity_annotation_excel_fixture.xlsx",
+        "trace_key_text": "_tmp_quantity_annotation_excel_fixture_kw.xlsx 設計検討表 excel_row 1 12.5 kWに変更 / 10 kW / 冷房能力 / 1 / 12.5 / 99",
+        "source_file": "_tmp_quantity_annotation_excel_fixture_kw.xlsx",
         "source_sheet": "設計検討表",
         "source_row": 2,
         "source_path": "$._trace_records[0]",
-        "source_section_id": "sheet-fba1625f",
+        "source_section_id": "sheet-a1e31ebc",
         "source_section_title": "設計検討表",
         "block_type": "excel_row",
         "tags": [],
@@ -66,32 +66,41 @@
           "設計項目": "冷房能力",
           "No": 1,
           "数値セル(単位付き書式)": 12.5,
+          "数値セル(書式なし)": 99,
           "review_status": "unreviewed",
           "tags": [],
           "unregistered_tags": []
         },
-        "stable_uid": "xrow-9e5fd2f2",
-        "content_hash": "eb6765f6",
+        "stable_uid": "xrow-fea9611d",
+        "content_hash": "2aaa5ee9",
         "review_method": "",
         "reviewed_at": "",
         "review_comment": "",
-        "exclusion_reason": ""
+        "exclusion_reason": "",
+        "source_record_display": {
+          "検討結果": "12.5 kWに変更",
+          "標準機種情報": "10 kW",
+          "設計項目": "冷房能力",
+          "No": "1",
+          "数値セル(単位付き書式)": "12.5 kW",
+          "数値セル(書式なし)": "99"
+        }
       },
       {
-        "trace_id": "excel-868afa10",
-        "parent_id": "sheet-fba1625f",
+        "trace_id": "excel-a86aa134",
+        "parent_id": "sheet-a1e31ebc",
         "trace_title": "2",
         "trace_text": "変更なし / 付帯事項 / 2",
         "trace_content": [
           "変更なし / 付帯事項 / 2"
         ],
         "trace_category": "excel_row",
-        "trace_key_text": "_tmp_quantity_annotation_excel_fixture.xlsx 設計検討表 excel_row 2 変更なし / 付帯事項 / 2",
-        "source_file": "_tmp_quantity_annotation_excel_fixture.xlsx",
+        "trace_key_text": "_tmp_quantity_annotation_excel_fixture_kw.xlsx 設計検討表 excel_row 2 変更なし / 付帯事項 / 2",
+        "source_file": "_tmp_quantity_annotation_excel_fixture_kw.xlsx",
         "source_sheet": "設計検討表",
         "source_row": 3,
         "source_path": "$._trace_records[1]",
-        "source_section_id": "sheet-fba1625f",
+        "source_section_id": "sheet-a1e31ebc",
         "source_section_title": "設計検討表",
         "block_type": "excel_row",
         "tags": [],
@@ -103,32 +112,41 @@
           "設計項目": "付帯事項",
           "No": 2,
           "数値セル(単位付き書式)": "",
+          "数値セル(書式なし)": "",
           "review_status": "unreviewed",
           "tags": [],
           "unregistered_tags": []
         },
-        "stable_uid": "xrow-aedcd59c",
-        "content_hash": "f8e286b3",
+        "stable_uid": "xrow-6ca78aa7",
+        "content_hash": "7ea49fd4",
         "review_method": "",
         "reviewed_at": "",
         "review_comment": "",
-        "exclusion_reason": ""
+        "exclusion_reason": "",
+        "source_record_display": {
+          "検討結果": "変更なし",
+          "標準機種情報": "",
+          "設計項目": "付帯事項",
+          "No": "2",
+          "数値セル(単位付き書式)": "",
+          "数値セル(書式なし)": ""
+        }
       },
       {
-        "trace_id": "excel-a467dec3",
-        "parent_id": "sheet-fba1625f",
+        "trace_id": "excel-82a883bf",
+        "parent_id": "sheet-a1e31ebc",
         "trace_title": "3",
-        "trace_text": "12.5 kWを実測 / 周囲温度50 °Cにおいて12.5 kWを実測 / 実測条件 / 3 / 20",
+        "trace_text": "12.5 kWを実測 / 周囲温度50 °Cにおいて12.5 kWを実測 / 実測条件 / 3 / 20 / 100",
         "trace_content": [
-          "12.5 kWを実測 / 周囲温度50 °Cにおいて12.5 kWを実測 / 実測条件 / 3 / 20"
+          "12.5 kWを実測 / 周囲温度50 °Cにおいて12.5 kWを実測 / 実測条件 / 3 / 20 / 100"
         ],
         "trace_category": "excel_row",
-        "trace_key_text": "_tmp_quantity_annotation_excel_fixture.xlsx 設計検討表 excel_row 3 12.5 kWを実測 / 周囲温度50 °Cにおいて12.5 kWを実測 / 実測条件 / 3 / 20",
-        "source_file": "_tmp_quantity_annotation_excel_fixture.xlsx",
+        "trace_key_text": "_tmp_quantity_annotation_excel_fixture_kw.xlsx 設計検討表 excel_row 3 12.5 kWを実測 / 周囲温度50 °Cにおいて12.5 kWを実測 / 実測条件 / 3 / 20 / 100",
+        "source_file": "_tmp_quantity_annotation_excel_fixture_kw.xlsx",
         "source_sheet": "設計検討表",
         "source_row": 4,
         "source_path": "$._trace_records[2]",
-        "source_section_id": "sheet-fba1625f",
+        "source_section_id": "sheet-a1e31ebc",
         "source_section_title": "設計検討表",
         "block_type": "excel_row",
         "tags": [],
@@ -140,16 +158,25 @@
           "設計項目": "実測条件",
           "No": 3,
           "数値セル(単位付き書式)": 20,
+          "数値セル(書式なし)": 100,
           "review_status": "unreviewed",
           "tags": [],
           "unregistered_tags": []
         },
-        "stable_uid": "xrow-6d7acf26",
-        "content_hash": "2d1b86d3",
+        "stable_uid": "xrow-c02b2569",
+        "content_hash": "0b2f8f9f",
         "review_method": "",
         "reviewed_at": "",
         "review_comment": "",
-        "exclusion_reason": ""
+        "exclusion_reason": "",
+        "source_record_display": {
+          "検討結果": "12.5 kWを実測",
+          "標準機種情報": "周囲温度50 °Cにおいて12.5 kWを実測",
+          "設計項目": "実測条件",
+          "No": "3",
+          "数値セル(単位付き書式)": "20.0 kW",
+          "数値セル(書式なし)": "100"
+        }
       }
     ],
     "id_scheme": "stable-excel-row-uid-v2"
@@ -157,11 +184,11 @@
   "sample_sidecar": {
     "schema_version": "quantity-annotation/1.0-rc1",
     "side": "actual",
-    "source_trace_file": "_tmp_quantity_annotation_excel_fixture_trace_v1.json",
+    "source_trace_file": "_tmp_quantity_annotation_excel_fixture_kw_trace_v1.json",
     "hash_algorithm": "SHA-256",
     "id_hash_algorithm": "SHA-256/128",
-    "dataset_signature": "QA-SHA256:206e7191878646b0f12c0f7e6e0975a406b2d82560d7f5ced8090e054cdaf69a",
-    "generated_at": "2026-07-19T15:55:32.531Z",
+    "dataset_signature": "QA-SHA256:057fef20fd4a11ea10fe8339abe934cc9ef6ef9b63ebc32c09537b47f0183d3a",
+    "generated_at": "2026-07-19T16:28:46.296Z",
     "generator": {
       "tool": "quantity_extraction_prototype.js + semantic_mapping_prototype.js（本ツールへ統合）",
       "version": "v2.14 / v2.19"
@@ -233,16 +260,42 @@
             ]
           }
         ]
+      },
+      {
+        "column": "数値セル(単位付き書式)",
+        "role_candidates": [
+          {
+            "role": "resolved_design",
+            "confidence": 0.22499999999999998,
+            "evidence": [
+              {
+                "type": "position_near_baseline",
+                "role": "resolved_design",
+                "baseline_column": "標準機種情報",
+                "distance": 2,
+                "weight": 0.075
+              },
+              {
+                "type": "value_distribution",
+                "role": "resolved_design",
+                "unique_ratio": 1,
+                "weight": 0.15
+              }
+            ]
+          }
+        ]
       }
     ],
     "records": [
       {
-        "trace_id": "excel-c1ac217b",
-        "content_hash": "bd669d266ff3552f0b192c2de6f1b16ae300853248d2dda1225a3795ff29fa66",
+        "trace_id": "excel-6452ec03",
+        "content_hash": "9d603a41eec1d7cbfb3b5452cd48e2135a4ac1624b90980d0f8a350343a0a825",
         "analyses": [
           {
-            "quantity_id": "q-db0b0c52286ecba928327b81909dff55",
+            "quantity_id": "q-1f45532c5cfd0ff47d94f20f6c55f9fc",
             "source_field": "検討結果",
+            "source_representation": "raw_value",
+            "source_value_text": "12.5 kWに変更",
             "occurrence_index": 0,
             "source_span": {
               "start": 0,
@@ -324,8 +377,10 @@
             ]
           },
           {
-            "quantity_id": "q-bf5da7c48d1329eeaab6a25ad503fe1f",
+            "quantity_id": "q-3301a3152e2d851a509affea02cf3322",
             "source_field": "標準機種情報",
+            "source_representation": "raw_value",
+            "source_value_text": "10 kW",
             "occurrence_index": 0,
             "source_span": {
               "start": 0,
@@ -398,21 +453,101 @@
                 ]
               }
             ]
+          },
+          {
+            "quantity_id": "q-c660ca0961f3b8a62185d17cff448197",
+            "source_field": "数値セル(単位付き書式)",
+            "source_representation": "formatted_display",
+            "source_value_text": "12.5 kW",
+            "occurrence_index": 0,
+            "source_span": {
+              "start": 0,
+              "end": 7
+            },
+            "normalized_text": "12.5 kW",
+            "quantity": {
+              "source_text": "12.5 kW",
+              "source_span": {
+                "start": 0,
+                "end": 7
+              },
+              "normalized_text": "12.5 kW",
+              "quantity": {
+                "kind": "interval",
+                "lower": {
+                  "value": 12.5,
+                  "inclusive": true
+                },
+                "upper": {
+                  "value": 12.5,
+                  "inclusive": true
+                }
+              },
+              "unit": {
+                "source": "kW",
+                "canonical": "kW",
+                "dimension": "power",
+                "standard_ref": {
+                  "standard": "JIS Z 8000-4",
+                  "category": "mechanics"
+                }
+              },
+              "context": {
+                "property": null,
+                "subject": null,
+                "state": null,
+                "tokens": []
+              },
+              "extraction": {
+                "confidence": 0.95,
+                "warnings": []
+              }
+            },
+            "interval_semantics_candidates": [
+              {
+                "value": "achieved_point",
+                "confidence": 0.3,
+                "evidence": [
+                  {
+                    "type": "quantity_shape",
+                    "value": "achieved_point",
+                    "source_text": "12.5 kW",
+                    "effect": "supports",
+                    "weight": 0.3
+                  }
+                ]
+              },
+              {
+                "value": "unknown",
+                "confidence": 0.15,
+                "evidence": [
+                  {
+                    "type": "baseline",
+                    "value": "unknown",
+                    "source_text": "(既定の受け皿。他候補が弱い場合の下限)",
+                    "effect": "supports",
+                    "weight": 0.15
+                  }
+                ]
+              }
+            ]
           }
         ]
       },
       {
-        "trace_id": "excel-868afa10",
-        "content_hash": "ef024ddb01a1f60a355aa8dd5b59bf594bd9dd8b58d2a05fd2d87f7ab4102be1",
+        "trace_id": "excel-a86aa134",
+        "content_hash": "ad2d2d7209831725bb6c64bd669890d806e223ac9c3cae7722006d8d3b9a4468",
         "analyses": []
       },
       {
-        "trace_id": "excel-a467dec3",
-        "content_hash": "481bc5267c63ffee4a8745f279bf73d40e38c02b4d5569e0ce631a8248723317",
+        "trace_id": "excel-82a883bf",
+        "content_hash": "34a23fbb141d78b97cdc161621430497317aa49bc67e09f292edcf8c29444858",
         "analyses": [
           {
-            "quantity_id": "q-80eda72df3656806bd3ededd77332663",
+            "quantity_id": "q-3f7fe464cd124ebdbfd3ea68cffdc892",
             "source_field": "検討結果",
+            "source_representation": "raw_value",
+            "source_value_text": "12.5 kWを実測",
             "occurrence_index": 0,
             "source_span": {
               "start": 0,
@@ -501,8 +636,10 @@
             ]
           },
           {
-            "quantity_id": "q-3f4dc499689988a406aafd0a9cba5e85",
+            "quantity_id": "q-0d9f485ad8b0df2c19996b4557a5b597",
             "source_field": "標準機種情報",
+            "source_representation": "raw_value",
+            "source_value_text": "周囲温度50 °Cにおいて12.5 kWを実測",
             "occurrence_index": 0,
             "source_span": {
               "start": 13,
@@ -614,8 +751,10 @@
             ]
           },
           {
-            "quantity_id": "q-7ac67e25b0adf704fc26f986facf3e64",
+            "quantity_id": "q-ddeb25b999ff196307d092ab37eb7ae6",
             "source_field": "標準機種情報",
+            "source_representation": "raw_value",
+            "source_value_text": "周囲温度50 °Cにおいて12.5 kWを実測",
             "occurrence_index": 0,
             "source_span": {
               "start": 4,
@@ -660,6 +799,84 @@
             },
             "is_condition_value": true,
             "interval_semantics_candidates": [
+              {
+                "value": "unknown",
+                "confidence": 0.15,
+                "evidence": [
+                  {
+                    "type": "baseline",
+                    "value": "unknown",
+                    "source_text": "(既定の受け皿。他候補が弱い場合の下限)",
+                    "effect": "supports",
+                    "weight": 0.15
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "quantity_id": "q-17d064e68fdd0157649ad02431028c71",
+            "source_field": "数値セル(単位付き書式)",
+            "source_representation": "formatted_display",
+            "source_value_text": "20.0 kW",
+            "occurrence_index": 0,
+            "source_span": {
+              "start": 0,
+              "end": 7
+            },
+            "normalized_text": "20.0 kW",
+            "quantity": {
+              "source_text": "20.0 kW",
+              "source_span": {
+                "start": 0,
+                "end": 7
+              },
+              "normalized_text": "20.0 kW",
+              "quantity": {
+                "kind": "interval",
+                "lower": {
+                  "value": 20,
+                  "inclusive": true
+                },
+                "upper": {
+                  "value": 20,
+                  "inclusive": true
+                }
+              },
+              "unit": {
+                "source": "kW",
+                "canonical": "kW",
+                "dimension": "power",
+                "standard_ref": {
+                  "standard": "JIS Z 8000-4",
+                  "category": "mechanics"
+                }
+              },
+              "context": {
+                "property": null,
+                "subject": null,
+                "state": null,
+                "tokens": []
+              },
+              "extraction": {
+                "confidence": 0.95,
+                "warnings": []
+              }
+            },
+            "interval_semantics_candidates": [
+              {
+                "value": "achieved_point",
+                "confidence": 0.3,
+                "evidence": [
+                  {
+                    "type": "quantity_shape",
+                    "value": "achieved_point",
+                    "source_text": "20.0 kW",
+                    "effect": "supports",
+                    "weight": 0.3
+                  }
+                ]
+              },
               {
                 "value": "unknown",
                 "confidence": 0.15,

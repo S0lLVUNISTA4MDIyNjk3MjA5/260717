@@ -122,7 +122,15 @@
             }
           }
         },
-        "is_condition_value": { "type": "boolean" }
+        "is_condition_value": { "type": "boolean" },
+        "source_representation": {
+          "description": "Excel側のみが出力する任意フィールド。source_span/normalized_textが、セルの生値をそのまま文字列化したテキスト('raw_value')と、セルの表示形式(number format)を適用した表示文字列('formatted_display'、例: 単位付き書式を持つ数値セル)のどちらに対する位置・テキストなのかを明示する。PDF側の出力にはこのフィールド自体が存在しない。",
+          "enum": ["raw_value", "formatted_display"]
+        },
+        "source_value_text": {
+          "description": "Excel側のみが出力する任意フィールド。source_representationが指すテキスト全体(抽出対象になったセルの値そのもの)。normalized_textは数量部分だけの正規化後テキストなので、それとは異なる。",
+          "type": "string"
+        }
       }
     },
     "quantityRecord": {

@@ -6,7 +6,7 @@
 //
 // このスクリプトは、実際に生成した.xlsxバイナリをXLSX.read()で解析させる経路を検証する。
 // 2つの追加的な依存が必要になる(いずれも製品コード=tools/配下のツール本体には一切影響しない、
-// このテストスクリプト実行時だけの依存。tools/design_notes/package.jsonを参照、事前にnpm installが必要):
+// このテストスクリプト実行時だけの依存。tools/design_notes/package.jsonを参照、事前にnpm ciが必要):
 //   - playwright: 他の実ブラウザ検証スクリプトと同じ理由。
 //   - xlsx: 実際の.xlsxバイナリを合成データから生成するため。ツール自身はCDN
 //     (cdn.jsdelivr.net/npm/xlsx@0.18.5)からブラウザ側で読み込む設計のままであり、変更していない。
@@ -28,28 +28,39 @@ const SCHEMA = JSON.parse(fs.readFileSync(path.join(__dirname, 'quantity_annotat
 const XLSX_LIB_PATH = require.resolve('xlsx/dist/xlsx.full.min.js');
 const OUT_FIXTURE = path.join(__dirname, 'runtime_fixtures', 'quantity_annotation_excel_xlsx_verified.json');
 
+// ブラウザ側(CDN差し替え経由で読み込むコピー)とNode側(このスクリプトがrequireするコピー)が
+// 同一バージョンのSheetJSであることを明示的に確認する(依存固定に関するレビュー指摘への対応。
+// バージョンが食い違うと、Node側で合成した.xlsxをブラウザ側が異なる挙動で解析してしまう可能性がある)。
+const XLSX_EXPECTED_VERSION = '0.18.5';
+
 const assertions = [];
 function check(name, ok, detail) { assertions.push({ name, ok: !!ok, detail }); }
 
-function buildFixtureWorkbook() {
+function buildFixtureWorkbook(unitFormat) {
   // 列順序をわざと「検討結果」→「標準機種情報」→「設計項目」→管理列の順にする
   // (表内位置による役割候補の根拠が、配列の格納順ではなく実際のシート上の列順序から
-  // 正しく計算されることを検証するため)。数式セル・単位付き表示形式の数値セル・空欄・
-  // 管理列も混在させる。
+  // 正しく計算されることを検証するため)。数式セル・単位付き表示形式の数値セル・
+  // 単位のない通常数値セル・空欄・管理列も混在させる。
   const ws = XLSX.utils.aoa_to_sheet([
-    ['検討結果', '標準機種情報', '設計項目', 'No', '数値セル(単位付き書式)'],
-    ['12.5 kWに変更', '10 kW', '冷房能力', 1, 12.5],
-    ['変更なし', '', '付帯事項', 2, null],
-    ['', '周囲温度50 °Cにおいて12.5 kWを実測', '実測条件', 3, 20],
+    ['検討結果', '標準機種情報', '設計項目', 'No', '数値セル(単位付き書式)', '数値セル(書式なし)'],
+    ['12.5 kWに変更', '10 kW', '冷房能力', 1, 12.5, 99],
+    ['変更なし', '', '付帯事項', 2, null, null],
+    ['', '周囲温度50 °Cにおいて12.5 kWを実測', '実測条件', 3, 20, 100],
   ]);
   // 数式セル(A4): SheetJSがcellFormula:trueで読み取るキャッシュ済み文字列値
   ws['A4'] = { t: 'str', f: 'CONCATENATE("12.5"," kWを実測")', v: '12.5 kWを実測' };
   // 単位付き表示形式の数値セル(E2, E4): 数値としては12.5/20だが、セル書式により表示文字列は
   // "12.5 kW"のようになる(現場のExcel帳票で実際によくある、単位を書式側に持たせるパターン)。
-  ws['E2'] = { t: 'n', v: 12.5, z: '0.0" kW"' };
-  ws['E4'] = { t: 'n', v: 20, z: '0.0" kW"' };
+  // unitFormat引数で単位表記を差し替えられるようにし、書式変更による陳腐化検出のテストに使う。
+  const fmt = `0.0" ${unitFormat}"`;
+  ws['E2'] = { t: 'n', v: 12.5, z: fmt };
+  ws['E4'] = { t: 'n', v: 20, z: fmt };
   ws['E2'].w = XLSX.SSF.format(ws['E2'].z, ws['E2'].v);
   ws['E4'].w = XLSX.SSF.format(ws['E4'].z, ws['E4'].v);
+  // 単位のない通常数値セル(F2, F4): 書式は既定(General)のまま。表示文字列も生値と同じ"99"/"100"に
+  // なるはずで、単位が無いため数量として推測してはならない。
+  ws['F2'] = { t: 'n', v: 99 };
+  ws['F4'] = { t: 'n', v: 100 };
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '設計検討表');
   return wb;
@@ -94,35 +105,60 @@ async function clickQuantityAnnotationButton(page, tmpDir) {
   return { trace, sidecar };
 }
 
+async function runXlsxScenario(page, fixtureDir, xlsxPath, profileName) {
+  await page.setInputFiles('#excelFile', xlsxPath);
+  await page.waitForTimeout(500);
+  const importMsg = await page.evaluate(() => document.getElementById('importMessage').textContent);
+  check('実.xlsxファイルの読み込みに成功する', /読み込み完了/.test(importMsg || ''), importMsg);
+  await page.click('#convertBtn');
+  await page.waitForTimeout(300);
+  await page.click('[data-tab="profileTab"]');
+  await page.waitForTimeout(200);
+  await page.fill('#profileEditor', JSON.stringify({
+    profile_name: profileName, profile_version: '1.0',
+    output: { mode: 'array', preserve_unmapped: true },
+    tag_policy: { mode: 'controlled', vocabulary_id: 't', tag_vocabulary_version: '1.0', allow_free_input: false, allowed_tags: [] },
+  }, null, 2));
+  return clickQuantityAnnotationButton(page, fixtureDir);
+}
+
+// 元trace(_trace_records、source_record_displayを含む)だけから、比較エンジン側が独立に
+// dataset_signatureを再計算できることを検証する(v12ComputeDatasetSignature()と同一契約)。
+function nodeRecomputeDatasetSignature(traceRecords) {
+  const crypto = require('crypto');
+  const NUL = String.fromCharCode(0);
+  const normalize = v => String(v ?? '').normalize('NFKC').replace(/\r\n?/g, '\n').split('\n').map(s => s.replace(/[ \t]+$/g, '')).join('\n').replace(/[ \t]+/g, ' ').trim();
+  const hashParts = (ns, parts) => crypto.createHash('sha256').update(Buffer.from([ns, ...parts.map(normalize)].join(NUL), 'utf8')).digest('hex');
+  const canonical = v => {
+    if (Array.isArray(v)) return v.map(canonical);
+    if (v && typeof v === 'object') { const o = {}; Object.keys(v).sort().forEach(k => { o[k] = canonical(v[k]); }); return o; }
+    return v;
+  };
+  const sorted = [...traceRecords].sort((a, b) => a.trace_id < b.trace_id ? -1 : a.trace_id > b.trace_id ? 1 : 0);
+  return 'QA-SHA256:' + hashParts('dataset-signature-v1', [JSON.stringify(canonical(sorted))]);
+}
+
 (async () => {
   const fixtureDir = path.join(__dirname, 'runtime_fixtures');
   fs.mkdirSync(fixtureDir, { recursive: true });
-  const xlsxPath = path.join(fixtureDir, '_tmp_quantity_annotation_excel_fixture.xlsx');
-  XLSX.writeFile(buildFixtureWorkbook(), xlsxPath);
+  const xlsxPathKw = path.join(fixtureDir, '_tmp_quantity_annotation_excel_fixture_kw.xlsx');
+  const xlsxPathKpa = path.join(fixtureDir, '_tmp_quantity_annotation_excel_fixture_kpa.xlsx');
+  XLSX.writeFile(buildFixtureWorkbook('kW'), xlsxPathKw);
+  XLSX.writeFile(buildFixtureWorkbook('kPa'), xlsxPathKpa);
 
+  check('Node側requireしたxlsxパッケージのバージョンが期待どおり(ブラウザ側CDN差し替えコピーと同一)',
+    require('xlsx/package.json').version === XLSX_EXPECTED_VERSION, require('xlsx/package.json').version);
+
+  let mainRun;
   await withPage(async (page, pageErrors) => {
     const xlsxDefined = await page.evaluate(() => typeof XLSX);
     check('CDNルート差し替えでXLSXライブラリが読み込まれる(route()によるローカルSheetJS差し替え)', xlsxDefined === 'object', xlsxDefined);
+    const browserXlsxVersion = await page.evaluate(() => XLSX.version);
+    check('ブラウザ側(CDN差し替え経由)のXLSXバージョンがNode側と一致する', browserXlsxVersion === XLSX_EXPECTED_VERSION, browserXlsxVersion);
 
-    await page.setInputFiles('#excelFile', xlsxPath);
-    await page.waitForTimeout(500);
-    const importMsg = await page.evaluate(() => document.getElementById('importMessage').textContent);
-    check('実.xlsxファイルの読み込みに成功する', /読み込み完了/.test(importMsg || ''), importMsg);
+    mainRun = await runXlsxScenario(page, fixtureDir, xlsxPathKw, 'xlsxtest');
 
-    await page.click('#convertBtn');
-    await page.waitForTimeout(300);
-
-    await page.click('[data-tab="profileTab"]');
-    await page.waitForTimeout(200);
-    const profile = {
-      profile_name: 'xlsxtest', profile_version: '1.0',
-      output: { mode: 'array', preserve_unmapped: true },
-      tag_policy: { mode: 'controlled', vocabulary_id: 't', tag_vocabulary_version: '1.0', allow_free_input: false, allowed_tags: [] },
-    };
-    await page.fill('#profileEditor', JSON.stringify(profile, null, 2));
-
-    const run = await clickQuantityAnnotationButton(page, fixtureDir);
-
+    const run = mainRun;
     check('trace JSONとsidecarのgenerated_atが完全一致する(実.xlsx経由でも同一スナップショット)', run.trace.generated_at === run.sidecar.generated_at);
     check('実.xlsx生成物がJSON Schemaを満たす', validate(SCHEMA, run.sidecar).valid, validate(SCHEMA, run.sidecar).errors);
 
@@ -130,12 +166,6 @@ async function clickQuantityAnnotationButton(page, tmpDir) {
     const analysesOf = traceId => run.sidecar.records.find(r => r.trace_id === traceId)?.analyses || [];
 
     // 列順序が役割候補の位置根拠(baseline列からの距離)へ正しく反映されること。
-    // このfixtureでは列順序が「検討結果(0)→標準機種情報(1)→設計項目(2)」であり、標準機種情報の
-    // 右隣・近傍にresolved系の列が無い(検討結果はbaseline列より左)ため、検討結果には
-    // position_near_baselineが付かない、というのが実際のシート上の列順序に従った場合の正しい結果。
-    // (作業中JSON経由のquantity_annotation_excel_verification.jsでは逆順で配置しており、
-    // そちらではposition_near_baselineが付くことを確認済み。両方を突き合わせることで、
-    // 位置根拠が配列の格納順ではなく実際の列順序から計算されていることを検証する)
     const kentouRole = run.sidecar.column_role_candidates.find(c => c.column === '検討結果');
     check('実.xlsxの列順序(検討結果が標準機種情報より左)では、検討結果にposition_near_baselineが付かない(列順序が正しく反映されている)',
       kentouRole && !kentouRole.role_candidates.some(c => c.evidence.some(e => e.type === 'position_near_baseline')), kentouRole);
@@ -149,16 +179,39 @@ async function clickQuantityAnnotationButton(page, tmpDir) {
     const jissokuRow = rowByDesignItem('実測条件');
     check('数式セル(検討結果、キャッシュ済み文字列値)から数量が抽出される', jissokuRow && analysesOf(jissokuRow.trace_id).some(a => a.source_field === '検討結果' && a.normalized_text.includes('12.5')), jissokuRow && analysesOf(jissokuRow.trace_id));
 
-    // 数値型セル(preserveTypes=true、既定)は生の数値のまま渡され、単位が無いため
-    // 意図的に数量として抽出されない(quantity_extraction_prototype.jsの既存の仕様、
-    // 単位を伴わない裸の数値を数量と誤認しない設計。バグではなく、既定設定での正しい挙動)。
+    // 【レビュー指摘の主要な回帰テスト】既定設定(preserveTypes=true)のまま、単位付き書式の
+    // 数値セル(生値12.5、書式"0.0\" kW\""、表示"12.5 kW")から数量を抽出できること。
     const reikyakuRow = rowByDesignItem('冷房能力');
-    check('数値型セル(preserveTypes=true既定、単位書式が失われ裸の数値になる)からは数量を抽出しない(quantity_extraction_prototype.jsの既存仕様どおり)',
-      reikyakuRow && !analysesOf(reikyakuRow.trace_id).some(a => a.source_field === '数値セル(単位付き書式)'), reikyakuRow && analysesOf(reikyakuRow.trace_id));
+    const unitCellAnalyses = reikyakuRow ? analysesOf(reikyakuRow.trace_id).filter(a => a.source_field === '数値セル(単位付き書式)') : [];
+    check('既定設定(preserveTypes=true)のまま、単位付き書式の数値セル("12.5"+"0.0\\" kW\\""形式)から数量を抽出する(回帰1)',
+      unitCellAnalyses.length > 0 && unitCellAnalyses.some(a => a.normalized_text.includes('12.5')), unitCellAnalyses);
+    check('表示文字列由来であることがsource_representation:"formatted_display"から判別できる(回帰4)',
+      unitCellAnalyses.every(a => a.source_representation === 'formatted_display' && a.source_value_text === '12.5 kW'), unitCellAnalyses);
+
+    // trace側のraw_value由来の数量(検討結果・標準機種情報、もともと文字列セル)はsource_representation
+    // が"raw_value"のままであることも合わせて確認する(既存の文字列セル処理への非退行確認)。
+    const kentouAnalysis = analysesOf(reikyakuRow.trace_id).find(a => a.source_field === '検討結果');
+    check('文字列セル由来の数量はsource_representation:"raw_value"のまま(非退行確認)',
+      kentouAnalysis && kentouAnalysis.source_representation === 'raw_value', kentouAnalysis);
+
+    // 単位のない通常数値セルは、書式の有無に関わらず表示文字列も生値と同じ("99")になるため、
+    // 推測で数量化されないままであること(回帰3)。
+    const plainNumCellAnalyses = reikyakuRow ? analysesOf(reikyakuRow.trace_id).filter(a => a.source_field === '数値セル(書式なし)') : [];
+    check('単位のない通常数値セルは推測で数量化されない(回帰3)', plainNumCellAnalyses.length === 0, plainNumCellAnalyses);
 
     // 空欄セル(標準機種情報、2行目"付帯事項")は数量ゼロで正常に扱われる
     const futaiRow = rowByDesignItem('付帯事項');
     check('空欄セルを含む行でもエラーにならない', !!futaiRow);
+
+    // 【レビュー指摘の回帰テスト】元trace(_trace_records)だけから、比較エンジン側が独立に
+    // dataset_signatureを再計算できること(source_record_displayを含めた契約の検証)。
+    const recomputed = nodeRecomputeDatasetSignature(run.trace._trace_records);
+    check('元trace(_trace_records、source_record_display込み)だけから独立に再計算したdataset_signatureが、実際のsidecarの値と一致する(回帰5)',
+      recomputed === run.sidecar.dataset_signature, { recomputed, actual: run.sidecar.dataset_signature });
+
+    // trace側にsource_record_displayが実際に含まれていること(比較エンジン側が表示文字列由来の
+    // 陳腐化を検出するために必要な情報が、sidecarだけでなく元trace側にもあることの確認)。
+    check('trace._trace_recordsにsource_record_displayが含まれる', reikyakuRow && reikyakuRow.source_record_display && reikyakuRow.source_record_display['数値セル(単位付き書式)'] === '12.5 kW', reikyakuRow?.source_record_display);
 
     check('検証中にページエラーが発生していない(ERR_TUNNEL_CONNECTION_FAILED等の無関係なネットワークエラーは許容)',
       pageErrors.every(e => /ERR_TUNNEL_CONNECTION_FAILED|net::/.test(e)), pageErrors);
@@ -166,14 +219,35 @@ async function clickQuantityAnnotationButton(page, tmpDir) {
     fs.writeFileSync(OUT_FIXTURE, JSON.stringify({ generated_at: new Date().toISOString(), sample_trace: run.trace, sample_sidecar: run.sidecar }, null, 2));
   });
 
-  // ── preserveTypesを外した場合(数値・真偽値を保持のチェックを外す)、単位付き書式の
-  //    数値セルの表示文字列("12.5 kW")が渡され、数量として抽出できることを確認する。
-  //    これにより「数値型セルからの数量抽出」がツールの設定次第で実際に可能であることを示す。
+  // ── 【レビュー指摘の回帰テスト】生値は変えずセル書式だけをkW→kPaへ変更すると、
+  //    content_hash・dataset_signature・抽出される単位のいずれも変わることを確認する("W"は
+  //    quantity_extraction_prototype.jsのUNIT_ALTに含まれない単位のため、抽出自体が成立しなくなり
+  //    「単位が変わったこと」の検証にならない。UNIT_ALTに含まれる別の単位"kPa"を使う)。
   await withPage(async (page, pageErrors) => {
-    await page.route('**://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js', route => {
-      route.fulfill({ status: 200, contentType: 'application/javascript', body: fs.readFileSync(XLSX_LIB_PATH) });
-    });
-    await page.setInputFiles('#excelFile', xlsxPath);
+    const runKpa = await runXlsxScenario(page, fixtureDir, xlsxPathKpa, 'xlsxtest_kpa');
+    const reikyakuRowKw = mainRun.trace._trace_records.find(r => r.source_record['設計項目'] === '冷房能力');
+    const reikyakuRowKpa = runKpa.trace._trace_records.find(r => r.source_record['設計項目'] === '冷房能力');
+    const recordKw = mainRun.sidecar.records.find(r => r.trace_id === reikyakuRowKw.trace_id);
+    const recordKpa = runKpa.sidecar.records.find(r => r.trace_id === reikyakuRowKpa.trace_id);
+
+    check('生値は変えず書式だけkW→kPaへ変更しても、行のcontent_hashが変わる(回帰2)', recordKw.content_hash !== recordKpa.content_hash, { kw: recordKw.content_hash, kpa: recordKpa.content_hash });
+    check('生値は変えず書式だけkW→kPaへ変更すると、dataset_signatureも変わる(回帰2)', mainRun.sidecar.dataset_signature !== runKpa.sidecar.dataset_signature, { kw: mainRun.sidecar.dataset_signature, kpa: runKpa.sidecar.dataset_signature });
+
+    const unitCellAnalysesKpa = runKpa.sidecar.records.find(r => r.trace_id === reikyakuRowKpa.trace_id).analyses.filter(a => a.source_field === '数値セル(単位付き書式)');
+    check('書式変更後は抽出される単位も"kPa"になる(回帰2)', unitCellAnalysesKpa.some(a => a.quantity.unit.canonical === 'kPa' || a.quantity.unit.source === 'kPa'), unitCellAnalysesKpa);
+
+    check('生値(数値)自体は書式変更の前後で変わらない(source_recordの生値は維持する契約)',
+      reikyakuRowKw.source_record['数値セル(単位付き書式)'] === reikyakuRowKpa.source_record['数値セル(単位付き書式)'],
+      { kw: reikyakuRowKw.source_record['数値セル(単位付き書式)'], kpa: reikyakuRowKpa.source_record['数値セル(単位付き書式)'] });
+
+    check('パート2実行中にページエラーが発生していない',
+      pageErrors.every(e => /ERR_TUNNEL_CONNECTION_FAILED|net::/.test(e)), pageErrors);
+  });
+
+  // ── preserveTypesを外した場合も、単位付き書式の数値セルの表示文字列("12.5 kW")から
+  //    数量として抽出できることを確認する(既定・非既定どちらでも動くことの非退行確認)。
+  await withPage(async (page, pageErrors) => {
+    await page.setInputFiles('#excelFile', xlsxPathKw);
     await page.waitForTimeout(500);
     await page.uncheck('#preserveTypes');
     await page.click('#convertBtn');
@@ -188,13 +262,14 @@ async function clickQuantityAnnotationButton(page, tmpDir) {
     const run = await clickQuantityAnnotationButton(page, fixtureDir);
     const reikyakuRow = run.trace._trace_records.find(r => r.source_record['設計項目'] === '冷房能力');
     const analyses = run.sidecar.records.find(r => r.trace_id === reikyakuRow?.trace_id)?.analyses || [];
-    check('preserveTypesを外すと、単位付き書式の数値セルの表示文字列("12.5 kW")から数量が抽出される',
+    check('preserveTypesを外しても、単位付き書式の数値セルの表示文字列("12.5 kW")から数量が抽出される(非退行確認)',
       reikyakuRow && analyses.some(a => a.source_field === '数値セル(単位付き書式)' && a.normalized_text.includes('12.5')), analyses);
-    check('パート2実行中にページエラーが発生していない',
+    check('パート3実行中にページエラーが発生していない',
       pageErrors.every(e => /ERR_TUNNEL_CONNECTION_FAILED|net::/.test(e)), pageErrors);
   });
 
-  fs.unlinkSync(xlsxPath);
+  fs.unlinkSync(xlsxPathKw);
+  fs.unlinkSync(xlsxPathKpa);
 
   console.log('\n=== quantity_annotation_excel_xlsx_verification 結果 ===');
   let fail = 0;
