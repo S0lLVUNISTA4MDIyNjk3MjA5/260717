@@ -9,11 +9,13 @@
 //   1. 同一入力でのID・ハッシュ安定性
 //   2. source_spanによる同一表記の数量の区別
 //   3. タグ・本文変更による陳腐化検出(content_hashが変わる)
-//   4. レコード順序変更に対するdataset_signatureの安定性(trace_id昇順への正規化)
+//   4. dataset_signatureが元trace(_trace_records)だけから導出され、analyses/意味候補/side
+//      には依存しないこと。レコード順序変更に対する安定性(trace_id昇順への正規化)。
 //   5. 重複trace_idの拒否
 //   6. 数量ゼロ件のレコードの扱い(エラーにならず空analyses)
 //   7. 条件節(condition_candidates)がis_condition_value:trueとして別analysesに含まれる
-//   8. 元trace JSONとsidecarが同一スナップショット(同一generated_at・同一trace_id集合)から生成される
+//   8. 元trace JSONとsidecarが、1回の操作・1回のv12BuildTrace()呼び出しから生成され、
+//      generated_atが完全一致すること(同一スナップショットの構造的保証)
 //   9. 実際のブラウザ生成物がJSON Schema(quantity_annotation_schema_v1.json)を満たす
 //  10. 既存のtrace JSON出力ボタン(#btn-trace-export)・通常JSON出力ボタン(#btn-export)が影響を受けない
 'use strict';
@@ -33,8 +35,12 @@ function check(name, ok, detail) {
   assertions.push({ name, ok: !!ok, detail: detail !== undefined ? detail : undefined });
 }
 
+// exportJson()(#btn-export、通常JSON)のvalidateAgainst()はprofileのdoc_fields
+// (chapter_number/chapter_title)が文字列であることを要求するため、両方を含める。
 const SAMPLE_OBJ = {
   file_name: 'customer_hvac_requirements.pdf',
+  chapter_number: '第2章',
+  chapter_title: '要求仕様',
   document_number: 'CHV-REQ-001',
   revision: 'Rev. A',
   sections: [
@@ -88,11 +94,36 @@ async function clickAndDownload(page, selector, savePath) {
   return JSON.parse(fs.readFileSync(savePath, 'utf8'));
 }
 
+// #btn-quantity-annotation-export/-bは1クリックで2ファイル(照合用JSON→数量注釈JSON、
+// この順にv12DownloadJson()を呼ぶ)をダウンロードする。両方を捕まえる。
+async function clickAndDownloadBoth(page, selector, savePathTrace, savePathSidecar) {
+  const downloads = [];
+  const onDownload = d => downloads.push(d);
+  page.on('download', onDownload);
+  await page.click(selector);
+  const deadline = Date.now() + 20000;
+  while (downloads.length < 2 && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 50));
+  }
+  page.off('download', onDownload);
+  if (downloads.length < 2) throw new Error(`2件のダウンロードを期待したが${downloads.length}件しか観測されなかった`);
+  // ダウンロード順を仮定せず、ファイル名(_trace_v1_3.json / _quantity_annotation_v1.json)で判別する。
+  const traceDownload = downloads.find(d => d.suggestedFilename().includes('_trace_v1_3.json'));
+  const sidecarDownload = downloads.find(d => d.suggestedFilename().includes('_quantity_annotation_v1.json'));
+  if (!traceDownload || !sidecarDownload) throw new Error(`ダウンロードされたファイル名が想定外: ${downloads.map(d => d.suggestedFilename())}`);
+  await traceDownload.saveAs(savePathTrace);
+  await sidecarDownload.saveAs(savePathSidecar);
+  return {
+    trace: JSON.parse(fs.readFileSync(savePathTrace, 'utf8')),
+    sidecar: JSON.parse(fs.readFileSync(savePathSidecar, 'utf8')),
+  };
+}
+
 (async () => {
   const fixtureDir = path.join(__dirname, 'runtime_fixtures');
   fs.mkdirSync(fixtureDir, { recursive: true });
 
-  // ── パート1: buildQuantityAnnotationSidecar()を直接呼ぶ単体検証(hand-builtなtrace入力) ──
+  // ── パート1: buildQuantityAnnotationSidecar()/v12ComputeDatasetSignature()を直接呼ぶ単体検証 ──
   await withPage(async (page, pageErrors) => {
     const baseTrace = {
       generated_at: '2026-07-19T00:00:00.000Z',
@@ -125,10 +156,26 @@ async function clickAndDownload(page, selector, savePath) {
     const sidecarTextChanged = await page.evaluate(t => buildQuantityAnnotationSidecar(t, 'A', 'sample_trace_v1_3.json'), traceTextChanged);
     check('本文変更でcontent_hashが変わる(3、陳腐化検出)', sidecarTextChanged.records[0].content_hash !== sidecar1.records[0].content_hash);
 
-    // 4. レコード順序変更に対するdataset_signatureの安定性
+    // 4a. dataset_signatureは元trace(_trace_records)の非数量フィールド(タグ等)変更でも変わる
+    check('タグ変更(元trace側)でdataset_signatureも変わる(4、元trace由来であることの確認)',
+      sidecarTagChanged.dataset_signature !== sidecar1.dataset_signature);
+
+    // 4b. dataset_signatureはanalyses/意味候補(side違いで内容が変わる)には依存しない
+    const sidecarSideB = await page.evaluate(t => buildQuantityAnnotationSidecar(t, 'B', 'sample_trace_v1_3.json'), baseTrace);
+    const analysesDiffer = JSON.stringify(sidecar1.records[0].analyses) !== JSON.stringify(sidecarSideB.records[0].analyses);
+    check('side違いでanalyses/interval_semantics_candidatesの中身は実際に変わる(前提条件の確認)', analysesDiffer);
+    check('side違い(analyses/意味候補が変わる)でもdataset_signatureは変わらない(4、sidecar派生値を含まないことの確認)',
+      sidecar1.dataset_signature === sidecarSideB.dataset_signature);
+
+    // 4c. レコード順序変更に対するdataset_signatureの安定性
     const traceReordered = { ...baseTrace, _trace_records: [...baseTrace._trace_records].reverse() };
     const sidecarReordered = await page.evaluate(t => buildQuantityAnnotationSidecar(t, 'A', 'sample_trace_v1_3.json'), traceReordered);
     check('レコード順序を反転してもdataset_signatureが変わらない(4、trace_id昇順への正規化)', sidecar1.dataset_signature === sidecarReordered.dataset_signature);
+
+    // 4d. 元trace(_trace_records)だけから比較エンジン側が独立に再計算しても一致する
+    const recomputed = await page.evaluate(t => v12ComputeDatasetSignature(t._trace_records), baseTrace);
+    check('trace._trace_recordsから独立に再計算したdataset_signatureがsidecarの値と一致する(4、比較エンジン側の再計算契約)',
+      recomputed === sidecar1.dataset_signature);
 
     // 5. 重複trace_id拒否
     const traceDup = { ...baseTrace, _trace_records: [...baseTrace._trace_records, { trace_id: 'req-cooling-capacity', source_raw_text: '別内容', tags: [] }] };
@@ -148,14 +195,52 @@ async function clickAndDownload(page, selector, savePath) {
     const rCond = sidecar1.records.find(r => r.trace_id === 'req-condition');
     check('条件節(condition_candidates)がis_condition_value:trueの別analysesになる(7)', rCond.analyses.some(a => a.is_condition_value === true));
 
-    // side='B'は'actual'
-    const sidecarB = await page.evaluate(t => buildQuantityAnnotationSidecar(t, 'B', 'sample_trace_v1_3.json'), baseTrace);
-    check('side="B"はrequirementではなくactualになる', sidecarB.side === 'actual');
+    check('side="B"はrequirementではなくactualになる', sidecarSideB.side === 'actual');
+    check('id_hash_algorithmフィールドがSHA-256/128である', sidecar1.id_hash_algorithm === 'SHA-256/128');
 
     check('単体検証中にページエラーが発生していない', pageErrors.length === 0, pageErrors);
   });
 
-  // ── パート2: 実際のUIフロー(ボタンクリック)による end-to-end 検証 ──
+  // ── パート2: 同一スナップショット保証の直接検証(v12BuildTraceの呼び出し回数を計測) ──
+  await withPage(async (page, pageErrors) => {
+    await loadDocument(page, SAMPLE_OBJ);
+
+    // v12BuildTrace()を、呼び出しごとに異なるgenerated_atを返す(かつ呼び出し回数を記録する)
+    // ものへ差し替える。もし#btn-quantity-annotation-exportの実装がv12BuildTrace()を2回
+    // 呼んでいたら、trace側とsidecar側でgenerated_atが食い違い、下の一致検査が失敗する
+    // (=このテストは「同一スナップショット」の退行を実際に検出できることの証明でもある)。
+    const callCount = await page.evaluate(() => {
+      window.__v12BuildTraceCallCount = 0;
+      const orig = v12BuildTrace;
+      v12BuildTrace = async (...args) => {
+        window.__v12BuildTraceCallCount++;
+        const t = await orig(...args);
+        t.generated_at = new Date(Date.now() + window.__v12BuildTraceCallCount).toISOString();
+        return t;
+      };
+      return true;
+    });
+    check('v12BuildTraceの差し替えに成功した(前提条件)', callCount === true);
+
+    const traceP = path.join(fixtureDir, '_tmp_snapshot_trace.json');
+    const sidecarP = path.join(fixtureDir, '_tmp_snapshot_sidecar.json');
+    const { trace: traceOut, sidecar: sidecarOut } = await clickAndDownloadBoth(page, '#btn-quantity-annotation-export', traceP, sidecarP);
+    fs.unlinkSync(traceP); fs.unlinkSync(sidecarP);
+
+    const buildTraceCalls = await page.evaluate(() => window.__v12BuildTraceCallCount);
+    check('新ボタン1クリックでv12BuildTrace()がちょうど1回だけ呼ばれる(8、同一スナップショットの直接検証)', buildTraceCalls === 1, { buildTraceCalls });
+    check('trace JSONとsidecarのgenerated_atが完全一致する(8、v12BuildTrace()を2回呼んでいたらこの検査は失敗する)',
+      traceOut.generated_at === sidecarOut.generated_at, { trace: traceOut.generated_at, sidecar: sidecarOut.generated_at });
+    check('sidecarのtrace_id集合がtrace JSONのtrace_id集合と完全一致する(8)',
+      JSON.stringify([...traceOut._trace_records.map(r=>r.trace_id)].sort()) === JSON.stringify([...sidecarOut.records.map(r=>r.trace_id)].sort()));
+    check('source_trace_fileがtrace JSONのファイル名と対応する(8)', sidecarOut.source_trace_file.includes('_trace_v1_3.json'));
+
+    check('パート2実行中にページエラーが発生していない', pageErrors.length === 0, pageErrors);
+
+    fs.writeFileSync(OUT_FIXTURE, JSON.stringify({ generated_at: new Date().toISOString(), sample_trace: traceOut, sample_sidecar: sidecarOut }, null, 2));
+  });
+
+  // ── パート3: 実際のUIフロー(ボタンクリック)による end-to-end 検証、既存ボタンの非退行確認 ──
   await withPage(async (page, pageErrors) => {
     const disabledBefore = await page.evaluate(() => document.getElementById('btn-quantity-annotation-export').disabled);
     check('文書読込前はボタンが無効(disabled)である', disabledBefore === true, { disabledBefore });
@@ -164,33 +249,34 @@ async function clickAndDownload(page, selector, savePath) {
     const disabledAfter = await page.evaluate(() => document.getElementById('btn-quantity-annotation-export').disabled);
     check('文書読込後はボタンが有効になる(10)', disabledAfter === false, { disabledBefore, disabledAfter });
 
+    // 既存の「照合用JSON」ボタン(#btn-trace-export)
     const traceJsonPath = path.join(fixtureDir, '_tmp_trace_export.json');
     const traceJson = await clickAndDownload(page, '#btn-trace-export', traceJsonPath);
     fs.unlinkSync(traceJsonPath);
     check('既存の「照合用JSON」ボタンが影響を受けず動作する(10)', Array.isArray(traceJson._trace_records) && traceJson._trace_records.length > 0, { records: traceJson._trace_records?.length });
 
-    // 注: #btn-export(通常JSON、旧exportJson())は本フェーズAでは変更しておらず、また
-    // validate(data)が要求するデータ形が本検証の合成fixture(obj、v12BuildDocumentModel()の
-    // 入力形)とは別物(DocumentModel後の形を期待する古い経路)のため、ここでは検証対象に含めない。
-    // #btn-trace-export(直上)が、新ボタンと全く同じv12BuildTrace()系の配線パターンを共有する
-    // 既存ボタンであり、影響を受けていないことの確認としては十分。
-
-    // 再読込して(v12ReviewCountsの状態が変わらないよう)同一スナップショットから両方を出力する
+    // 既存の「通常JSON」ボタン(#btn-export)。以前はSAMPLE_OBJにchapter_number/chapter_titleが
+    // 無くvalidateAgainst()が失敗しダウンロードされなかった(検証漏れ)。fixture側を修正し、
+    // 実際にE2Eでダウンロードを確認する。初期化時のrebuildActions()がこのボタンを
+    // 折りたたみ済みの<details class="ui14-inline-menu">(「文書・その他」)へ移動するため、
+    // 先にdetailsを開いてからクリックする(既存UIの挙動そのものであり、変更はしていない)。
     await loadDocument(page, SAMPLE_OBJ);
-    const traceJson2Path = path.join(fixtureDir, '_tmp_trace_export2.json');
-    const traceJson2 = await clickAndDownload(page, '#btn-trace-export', traceJson2Path);
-    fs.unlinkSync(traceJson2Path);
+    await page.evaluate(() => { document.querySelector('#btn-export').closest('details').open = true; });
+    const normalJsonPath = path.join(fixtureDir, '_tmp_normal_export.json');
+    const normalJson = await clickAndDownload(page, '#btn-export', normalJsonPath);
+    fs.unlinkSync(normalJsonPath);
+    check('既存の「通常JSON」ボタンが影響を受けず動作する(10)',
+      normalJson.chapter_number === SAMPLE_OBJ.chapter_number && Array.isArray(normalJson.sections) && normalJson.sections.length === SAMPLE_OBJ.sections.length,
+      { chapter_number: normalJson.chapter_number, sections: normalJson.sections?.length });
 
-    const sidecarPath = path.join(fixtureDir, '_tmp_quantity_annotation.json');
-    const sidecar = await clickAndDownload(page, '#btn-quantity-annotation-export', sidecarPath);
-    fs.unlinkSync(sidecarPath);
+    // 新ボタン(1クリック2ダウンロード)のend-to-end検証
+    await loadDocument(page, SAMPLE_OBJ);
+    const traceP2 = path.join(fixtureDir, '_tmp_e2e_trace.json');
+    const sidecarP2 = path.join(fixtureDir, '_tmp_e2e_sidecar.json');
+    const { trace, sidecar } = await clickAndDownloadBoth(page, '#btn-quantity-annotation-export', traceP2, sidecarP2);
+    fs.unlinkSync(traceP2); fs.unlinkSync(sidecarP2);
 
-    const traceIds = new Set(traceJson2._trace_records.map(r => r.trace_id));
-    const sidecarIds = new Set(sidecar.records.map(r => r.trace_id));
-    check('sidecarのtrace_id集合がtrace JSONのtrace_id集合と完全一致する(8、同一スナップショット)',
-      traceIds.size === sidecarIds.size && [...traceIds].every(id => sidecarIds.has(id)),
-      { traceIds: [...traceIds], sidecarIds: [...sidecarIds] });
-    check('source_trace_fileがtrace JSONのファイル名と対応する(8)', sidecar.source_trace_file.includes('_trace_v1_3.json'));
+    check('新ボタンのend-to-end出力でもgenerated_atが一致する(8)', trace.generated_at === sidecar.generated_at);
 
     // 9. JSON Schema検証(実際にボタンクリックで得た生成物)
     const schemaResult = validate(SCHEMA, sidecar);
@@ -198,8 +284,6 @@ async function clickAndDownload(page, selector, savePath) {
 
     check('end-to-end検証中にページエラーが発生していない(ERR_TUNNEL_CONNECTION_FAILED等の無関係なネットワークエラーは許容)',
       pageErrors.every(e => /ERR_TUNNEL_CONNECTION_FAILED|net::/.test(e)), pageErrors);
-
-    fs.writeFileSync(OUT_FIXTURE, JSON.stringify({ generated_at: new Date().toISOString(), sample_sidecar: sidecar }, null, 2));
   });
 
   console.log('\n=== quantity_annotation_pdf_verification 結果 ===');

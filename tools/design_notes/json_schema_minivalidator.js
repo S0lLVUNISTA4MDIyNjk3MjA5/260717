@@ -2,8 +2,9 @@
 // quantity_annotation_schema_v1.json / trace_comparison_schema_v1.md 系のスキーマが実際に
 // 使うキーワードのみをサポートする、汎用実装ではない限定的な検証器(ajv等は本プロジェクトの
 // 「依存ゼロ」原則によりnpm経由で導入できないため、必要な部分だけを自前で実装する)。
-// サポートするキーワード: type, const, enum, pattern, minLength, minimum, maximum,
-// required, properties, additionalProperties, items, $ref(同一ドキュメント内の#/...のみ)。
+// サポートするキーワード: type(文字列または配列、nullable表現用), const, enum, pattern,
+// minLength, minimum, maximum, required, properties, additionalProperties, items,
+// $ref(同一ドキュメント内の#/...のみ)。
 'use strict';
 
 function resolveRef(root, ref) {
@@ -26,8 +27,9 @@ function typeOf(value) {
 
 function typeMatches(expected, value) {
   const actual = typeOf(value);
-  if (expected === 'number') return actual === 'number' || actual === 'integer';
-  return actual === expected;
+  const matchesOne = (exp) => exp === 'number' ? (actual === 'number' || actual === 'integer') : actual === exp;
+  if (Array.isArray(expected)) return expected.some(matchesOne);
+  return matchesOne(expected);
 }
 
 // errors: 検出したエラーメッセージ(path付き)を蓄積する配列

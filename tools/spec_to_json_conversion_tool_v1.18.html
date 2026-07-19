@@ -1059,7 +1059,7 @@
         <div class="ui15-action-group" data-step="1" id="ui15-read-actions"><span class="ui15-action-label">1 読込</span><button class="btn primary" id="btn-open">JSON読込</button><button class="btn primary" id="btn-gen">PDF読込・変換</button></div>
         <div class="ui15-action-group" data-step="2" id="ui15-review-actions"><span class="ui15-action-label">2 確認・タグ</span><button class="btn" id="btn-pdf" disabled>原本確認</button><button class="btn" id="btn-json-view-a" disabled title="確認状態・タグ・除外情報を含むJSONを表示">JSONプレビュー</button><button class="btn ghost-shu" id="btn-edit" disabled>内容編集</button><button class="btn" id="btn-report" disabled>確認レポート</button><button class="btn" id="ui15-open-search" type="button">タグ付け・検索</button></div>
         <div class="ui15-action-group" data-step="3" id="ui15-validation-actions"><span class="ui15-action-label">3 検証</span></div>
-        <div class="ui15-action-group" data-step="4" id="ui15-output-actions"><span class="ui15-action-label">4 出力</span><button class="btn primary" id="btn-export" disabled>通常JSON</button><button class="btn" id="btn-trace-export" disabled title="章・節・本文・表をknowledge_tool_v12向け行形式で出力">照合用JSON</button><button class="btn" id="btn-quantity-annotation-export" disabled title="照合用JSONと同一スナップショットから、数量抽出・意味候補の付加情報(quantity-annotation/1.0-rc1、候補のみ・未確定)を出力">数量注釈JSON</button><span class="ui15-output-help">後段連携は照合用JSON</span></div>
+        <div class="ui15-action-group" data-step="4" id="ui15-output-actions"><span class="ui15-action-label">4 出力</span><button class="btn primary" id="btn-export" disabled>通常JSON</button><button class="btn" id="btn-trace-export" disabled title="章・節・本文・表をknowledge_tool_v12向け行形式で出力">照合用JSON</button><button class="btn" id="btn-quantity-annotation-export" disabled title="照合用JSON(schema 1.2)と、同一スナップショットから生成した数量抽出・意味候補の付加情報(quantity-annotation/1.0-rc1、候補のみ・未確定)の2ファイルを出力">照合用+数量注釈JSON</button><span class="ui15-output-help">後段連携は照合用JSON</span></div>
         <details class="ui14-inline-menu"><summary>文書・その他</summary><div class="ui14-inline-menu-panel" id="ui15-other-actions"><button class="btn" id="btn-revert" disabled>読込時へ戻す</button></div></details>
       </div>
     </div>
@@ -1082,7 +1082,7 @@
       <div class="ui14-pane-actions">
         <div class="ui14-action-group ui14-profile-group"><span class="ui14-action-label">様式</span><select id="profileB-select" title="文書Bに適用する様式プロファイル"></select></div>
         <div class="ui14-action-group"><span class="ui14-action-label">読込</span><button class="btn" id="embB-json">JSON読込</button><button class="btn" id="embB-pdf">PDF読込・変換</button></div>
-        <div class="ui14-action-group"><span class="ui14-action-label">確認・出力</span><button class="btn" id="btn-json-view-b" disabled title="確認状態・タグ・除外情報を含むJSONを表示">JSONプレビュー</button><button class="btn" id="btn-trace-export-b" disabled title="文書Bをknowledge_tool_v12向け行形式で出力">照合用JSON</button><button class="btn" id="btn-quantity-annotation-export-b" disabled title="照合用JSONと同一スナップショットから、数量抽出・意味候補の付加情報(quantity-annotation/1.0-rc1、候補のみ・未確定)を出力">数量注釈JSON</button></div>
+        <div class="ui14-action-group"><span class="ui14-action-label">確認・出力</span><button class="btn" id="btn-json-view-b" disabled title="確認状態・タグ・除外情報を含むJSONを表示">JSONプレビュー</button><button class="btn" id="btn-trace-export-b" disabled title="文書Bをknowledge_tool_v12向け行形式で出力">照合用JSON</button><button class="btn" id="btn-quantity-annotation-export-b" disabled title="照合用JSON(schema 1.2)と、同一スナップショットから生成した数量抽出・意味候補の付加情報(quantity-annotation/1.0-rc1、候補のみ・未確定)の2ファイルを出力">照合用+数量注釈JSON</button></div>
         <details class="ui14-inline-menu"><summary>表示設定</summary><div class="ui14-inline-menu-panel"><label class="status" style="cursor:pointer"><input type="checkbox" id="sync-scroll" checked> スクロール同期</label><button class="btn" id="btn-collapseB" title="文書Bペインを畳んで文書Aを全幅表示">文書Bを畳む</button></div></details>
       </div>
     </div>
@@ -6469,17 +6469,26 @@ async function v12ComputeRecordContentHash(record){
   return v12HashParts("content-hash-v1", [v12CanonicalJson(analysisInput)]);
 }
 
-async function v12ComputeDatasetSignature(records){
+async function v12ComputeDatasetSignature(traceRecords){
+  // 設計契約(shadow_mode_integration_design.md 2.1節): 元trace JSON(_trace_records全体、
+  // trace_id昇順)からのみ導出する。sidecar側の派生値(content_hash/analyses/interval_semantics_candidates)
+  // を含めない。これにより、抽出規則(ruleset_version)や意味候補が変わっても元trace JSONが
+  // 同じであればdataset_signatureは変わらず、逆に元trace JSONの本文以外のフィールド(タグ・
+  // source_page等)が変わればruleset変更なしでもdataset_signatureが変わる、という
+  // 「取り違え検出は元trace側だけで再計算できる」契約を満たす。比較エンジン側は
+  // quantity-annotation側のanalysesを一切参照せず、trace._trace_recordsだけからこの値を
+  // 独立に再計算できる。
   const seen = new Set();
-  for(const r of records){
+  for(const r of traceRecords){
     if(seen.has(r.trace_id)) throw new Error(`dataset_signatureの計算に失敗しました。trace_idが重複しています: ${r.trace_id}`);
     seen.add(r.trace_id);
   }
-  const sorted = [...records].sort((a,b)=> a.trace_id < b.trace_id ? -1 : a.trace_id > b.trace_id ? 1 : 0);
+  const sorted = [...traceRecords].sort((a,b)=> a.trace_id < b.trace_id ? -1 : a.trace_id > b.trace_id ? 1 : 0);
   return "QA-SHA256:" + await v12HashParts("dataset-signature-v1", [v12CanonicalJson(sorted)]);
 }
 
 async function buildQuantityAnnotationSidecar(trace, side, sourceTraceFileName){
+  const datasetSignature = await v12ComputeDatasetSignature(trace._trace_records);
   const records = [];
   for(const r of trace._trace_records){
     const analyses = await v12BuildQuantityAnalyses(r.source_raw_text, side, r.trace_id, "source_raw_text");
@@ -6490,7 +6499,8 @@ async function buildQuantityAnnotationSidecar(trace, side, sourceTraceFileName){
     side: side === "A" ? "requirement" : "actual",
     source_trace_file: sourceTraceFileName,
     hash_algorithm: "SHA-256",
-    dataset_signature: await v12ComputeDatasetSignature(records),
+    id_hash_algorithm: "SHA-256/128",
+    dataset_signature: datasetSignature,
     generated_at: trace.generated_at,
     generator: { tool: "quantity_extraction_prototype.js + semantic_mapping_prototype.js（本ツールへ統合）", version: "v2.14 / v2.19" },
     ruleset_version: QA_RULESET_VERSION,
@@ -7165,13 +7175,18 @@ async function v12ExportTraceSide(obj,profile,side,label){
 async function v12ExportQuantityAnnotationSide(obj,profile,side,label){
   if(!obj){toast(`${label}がありません。`,true);return;}
   const counts=v12ReviewCounts(obj,profile);if(counts.needs_fix||counts.unregistered){v12Modal("数量注釈JSON出力を中止しました",`<p class="v12-error">要修正 ${counts.needs_fix}件、未登録タグ ${counts.unregistered}件があります。整理後に再実行してください。</p>`);return;}
-  if(counts.unreviewed&&!confirm(`未確認項目が ${counts.unreviewed}件あります。数量注釈JSONは作業用として出力しますか？`))return;
+  if(counts.unreviewed&&!confirm(`未確認項目が ${counts.unreviewed}件あります。照合用JSON・数量注釈JSONは作業用として出力しますか？`))return;
   try{
+    // 「元trace JSONとsidecarは同一スナップショットから生成する」を構造的に保証するため、
+    // v12BuildTrace()を1回だけ呼び、その戻り値(trace、以降await一切を挟まず同期的に参照する
+    // ローカル変数)から両方のファイルをこの1回のクリック内で生成する。既存の#btn-trace-export
+    // ボタン(v12ExportTraceSide())とは独立したv12BuildTrace()呼び出しであり、互いには影響しない。
     const trace=await v12BuildTrace(obj,profile,side);
     const sourceTraceFileName=`${v12SafeBase(obj,profile)}_trace_v1_3.json`;
     const sidecar=await buildQuantityAnnotationSidecar(trace,side,sourceTraceFileName);
+    v12DownloadJson(trace,sourceTraceFileName);
     v12DownloadJson(sidecar,`${v12SafeBase(obj,profile)}_quantity_annotation_v1.json`);
-    toast(`${label}の数量注釈JSONを ${sidecar.records.length}件（うち数量あり ${sidecar.records.filter(r=>r.analyses.length).length}件）出力しました。`);
+    toast(`${label}の照合用JSON(${trace._trace_records.length}件)・数量注釈JSON(数量あり ${sidecar.records.filter(r=>r.analyses.length).length}件)を同一スナップショットから出力しました。`);
   }catch(e){console.error(e);v12Modal("数量注釈JSON生成エラー",`<pre class="v12-error">${escapeHtml(e.message||String(e))}</pre>`);}
 }
 

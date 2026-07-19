@@ -1,12 +1,279 @@
 {
-  "generated_at": "2026-07-19T11:08:46.059Z",
+  "generated_at": "2026-07-19T11:28:29.003Z",
+  "sample_trace": {
+    "file_name": "customer_hvac_requirements.pdf",
+    "chapter_number": "TRACE",
+    "chapter_title": "要求仕様",
+    "trace_format": "chapter-section-trace-v1",
+    "schema_version": "1.2",
+    "generated_at": "2026-07-19T11:28:28.980Z",
+    "generator": {
+      "name": "仕様書PDF→JSON 変換・確認ツール",
+      "version": "1.15-manual-guided-ui-20260714"
+    },
+    "source": {
+      "document_id": "doci-5e626d80e4b718678a5da2a483392509",
+      "document_instance_id": "doci-5e626d80e4b718678a5da2a483392509",
+      "document_series_id": "series-9a25672115a5cdd3236f5fbb10a20ca1",
+      "file_name": "customer_hvac_requirements.pdf",
+      "document_sha256": "0ecbcb779921f3bfdb532890f57aee6e1fd64fed809390ac04f718f54a1300fb",
+      "profile_id": "profile-C995932B",
+      "profile_version": "2.0",
+      "profile_sha256": "8cc3689e0acdae1eea5a43e5fc2fc4cac4dea2df6b720dabda7a16d35235dd44",
+      "id_scheme_version": "stable-uid-id-v2",
+      "extraction_signature": "0d540c1d40f6016d1c031fc6a84168fb61ce5298f6b1471125f929623ce1b411",
+      "tag_vocabulary_id": "hvac-demo-tags",
+      "tag_vocabulary_version": "1.0"
+    },
+    "options": {
+      "text_unit": "block",
+      "list_unit": "item",
+      "table_unit": "row"
+    },
+    "statistics": {
+      "sections": 2,
+      "records": 5,
+      "skipped": 0
+    },
+    "warnings": [],
+    "_trace_adapter": {
+      "kind": "section_document_export",
+      "side": "sys",
+      "source_file": "customer_hvac_requirements.pdf",
+      "record_count": 5,
+      "generated_at": "2026-07-19T11:28:28.979Z"
+    },
+    "_trace_records": [
+      {
+        "_adapterKind": "section_document_export",
+        "_adapterSide": "sys",
+        "id": "blk-b409e2cdd9b38c1957e1c6c16bbc8432",
+        "trace_id": "blk-b409e2cdd9b38c1957e1c6c16bbc8432",
+        "parent_id": "sec-3b09a5a5d61f933de02088fc23d92ec8",
+        "trace_title": "冷房性能",
+        "trace_text": "冷房能力は12kW以上とすること。",
+        "trace_content": [
+          "冷房能力は12kW以上とすること。"
+        ],
+        "trace_category": "text",
+        "trace_key_text": "要求仕様 2.1 冷房性能 冷房性能 冷房能力は12kW以上とすること。",
+        "chapter_number": "",
+        "chapter_title": "要求仕様",
+        "section_number": "2.1",
+        "section_title": "冷房性能",
+        "block_type": "paragraph",
+        "source_file": "customer_hvac_requirements.pdf",
+        "source_path": "$.sections[0].content[0]",
+        "source_kind": "paragraph",
+        "source_section_id": "sec-3b09a5a5d61f933de02088fc23d92ec8",
+        "source_section_title": "冷房性能",
+        "source_block_id": "u:sections[0].content[0]",
+        "stable_key": "",
+        "stable_key_quality": "none",
+        "id_scheme_version": "stable-uid-id-v2",
+        "source_raw_text": "冷房能力は12kW以上とすること。",
+        "content_hash": "92a18076a100f8d88b566adbb1b7c350a6aef721537bbb5f2ab90d3a29288609",
+        "source_page": null,
+        "source_bbox": null,
+        "source_refs": [],
+        "review_status": "unreviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "annotations": [
+          {
+            "type": "extraction",
+            "value": "unknown",
+            "source": "system"
+          }
+        ],
+        "quality_flags": []
+      },
+      {
+        "_adapterKind": "section_document_export",
+        "_adapterSide": "sys",
+        "id": "blk-0d2f732c45958682308c0d609423ceb8",
+        "trace_id": "blk-0d2f732c45958682308c0d609423ceb8",
+        "parent_id": "sec-3b09a5a5d61f933de02088fc23d92ec8",
+        "trace_title": "冷房性能",
+        "trace_text": "周囲温度50 °Cにおいて12.5 kWを実測。",
+        "trace_content": [
+          "周囲温度50 °Cにおいて12.5 kWを実測。"
+        ],
+        "trace_category": "text",
+        "trace_key_text": "要求仕様 2.1 冷房性能 冷房性能 周囲温度50 °Cにおいて12.5 kWを実測。",
+        "chapter_number": "",
+        "chapter_title": "要求仕様",
+        "section_number": "2.1",
+        "section_title": "冷房性能",
+        "block_type": "paragraph",
+        "source_file": "customer_hvac_requirements.pdf",
+        "source_path": "$.sections[0].content[1]",
+        "source_kind": "paragraph",
+        "source_section_id": "sec-3b09a5a5d61f933de02088fc23d92ec8",
+        "source_section_title": "冷房性能",
+        "source_block_id": "u:sections[0].content[1]",
+        "stable_key": "",
+        "stable_key_quality": "none",
+        "id_scheme_version": "stable-uid-id-v2",
+        "source_raw_text": "周囲温度50 °Cにおいて12.5 kWを実測。",
+        "content_hash": "66e416359bc98bc6a2a287157f006c6d858a6976a2705eeebb589728dd1e0fef",
+        "source_page": null,
+        "source_bbox": null,
+        "source_refs": [],
+        "review_status": "unreviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "annotations": [
+          {
+            "type": "extraction",
+            "value": "unknown",
+            "source": "system"
+          }
+        ],
+        "quality_flags": []
+      },
+      {
+        "_adapterKind": "section_document_export",
+        "_adapterSide": "sys",
+        "id": "blk-a769d646a6b2d072140adc0a9b64bed9",
+        "trace_id": "blk-a769d646a6b2d072140adc0a9b64bed9",
+        "parent_id": "sec-3b09a5a5d61f933de02088fc23d92ec8",
+        "trace_title": "冷房性能",
+        "trace_text": "試験は50 °Cと50 °Cの両方で実施すること。",
+        "trace_content": [
+          "試験は50 °Cと50 °Cの両方で実施すること。"
+        ],
+        "trace_category": "text",
+        "trace_key_text": "要求仕様 2.1 冷房性能 冷房性能 試験は50 °Cと50 °Cの両方で実施すること。",
+        "chapter_number": "",
+        "chapter_title": "要求仕様",
+        "section_number": "2.1",
+        "section_title": "冷房性能",
+        "block_type": "paragraph",
+        "source_file": "customer_hvac_requirements.pdf",
+        "source_path": "$.sections[0].content[2]",
+        "source_kind": "paragraph",
+        "source_section_id": "sec-3b09a5a5d61f933de02088fc23d92ec8",
+        "source_section_title": "冷房性能",
+        "source_block_id": "u:sections[0].content[2]",
+        "stable_key": "",
+        "stable_key_quality": "none",
+        "id_scheme_version": "stable-uid-id-v2",
+        "source_raw_text": "試験は50 °Cと50 °Cの両方で実施すること。",
+        "content_hash": "12aed81a69c275c2bd8af63fa6ff13a90c901afbb4a63653347946d741798133",
+        "source_page": null,
+        "source_bbox": null,
+        "source_refs": [],
+        "review_status": "unreviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "annotations": [
+          {
+            "type": "extraction",
+            "value": "unknown",
+            "source": "system"
+          }
+        ],
+        "quality_flags": []
+      },
+      {
+        "_adapterKind": "section_document_export",
+        "_adapterSide": "sys",
+        "id": "blk-41a689b60954aa368301f693db09cf18",
+        "trace_id": "blk-41a689b60954aa368301f693db09cf18",
+        "parent_id": "sec-3b09a5a5d61f933de02088fc23d92ec8",
+        "trace_title": "冷房性能",
+        "trace_text": "電源電圧は220Vとすること。",
+        "trace_content": [
+          "電源電圧は220Vとすること。"
+        ],
+        "trace_category": "list_item",
+        "trace_key_text": "要求仕様 2.1 冷房性能 冷房性能 電源電圧は220Vとすること。",
+        "chapter_number": "",
+        "chapter_title": "要求仕様",
+        "section_number": "2.1",
+        "section_title": "冷房性能",
+        "block_type": "list_item",
+        "source_file": "customer_hvac_requirements.pdf",
+        "source_path": "$.sections[0].content[3].items[0]",
+        "source_kind": "list_item",
+        "source_section_id": "sec-3b09a5a5d61f933de02088fc23d92ec8",
+        "source_section_title": "冷房性能",
+        "source_block_id": "u:sections[0].content[3]",
+        "stable_key": "skey-item-6c1fe5855e1a0a50f2f98443f9c4cce1",
+        "stable_key_quality": "weak",
+        "id_scheme_version": "stable-uid-id-v2",
+        "source_raw_text": "電源電圧は220Vとすること。",
+        "content_hash": "457d6980c13def4636c85b68d7c4baefe57871d101e2828f139d2b63a75351a0",
+        "source_page": null,
+        "source_bbox": null,
+        "source_refs": [],
+        "review_status": "unreviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "annotations": [
+          {
+            "type": "extraction",
+            "value": "unknown",
+            "source": "system"
+          }
+        ],
+        "quality_flags": []
+      },
+      {
+        "_adapterKind": "section_document_export",
+        "_adapterSide": "sys",
+        "id": "blk-43f1aeeaa50fa72bfa0d388c8156f816",
+        "trace_id": "blk-43f1aeeaa50fa72bfa0d388c8156f816",
+        "parent_id": "sec-fe25cf593d9c5b9d91d4acff72da3dd1",
+        "trace_title": "付帯事項",
+        "trace_text": "本節には数量を含まない説明のみを記載する。",
+        "trace_content": [
+          "本節には数量を含まない説明のみを記載する。"
+        ],
+        "trace_category": "text",
+        "trace_key_text": "要求仕様 2.2 付帯事項 付帯事項 本節には数量を含まない説明のみを記載する。",
+        "chapter_number": "",
+        "chapter_title": "要求仕様",
+        "section_number": "2.2",
+        "section_title": "付帯事項",
+        "block_type": "paragraph",
+        "source_file": "customer_hvac_requirements.pdf",
+        "source_path": "$.sections[1].content[0]",
+        "source_kind": "paragraph",
+        "source_section_id": "sec-fe25cf593d9c5b9d91d4acff72da3dd1",
+        "source_section_title": "付帯事項",
+        "source_block_id": "u:sections[1].content[0]",
+        "stable_key": "",
+        "stable_key_quality": "none",
+        "id_scheme_version": "stable-uid-id-v2",
+        "source_raw_text": "本節には数量を含まない説明のみを記載する。",
+        "content_hash": "bd5370005275cd97dc858f1df4ff0011c0f087d8df45bf4389c4b93a593db55c",
+        "source_page": null,
+        "source_bbox": null,
+        "source_refs": [],
+        "review_status": "unreviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "annotations": [
+          {
+            "type": "extraction",
+            "value": "unknown",
+            "source": "system"
+          }
+        ],
+        "quality_flags": []
+      }
+    ]
+  },
   "sample_sidecar": {
     "schema_version": "quantity-annotation/1.0-rc1",
     "side": "requirement",
     "source_trace_file": "customer_hvac_requirements_trace_v1_3.json",
     "hash_algorithm": "SHA-256",
-    "dataset_signature": "QA-SHA256:8e765163a7a33ac6bd51fd0f1d04136ee8f22e62807588ff09d633a5fbc47e6a",
-    "generated_at": "2026-07-19T11:08:46.046Z",
+    "id_hash_algorithm": "SHA-256/128",
+    "dataset_signature": "QA-SHA256:47ec4633cf54cd8f68854282b799e2445eb051edf6e042b1f10d6c904988b57e",
+    "generated_at": "2026-07-19T11:28:28.980Z",
     "generator": {
       "tool": "quantity_extraction_prototype.js + semantic_mapping_prototype.js（本ツールへ統合）",
       "version": "v2.14 / v2.19"
@@ -22,11 +289,11 @@
     },
     "records": [
       {
-        "trace_id": "blk-3cb9ce6da3918f296957975b465aa64a",
-        "content_hash": "6a58c5388a92913dcd04c2e2a0ebdd45a53eae70a9de33a49fd8313ae9d1880f",
+        "trace_id": "blk-b409e2cdd9b38c1957e1c6c16bbc8432",
+        "content_hash": "6035e59da22da590e7ca02ec15168352f503a8040967b6fb8901818ff1a7261b",
         "analyses": [
           {
-            "quantity_id": "q-c076435ba246baf6668642a4e1eabbef",
+            "quantity_id": "q-c880ec8e4774f77996bee7a6381987c4",
             "source_field": "source_raw_text",
             "occurrence_index": 0,
             "source_span": {
@@ -108,11 +375,11 @@
         ]
       },
       {
-        "trace_id": "blk-0e4181612d51e91d91cf8b40fdc6c76c",
-        "content_hash": "b44b30df21d4e5d676cacd1c6a37be14f194d5fc5ef8d43f2403a33ef4e7ca6e",
+        "trace_id": "blk-0d2f732c45958682308c0d609423ceb8",
+        "content_hash": "cdaebe50f177d24585cf1b27ddc1ec36c1f5ab96a6da1ce1cce396816d1363bd",
         "analyses": [
           {
-            "quantity_id": "q-82842bc627f35a77f18aaa95168b5075",
+            "quantity_id": "q-bd41d940eeab61b1eaeb3d15cb981e7f",
             "source_field": "source_raw_text",
             "occurrence_index": 0,
             "source_span": {
@@ -218,7 +485,7 @@
             ]
           },
           {
-            "quantity_id": "q-e4bf9fe3a892cdaaabd8d38e2793ce97",
+            "quantity_id": "q-25e691d353af0e2a9b8dc4d4eaa5afc6",
             "source_field": "source_raw_text",
             "occurrence_index": 0,
             "source_span": {
@@ -282,11 +549,11 @@
         ]
       },
       {
-        "trace_id": "blk-8ec6bc4027182482d3970100b10bcd17",
-        "content_hash": "2fdca247bc4cb625b93f2d40f5e78d22d9d79a9d644ec9323a0b329848c452e6",
+        "trace_id": "blk-a769d646a6b2d072140adc0a9b64bed9",
+        "content_hash": "7ebf93442095818d02e2b4283be262ed8ea14df3fd58d9b95c5f4f8061a5c38d",
         "analyses": [
           {
-            "quantity_id": "q-b6648546ebb945cc96bf4b41b84bc1e5",
+            "quantity_id": "q-7cfc68673348d764c2171ae03583ed96",
             "source_field": "source_raw_text",
             "occurrence_index": 0,
             "source_span": {
@@ -362,7 +629,7 @@
             ]
           },
           {
-            "quantity_id": "q-8d3bdf32abddde6b8bb1e230db7c6b04",
+            "quantity_id": "q-a51c563091438dcacdaf041c143000d2",
             "source_field": "source_raw_text",
             "occurrence_index": 1,
             "source_span": {
@@ -440,11 +707,11 @@
         ]
       },
       {
-        "trace_id": "blk-c0ca1bdd044e936bff98511cff6aa029",
-        "content_hash": "8ca4e9df0b4884b27c06d8f00dd6307917a54ec1107d1f5ab57b60921e960ce0",
+        "trace_id": "blk-41a689b60954aa368301f693db09cf18",
+        "content_hash": "37379a6b352b9ff8cd6cfa526027482f4a9b1e41cb24cc544e039db2aef819ea",
         "analyses": [
           {
-            "quantity_id": "q-40870c828f7f4dddbb250fce3dba8529",
+            "quantity_id": "q-5e3f54a8daf46fc70515be2c65e3fa92",
             "source_field": "source_raw_text",
             "occurrence_index": 0,
             "source_span": {
@@ -529,8 +796,8 @@
         ]
       },
       {
-        "trace_id": "blk-dd6b8cee0f4c3ffb8f05c3dd626cc130",
-        "content_hash": "90deff3ce04f583c98ba9eba4ff30bd8a3043f1b5983e1a18508862e9d97e167",
+        "trace_id": "blk-43f1aeeaa50fa72bfa0d388c8156f816",
+        "content_hash": "794b9997671e0dfe026656bfbb3943b3fede8ad632e3827b7fc8f796d7aa9142",
         "analyses": []
       }
     ]
