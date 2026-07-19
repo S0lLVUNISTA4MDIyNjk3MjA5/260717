@@ -55,6 +55,7 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <!-- 軽量形態素解析（読み込み失敗時は文字種チャンクに自動フォールバック） -->
   <script src="https://unpkg.com/tiny-segmenter@0.2.0/dist/tiny-segmenter-0.2.0.js" onerror="window.__tsLoadFailed=true"></script>
+  <script src="./quantity_sidecar_binding_core.js"></script>
   <style>
     :root {
       --primary: #2563eb;
@@ -478,6 +479,16 @@
           <input type="file" id="plmFile" accept=".json,application/json" />
         </div>
         <div>
+          <label class="json-side-a-label">数量注釈 A（任意・requirement sidecar）</label>
+          <input type="file" id="sysQuantityFile" accept=".json,application/json" />
+          <div class="field-hint">Phase B結合検証。片側だけでは比較候補を生成しません。</div>
+        </div>
+        <div>
+          <label class="json-side-b-label">数量注釈 B（任意・actual sidecar）</label>
+          <input type="file" id="plmQuantityFile" accept=".json,application/json" />
+          <div class="field-hint">Schema・署名・レコードハッシュ・trace_idを厳密検証します。</div>
+        </div>
+        <div>
           <label>ファイル名プレフィックス</label>
           <input type="text" id="graphName" placeholder="例: project_trace_202607" />
           <div class="field-hint">Excel / SysML / JSON / SVGなどの保存ファイル名の先頭に使います。</div>
@@ -487,6 +498,7 @@
       <div class="workflow-actions">
         <button id="loadBtn" class="primary-action" disabled>読み込み・照合</button>
       </div>
+      <div id="quantityBindingStatus" class="field-hint" role="status">数量注釈sidecarは未選択です。</div>
     </section>
 
     <section class="workflow-section secondary" aria-label="出力・保存">
@@ -1578,6 +1590,7 @@
      状態
   ═══════════════════════════════════════════ */
   let plmData = null, sysData = null, mergedResult = null, cy = null;
+  let quantityBindingState = null;
   let editData = [];          // 表形式編集用データ（sysListのコピー）
   let editHeaders = [];
   let isEditMode = false;
@@ -1596,6 +1609,8 @@
   const $ = id => document.getElementById(id);
   const plmFile       = $('plmFile');
   const sysFile       = $('sysFile');
+  const plmQuantityFile = $('plmQuantityFile');
+  const sysQuantityFile = $('sysQuantityFile');
   const graphName     = $('graphName');
   const loadBtn       = $('loadBtn');
   const saveGraphBtn  = $('saveGraphBtn');
@@ -1646,6 +1661,64 @@
       r.readAsText(file, 'UTF-8');
     });
   }
+
+  function quantityBindingSummary(state = quantityBindingState) {
+    if (!state) return { phase:'not_selected', ready:false, diagnostics:[], boundRequirement:0, boundActual:0, comparisonCandidates:0, satisfactionJudgements:0 };
+    return {
+      phase:'binding_only', ready:!!state.ready,
+      diagnostics:(state.diagnostics || []).map(d => ({ ...d })),
+      boundRequirement:(state.requirement?.bindings || []).filter(b => b.status === 'bound').length,
+      boundActual:(state.actual?.bindings || []).filter(b => b.status === 'bound').length,
+      comparisonCandidates:(state.comparison_candidates || []).length,
+      satisfactionJudgements:(state.satisfaction_judgements || []).length
+    };
+  }
+
+  function renderQuantityBindingStatus() {
+    const el = $('quantityBindingStatus');
+    if (!el) return;
+    if (!quantityBindingState) {
+      el.textContent = '数量注釈sidecarは未選択です。既存のトレース照合だけを実行します。';
+      return;
+    }
+    const s = quantityBindingSummary();
+    if (s.ready) {
+      el.textContent = `数量注釈の厳密結合が完了しました（要求 ${s.boundRequirement}件 / 実仕様 ${s.boundActual}件）。Phase B-1では比較候補・数値比較・充足判定を生成しません。`;
+      return;
+    }
+    const counts = {};
+    s.diagnostics.forEach(d => { counts[d.code] = (counts[d.code] || 0) + 1; });
+    const detail = Object.entries(counts).map(([code, count]) => `${code}:${count}`).join(' / ');
+    el.textContent = `数量注釈を結合できません（${detail || '診断なし'}）。不整合データから比較候補・充足判定は生成しません。`;
+  }
+
+  async function loadQuantityBindings() {
+    const requirementFile = sysQuantityFile?.files?.[0] || null;
+    const actualFile = plmQuantityFile?.files?.[0] || null;
+    if (!requirementFile && !actualFile) {
+      quantityBindingState = null;
+      renderQuantityBindingStatus();
+      return null;
+    }
+    if (!globalThis.QuantitySidecarBinding) throw new Error('数量注釈結合コアを読み込めませんでした。quantity_sidecar_binding_core.jsをHTMLと同じフォルダへ配置してください。');
+    const requirementAnnotation = requirementFile ? await readJsonFile(requirementFile) : null;
+    const actualAnnotation = actualFile ? await readJsonFile(actualFile) : null;
+    quantityBindingState = await globalThis.QuantitySidecarBinding.bindInputPair({
+      requirementTrace:sysData, requirementAnnotation,
+      actualTrace:plmData, actualAnnotation
+    });
+    renderQuantityBindingStatus();
+    return quantityBindingState;
+  }
+
+  window.__quantityBindingDiagnostics = Object.freeze({
+    state:() => quantityBindingState ? JSON.parse(JSON.stringify(quantityBindingState)) : null,
+    summary:() => quantityBindingSummary(),
+    relationRows:() => (traceMatrixRows || []).map(row => globalThis.QuantitySidecarBinding?.relationRefs(row) || ({
+      requirement_trace_id:row?.requirement_trace_id || null, actual_trace_id:row?.actual_trace_id || null,
+      matcher_a_id:row?.matcher_a_id || row?.['A_ID'] || null, matcher_b_id:row?.matcher_b_id || row?.['B_ID'] || null
+    }))
+  });
   function normalizeText(v) {
     if (v == null) return '';
     return String(v).replace(/\r\n/g,'\n').replace(/\u3000/g,' ').trim();
@@ -2025,7 +2098,8 @@
       created_at: new Date().toISOString(),
       metadata: { plmCount:plmList.length, sysCount:sysList.length,
         inputAdapters:{ plm:preparedPlm.adapter, sys:preparedSys.adapter },
-        traceProfile: activeTraceProfile().label, traceProfileId: matchLogic.traceProfile || 'generic', matchStatus:'loaded-only' },
+        traceProfile: activeTraceProfile().label, traceProfileId: matchLogic.traceProfile || 'generic', matchStatus:'loaded-only',
+        quantityBinding:quantityBindingSummary() },
       nodes:[], edges:[], sysml_text:'', sysList, plmList
     };
     traceMatrixRows = [];
@@ -7704,7 +7778,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       if (!matches.length) {
         const key = traceReviewKeyFromValues(aId, '', 'A未対応');
         const rv = traceReviewFor(key);
-        rows.push({ '_reviewKey':key, ...aHidden, '_bParentKey':'', '_bParentLabel':'', '_bGroupKey':'', '_bGroupLabel':'', '_bGranularityRule':'', '分類':'A未対応', 'A_ID':aId, 'A_表示名':aTitle, 'A_照合値':aText, 'B_ID':'', 'B_表示名':'', 'B_照合値':'', '信頼度':'', '方式':'', '根拠':'対応先なし', 'レビュー判定':rv.label || '', 'レビューコメント':rv.comment || '' });
+        rows.push({ '_reviewKey':key, ...aHidden, '_bParentKey':'', '_bParentLabel':'', '_bGroupKey':'', '_bGroupLabel':'', '_bGranularityRule':'', requirement_trace_id:normalizeText(item?.trace_id) || null, actual_trace_id:null, matcher_a_id:aId, matcher_b_id:null, '分類':'A未対応', 'A_ID':aId, 'A_表示名':aTitle, 'A_照合値':aText, 'B_ID':'', 'B_表示名':'', 'B_照合値':'', '信頼度':'', '方式':'', '根拠':'対応先なし', 'レビュー判定':rv.label || '', 'レビューコメント':rv.comment || '' });
       }
       else matches.forEach((m, mi) => {
         const bId = plmUniqueKey(m, mi);
@@ -7725,6 +7799,10 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
           '_matchedChunk': m._matchedChunk || null,
           '_chunkMatches': Array.isArray(m._chunkMatches) ? m._chunkMatches : [],
           '_tagEvidence': m._tagEvidence ? JSON.parse(JSON.stringify(m._tagEvidence)) : null,
+          requirement_trace_id: normalizeText(item?.trace_id) || null,
+          actual_trace_id: normalizeText(srcB?.trace_id) || null,
+          matcher_a_id: aId,
+          matcher_b_id: bId,
           '分類': category,
           'A_ID': aId,
           'A_表示名': aTitle,
@@ -7746,7 +7824,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         const bMeta = granularityMeta(plm, bId);
         const key = traceReviewKeyFromValues('', bId, 'B未参照');
         const rv = traceReviewFor(key);
-        rows.push({ '_reviewKey':key, '_aParentKey':'', '_aParentLabel':'', '_aGroupKey':'', '_aGroupLabel':'', '_aGranularityRule':'', '_bParentKey':bMeta.parentKey, '_bParentLabel':bMeta.parentLabel, '_bGroupKey':bMeta.groupKey, '_bGroupLabel':bMeta.groupLabel, '_bGranularityRule':bMeta.rule, '分類':'B未参照', 'A_ID':'', 'A_表示名':'', 'A_照合値':'', 'B_ID':bId, 'B_表示名':plmDisplayName(plm, idx), 'B_照合値':plmModelText(plm), '信頼度':'', '方式':'', '根拠':'A側から参照なし', 'レビュー判定':rv.label || '', 'レビューコメント':rv.comment || '' });
+        rows.push({ '_reviewKey':key, '_aParentKey':'', '_aParentLabel':'', '_aGroupKey':'', '_aGroupLabel':'', '_aGranularityRule':'', '_bParentKey':bMeta.parentKey, '_bParentLabel':bMeta.parentLabel, '_bGroupKey':bMeta.groupKey, '_bGroupLabel':bMeta.groupLabel, '_bGranularityRule':bMeta.rule, requirement_trace_id:null, actual_trace_id:normalizeText(plm?.trace_id) || null, matcher_a_id:null, matcher_b_id:bId, '分類':'B未参照', 'A_ID':'', 'A_表示名':'', 'A_照合値':'', 'B_ID':bId, 'B_表示名':plmDisplayName(plm, idx), 'B_照合値':plmModelText(plm), '信頼度':'', '方式':'', '根拠':'A側から参照なし', 'レビュー判定':rv.label || '', 'レビューコメント':rv.comment || '' });
       }
     });
     return rows;
@@ -8859,6 +8937,15 @@ ${h.name}`, type:'requirement', detail:srcA };
   function updateLoadButton() { loadBtn.disabled = !!activeMatchingJob || !(plmFile.files.length && sysFile.files.length); }
   plmFile.addEventListener('change', updateLoadButton);
   sysFile.addEventListener('change', updateLoadButton);
+  const invalidateQuantityBindingSelection = () => {
+    quantityBindingState = null;
+    const el = $('quantityBindingStatus');
+    if (el) el.textContent = '入力選択が変更されました。「読み込み・照合」で数量注釈を再検証してください。';
+  };
+  plmFile.addEventListener('change', invalidateQuantityBindingSelection);
+  sysFile.addEventListener('change', invalidateQuantityBindingSelection);
+  plmQuantityFile?.addEventListener('change', invalidateQuantityBindingSelection);
+  sysQuantityFile?.addEventListener('change', invalidateQuantityBindingSelection);
 
   loadBtn.addEventListener('click', async () => {
     const runId = ++matchRunSeq;
@@ -8871,6 +8958,8 @@ ${h.name}`, type:'requirement', detail:srcA };
       plmData = await readJsonFile(plmFile.files[0]);
       assertMatchingNotCancelled(job);
       sysData = await readJsonFile(sysFile.files[0]);
+      assertMatchingNotCancelled(job);
+      await loadQuantityBindings();
       assertMatchingNotCancelled(job);
       updateMatchingProgress(job, { phase:'読み込み中', current:1, total:5, detail:'入力JSONを正規化中' });
       await yieldToUi(0);
@@ -9331,6 +9420,10 @@ ${h.name}`, type:'requirement', detail:srcA };
       '_bGranularityRule': base._bGranularityRule || overrides._bGranularityRule || '',
       '_matchedChunk': base._matchedChunk || null,
       '_chunkMatches': Array.isArray(base._chunkMatches) ? base._chunkMatches : [],
+      requirement_trace_id: base.requirement_trace_id || overrides.requirement_trace_id || null,
+      actual_trace_id: base.actual_trace_id || overrides.actual_trace_id || null,
+      matcher_a_id: base.matcher_a_id || overrides.matcher_a_id || base['A_ID'] || overrides.A_ID || null,
+      matcher_b_id: base.matcher_b_id || overrides.matcher_b_id || base['B_ID'] || overrides.B_ID || null,
       '分類': effective.judgement,
       '機械判定': auto.exists ? auto.judgement : (overrides.autoJudgement || '候補消滅'),
       'レビュー判定': label,
@@ -9401,6 +9494,8 @@ ${h.name}`, type:'requirement', detail:srcA };
         '_reviewKey':key, '_autoExists':false,
         '_aParentKey':aMeta.parentKey, '_aParentLabel':aMeta.parentLabel, '_aGroupKey':aMeta.groupKey, '_aGroupLabel':aMeta.groupLabel, '_aGranularityRule':aMeta.rule,
         '_bParentKey':bMeta.parentKey, '_bParentLabel':bMeta.parentLabel, '_bGroupKey':bMeta.groupKey, '_bGroupLabel':bMeta.groupLabel, '_bGranularityRule':bMeta.rule,
+        requirement_trace_id:normalizeText(aEntry.row?.trace_id) || null, actual_trace_id:normalizeText(bEntry.row?.trace_id) || null,
+        matcher_a_id:manual.aId, matcher_b_id:manual.bId,
         '分類':manual.judgement, 'A_ID':manual.aId, 'A_表示名':sysDisplayName(aEntry.row, aEntry.idx), 'A_照合値':sysAffectedText(aEntry.row),
         'B_ID':manual.bId, 'B_表示名':plmDisplayName(bEntry.row, bEntry.idx), 'B_照合値':plmModelText(bEntry.row),
         '信頼度':'', '方式':'manual', '根拠':manual.comment ? `手動追加: ${manual.comment}` : '人が追加した関係'
@@ -9425,6 +9520,8 @@ ${h.name}`, type:'requirement', detail:srcA };
         '_reviewKey':key, '_autoExists':false,
         '_aParentKey':aMeta.parentKey, '_aParentLabel':aMeta.parentLabel, '_aGroupKey':aMeta.groupKey, '_aGroupLabel':aMeta.groupLabel, '_aGranularityRule':aMeta.rule,
         '_bParentKey':bMeta.parentKey, '_bParentLabel':bMeta.parentLabel, '_bGroupKey':bMeta.groupKey, '_bGroupLabel':bMeta.groupLabel, '_bGranularityRule':bMeta.rule,
+        requirement_trace_id:normalizeText(aEntry.row?.trace_id) || null, actual_trace_id:normalizeText(bEntry.row?.trace_id) || null,
+        matcher_a_id:parsed.aId, matcher_b_id:parsed.bId,
         '分類':normalizeText(autoAtReview.judgement || '候補消滅'),
         'A_ID':parsed.aId, 'A_表示名':sysDisplayName(aEntry.row, aEntry.idx), 'A_照合値':sysAffectedText(aEntry.row),
         'B_ID':parsed.bId, 'B_表示名':plmDisplayName(bEntry.row, bEntry.idx), 'B_照合値':plmModelText(bEntry.row),
