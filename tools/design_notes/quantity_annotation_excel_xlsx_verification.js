@@ -122,6 +122,30 @@ async function runXlsxScenario(page, fixtureDir, xlsxPath, profileName) {
   return clickQuantityAnnotationButton(page, fixtureDir);
 }
 
+// runXlsxScenarioと同様に.xlsxを読み込み変換するが、様式適用の直前(=trace化によって
+// currentCellMetaがリセットされる直前)に、表形式・編集タブ上で実際のUI操作(セル編集・
+// 並べ替え・列名変更等)をtableOpsFnとして挟めるようにしたもの。stable-identityな
+// 表示文字列解決(v12ResolveSourceRecordDisplay())が、位置ではなく行・列の実体に追従することを、
+// stale化したworkbookの再変換ではなく実際のツール操作を経由して検証するため
+// (「フェーズA完了は保留」としたレビュー指摘への対応、6件の回帰テストのうち3件をここに置く)。
+async function runXlsxScenarioWithTableOps(page, fixtureDir, xlsxPath, profileName, tableOpsFn) {
+  await page.setInputFiles('#excelFile', xlsxPath);
+  await page.waitForTimeout(500);
+  await page.click('#convertBtn');
+  await page.waitForTimeout(300);
+  await page.click('[data-tab="tableTab"]');
+  await page.waitForTimeout(150);
+  if (tableOpsFn) await tableOpsFn(page);
+  await page.click('[data-tab="profileTab"]');
+  await page.waitForTimeout(200);
+  await page.fill('#profileEditor', JSON.stringify({
+    profile_name: profileName, profile_version: '1.0',
+    output: { mode: 'array', preserve_unmapped: true },
+    tag_policy: { mode: 'controlled', vocabulary_id: 't', tag_vocabulary_version: '1.0', allow_free_input: false, allowed_tags: [] },
+  }, null, 2));
+  return clickQuantityAnnotationButton(page, fixtureDir);
+}
+
 // 元trace(_trace_records、source_record_displayを含む)だけから、比較エンジン側が独立に
 // dataset_signatureを再計算できることを検証する(v12ComputeDatasetSignature()と同一契約)。
 function nodeRecomputeDatasetSignature(traceRecords) {
@@ -265,6 +289,81 @@ function nodeRecomputeDatasetSignature(traceRecords) {
     check('preserveTypesを外しても、単位付き書式の数値セルの表示文字列("12.5 kW")から数量が抽出される(非退行確認)',
       reikyakuRow && analyses.some(a => a.source_field === '数値セル(単位付き書式)' && a.normalized_text.includes('12.5')), analyses);
     check('パート3実行中にページエラーが発生していない',
+      pageErrors.every(e => /ERR_TUNNEL_CONNECTION_FAILED|net::/.test(e)), pageErrors);
+  });
+
+  // ── 【レビュー指摘の回帰テスト、その1】セルをUI編集モードで編集してから照合用JSONを
+  //    生成すると、生値の変更に加え表示文字列も編集後の値へnumber formatを再適用した
+  //    ものになること(stale化したworkbookの再変換ではなく、生値+解析時点に捕捉した
+  //    number formatから都度再構成するv12ResolveSourceRecordDisplay()の直接検証、回帰6a)。
+  await withPage(async (page, pageErrors) => {
+    const run = await runXlsxScenarioWithTableOps(page, fixtureDir, xlsxPathKw, 'xlsxtest_edit', async page => {
+      await page.click('#toggleEditBtn');
+      const cellSel = 'td[data-row="0"][data-key="数値セル(単位付き書式)"]';
+      await page.click(cellSel);
+      await page.fill(`${cellSel} input`, '20');
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(150);
+    });
+    const row = run.trace._trace_records.find(r => r.source_record['設計項目'] === '冷房能力');
+    check('セル編集後、source_recordの生値が編集後の値(20)になる',
+      row && row.source_record['数値セル(単位付き書式)'] === 20, row?.source_record);
+    check('セル編集後、表示文字列が編集後の値へnumber formatを再適用した"20.0 kW"になる(回帰6a)',
+      row && row.source_record_display?.['数値セル(単位付き書式)'] === '20.0 kW', row?.source_record_display);
+    const analyses = run.sidecar.records.find(r => r.trace_id === row?.trace_id)?.analyses || [];
+    const unitAnalyses = analyses.filter(a => a.source_field === '数値セル(単位付き書式)');
+    check('編集後の数量抽出が新しい値(20)を反映し、旧値(12.5)を抽出しない(回帰6a)',
+      unitAnalyses.some(a => a.normalized_text.includes('20')) && !unitAnalyses.some(a => a.normalized_text.includes('12.5')), unitAnalyses);
+    check('パート4(セル編集)実行中にページエラーが発生していない',
+      pageErrors.every(e => /ERR_TUNNEL_CONNECTION_FAILED|net::/.test(e)), pageErrors);
+  });
+
+  // ── 【レビュー指摘の回帰テスト、その2・3】行を並べ替えても、各行の表示文字列は
+  //    自分自身の値のまま追従し、他行の値と取り違えない(配列インデックスだけの結合を
+  //    廃止したことの直接検証。フィクスチャは「冷房能力」行(12.5 kW)と「実測条件」行
+  //    (20.0 kW)の2行に異なる表示文字列を持たせてあるため、位置結合のままなら並べ替え後に
+  //    値が入れ替わって観測されるはずである。No列の降順ソートで全行を反転させることで、
+  //    先頭↔末尾の入れ替え(回帰2)・隣接する2行の入れ替え(回帰3)の両方を1回の操作で兼ねる)。
+  await withPage(async (page, pageErrors) => {
+    const run = await runXlsxScenarioWithTableOps(page, fixtureDir, xlsxPathKw, 'xlsxtest_reorder', async page => {
+      await page.selectOption('#tableSortColumn', 'No');
+      await page.selectOption('#tableSortDirection', 'desc');
+      await page.click('#applySortToDataBtn');
+      await page.waitForTimeout(150);
+    });
+    check('並べ替えが実際にcurrentData(ひいてはtrace._trace_records)へ反映されている(先頭行がNo=3の実測条件)',
+      run.trace._trace_records[0]?.source_record['設計項目'] === '実測条件', run.trace._trace_records.map(r => r.source_record['設計項目']));
+    const reikyaku = run.trace._trace_records.find(r => r.source_record['設計項目'] === '冷房能力');
+    const jissoku = run.trace._trace_records.find(r => r.source_record['設計項目'] === '実測条件');
+    check('並べ替え後も「冷房能力」行の表示文字列は自分自身の値(12.5 kW)のまま(回帰2/3: 位置結合による取り違えがない)',
+      reikyaku?.source_record_display?.['数値セル(単位付き書式)'] === '12.5 kW', reikyaku?.source_record_display);
+    check('並べ替え後も「実測条件」行の表示文字列は自分自身の値(20.0 kW)のまま(回帰2/3: 位置結合による取り違えがない)',
+      jissoku?.source_record_display?.['数値セル(単位付き書式)'] === '20.0 kW', jissoku?.source_record_display);
+    check('パート5(並べ替え)実行中にページエラーが発生していない',
+      pageErrors.every(e => /ERR_TUNNEL_CONNECTION_FAILED|net::/.test(e)), pageErrors);
+  });
+
+  // ── 【レビュー指摘の回帰テスト、その4】列名(JSONキー)をUI編集モードで変更しても、
+  //    新しい列名でsource_record・source_record_display・sidecarのsource_fieldすべてが
+  //    一貫して解決できること(__number_formatの改名追従、renameCellMetaColumn()の直接検証、回帰4)。
+  await withPage(async (page, pageErrors) => {
+    const run = await runXlsxScenarioWithTableOps(page, fixtureDir, xlsxPathKw, 'xlsxtest_rename', async page => {
+      await page.click('#toggleEditBtn');
+      const headerSel = 'th[data-key="数値セル(単位付き書式)"]';
+      await page.click(headerSel);
+      await page.fill(`${headerSel} input`, '単位付き数値');
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(150);
+    });
+    const row = run.trace._trace_records.find(r => r.source_record['設計項目'] === '冷房能力');
+    check('列名変更後、新しい列名でsource_recordに生値が残る(回帰4)',
+      row && row.source_record['単位付き数値'] === 12.5, row?.source_record);
+    check('列名変更後も、新しい列名でnumber formatが解決され表示文字列が付く(回帰4: __number_formatの改名追従)',
+      row && row.source_record_display?.['単位付き数値'] === '12.5 kW', row?.source_record_display);
+    const analyses = run.sidecar.records.find(r => r.trace_id === row?.trace_id)?.analyses || [];
+    check('列名変更後、sidecar側のsource_fieldも新しい列名で一貫している(回帰4)',
+      analyses.some(a => a.source_field === '単位付き数値' && a.normalized_text.includes('12.5')), analyses);
+    check('パート6(列名変更)実行中にページエラーが発生していない',
       pageErrors.every(e => /ERR_TUNNEL_CONNECTION_FAILED|net::/.test(e)), pageErrors);
   });
 

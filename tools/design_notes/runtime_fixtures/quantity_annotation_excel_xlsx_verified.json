@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-07-19T16:28:46.338Z",
+  "generated_at": "2026-07-19T22:51:47.072Z",
   "sample_trace": {
     "file_name": "_tmp_quantity_annotation_excel_fixture_kw.xlsx",
     "chapter_number": "TRACE",
     "chapter_title": "_tmp_quantity_annotation_excel_fixture_kw",
     "trace_format": "excel-row-trace-v1",
     "schema_version": "1.1",
-    "generated_at": "2026-07-19T16:28:46.296Z",
+    "generated_at": "2026-07-19T22:51:47.035Z",
     "generator": {
       "name": "Excel → JSON 変換・確認ツール",
       "version": "2.0.8"
@@ -37,7 +37,7 @@
       "source_file": "_tmp_quantity_annotation_excel_fixture_kw.xlsx",
       "source_sheet": "設計検討表",
       "record_count": 3,
-      "generated_at": "2026-07-19T16:28:46.296Z"
+      "generated_at": "2026-07-19T22:51:47.035Z"
     },
     "_trace_records": [
       {
@@ -78,12 +78,7 @@
         "review_comment": "",
         "exclusion_reason": "",
         "source_record_display": {
-          "検討結果": "12.5 kWに変更",
-          "標準機種情報": "10 kW",
-          "設計項目": "冷房能力",
-          "No": "1",
-          "数値セル(単位付き書式)": "12.5 kW",
-          "数値セル(書式なし)": "99"
+          "数値セル(単位付き書式)": "12.5 kW"
         }
       },
       {
@@ -122,15 +117,7 @@
         "review_method": "",
         "reviewed_at": "",
         "review_comment": "",
-        "exclusion_reason": "",
-        "source_record_display": {
-          "検討結果": "変更なし",
-          "標準機種情報": "",
-          "設計項目": "付帯事項",
-          "No": "2",
-          "数値セル(単位付き書式)": "",
-          "数値セル(書式なし)": ""
-        }
+        "exclusion_reason": ""
       },
       {
         "trace_id": "excel-82a883bf",
@@ -170,12 +157,7 @@
         "review_comment": "",
         "exclusion_reason": "",
         "source_record_display": {
-          "検討結果": "12.5 kWを実測",
-          "標準機種情報": "周囲温度50 °Cにおいて12.5 kWを実測",
-          "設計項目": "実測条件",
-          "No": "3",
-          "数値セル(単位付き書式)": "20.0 kW",
-          "数値セル(書式なし)": "100"
+          "数値セル(単位付き書式)": "20.0 kW"
         }
       }
     ],
@@ -187,8 +169,8 @@
     "source_trace_file": "_tmp_quantity_annotation_excel_fixture_kw_trace_v1.json",
     "hash_algorithm": "SHA-256",
     "id_hash_algorithm": "SHA-256/128",
-    "dataset_signature": "QA-SHA256:057fef20fd4a11ea10fe8339abe934cc9ef6ef9b63ebc32c09537b47f0183d3a",
-    "generated_at": "2026-07-19T16:28:46.296Z",
+    "dataset_signature": "QA-SHA256:b916431fa511bbb8b030d04c74fe6b30ae85310e94446db49feb9d3d1bee6373",
+    "generated_at": "2026-07-19T22:51:47.035Z",
     "generator": {
       "tool": "quantity_extraction_prototype.js + semantic_mapping_prototype.js（本ツールへ統合）",
       "version": "v2.14 / v2.19"
@@ -289,7 +271,7 @@
     "records": [
       {
         "trace_id": "excel-6452ec03",
-        "content_hash": "9d603a41eec1d7cbfb3b5452cd48e2135a4ac1624b90980d0f8a350343a0a825",
+        "content_hash": "c7516d307688e97c46daa75a76ef4e31ddf94bc7ab0b15c57aba518b47067005",
         "analyses": [
           {
             "quantity_id": "q-1f45532c5cfd0ff47d94f20f6c55f9fc",
@@ -536,12 +518,12 @@
       },
       {
         "trace_id": "excel-a86aa134",
-        "content_hash": "ad2d2d7209831725bb6c64bd669890d806e223ac9c3cae7722006d8d3b9a4468",
+        "content_hash": "1df71c8cfd871084abc8a5beab03f9e64832995ccef9dbf4b17c8140e3ad3657",
         "analyses": []
       },
       {
         "trace_id": "excel-82a883bf",
-        "content_hash": "34a23fbb141d78b97cdc161621430497317aa49bc67e09f292edcf8c29444858",
+        "content_hash": "86706a1b234059e28c8515694ef5cebdc0145f177b1dce289de7fcacc22daac7",
         "analyses": [
           {
             "quantity_id": "q-3f7fe464cd124ebdbfd3ea68cffdc892",

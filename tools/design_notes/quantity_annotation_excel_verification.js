@@ -375,6 +375,56 @@ async function clickQuantityAnnotationButton(page, tmpDir) {
       Array.isArray(existingJson._trace_records) && existingJson._trace_records.length === BASE_RECORDS.length,
       { records: existingJson._trace_records?.length });
 
+    // ── 【レビュー指摘の回帰テスト、その5】行の除外(review_status: 'excluded')は、
+    //    レコード配列からの削除ではなくフラグに過ぎない(exclusion_reason/review_status関連の
+    //    コード調査で確認済み)。除外行が存在しても、他の生存行の表示文字列解決が位置ずれ・
+    //    取り違えを起こさないこと、また除外行自体も(削除ではなく)_trace_recordsに残り続け、
+    //    自分自身の値で正しく解決されることを検証する(回帰5)。
+    const exclusionRecords = [
+      { '設計項目': '対象A', '標準仕様': '12.5 kWに変更', 'No': 1, 'review_status': 'unreviewed' },
+      { '設計項目': '対象B(除外予定)', '標準仕様': '20 kWに変更', 'No': 2, 'review_status': 'excluded' },
+      { '設計項目': '対象C', '標準仕様': '30 kWに変更', 'No': 3, 'review_status': 'unreviewed' },
+    ];
+    await loadWorkJson(page, workPackage(exclusionRecords), fixtureDir);
+    const runExcl = await clickQuantityAnnotationButton(page, fixtureDir);
+    check('除外(review_status:excluded)フラグの行も_trace_recordsから削除されない(回帰5)',
+      runExcl.trace._trace_records.length === exclusionRecords.length, runExcl.trace._trace_records.length);
+    const excludedRow = runExcl.trace._trace_records.find(r => r.source_record['設計項目'] === '対象B(除外予定)');
+    check('除外行のreview_statusが正しく維持される(回帰5)', excludedRow?.review_status === 'excluded', excludedRow?.review_status);
+    const excludedAnalyses = runExcl.sidecar.records.find(r => r.trace_id === excludedRow?.trace_id)?.analyses || [];
+    check('除外行自体も自分自身の値(20)で正しく数量抽出される(削除されていないため、回帰5)',
+      excludedAnalyses.some(a => a.normalized_text.includes('20')), excludedAnalyses);
+    const survivorA = runExcl.trace._trace_records.find(r => r.source_record['設計項目'] === '対象A');
+    const survivorC = runExcl.trace._trace_records.find(r => r.source_record['設計項目'] === '対象C');
+    const survivorAAnalyses = runExcl.sidecar.records.find(r => r.trace_id === survivorA?.trace_id)?.analyses || [];
+    const survivorCAnalyses = runExcl.sidecar.records.find(r => r.trace_id === survivorC?.trace_id)?.analyses || [];
+    check('除外行の前後にある生存行も、自分自身の値のまま取り違えられない(12.5、回帰5)',
+      survivorAAnalyses.some(a => a.normalized_text.includes('12.5')), survivorAAnalyses);
+    check('除外行の前後にある生存行も、自分自身の値のまま取り違えられない(30、回帰5)',
+      survivorCAnalyses.some(a => a.normalized_text.includes('30')), survivorCAnalyses);
+
+    // ── 【レビュー指摘の回帰テスト、その6】表示文字列を解決できない場合は、生値のみへの
+    //    黙示的フォールバックをせず、理由付きでsource_record_display_unresolvedへ記録すること。
+    //    「そもそもnumber formatが無い(通常の数値列。大半のケース)」と「number formatはあるが
+    //    現在値が数値でない(編集等で書式の前提が崩れた)」を区別して検証する(回帰6b)。
+    const diagRecords = [
+      { '設計項目': '診断対象', '数値列(書式あり)': 'テキストへ編集済み', '数値列(書式なし)': 42, 'No': 1 },
+    ];
+    const diagCellMeta = [{ __number_format: { '数値列(書式あり)': '0.0" kW"' } }];
+    await loadWorkJson(page, workPackage(diagRecords, { cell_meta: diagCellMeta }), fixtureDir);
+    const runDiag = await clickQuantityAnnotationButton(page, fixtureDir);
+    const diagRow = runDiag.trace._trace_records.find(r => r.source_record['設計項目'] === '診断対象');
+    check('number formatはあるが現在値が数値でない列には表示文字列を付けない(黙示的フォールバック禁止、回帰6b)',
+      diagRow?.source_record_display?.['数値列(書式あり)'] === undefined, diagRow?.source_record_display);
+    check('number formatはあるが現在値が数値でない列は、理由付きでunresolvedへ記録される(回帰6b)',
+      Array.isArray(diagRow?.source_record_display_unresolved) &&
+      diagRow.source_record_display_unresolved.some(u => u.source_field === '数値列(書式あり)' && u.code === 'formatted_display_unavailable' && u.reason === 'value_not_numeric'),
+      diagRow?.source_record_display_unresolved);
+    check('number format自体が無い通常の数値列は、表示文字列もunresolved診断も付かない(「書式なし」と「解決失敗」を混同しない、回帰6b)',
+      diagRow?.source_record_display?.['数値列(書式なし)'] === undefined &&
+      !diagRow?.source_record_display_unresolved?.some(u => u.source_field === '数値列(書式なし)'),
+      { display: diagRow?.source_record_display, unresolved: diagRow?.source_record_display_unresolved });
+
     check('検証中にページエラーが発生していない(ERR_TUNNEL_CONNECTION_FAILED等の無関係なネットワークエラーは許容)',
       pageErrors.every(e => /ERR_TUNNEL_CONNECTION_FAILED|net::/.test(e)), pageErrors);
 

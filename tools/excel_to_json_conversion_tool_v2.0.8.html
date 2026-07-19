@@ -1438,7 +1438,8 @@ I/F = インターフェース"></textarea>
         let value = convertCellValue(info.cell);
         const explicitNull = Boolean(detectNullTokens?.checked && typeof value === 'string' && activeNullTokens.has(normalizeText(value)));
         if (explicitNull) value = null;
-        row.push({ value, origin: explicitNull ? 'null-token' : info.origin, explicitNull });
+        const numFmt = (!explicitNull && info.cell && info.cell.t === 'n' && info.cell.z && info.cell.z !== 'General') ? info.cell.z : null;
+        row.push({ value, origin: explicitNull ? 'null-token' : info.origin, explicitNull, numFmt });
       }
       matrix.push(row);
     }
@@ -1467,6 +1468,11 @@ I/F = インターフェース"></textarea>
         } else {
           item[key] = value;
           if (entry.origin !== 'source') rowMeta[key] = entry.origin;
+          // 解析時点でのセル表示形式(number format)を、行本体とは別に__number_formatへ保存しておく。
+          // 後で(照合用JSON生成時など)値が編集されていても、生値へ同じ書式を再適用して単位付き
+          // 表示文字列を再現できるようにするため。手動編集(currentCellMeta[row][key]への上書き)は
+          // 別プロパティなのでこの情報を破壊しない(quantity_annotation_excel_verification.js参照)。
+          if (entry.numFmt) { (rowMeta.__number_format ||= {})[key] = entry.numFmt; }
         }
       });
 
@@ -2558,6 +2564,18 @@ I/F = インターフェース"></textarea>
     return renamed;
   }
 
+  // currentCellMeta[row]のトップレベルキー(列名)をrenameRowKey()で改名するのに加え、
+  // __number_format(列名→number formatコードの入れ子オブジェクト)内のキーも同期して改名する。
+  // これを怠ると、列名変更後にexportQuantityAnnotationExcel()が旧列名でnumber formatを探し続け、
+  // 常にformatted_display_unavailableとなる(値の取り違えにはならないが機能が使えなくなる)。
+  function renameCellMetaColumn(item, oldKey, newKey) {
+    const renamed = renameRowKey(item || {}, oldKey, newKey);
+    if (renamed.__number_format && typeof renamed.__number_format === 'object') {
+      renamed.__number_format = renameRowKey(renamed.__number_format, oldKey, newKey);
+    }
+    return renamed;
+  }
+
   function renamePathRoot(path, oldKey, newKey) {
     const value = String(path ?? '');
     if (value === oldKey) return newKey;
@@ -2675,7 +2693,7 @@ I/F = インターフェース"></textarea>
       }
 
       currentData = currentData.map(item => renameRowKey(item, oldKey, newKey));
-      currentCellMeta = currentCellMeta.map(item => renameRowKey(item || {}, oldKey, newKey));
+      currentCellMeta = currentCellMeta.map(item => renameCellMetaColumn(item, oldKey, newKey));
       const profileUpdated = updateProfileReferencesForHeader(oldKey, newKey);
       syncCurrentDataToOutput();
       refreshAllViews();
@@ -2909,8 +2927,23 @@ I/F = インターフェース"></textarea>
         if (Object.prototype.hasOwnProperty.call(item || {}, rule.original)) converted[rule.target] = item[rule.original];
       });
       Object.keys(item || {}).forEach(key => {
+        if (key === '__number_format') return;
         if (!rules.some(rule => rule.original === key)) converted[key] = item[key];
       });
+      // __number_format(列名→number formatコード)も、列名・型設定と同じ改名規則で変換する。
+      // ここを怠ると列名変更後にnumber formatが旧列名のまま残り、以後常に解決不能になる
+      // (renameCellMetaColumn()と同じ理由。値の取り違えにはならない)。
+      const sourceFmt = item?.__number_format;
+      if (sourceFmt && typeof sourceFmt === 'object') {
+        const convertedFmt = {};
+        rules.forEach(rule => {
+          if (Object.prototype.hasOwnProperty.call(sourceFmt, rule.original)) convertedFmt[rule.target] = sourceFmt[rule.original];
+        });
+        Object.keys(sourceFmt).forEach(key => {
+          if (!rules.some(rule => rule.original === key)) convertedFmt[key] = sourceFmt[key];
+        });
+        if (Object.keys(convertedFmt).length) converted.__number_format = convertedFmt;
+      }
       return converted;
     });
     currentHeaders = rules.map(rule => rule.target);
@@ -3995,9 +4028,11 @@ I/F = インターフェース"></textarea>
         const rawValue = r.source_record[col];
         // 数値型セル(数値・真偽値を保持=true、既定)は生値のまま(例: 12.5)保持されるため、
         // "0.0\" kW\""のような単位付きセル書式を持つセルでも単位情報を含む文字列が失われる。
-        // source_record_display(v12DisplayedRowsForCurrentSheet()が別途、表示形式を適用した
-        // 文字列として捕捉したもの)が同じ列に存在し、かつ生値と異なる場合は、その表示文字列を
-        // 抽出対象にする(生値そのものは変更せず、抽出にだけ使う。レビュー指摘への対応)。
+        // source_record_display(exportQuantityAnnotationExcel()がv12ResolveSourceRecordDisplay()
+        // で、解析時点に捕捉したnumber formatをライブの生値へ再適用して個別解決したもの。
+        // stale化したworkbookの再変換や配列インデックスだけの結合には依存しない)が同じ列に
+        // 存在し、かつ生値と異なる場合は、その表示文字列を抽出対象にする(生値そのものは
+        // 変更せず、抽出にだけ使う。レビュー指摘への対応)。
         const displayValue = r.source_record_display?.[col];
         const useDisplay = typeof rawValue === "number" && displayValue !== undefined && displayValue !== null && String(displayValue) !== String(rawValue);
         const text = useDisplay ? String(displayValue) : String(rawValue ?? "");
@@ -4562,24 +4597,52 @@ I/F = インターフェース"></textarea>
     ensureRowStates(); refreshAllViews();
   };
 
-  // 現在のシートを、セルの表示形式(number format)を適用した表示文字列版として再変換する。
-  // 数値・真偽値を保持(preserveTypes)は既定でtrueのため、単位付き書式("0.0\" kW\""等)を持つ
-  // 数値セルであっても、通常の変換では生値(例: 12.5)しか残らず単位情報が失われる。この関数は
-  // 既存のconvertSheet()をpreserveTypesだけ一時的にfalseへ切り替えて再利用し(呼び出し後は
-  // 必ず元の状態へ戻す。DOM上のチェックボックス表示や他の変換結果には影響しない)、
-  // 表示文字列版の行配列を得る。全シートモード・workbook未読込(作業中JSON経由等、実際の.xlsxを
-  // 経由していない場合)ではnullを返し、呼び出し側は生値のみにフォールバックする。
-  function v12DisplayedRowsForCurrentSheet() {
-    if (!workbook || !currentSheetName || outputModeAllSheets) return null;
-    const original = preserveTypes.checked;
-    preserveTypes.checked = false;
-    try {
-      return convertSheet(currentSheetName).data;
-    } catch (e) {
-      return null;
-    } finally {
-      preserveTypes.checked = original;
+  // 列(target側の列名)に対応する変換前(source側)の列名を、現在の様式プロファイルの
+  // 列マッピング規則(profile.columns)から逆引きする。マッピング規則が無い・単純な列名同士
+  // でない(パス指定を含む)場合は、列名がそのまま(pass-through)使われているとみなし列名自身を返す。
+  // mapRowWithProfile()のpreserve_unmapped前提と整合させるための逆変換。
+  function v12ColumnSourceAlias(profile, targetColumn) {
+    const rules = profile?.columns || [];
+    const rule = rules.find(rule => rule && rule.target === targetColumn
+      && typeof rule.source === 'string' && !rule.source.includes('.') && !String(rule.target).includes('.'));
+    return rule ? rule.source : targetColumn;
+  }
+
+  // trace化される前(applyProfileToCurrentData(true)呼び出し直前)のcurrentData[index]・
+  // currentCellMeta[index]から、そのtraceレコードのsource_recordに対応する表示文字列
+  // (number formatを適用した文字列)を、列名ごとに個別解決する。stale化したworkbookの
+  // 再変換や配列インデックスだけの結合には一切依存しない: currentCellMeta[index]は解析時点で
+  // 捕捉したnumber formatを保持し続け(手動編集・並べ替え・列名変更でも追従する。
+  // convertSheet()でのnumber format捕捉、renameCellMetaColumn()・applyMapping()での
+  // 追従処理を参照)、生値はpreTraceRow[sourceCol]から都度ライブに取得するため、
+  // 編集後の値にも正しく追従する。解決できない列はdisplayに含めず、理由付きでunresolvedへ積む
+  // (生値のみへの黙示的フォールバックはしない。レビュー指摘への対応)。
+  function v12ResolveSourceRecordDisplay(record, preTraceRow, preTraceMeta, profile) {
+    const numberFormats = preTraceMeta?.__number_format;
+    const display = {};
+    const unresolved = [];
+    if (!preTraceRow || !numberFormats) return { display: null, unresolved };
+    for (const col of Object.keys(record?.source_record || {})) {
+      const sourceCol = v12ColumnSourceAlias(profile, col);
+      const fmt = numberFormats[sourceCol];
+      if (!fmt) continue;
+      const liveValue = preTraceRow[sourceCol];
+      if (typeof liveValue !== 'number') {
+        unresolved.push({ source_field: col, code: 'formatted_display_unavailable', reason: 'value_not_numeric' });
+        continue;
+      }
+      try {
+        const formatted = (typeof XLSX !== 'undefined' && XLSX.SSF?.format) ? XLSX.SSF.format(fmt, liveValue) : null;
+        if (formatted === null || formatted === undefined || formatted === '') {
+          unresolved.push({ source_field: col, code: 'formatted_display_unavailable', reason: 'format_empty' });
+        } else {
+          display[col] = formatted;
+        }
+      } catch (e) {
+        unresolved.push({ source_field: col, code: 'formatted_display_unavailable', reason: 'format_error' });
+      }
     }
+    return { display: Object.keys(display).length ? display : null, unresolved };
   }
 
   async function exportQuantityAnnotationExcel(){
@@ -4589,7 +4652,21 @@ I/F = インターフェース"></textarea>
     // 以降await一切を挟まず同期的に参照するローカル変数)から照合用JSON本体とsidecarの両方を
     // この1回のクリック内でダウンロードする。既存の#buildTraceBtn・#downloadJsonBtnのハンドラは
     // 変更しない(独立した別のapplyProfileToCurrentData()呼び出しのまま残る)。
+    //
+    // 表示文字列(number format適用後の文字列)の解決に使うcurrentData・currentCellMeta・
+    // 適用中プロファイルは、trace化(applyProfileToCurrentData)によってcurrentCellMetaが
+    // 空へリセットされる直前の状態をここで退避しておく(applyProfileToCurrentData冒頭の
+    // records = currentData.map((row, index) => ...)と、buildTraceOutput内のtraceRecords =
+    // records.map((row, index) => ...)がどちらもindex順を保つ写像であることを直接確認済みなので、
+    // 退避したcurrentData[index]・currentCellMeta[index]は、生成されるtrace._trace_records[index]
+    // と対応する。ただしtrace化後のsource_record内の列名は、適用中プロファイルの列マッピング規則で
+    // 改名されている場合があるため、v12ColumnSourceAlias()で逆引きしてから照合する)。
     const before = outputData;
+    const preTraceData = currentData;
+    const preTraceMeta = currentCellMeta;
+    // showErrors=false: 検証エラーの表示は、この直後に呼ぶapplyProfileToCurrentData()内部の
+    // getActiveProfileFromEditor()呼び出しに任せる(同じ検証結果を二重表示しないため)。
+    const profileForDisplay = getActiveProfileFromEditor(false);
     applyProfileToCurrentData(true);
     if (outputData === before || !outputData || !Array.isArray(outputData._trace_records)) {
       showMessage($('profileMessage'), 'error', '照合用JSONの生成に失敗しました。様式・変換済みデータを確認してください。');
@@ -4601,15 +4678,19 @@ I/F = インターフェース"></textarea>
       // outputData自身は変更しない(既存の#downloadJsonBtnが後で同じoutputDataを別内容として
       // 参照する可能性があるため、共有状態を汚染しないようdeepCloneしたコピーへ追加情報を載せる)。
       const trace = deepClone(outputData);
-      const displayedRows = v12DisplayedRowsForCurrentSheet();
-      if (displayedRows && displayedRows.length === trace._trace_records.length) {
-        trace._trace_records.forEach((r, i) => { r.source_record_display = displayedRows[i]; });
+      let unresolvedCount = 0;
+      if (preTraceData.length === trace._trace_records.length) {
+        trace._trace_records.forEach((r, i) => {
+          const { display, unresolved } = v12ResolveSourceRecordDisplay(r, preTraceData[i], preTraceMeta[i], profileForDisplay);
+          if (display) r.source_record_display = display;
+          if (unresolved.length) { r.source_record_display_unresolved = unresolved; unresolvedCount += unresolved.length; }
+        });
       }
       const sidecar = await buildQuantityAnnotationSidecarExcel(trace, sourceTraceFileName);
       downloadText(JSON.stringify(trace, null, 2), normalizeFileName(sourceTraceFileName), 'application/json');
       downloadText(JSON.stringify(sidecar, null, 2), normalizeFileName(`${baseName}_quantity_annotation_v1.json`), 'application/json');
       const withQuantities = sidecar.records.filter(r => r.analyses.length).length;
-      showMessage($('profileMessage'), 'info', `照合用JSON(${trace._trace_records.length}件)・数量注釈JSON(数量あり ${withQuantities}件、列役割候補 ${sidecar.column_role_candidates.length}列)を同一スナップショットから出力しました。`);
+      showMessage($('profileMessage'), 'info', `照合用JSON(${trace._trace_records.length}件)・数量注釈JSON(数量あり ${withQuantities}件、列役割候補 ${sidecar.column_role_candidates.length}列` + (unresolvedCount ? `、表示形式未解決 ${unresolvedCount}件` : '') + `)を同一スナップショットから出力しました。`);
     } catch (error) {
       showMessage($('profileMessage'), 'error', `数量注釈JSON生成エラー: ${error.message}`);
     }
