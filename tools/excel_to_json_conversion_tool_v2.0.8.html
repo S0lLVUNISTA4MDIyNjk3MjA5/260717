@@ -863,6 +863,7 @@
           <button id="applyProfileBtn" type="button" disabled>様式を適用</button>
           <button id="autoTagBtn" class="success" type="button" disabled>照合タグ自動付与</button>
           <button id="buildTraceBtn" class="secondary" type="button" disabled>照合用JSON生成</button>
+          <button id="buildQuantityAnnotationBtn" class="secondary" type="button" disabled title="照合用JSON(schema 1.1)と同一スナップショットから、列自動検出による数量抽出・意味候補・列役割候補の付加情報(quantity-annotation/1.0-rc1、候補のみ・未確定)を出力">照合用+数量注釈JSON</button>
           <button id="validateOutputBtn" class="secondary" type="button" disabled>出力JSON検証</button>
         </div>
         <div id="profileOperationStatus" class="small">ExcelをJSONへ変換すると操作できます。</div>
@@ -2928,7 +2929,7 @@ I/F = インターフェース"></textarea>
   function setOutputButtons(enabled) {
     ['downloadJsonBtn', 'downloadJsonlBtn', 'copyJsonBtn', 'codeCopyBtn', 'codeDownloadBtn',
      'toggleEditBtn', 'toggleRangeEditBtn', 'resetEditBtn', 'addRowBtn', 'saveEditedBtn', 'applyMappingBtn', 'resetMappingBtn',
-     'applyProfileBtn', 'autoTagBtn', 'buildTraceBtn', 'validateOutputBtn', 'suggestTagsBtn',
+     'applyProfileBtn', 'autoTagBtn', 'buildTraceBtn', 'buildQuantityAnnotationBtn', 'validateOutputBtn', 'suggestTagsBtn',
      'tableSearchInput', 'tableFilterColumn', 'tableFilterMode', 'tableSortColumn', 'tableSortDirection', 'tablePageSize',
      'applyTableFilterBtn', 'clearTableFilterBtn', 'bulkConfirmFilteredBtn', 'columnToTagSelect', 'columnToTagBtn']
       .forEach(id => { $(id).disabled = !enabled; });
@@ -3089,6 +3090,917 @@ I/F = インターフェース"></textarea>
       .forEach(key => { if (key && Object.prototype.hasOwnProperty.call(copy, key)) delete copy[key]; });
     return hashString(JSON.stringify(canonicalValue(copy)));
   }
+
+  /* ================= quantity-annotation/1.0-rc1: ハッシュユーティリティ(移植) =================
+   * 出典: spec_to_json_conversion_tool_v1.18.html (5727〜5738行目相当)と同一契約。
+   * 3ツール間でhashParts()の入力構築(NUL区切り・namespaceは正規化しない)を統一するため、
+   * 同名のまま移植する(hash_3paths_verification.jsで実ブラウザ検証済みの契約と同一)。
+   * 本ツール既存のhashString()(FNV-1a、currentDatasetSignature相当の軽量用途向け)とは別物。 */
+  function v12Normalize(value){
+    return String(value ?? "").normalize("NFKC").replace(/\r\n?/g,"\n").split("\n").map(s=>s.replace(/[ \t]+$/g,"")).join("\n").replace(/[ \t]+/g," ").trim();
+  }
+  function v12Utf8(value){ return new TextEncoder().encode(String(value ?? "")); }
+  function v12Hex(buf){ return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join(""); }
+  function v12Sha256Fallback(value){
+    const bytes=value instanceof ArrayBuffer?new Uint8Array(value):v12Utf8(value),K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2],H=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19],len=bytes.length,bitLen=len*8,padLen=((len+9+63)>>6)<<6,msg=new Uint8Array(padLen);msg.set(bytes);msg[len]=0x80;const dv=new DataView(msg.buffer);dv.setUint32(padLen-4,bitLen>>>0,false);dv.setUint32(padLen-8,Math.floor(bitLen/0x100000000),false);const rotr=(x,n)=>(x>>>n)|(x<<(32-n));
+    for(let off=0;off<padLen;off+=64){const w=new Uint32Array(64);for(let i=0;i<16;i++)w[i]=dv.getUint32(off+i*4,false);for(let i=16;i<64;i++){const s0=rotr(w[i-15],7)^rotr(w[i-15],18)^(w[i-15]>>>3),s1=rotr(w[i-2],17)^rotr(w[i-2],19)^(w[i-2]>>>10);w[i]=(w[i-16]+s0+w[i-7]+s1)>>>0;}let [a,b,c,d,e,f,g,h]=H;for(let i=0;i<64;i++){const S1=rotr(e,6)^rotr(e,11)^rotr(e,25),ch=(e&f)^(~e&g),t1=(h+S1+ch+K[i]+w[i])>>>0,S0=rotr(a,2)^rotr(a,13)^rotr(a,22),maj=(a&b)^(a&c)^(b&c),t2=(S0+maj)>>>0;h=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;}H[0]=(H[0]+a)>>>0;H[1]=(H[1]+b)>>>0;H[2]=(H[2]+c)>>>0;H[3]=(H[3]+d)>>>0;H[4]=(H[4]+e)>>>0;H[5]=(H[5]+f)>>>0;H[6]=(H[6]+g)>>>0;H[7]=(H[7]+h)>>>0;}return H.map(x=>x.toString(16).padStart(8,"0")).join("");
+  }
+  async function v12Sha256(value){ if(globalThis.crypto?.subtle)return v12Hex(await globalThis.crypto.subtle.digest("SHA-256", value instanceof ArrayBuffer ? value : v12Utf8(value))); return v12Sha256Fallback(value); }
+  async function v12HashParts(namespace, parts){ const NUL = String.fromCharCode(0); return v12Sha256([namespace, ...parts.map(v12Normalize)].join(NUL)); }
+  function v12Id(prefix, digest){ return prefix + digest.slice(0,32); }
+
+  /* ================= quantity-annotation/1.0-rc1: 数量抽出ライブラリ(移植) =================
+   * 出典: tools/design_notes/quantity_extraction_prototype.js v2.14（112〜452,458〜469行目相当）。
+   * PDF側(spec_to_json_conversion_tool_v1.18.html)と完全に同一のソースを移植する
+   * (quantity_annotation_ported_lib_check.jsが乖離を検出する対象と同種のチェックをExcel側にも用意する)。 */
+  const UNIT_DEFS = [
+    { source: '°C', canonical: 'degC', dimension: 'temperature',
+      standard_ref: { standard: 'JIS Z 8000-5', category: 'thermodynamics' } },
+    { source: '℃', canonical: 'degC', dimension: 'temperature',
+      standard_ref: { standard: 'JIS Z 8000-5', category: 'thermodynamics' } },
+    { source: 'kW', canonical: 'kW', dimension: 'power',
+      standard_ref: { standard: 'JIS Z 8000-4', category: 'mechanics' } },
+    { source: 'V', canonical: 'V', dimension: 'voltage',
+      standard_ref: { standard: 'JIS Z 8000-6', category: 'electromagnetism' } },
+    { source: 'Hz', canonical: 'Hz', dimension: 'frequency',
+      standard_ref: { standard: 'JIS Z 8000-3', category: 'space_and_time' } },
+    { source: 'dB(A)', canonical: 'dB(A)', dimension: 'sound_pressure_level',
+      standard_ref: { standard: 'JIS Z 8000-8', category: 'acoustics' } },
+    { source: 'mm', canonical: 'mm', dimension: 'length',
+      standard_ref: { standard: 'JIS Z 8000-3', category: 'space_and_time' } },
+    { source: 'MPa', canonical: 'MPa', dimension: 'pressure',
+      standard_ref: { standard: 'JIS Z 8000-4', category: 'mechanics' } },
+    { source: 'kPa', canonical: 'kPa', dimension: 'pressure',
+      standard_ref: { standard: 'JIS Z 8000-4', category: 'mechanics' } },
+    { source: 'Pa', canonical: 'Pa', dimension: 'pressure',
+      standard_ref: { standard: 'JIS Z 8000-4', category: 'mechanics' } },
+    { source: 'kVA', canonical: 'kVA', dimension: 'apparent_power',
+      standard_ref: { standard: 'JIS Z 8000-6', category: 'electromagnetism' } },
+  ].map(u => Object.freeze({ ...u, standard_ref: Object.freeze(u.standard_ref) }));
+  Object.freeze(UNIT_DEFS);
+  const UNIT_ALT = '°C|℃|kW|kVA|V|Hz|dB\\(A\\)|mm|MPa|kPa|Pa';
+
+  function unitInfo(raw) {
+    const def = UNIT_DEFS.find(u => u.source === raw);
+    return def ? { source: raw, canonical: def.canonical, dimension: def.dimension, standard_ref: def.standard_ref }
+               : { source: raw, canonical: raw, dimension: 'unknown', standard_ref: null };
+  }
+
+  // 文脈トークン(周辺語)。将来はドメイン別に拡張する前提の暫定リスト。
+  const CONTEXT_TOKENS = ['三相', '単相', 'AC', 'DC', '交流', '直流', '定格'];
+
+  // 全角→半角の1:1文字置換のみ行う(文字数・位置を変えない)。
+  // これにより、抽出したspanをそのまま元のtextへ適用してsource_textを取り出せる
+  // （正規化前の原文と、正規化後の文字列を両方保持できる＝レビュー2.4への対応）。
+  // v2.11(実データ検証で発見): 全角英字(Ａ/Ｖ等)は単位記号としても実際の政府調達仕様書に
+  // 現れる（例:「定格電流が15Ａ」）が、修正前は全角数字・全角ピリオドしか変換しておらず、
+  // 全角のまま書かれた単位は(数字と英字がともに全角でも)一切認識できなかった。全角ASCII
+  // (U+FF01-U+FF5E)はUnicodeの定義上、対応する半角ASCII(U+0021-U+007E)から一律+0xFEE0だけ
+  // シフトした位置にあるため、オフセット計算で1文字→1文字のまま包括的に半角化できる
+  // (数字・英字・括弧・カンマ等を、個別の文字表を保守せず一度にカバーする)。
+  function normalizeText1to1(text) {
+    return text
+      .replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+      // 全角ASCIIブロックに含まれない別のマイナス記号(U+2212)・波ダッシュ(U+301C)は個別に置換する。
+      .replace(/[－−]/g, '-')
+      .replace(/[～〜]/g, '~');
+  }
+
+  function parseNumber(numStr) {
+    return Number(numStr.replace(/,/g, ''));
+  }
+
+  // 符号・桁区切りカンマ・小数に対応した数値トークン（レビュー2.1、および追加発見のカンマ区切りバグへの対応）
+  const NUM = '(-?\\d{1,3}(?:,\\d{3})*(?:\\.\\d+)?|-?\\d+(?:\\.\\d+)?)';
+  // 実データ検証(国土交通省「公共建築工事標準仕様書」)で発見: 見出し番号と値がPDF由来のテキストで
+  // 区切りなく結合している場合(例:「表2.1.9200V・400V…」の"表2.1.9"に続けて"200V"が現れる)、
+  // NUMは数字列の途中(直前が数字・ピリオド)からでも一致してしまい、「1.9200V」のような無意味な
+  // 数量を誤って抽出していた。各正規表現の先頭(スキャン開始点となる最初のNUM)にのみ、直前が
+  // 数字・ピリオドでないことを要求する境界チェックを課す(2番目以降のNUMは~・±・/・「から」等の
+  // 記号区切りが直前にあるため、この問題は起きない)。
+  const NUM_AT_BOUNDARY = '(?<![\\d.])' + NUM;
+
+  function splitSentences(text) {
+    // 句点等の直後で分割し、各文の絶対オフセットを保持する。
+    // 条件節の付与(後述)をこの文単位に限定することで、文をまたいだ誤伝播を防ぐ（レビュー2.6への対応）。
+    // v2.3: ASCIIピリオド"."は、数字に挟まれている場合(小数点)は文区切りとみなさない。
+    // 修正前は「周囲温度50 °Cで12.5 kW」の小数点を文区切りと誤認識し、
+    // 「12.5 kW」が「5 kW」に破損する不具合があった(工程3プロトタイプの実データ検証で発見)。
+    const parts = [];
+    let start = 0;
+    const re = /(?<!\d)\.(?!\d)|[。!?！？]/g;
+    let m;
+    while ((m = re.exec(text))) {
+      parts.push({ text: text.slice(start, m.index + 1), offset: start });
+      start = m.index + 1;
+    }
+    if (start < text.length) parts.push({ text: text.slice(start), offset: start });
+    return parts;
+  }
+
+  function contextTokensBefore(sentenceNorm, localIndex) {
+    const windowStart = Math.max(0, localIndex - 12);
+    const before = sentenceNorm.slice(windowStart, localIndex);
+    return CONTEXT_TOKENS.filter(tok => before.includes(tok));
+  }
+
+  function boundFromOperatorWord(word) {
+    // "以上"/"以下"等の直後語から、単一制約(lower-only or upper-only)を作る
+    if (word === '以上') return { side: 'lower', inclusive: true };
+    if (word === '以下') return { side: 'upper', inclusive: true };
+    if (word === '未満') return { side: 'upper', inclusive: false };
+    if (word === '超える' || word === '超え') return { side: 'lower', inclusive: false };
+    return null;
+  }
+
+  function makeIntervalExact(value) {
+    return { kind: 'interval', lower: { value, inclusive: true }, upper: { value, inclusive: true } };
+  }
+
+  function extractFromSentence(sentenceText, sentenceOffset, fullOriginal) {
+    const norm = normalizeText1to1(sentenceText);
+    const raws = []; // 中間表現: {startLocal, endLocal, quantity, unit, warnings, _boundSide}
+    const consumed = new Array(norm.length).fill(false);
+    const markConsumed = (s, e) => { for (let i = s; i < e; i++) consumed[i] = true; };
+    const isFree = (s, e) => { for (let i = s; i < e; i++) if (consumed[i]) return false; return true; };
+
+    // 1. 範囲: "X~Y unit"（unitはX側にあってもなくてもよい。canonicalで比較。レビュー3.1への対応）
+    {
+      const re = new RegExp(`${NUM_AT_BOUNDARY}\\s*(${UNIT_ALT})?\\s*~\\s*${NUM}\\s*(${UNIT_ALT})`, 'g');
+      let m;
+      while ((m = re.exec(norm))) {
+        const [full, lo, uLo, hi, uHi] = m;
+        const s = m.index, e = m.index + full.length;
+        if (!isFree(s, e)) continue;
+        const uHiInfo = unitInfo(uHi);
+        const warnings = [];
+        if (uLo && unitInfo(uLo).canonical !== uHiInfo.canonical) warnings.push('範囲前後で単位が食い違う');
+        const loVal = parseNumber(lo), hiVal = parseNumber(hi);
+        const reversed = loVal > hiVal;
+        if (reversed) warnings.push('下限が上限を超えている(逆転範囲)'); // レビュー3.4: 自動修正せず警告のみ
+        raws.push({
+          startLocal: s, endLocal: e,
+          quantity: { kind: 'interval', lower: { value: loVal, inclusive: true }, upper: { value: hiVal, inclusive: true } },
+          unit: uHiInfo, warnings,
+        });
+        markConsumed(s, e);
+      }
+    }
+
+    // 1b. "Xunitから Yunitまで"（両側とも単位あり、canonicalで比較。まで、は任意）
+    {
+      const re = new RegExp(`${NUM_AT_BOUNDARY}\\s*(${UNIT_ALT})\\s*から\\s*${NUM}\\s*(${UNIT_ALT})\\s*(まで)?`, 'g');
+      let m;
+      while ((m = re.exec(norm))) {
+        const [full, lo, uLo, hi, uHi] = m;
+        const s = m.index, e = m.index + full.length;
+        if (!isFree(s, e)) continue;
+        const uLoInfo = unitInfo(uLo), uHiInfo = unitInfo(uHi);
+        const warnings = [];
+        if (uLoInfo.canonical !== uHiInfo.canonical) warnings.push('範囲前後で単位が食い違う');
+        const loVal = parseNumber(lo), hiVal = parseNumber(hi);
+        if (loVal > hiVal) warnings.push('下限が上限を超えている(逆転範囲)');
+        raws.push({
+          startLocal: s, endLocal: e,
+          quantity: { kind: 'interval', lower: { value: loVal, inclusive: true }, upper: { value: hiVal, inclusive: true } },
+          unit: uHiInfo, warnings,
+        });
+        markConsumed(s, e);
+      }
+    }
+
+    // 2. ±公差: "X±Y unit" → 区間[X-Y, X+Y]。レビュー後の追加発見バグ(値の取り違え)への対応。
+    {
+      const re = new RegExp(`${NUM_AT_BOUNDARY}\\s*±\\s*${NUM}\\s*(${UNIT_ALT})`, 'g');
+      let m;
+      while ((m = re.exec(norm))) {
+        const [full, nominal, tol, u] = m;
+        const s = m.index, e = m.index + full.length;
+        if (!isFree(s, e)) continue;
+        const nomVal = parseNumber(nominal), tolVal = parseNumber(tol);
+        raws.push({
+          startLocal: s, endLocal: e,
+          quantity: { kind: 'interval', lower: { value: nomVal - tolVal, inclusive: true }, upper: { value: nomVal + tolVal, inclusive: true } },
+          unit: unitInfo(u),
+          warnings: [`公差表記(中心値${nomVal}, 公差±${tolVal})から区間を算出`],
+        });
+        markConsumed(s, e);
+      }
+    }
+
+    // 3. 並列値: "X/Y unit"（意味は未確定のまま保持。レビュー3.2への対応）
+    {
+      const re = new RegExp(`${NUM_AT_BOUNDARY}\\s*/\\s*${NUM}\\s*(${UNIT_ALT})`, 'g');
+      let m;
+      while ((m = re.exec(norm))) {
+        const [full, a, b, u] = m;
+        const s = m.index, e = m.index + full.length;
+        if (!isFree(s, e)) continue;
+        raws.push({
+          startLocal: s, endLocal: e,
+          quantity: { kind: 'alternatives', options: [parseNumber(a), parseNumber(b)], selection_semantics: 'unknown' },
+          unit: unitInfo(u),
+          warnings: ['スラッシュの意味(択一/両対応/比率等)は文脈判定が必要'],
+        });
+        markConsumed(s, e);
+      }
+    }
+
+    // 4. 単一値 + 比較演算子(以上/以下/未満/超える) + 約
+    {
+      const re = new RegExp(`${NUM_AT_BOUNDARY}\\s*(${UNIT_ALT})`, 'g');
+      let m;
+      while ((m = re.exec(norm))) {
+        const [full, numStr, u] = m;
+        const s = m.index, e = m.index + full.length;
+        if (!isFree(s, e)) continue;
+        const after = norm.slice(e, e + 8);
+        const beforeStart = Math.max(0, s - 8);
+        const before = norm.slice(beforeStart, s);
+        let opWord = null;
+        if (/^\s*以上/.test(after)) opWord = '以上';
+        else if (/^\s*以下/.test(after)) opWord = '以下';
+        else if (/^\s*未満/.test(after)) opWord = '未満';
+        else if (/^\s*を?超え/.test(after)) opWord = '超える';
+
+        // v2.1: 修飾語を数量表現の一部として保持する。
+        // 「最大・最小」は片側境界の候補、「約・およそ・程度・公称」は曖昧性情報として保持する。
+        // v2.9: 「最高・最低」を「最大・最小」の同義語として認識する(工程3のinterval_semantics
+        // 候補生成の対照テスト作成中に、「最低」が全く認識されず単なる数値として抽出されて
+        // しまう不具合を発見。実文書では最大/最小と同程度に一般的な表現のため追加した)。
+        // source_textには実際に書かれた語(最高/最低)をそのまま保持し、種別(type)のみ
+        // 最大/最小と同じ'maximum'/'minimum'へ正規化する。
+        const prefixMatch = before.match(/(約|およそ|最大|最小|最高|最低|公称)\s*$/);
+        const suffixMatch = after.match(/^\s*(程度)/);
+        const prefix = prefixMatch ? prefixMatch[1] : null;
+        const suffix = suffixMatch ? suffixMatch[1] : null;
+        const prefixCanonical = prefix === '最高' ? '最大' : prefix === '最低' ? '最小' : prefix;
+        const spanStart = prefixMatch ? s - prefixMatch[0].length : s;
+        const spanEnd = suffixMatch ? e + suffixMatch[0].length : e;
+        const qualifiers = [];
+        if (prefix === '約' || prefix === 'およそ' || suffix === '程度') {
+          qualifiers.push({ type: 'approximate', source_text: prefix || suffix });
+        }
+        if (prefixCanonical === '最大') qualifiers.push({ type: 'maximum', source_text: prefix });
+        if (prefixCanonical === '最小') qualifiers.push({ type: 'minimum', source_text: prefix });
+        if (prefix === '公称') qualifiers.push({ type: 'nominal', source_text: prefix });
+
+        const value = parseNumber(numStr);
+        const warnings = [];
+        let quantity;
+        let bound = opWord ? boundFromOperatorWord(opWord) : null;
+        if (!bound && prefixCanonical === '最大') bound = { side: 'upper', inclusive: true };
+        if (!bound && prefixCanonical === '最小') bound = { side: 'lower', inclusive: true };
+        if (bound) {
+          // レビュー2.3: 境界の包含/非包含を保持する
+          quantity = bound.side === 'lower'
+            ? { kind: 'interval', lower: { value, inclusive: bound.inclusive }, upper: null }
+            : { kind: 'interval', lower: null, upper: { value, inclusive: bound.inclusive } };
+        } else {
+          quantity = makeIntervalExact(value); // レビュー4章: 単一値も区間モデルへ統一(lower=upper)
+        }
+        if (qualifiers.some(q => q.type === 'approximate')) warnings.push('概数表記のため、境界値は厳密値として扱わない');
+        if (prefixCanonical === '最大' || prefixCanonical === '最小') warnings.push(`「${prefix}」を片側境界候補として抽出。文脈による確定が必要`);
+        if (prefix === '公称') warnings.push('「公称」表記のため、実測値・保証値との混同に注意');
+        raws.push({
+          // v2.2: 最大/最小由来の境界も_boundSideへ反映し、以上/以下と同様に隣接統合の対象にする
+          // （統合後も qualifiers/warnings は引き継がれ、confidenceは自動的に低いまま保たれる）。
+          startLocal: spanStart, endLocal: spanEnd, quantity, unit: unitInfo(u), warnings,
+          qualifiers, _boundSide: bound ? bound.side : null,
+        });
+        markConsumed(spanStart, spanEnd);
+      }
+    }
+
+    raws.sort((a, b) => a.startLocal - b.startLocal);
+
+    // 5. 片側制約の隣接ペアをひとつの区間へ統合(例: "0℃以上50℃以下" → 2件 → 1件。レビュー2.2への対応)
+    const merged = [];
+    for (let i = 0; i < raws.length; i++) {
+      const cur = raws[i];
+      const next = raws[i + 1];
+      if (
+        cur._boundSide === 'lower' && next && next._boundSide === 'upper' &&
+        cur.unit.canonical === next.unit.canonical &&
+        cur.quantity.lower && next.quantity.upper
+      ) {
+        merged.push({
+          startLocal: cur.startLocal, endLocal: next.endLocal,
+          quantity: { kind: 'interval', lower: cur.quantity.lower, upper: next.quantity.upper },
+          unit: cur.unit,
+          warnings: [...cur.warnings, ...next.warnings],
+          qualifiers: [...(cur.qualifiers || []), ...(next.qualifiers || [])],
+        });
+        i++; // next を消費済みにする
+        continue;
+      }
+      merged.push(cur);
+    }
+
+    // 6. 条件節付与(同一文内限定。レビュー2.6への対応)。
+    // 直後に「において」「で」が続く数量を、後続数量の condition_candidates にする(確信度付き、自動確定しない)。
+    for (let i = 0; i < merged.length; i++) {
+      const q = merged[i];
+      const tail = norm.slice(q.endLocal, q.endLocal + 6);
+      const isMarker = /^\s*(において|で)/.test(tail);
+      if (isMarker && merged[i + 1]) {
+        merged[i + 1]._condition = q;
+        q._isConditionOnly = true;
+      }
+    }
+
+    // 7. 出力形へ整形。source_text/normalized_textは同一spanで元テキストから切り出す(1:1マッピングのため安全)。
+    return merged
+      .filter(q => !q._isConditionOnly)
+      .map(q => {
+        const absStart = sentenceOffset + q.startLocal;
+        const absEnd = sentenceOffset + q.endLocal;
+        const contextTokens = contextTokensBefore(norm, q.startLocal);
+        const warnings = [...q.warnings];
+        const out = {
+          source_text: fullOriginal.slice(absStart, absEnd),
+          // v2.14: 原文(fullOriginal)内の絶対文字位置。同じnormalized_textが複数回出現しても
+          // 出現ごとに異なる値になるため、occurrence_indexのような間接的な位置特定に頼らずに
+          // 数量を一意識別できる(trace_comparison_schema_v1.mdのquantity_id導出で使用する)。
+          source_span: { start: absStart, end: absEnd },
+          normalized_text: norm.slice(q.startLocal, q.endLocal),
+          quantity: q.quantity,
+          unit: q.unit,
+          ...(q.qualifiers && q.qualifiers.length ? { qualifiers: q.qualifiers } : {}),
+          // property/subject/state は工程3(意味対応付け)が埋める領域であり、本プロトタイプ(工程4a)では確定しない
+          context: { property: null, subject: null, state: null, tokens: contextTokens },
+          extraction: { confidence: warnings.length ? 0.6 : 0.95, warnings },
+        };
+        if (q._condition) {
+          const cAbsStart = sentenceOffset + q._condition.startLocal;
+          const cAbsEnd = sentenceOffset + q._condition.endLocal;
+          out.condition_candidates = [{
+            source_text: fullOriginal.slice(cAbsStart, cAbsEnd),
+            source_span: { start: cAbsStart, end: cAbsEnd },
+            quantity: q._condition.quantity,
+            unit: q._condition.unit,
+            confidence: 0.7,
+          }];
+        }
+        return out;
+      });
+  }
+
+  function extractQuantities(text) {
+    const sentences = splitSentences(text);
+    const all = [];
+    for (const sent of sentences) {
+      all.push(...extractFromSentence(sent.text, sent.offset, text));
+    }
+    return all;
+  }
+  function isEmptyInterval(q) {
+    if (!q.lower || !q.upper) return false;
+    if (q.lower.value > q.upper.value) return true;
+    if (q.lower.value === q.upper.value) return !(q.lower.inclusive && q.upper.inclusive);
+    return false;
+  }
+
+  // 真の点(単一の達成値)かどうかを判定する。空集合を誤って点扱いしないよう、
+  // 値の一致に加えて両端が包含(inclusive)であることも要求する。
+  function isGenuinePoint(q) {
+    return !!(q.lower && q.upper && q.lower.value === q.upper.value && q.lower.inclusive && q.upper.inclusive);
+  }
+
+  /* ================= quantity-annotation/1.0-rc1: interval_semantics候補生成ライブラリ(移植) =================
+   * 出典: tools/design_notes/semantic_mapping_prototype.js v2.19（76〜367行目相当、PDF側と同一）。 */
+  function isTwoSidedRange(q) {
+    return q.kind === 'interval' && !!q.lower && !!q.upper && !isGenuinePoint(q) && !isEmptyInterval(q);
+  }
+  function isOneSidedLower(q) { return q.kind === 'interval' && !!q.lower && !q.upper; }
+  function isOneSidedUpper(q) { return q.kind === 'interval' && !q.lower && !!q.upper; }
+
+  // 要求側(PDF=A側、role='requirement')の意味候補。
+  const REQUIREMENT_SEMANTICS_RULES = [
+    { value: 'required_capability_domain', weight: 0.5, evidenceType: 'keyword',
+      match: (text) => /運転できること|使用できること|動作できること|対応できること/.test(text) },
+    { value: 'required_capability_domain', weight: 0.15, evidenceType: 'quantity_shape',
+      match: (text, quantity) => isTwoSidedRange(quantity) },
+    { value: 'acceptable_region', weight: 0.45, evidenceType: 'keyword',
+      match: (text) => /確保する(?:こと)?|以下とする(?:こと)?|以上とする(?:こと)?/.test(text) },
+    // v2.17(8.20節): JIS Z 8301:2019(規格票の様式及び作成方法)附属書は、規格文書における
+    // 要求事項の標準的な表現として「…とする。」「…(し)なければならない。」を規定している
+    // （「…する。」「…による。」も同じ表に含まれるが、下記の理由で採用していない）。
+    // v2.16までは「〜とすること」（「こと」を伴う名詞化表現）のみに一致していたが、実データ
+    // 検証(8.18〜8.19節)で、政府調達仕様書ではこの「こと」を伴わない平叙文形「〜とする。」が
+    // 圧倒的多数(調査対象文書で355件、「とすること」はわずか2件)を占めることが判明したため、
+    // 「こと」を任意にし、あわせて「なければならない」も追加した。「〜する。」は動詞の終止形
+    // 一般と区別できず語彙として機能しないため採用せず、「〜による。」はJIS上は同じ要求事項の
+    // 表現に分類されるが、実データ調査で「特記による」「次による」のように他文書・他条項への
+    // 参照を表す用法がほぼ全て(20件サンプル中20件)であり、数量そのものを規定する表現ではない
+    // ため、意図的に追加を見送った。
+    { value: 'acceptable_region', weight: 0.3, evidenceType: 'keyword',
+      match: (text) => /とする(?:こと)?|なければならない/.test(text) &&
+        !/確保する(?:こと)?|以下とする(?:こと)?|以上とする(?:こと)?|運転できること|使用できること|動作できること|対応できること/.test(text) },
+    { value: 'acceptable_region', weight: 0.15, evidenceType: 'quantity_shape',
+      match: (text, quantity) => isOneSidedLower(quantity) || isOneSidedUpper(quantity) || isGenuinePoint(quantity) },
+  ];
+
+  // v2.16: 肯定語(実測/達成値/使用可能等)の正規表現は、直後に否定表現が続く場合でも文字列として
+  // 一致してしまう(「実測ではない25℃」の"実測"等)。摂動テストで、この場合でもachieved_pointが
+  // 確信度0.70(構造0.3+肯定語0.4)に達し、auto_applicable閾値(0.4)を超えることを発見した
+  // (vocabulary_negation_fuzz_test.js参照)。文全体の構文解析は行わず、肯定語の直後
+  // (助詞等を挟まない直近)に否定表現が続く場合のみ、その一致を無視する簡易策で対応する。
+  const NEGATION_SUFFIX_PATTERN = /^(?:ではな(?:い|く)|ではありません|ではございません|とは言えない)/;
+  function hasUnnegatedKeywordMatch(text, keywordPattern) {
+    const flags = keywordPattern.flags.includes('g') ? keywordPattern.flags : keywordPattern.flags + 'g';
+    const globalPattern = new RegExp(keywordPattern.source, flags);
+    let m;
+    while ((m = globalPattern.exec(text))) {
+      const after = text.slice(m.index + m[0].length);
+      if (!NEGATION_SUFFIX_PATTERN.test(after)) return true;
+      if (m[0].length === 0) globalPattern.lastIndex++;
+    }
+    return false;
+  }
+  const ACHIEVED_POINT_KEYWORD_PATTERN = /実測|達成値|検討(?:の)?結果|測定した結果|試験(?:の)?結果|検査(?:の)?結果|実績値|成績値/;
+  const CAPABILITY_KEYWORD_PATTERN = /使用可能|対応可能|運転可能/;
+
+  // 実仕様側(Excel=B側、role='baseline_design'/'resolved_design')の意味候補。
+  const ACTUAL_SEMANTICS_RULES = [
+    { value: 'achieved_point', weight: 0.3, evidenceType: 'quantity_shape',
+      match: (text, quantity) => isGenuinePoint(quantity) && !text.includes('±') },
+    // v2.10で0.3→0.15へ減衰したが、再レビューで「否定語辞書にない未知の曖昧語(代表値/中央値/
+    // 計画値等)には依然として無条件に自動適用されてしまう」という指摘を受けた。「点である」
+    // (0.3)と合算するとmodeConfidence閾値(0.4)を超えてしまうため、v2.11でさらに0.05へ抑えた。
+    // 「B側(実仕様側)である」ことは役割を表すだけで、その点が達成値なのか設定値・公称値・
+    // 試験条件・代表値・中央値・計画値なのかを識別する独立根拠にはならない、という指摘を
+    // 額面どおり受け止め、未修飾の点は「形+役割」だけでは自動適用の閾値に届かない設計とした
+    // (無修飾の点は確信度0.35で候補には残るが、auto_applicableはfalseになる)。
+    //
+    // v2.12(8.10節): レビュー推奨「列の役割＋セル内の肯定語＋数量形状を独立根拠として積み上げる」
+    // に沿って再設計した。単に「B側である」という一律の役割根拠ではなく、出典列の名前そのもの
+    // （'検討結果'＝検討の結果値、'標準機種情報'＝規格・公称値の可能性も残る）を弱い根拠として
+    // 使う。ただし、この列根拠の重みは意図的に低く抑えている(0.05)。「点である(0.3)」と
+    // 合算しても0.35にしかならず、モード確信度閾値(0.4)には届かない。これは、列名という
+    // 構造的な手掛かりだけでは「代表値」「中央値」等の未知の曖昧語と同じ強さの根拠にしかならず、
+    // 列根拠を強めるとv2.11で塞いだはずの脆弱性（否定語辞書にない曖昧語＋位置的な手掛かりだけで
+    // 自動適用してしまう）を再び開けてしまうことを確認したため（8.10節参照）。
+    { value: 'achieved_point', weight: 0.05, evidenceType: 'column_role',
+      match: (text, quantity, record, ctx) => isGenuinePoint(quantity) && ctx.sourceColumn === '検討結果' },
+    // セル内に達成値であることを積極的に示す語がある場合のみ、自動適用の閾値を超えられる
+    // 強い根拠を与える。「点である」構造的根拠と組み合わせて初めて高確信度に達する設計とし、
+    // 構造的根拠(形・列名)だけでは決して閾値を超えないようにしている。
+    // v2.13(8.12節): JIS計測用語・検査成績書の実務用語を調査し、肯定語の語彙を拡張した。
+    // 「試験結果」「検査結果」は実施した試験・検査で得た値を指す点で「実測」と同義だが、
+    // 「試験」単体（否定根拠の語彙にある）とは意味が異なるため、後述のNEGATIVE_KEYWORD_RULESの
+    // 「試験」パターンには「試験結果」を含めないよう除外している。「測定結果」「測定値」は
+    // 既存のoutcome_range(変動・ばらつきの意味)の語彙と重複するため、ここには含めない。
+    // v2.14: 「試験の結果」「検討の結果」のように「の」を挟む自然な表現も一致するよう、
+    // 「試験」「検査」「検討」いずれも(?:の)?を挟めるパターンへ統一した。
+    { value: 'achieved_point', weight: 0.4, evidenceType: 'keyword',
+      match: (text, quantity) => isGenuinePoint(quantity) &&
+        hasUnnegatedKeywordMatch(text, ACHIEVED_POINT_KEYWORD_PATTERN) },
+    { value: 'capability_domain', weight: 0.55, evidenceType: 'keyword',
+      match: (text, quantity) => isTwoSidedRange(quantity) && hasUnnegatedKeywordMatch(text, CAPABILITY_KEYWORD_PATTERN) },
+    { value: 'capability_domain', weight: 0.1, evidenceType: 'quantity_shape',
+      match: (text, quantity) => isTwoSidedRange(quantity) },
+    // 点であっても、能力キーワードが伴う場合はcapability_domainの可能性も残す
+    // (「点だから自動的にachieved_pointにしない」というレビュー指摘への対応。
+    //  例:「対応可能温度は25℃のみ」は達成値・能力領域のどちらの解釈もあり得る)
+    { value: 'capability_domain', weight: 0.4, evidenceType: 'keyword',
+      match: (text, quantity) => isGenuinePoint(quantity) && hasUnnegatedKeywordMatch(text, CAPABILITY_KEYWORD_PATTERN) },
+    { value: 'outcome_range', weight: 0.6, evidenceType: 'keyword',
+      match: (text) => text.includes('±') },
+    { value: 'outcome_range', weight: 0.5, evidenceType: 'keyword',
+      match: (text) => /変動|ばらつき|測定結果|測定値/.test(text) },
+    { value: 'guaranteed_minimum', weight: 0.55, evidenceType: 'qualifier',
+      match: (text, quantity, record) => (record.qualifiers || []).some(q => q.type === 'minimum') },
+    { value: 'guaranteed_minimum', weight: 0.1, evidenceType: 'quantity_shape',
+      // 片側区間というだけでは弱い根拠に留める(「片側区間だけで保証下限を確定しない」)
+      match: (text, quantity) => isOneSidedLower(quantity) },
+    { value: 'guaranteed_maximum', weight: 0.55, evidenceType: 'qualifier',
+      match: (text, quantity, record) => (record.qualifiers || []).some(q => q.type === 'maximum') },
+    { value: 'guaranteed_maximum', weight: 0.1, evidenceType: 'quantity_shape',
+      match: (text, quantity) => isOneSidedUpper(quantity) },
+    // v2.18(8.21節): 「代表値」「平均値」「中央値」「最頻値」は、JIS Z 8101-1(統計－用語及び記号－
+    // 第1部)が定義する統計用語であり、いずれも複数の測定値から算出される要約値(代表値の意味での
+    // "measure of location")であって、単一の実測点(achieved_point)ではない。v2.10〜v2.13では
+    // これらを意図的にどちらの辞書にも加えず、achieved_point側の構造的根拠(点である、0.3)のみが
+    // 残る「未分類」の扱いとしていたが、これは「識別できていない」だけであり「安全に区別できて
+    // いる」わけではなかった(v2.13時点の残課題として明記済み)。v2.18では、これらの語を専用の
+    // 意味値aggregated_representative_valueとして明示的に識別する。集計値は個々のばらつきを
+    // 均してしまうため(平均が規格内でも、個々の実測値は規格外の可能性がある)、COMPARISON_MODE_
+    // DERIVATION_TABLEには意図的に追加せず、要求側とのペアからcomparisonModeを一切導出しない
+    // (v2.10でrequired_capability_domain×achieved_pointを安全側の理由で除外したのと同じ設計)。
+    //
+    // v2.19(再レビュー軽微な改善提案への対応): 当初は「点である」という構造的根拠(0.1)を
+    // 無条件のquantity_shapeルールとして追加していたが、これだと統計語が一切現れない
+    // 通常の点(「実測25℃」等)にまで、無関係なaggregated_representative_value候補(0.1)が
+    // 常に付いてしまい、候補配列のノイズになるという指摘を受けた(自動判定の安全性には
+    // 影響しないが、候補配列の明瞭さを損なう)。統計語自体が「これは集計値である」ことを
+    // 直接示す強い根拠であり、構造的根拠を別立てにする理由(他の値と違いshapeだけでは
+    // 閾値を超えさせない、という8.11節の非対称設計)もこの値には当てはまらない
+    // (auto_applicableの対象に一切していないため)。キーワードルール1本(重み0.6)へ統合した。
+    { value: 'aggregated_representative_value', weight: 0.6, evidenceType: 'keyword',
+      match: (text, quantity) => isGenuinePoint(quantity) &&
+        hasUnnegatedKeywordMatch(text, /代表値|平均値|中央値|最頻値/) },
+  ];
+
+  // 条件節(role='condition')の意味候補。レビュー8節の対照テスト例に基づく最小限の語彙。
+  const CONDITION_SEMANTICS_RULES = [
+    { value: 'test_condition', weight: 0.5, evidenceType: 'keyword',
+      match: (text) => /試験|測定/.test(text) },
+  ];
+
+  // 否定根拠: どの候補にも一律に確信度を下げる方向で働く(特定候補だけを狙い撃ちしない)。
+  // v2.10: レビュー指摘により「設定」「公称」「試験」を追加。これらは「実仕様側の点＝達成値」
+  // という既定の解釈に疑問を投げかける語であり(設定値・公称値・試験条件は、必ずしも
+  // 実測された達成値ではない)、参考値・目安と同じ性質の否定根拠として扱う。重みも
+  // -0.3→-0.4へ強化し、「参考値58dB(A)」のようなケースでunknownと確実に差が付くようにした。
+  // v2.13(8.12節): JIS計測用語・検査成績書の実務用語調査により、「規格値」「基準値」
+  // 「目標値」「設計値」も、実測値と混同されやすい非達成値の語として追加した(規格値＝要求
+  // 許容範囲、目標値＝開発時点の目安、設計値＝理論上の理想値であり、いずれも実測結果ではない)。
+  // 「試験」は「試験結果」「試験の結果」（達成値を示す肯定語、上記ACTUAL_SEMANTICS_RULES参照）を
+  // 否定しないよう、否定先読みで除外している。v2.13時点では「試験(?!結果)」のみで「試験の結果」
+  // (「の」を挟む自然な表現)を除外できていなかった不具合を、v2.14で「試験(?!(?:の)?結果)」へ
+  // 修正した(検査成績書の実務調査は最初の不具合修正の際に参照した二次資料に基づくもので、
+  // 「試験の結果」という表記自体の見落としはレビューで指摘された)。
+  const NEGATIVE_KEYWORD_RULES = [
+    { pattern: /参考値|目安|概算|設定|公称|試験(?!(?:の)?結果)|規格値|基準値|目標値|設計値/, weight: -0.4, label: '達成値との混同に注意を要する語' },
+  ];
+
+  const UNKNOWN_BASELINE_CONFIDENCE = 0.15;
+
+  // ルール群を1レコードへ適用し、根拠付きの候補配列(確信度降順)を返す。
+  // 候補は複数保持する(単一候補にすると代替解釈と曖昧性の情報が失われるというレビュー指摘に対応)。
+  //
+  // 【重要】ここでの`confidence`は、ルール重みの単純加算値であり、統計的に校正された確率ではない
+  // (レビュー推奨修正4)。本プロトタイプでは検証用の相対スコアとして扱い、閾値との比較にのみ使う。
+  // 本体統合時は、名称を`score`へ改める、または`{score, score_model, calibrated:false}`のような
+  // 構造へ分離することを検討する(詳細はsemantic_mapping_prototype.md 8.8節参照)。
+  function scoreSemantics(rules, text, record, ctx) {
+    const quantity = record.quantity;
+    const shortText = text.length > 80 ? text.slice(0, 80) + '…' : text;
+    const scores = new Map();
+    const bump = (value, weight, evidenceType, effect) => {
+      if (!scores.has(value)) scores.set(value, { score: 0, evidence: [] });
+      const s = scores.get(value);
+      s.score += weight;
+      s.evidence.push({ type: evidenceType, value, source_text: shortText, effect, weight });
+    };
+    for (const rule of rules) {
+      if (rule.match(text, quantity, record, ctx)) bump(rule.value, rule.weight, rule.evidenceType, 'supports');
+    }
+    // 否定根拠(達成値との混同注意語)は、実仕様側(side='B')のachieved_point等の解釈に疑問を
+    // 投げかけるための語彙であり、要求側(side='A')の候補(acceptable_region等)には元々
+    // 対応する「既定の達成値解釈」が無いため適用対象ではない。条件節(role='condition')では
+    // 「試験」「測定」がtest_conditionの正の根拠として使われるため、ここでも適用しない。
+    if (ctx.side === 'B' && !ctx.isConditionValue) {
+      for (const neg of NEGATIVE_KEYWORD_RULES) {
+        if (neg.pattern.test(text)) {
+          for (const value of [...scores.keys()]) bump(value, neg.weight, 'negative_keyword', 'opposes');
+        }
+      }
+    }
+    if (!scores.has('unknown')) {
+      scores.set('unknown', {
+        score: UNKNOWN_BASELINE_CONFIDENCE,
+        evidence: [{ type: 'baseline', value: 'unknown', source_text: '(既定の受け皿。他候補が弱い場合の下限)', effect: 'supports', weight: UNKNOWN_BASELINE_CONFIDENCE }],
+      });
+    }
+    return [...scores.entries()]
+      .map(([value, s]) => ({ value, confidence: Math.max(0, Math.min(0.99, s.score)), evidence: s.evidence }))
+      .filter(c => c.confidence > 0.02)
+      .sort((a, b) => b.confidence - a.confidence);
+  }
+
+  // ── 1レコード分のinterval_semantics候補を生成する ──
+  // v2.14(レビュー必須修正1): セル内に複数の数量が含まれる場合、キーワード一致を数量ごとに
+  // 同じ節(文の一部)に限定する。以前はctx.nearbyText全体に対して正規表現を適用していたため、
+  // 「規格値12kW、試験結果12.5kW」のようなセルで、別の数量に付いた語（否定語・肯定語問わず）が
+  // 誤って伝播していた（レビューで実際に再現・確認）。恒久的な構文解析までは行わず、句読点・
+  // 読点・全角カンマで区切った「節」を、対象数量の位置を含む区間として簡易的に切り出す
+  // 暫定策を採用した（桁区切りカンマ「1,500」を誤って区切らないよう、数字に挟まれたカンマは
+  // 除外している）。record.source_textがnearbyText内に見つからない場合は、安全側として
+  // nearbyText全体にフォールバックする(呼び出し側がnearbyTextに数量の原文を含めない
+  // テストケース等、位置特定できない場合を壊さないため)。
+  //
+  // v2.15(再レビュー必須修正1): 工程4aの抽出結果(quantity_extraction_prototype.jsの出力)は
+  // 数量の原文内オフセット(source_span)を公開していないため、v2.14では`nearbyText.indexOf(
+  // sourceText)`で位置を復元していた。これは同じ表記の数量が同一セルに複数回現れる場合
+  // (「規格値12kW、試験結果12kW」等)、常に最初の出現位置に解決されてしまう不具合があった
+  // (レビューで再現・確認)。工程4a側のスキーマ変更(source_spanの追加)は、v2.8で一旦固定と
+  // 評価された比較エンジンの前提を再び動かすことになり影響範囲が大きいため見送り、レビューが
+  // 提示した暫定策（同一文字列の出現番号を渡す）を採用した。呼び出し側(buildPropertyCandidateRecords)
+  // が、同じsource_textを持つ数量が何番目の出現かを数え、ctx.occurrenceIndexとして渡す。
+  const CLAUSE_DELIMITER_PATTERN = /、|。|，|(?<!\d),(?!\d)/g;
+
+  // nearbyText内で、sourceTextのn番目(0始まり)の出現位置を返す。見つからなければ-1。
+  function findNthIndexOf(haystack, needle, n) {
+    let idx = -1;
+    for (let i = 0; i <= n; i++) {
+      idx = haystack.indexOf(needle, idx + 1);
+      if (idx === -1) return -1;
+    }
+    return idx;
+  }
+
+  function localClauseText(nearbyText, sourceText, occurrenceIndex = 0) {
+    if (!nearbyText || !sourceText) return nearbyText || '';
+    const idx = findNthIndexOf(nearbyText, sourceText, occurrenceIndex);
+    if (idx === -1) return nearbyText;
+    const boundaries = [0];
+    let m;
+    CLAUSE_DELIMITER_PATTERN.lastIndex = 0;
+    while ((m = CLAUSE_DELIMITER_PATTERN.exec(nearbyText))) {
+      boundaries.push(m.index + m[0].length);
+    }
+    boundaries.push(nearbyText.length);
+    for (let i = 0; i < boundaries.length - 1; i++) {
+      let segStart = boundaries[i];
+      const segEnd = boundaries[i + 1];
+      if (idx < segStart || idx >= segEnd) continue;
+      // 「試験の結果、58 dB(A)」のように、数量そのものを含まない前置きの節（「〜の結果、」等）は
+      // 対象数量の節へ連結する。前の節に数字が一切含まれない場合に限り連結することで、
+      // 「規格値12kW、試験結果12.5kW」のように前の節が別の数量を持つ場合は連結しない
+      // (それぞれの数量が別の語を誤って受け取らないようにする)。
+      let j = i - 1;
+      while (j >= 0) {
+        const prevStart = boundaries[j], prevEnd = boundaries[j + 1];
+        const prevSeg = nearbyText.slice(prevStart, prevEnd);
+        if (/\d/.test(prevSeg)) break; // 前の節に数字(別の数量)があれば連結しない
+        segStart = prevStart;
+        j--;
+      }
+      return nearbyText.slice(segStart, segEnd);
+    }
+    return nearbyText;
+  }
+
+  // v2.15(再レビュー必須修正2): 節への分割は、要求側(側A)では「電源電圧220V、50Hzとすること」
+  // のように、複数の数量が文末の共通述語(「〜とすること」)を共有する構造を壊す
+  // (実際に220Vの局所節が「定格電源は三相AC 220V、」となり、「とすること」を失うことを確認)。
+  // 今回解決すべき誤伝播は主に実仕様側(側B)の達成値・否定語判定であるため、節分割は側Bかつ
+  // 条件節でない場合のみに限定し、要求側は従来どおり全文を判定対象にする(安全側の暫定対応。
+  // 要求側で複数数量が異なる述語を持つケースへの対応は将来課題とする)。
+  function generateIntervalSemanticsCandidates(record, ctx) {
+    const fullText = ctx.nearbyText || record.source_text || '';
+    const text = (ctx.side === 'B' && !ctx.isConditionValue)
+      ? localClauseText(fullText, record.source_text || '', ctx.occurrenceIndex || 0)
+      : fullText;
+    if (ctx.isConditionValue) return scoreSemantics(CONDITION_SEMANTICS_RULES, text, record, ctx);
+    if (ctx.side === 'A') return scoreSemantics(REQUIREMENT_SEMANTICS_RULES, text, record, ctx);
+    if (ctx.side === 'B') return scoreSemantics(ACTUAL_SEMANTICS_RULES, text, record, ctx);
+    return scoreSemantics([], text, record, ctx);
+  }
+
+  // ── 要求側semanticsと実仕様側semanticsの組み合わせから、comparisonMode候補を導出する ──
+  // 単一レコードだけからcomparisonModeを決めない(レビュー指摘)。未定義の組み合わせや
+  // 片方でもunknownの場合は導出しない(推測しない)。
+  //
+  // v2.10: レビュー指摘により、required_capability_domain × achieved_point の対応
+  // (point_in_region)を削除した。要求が「対応可能領域全体」を求めている(例:「0〜50℃で
+  // 運転できること」)のに対し、実仕様が単一の達成値(例:「25℃」)しかない場合、その1点が
+  // 要求範囲内にあっても、要求範囲全域に対応できることの証明にはならない。この組み合わせは
+  // 当面「導出規則なし」とし、comparisonMode候補を返さない(comparable:falseのまま要確認とする)。
+  // acceptable_region × achieved_point (「騒音60dB以下」に対する「58dB」等、達成値が
+  // 許容範囲内かを問う関係)は、この問題を持たないため引き続きpoint_in_regionを対応させる。
+
+
+  /* ================= quantity-annotation/1.0-rc1: Excel側生成（フェーズA） =================
+   * 出典: PDF側(spec_to_json_conversion_tool_v1.18.html)のbuildQuantityAnnotationSidecar()と
+   * 同じ設計(shadow_mode_integration_design.md 2.0・2.1節)をExcel側の行データ向けに実装したもの。
+   * ハッシュ関数(v12Sha256/v12HashParts/v12Id)は同名のまま移植して両ツール間で契約を統一する。
+   * canonicalJson相当は本ツール既存のcanonicalValue()をそのまま再利用する(重複実装しない)。
+   */
+
+  const QA_SCHEMA_VERSION = "quantity-annotation/1.0-rc1";
+  const QA_RULESET_VERSION = {
+    quantity_extraction: "v2.14",
+    semantics_rules: "v2.19",
+    auto_applicable_thresholds: { modeConfidence: 0.4, margin: 0.2, propertyConfidence: 0.7 },
+  };
+
+  // 明らかな管理列の自動除外(shadow_mode_integration_design.md 2.3節1・2番)。
+  // rowContentHash()が既に持つ管理フィールド一覧(tags/unregistered_tags/review_status/
+  // review_method/reviewed_at/review_comment/exclusion_reason/trace_id/content_hash/stable_uid)を
+  // 土台にし、stable_key・No/ID/行番号・*_id/*_hash等のIDパターン(json_ab_trace_matching_tool
+  // のisOpaqueIdFieldName、3244〜3249行目と同種のパターン)を追加した。
+  const QA_MANAGEMENT_COLUMN_NAMES = new Set([
+    "tags", "unregistered_tags", "review_status", "review_method", "reviewed_at",
+    "review_comment", "exclusion_reason", "trace_id", "content_hash", "stable_uid", "stable_key",
+  ]);
+  function isManagementColumn(key) {
+    const k = String(key ?? "").trim();
+    if (!k) return true;
+    if (QA_MANAGEMENT_COLUMN_NAMES.has(k)) return true;
+    if (/^(no\.?|№|id|行番号)$/i.test(k)) return true;
+    if (/(^|_)(id|uid|guid|hash|sha\d*)$/i.test(k)) return true;
+    return false;
+  }
+
+  // source_recordのうち、走査対象になり得る列(文字列・数値、管理列を除く)の一覧を返す。
+  function scannableColumns(sourceRecord) {
+    if (!sourceRecord || typeof sourceRecord !== "object") return [];
+    return Object.keys(sourceRecord).filter(key => {
+      if (isManagementColumn(key)) return false;
+      const value = sourceRecord[key];
+      return typeof value === "string" || typeof value === "number";
+    });
+  }
+
+  // ── 列役割候補の生成(shadow_mode_integration_design.md 2.3節3番) ──
+  // 「候補は候補のまま、確定は行わない」の原則どおり、role_candidates配列を返すのみで
+  // 単一のroleへ自動確定しない。閾値未満の候補はrole:"unknown"のまま残す。
+  const QA_BASELINE_KEYWORDS = ["標準", "規格", "仕様", "基準", "定格"];
+  const QA_RESOLVED_KEYWORDS = ["検討", "対応", "実施", "結果", "実測", "測定"];
+  const QA_ROLE_CANDIDATE_MIN_CONFIDENCE = 0.15;
+
+  function keywordRoleEvidence(columnName) {
+    const evidence = [];
+    for (const kw of QA_BASELINE_KEYWORDS) {
+      if (columnName.includes(kw)) evidence.push({ type: "column_name_keyword", role: "baseline_design", keyword: kw, weight: 0.35 });
+    }
+    for (const kw of QA_RESOLVED_KEYWORDS) {
+      if (columnName.includes(kw)) evidence.push({ type: "column_name_keyword", role: "resolved_design", keyword: kw, weight: 0.35 });
+    }
+    return evidence;
+  }
+
+  // 表内位置: baseline寄りの列の右隣・近傍(2列以内)にある列は、検討・対応系(resolved_design)の
+  // 可能性が高いという弱い根拠にする(shadow_mode_integration_design.md 2.3節、実データでの
+  // 相対位置に基づく非確定的な弱い根拠)。
+  function positionalRoleEvidence(columnIndex, allColumns, baselineColumnIndexes) {
+    const evidence = [];
+    for (const bIdx of baselineColumnIndexes) {
+      const distance = columnIndex - bIdx;
+      if (distance > 0 && distance <= 2) {
+        evidence.push({ type: "position_near_baseline", role: "resolved_design", baseline_column: allColumns[bIdx], distance, weight: 0.15 / distance });
+      }
+    }
+    return evidence;
+  }
+
+  // 値の分布: シート内で値の種類が少ない(=一定・変化が少ない)ほどbaseline寄り、
+  // 種類が多い(=行ごとにばらつきが大きい)ほどresolved寄りという弱い根拠にする。
+  function distributionRoleEvidence(values) {
+    const nonBlank = values.map(v => String(v ?? "").trim()).filter(Boolean);
+    if (nonBlank.length < 2) return [];
+    const uniqueRatio = new Set(nonBlank).size / nonBlank.length;
+    if (uniqueRatio <= 0.34) return [{ type: "value_distribution", role: "baseline_design", unique_ratio: uniqueRatio, weight: 0.15 }];
+    if (uniqueRatio >= 0.67) return [{ type: "value_distribution", role: "resolved_design", unique_ratio: uniqueRatio, weight: 0.15 }];
+    return [];
+  }
+
+  function inferColumnRoleCandidates(columnName, columnIndex, allColumns, columnValuesByName) {
+    const baselineColumnIndexes = allColumns
+      .map((name, idx) => ({ name, idx }))
+      .filter(({ name }) => QA_BASELINE_KEYWORDS.some(kw => name.includes(kw)))
+      .map(({ idx }) => idx);
+    const evidence = [
+      ...keywordRoleEvidence(columnName),
+      ...positionalRoleEvidence(columnIndex, allColumns, baselineColumnIndexes),
+      ...distributionRoleEvidence(columnValuesByName[columnName] || []),
+    ];
+    const scores = new Map();
+    for (const e of evidence) {
+      const s = scores.get(e.role) || { score: 0, evidence: [] };
+      s.score += e.weight;
+      s.evidence.push(e);
+      scores.set(e.role, s);
+    }
+    const candidates = [...scores.entries()]
+      .map(([role, s]) => ({ role, confidence: Math.max(0, Math.min(0.99, s.score)), evidence: s.evidence }))
+      .filter(c => c.confidence >= QA_ROLE_CANDIDATE_MIN_CONFIDENCE)
+      .sort((a, b) => b.confidence - a.confidence);
+    if (!candidates.length) return [{ role: "unknown", confidence: 0, evidence: [] }];
+    return candidates;
+  }
+
+  // ── ハッシュ・ID(PDF側と同じ契約。v12Sha256/v12HashParts/v12Idをそのまま再利用) ──
+  async function v12QuantityIdDigest(traceId, sourceField, span, normalizedText) {
+    const digest = await v12HashParts("quantity-id-v1", [traceId, sourceField, String(span.start), String(span.end), normalizedText]);
+    return v12Id("q-", digest);
+  }
+
+  function v12NormalizeConditionAsRecord(cc) {
+    return {
+      source_text: cc.source_text,
+      normalized_text: cc.source_text,
+      quantity: cc.quantity,
+      unit: cc.unit,
+      context: { property: null, subject: null, state: null, tokens: [] },
+      extraction: { confidence: cc.confidence, warnings: ["工程4aのcondition_candidatesから補完した値"] },
+    };
+  }
+
+  // 対象列以外の非管理列のテキストを周辺語コンテキストとして含める(trace_comparison_example_verification.js
+  // 129〜133行目・170〜179行目で既に確立した「行内の他フィールドをnearbyTextに含める」設計を、
+  // 単一列("設計項目")へのハードコードではなく汎用化したもの)。
+  function buildNearbyText(sourceRecord, targetColumn, scannable) {
+    const others = scannable
+      .filter(col => col !== targetColumn)
+      .map(col => String(sourceRecord[col] ?? "").trim())
+      .filter(Boolean);
+    const targetText = `${targetColumn}: ${String(sourceRecord[targetColumn] ?? "").trim()}`;
+    return [...others, targetText].join(" / ");
+  }
+
+  async function v12BuildQuantityAnalysesForColumn(text, traceId, sourceField, nearbyText) {
+    const quantities = extractQuantities(text || "");
+    const occurrenceCounts = new Map();
+    const analyses = [];
+    for (const q of quantities) {
+      const occurrenceIndex = occurrenceCounts.get(q.source_text) || 0;
+      occurrenceCounts.set(q.source_text, occurrenceIndex + 1);
+      const ctx = { nearbyText, side: "B", sourceColumn: sourceField, isConditionValue: false, occurrenceIndex };
+      const normalizedText = v12Normalize(q.source_text);
+      analyses.push({
+        quantity_id: await v12QuantityIdDigest(traceId, sourceField, q.source_span, normalizedText),
+        source_field: sourceField,
+        occurrence_index: occurrenceIndex,
+        source_span: q.source_span,
+        normalized_text: normalizedText,
+        quantity: q,
+        interval_semantics_candidates: generateIntervalSemanticsCandidates(q, ctx),
+      });
+      for (const cc of (q.condition_candidates || [])) {
+        const ccRecord = v12NormalizeConditionAsRecord(cc);
+        const ccCtx = { nearbyText, side: "B", sourceColumn: sourceField, isConditionValue: true, occurrenceIndex: 0 };
+        const ccNormalizedText = v12Normalize(cc.source_text);
+        analyses.push({
+          quantity_id: await v12QuantityIdDigest(traceId, sourceField, cc.source_span, ccNormalizedText),
+          source_field: sourceField,
+          occurrence_index: 0,
+          source_span: cc.source_span,
+          normalized_text: ccNormalizedText,
+          quantity: ccRecord,
+          is_condition_value: true,
+          interval_semantics_candidates: generateIntervalSemanticsCandidates(ccRecord, ccCtx),
+        });
+      }
+    }
+    return analyses;
+  }
+
+  // 行単位のcontent_hash: PDF側と同じ粒度(records[].content_hash、trace_id単位)。
+  // 1行に複数の数量候補列があり得るため、行全体(source_record丸ごと)+tags+source_rowを対象にする
+  // (単一セル・単一列だけを対象にすると、他列の変更による意味候補への影響を検出できないため。
+  // trace_comparison_example_verification.jsが検証済みの「本文だけでなく周辺情報も含める」原則)。
+  async function v12ComputeRecordContentHash(record) {
+    const analysisInput = { trace_id: record.trace_id, source_record: record.source_record, tags: record.tags || [], source_row: record.source_row };
+    return v12HashParts("content-hash-v1", [JSON.stringify(canonicalValue(analysisInput))]);
+  }
+
+  async function v12ComputeDatasetSignature(traceRecords) {
+    const seen = new Set();
+    for (const r of traceRecords) {
+      if (seen.has(r.trace_id)) throw new Error(`dataset_signatureの計算に失敗しました。trace_idが重複しています: ${r.trace_id}`);
+      seen.add(r.trace_id);
+    }
+    const sorted = [...traceRecords].sort((a, b) => a.trace_id < b.trace_id ? -1 : a.trace_id > b.trace_id ? 1 : 0);
+    return "QA-SHA256:" + await v12HashParts("dataset-signature-v1", [JSON.stringify(canonicalValue(sorted))]);
+  }
+
+  async function buildQuantityAnnotationSidecarExcel(trace, sourceTraceFileName) {
+    const allColumns = new Set();
+    const columnValuesByName = {};
+    for (const r of trace._trace_records) {
+      for (const col of scannableColumns(r.source_record)) {
+        allColumns.add(col);
+        (columnValuesByName[col] ||= []).push(r.source_record[col]);
+      }
+    }
+    const allColumnsList = [...allColumns];
+    const columnRoleCandidates = allColumnsList.map((col, idx) => ({
+      column: col,
+      role_candidates: inferColumnRoleCandidates(col, idx, allColumnsList, columnValuesByName),
+    }));
+
+    const datasetSignature = await v12ComputeDatasetSignature(trace._trace_records);
+    const records = [];
+    for (const r of trace._trace_records) {
+      const scannable = scannableColumns(r.source_record);
+      const analyses = [];
+      for (const col of scannable) {
+        const text = String(r.source_record[col] ?? "");
+        const nearbyText = buildNearbyText(r.source_record, col, scannable);
+        analyses.push(...await v12BuildQuantityAnalysesForColumn(text, r.trace_id, col, nearbyText));
+      }
+      records.push({ trace_id: r.trace_id, content_hash: await v12ComputeRecordContentHash(r), analyses });
+    }
+
+    return {
+      schema_version: QA_SCHEMA_VERSION,
+      side: "actual",
+      source_trace_file: sourceTraceFileName,
+      hash_algorithm: "SHA-256",
+      id_hash_algorithm: "SHA-256/128",
+      dataset_signature: datasetSignature,
+      generated_at: trace.generated_at,
+      generator: { tool: "quantity_extraction_prototype.js + semantic_mapping_prototype.js（本ツールへ統合）", version: "v2.14 / v2.19" },
+      ruleset_version: QA_RULESET_VERSION,
+      column_role_candidates: columnRoleCandidates,
+      records,
+    };
+  }
+
 
   function normalizeAliasMap(value) {
     const result = {};
@@ -3623,6 +4535,33 @@ I/F = インターフェース"></textarea>
     ensureRowStates(); refreshAllViews();
   };
 
+  async function exportQuantityAnnotationExcel(){
+    clearMessage($('profileMessage'));
+    // 「同一スナップショットから生成する」を構造的に保証するため、この関数内で
+    // applyProfileToCurrentData(true)を1回だけ呼び、以降は一切再生成せず、その結果(outputData、
+    // 以降await一切を挟まず同期的に参照するローカル変数)から照合用JSON本体とsidecarの両方を
+    // この1回のクリック内でダウンロードする。既存の#buildTraceBtn・#downloadJsonBtnのハンドラは
+    // 変更しない(独立した別のapplyProfileToCurrentData()呼び出しのまま残る)。
+    const before = outputData;
+    applyProfileToCurrentData(true);
+    if (outputData === before || !outputData || !Array.isArray(outputData._trace_records)) {
+      showMessage($('profileMessage'), 'error', '照合用JSONの生成に失敗しました。様式・変換済みデータを確認してください。');
+      return;
+    }
+    const trace = outputData;
+    try {
+      const baseName = (sourceFile?.name || 'excel').replace(/\.[^.]+$/, '');
+      const sourceTraceFileName = `${baseName}_trace_v1.json`;
+      const sidecar = await buildQuantityAnnotationSidecarExcel(trace, sourceTraceFileName);
+      downloadText(JSON.stringify(trace, null, 2), normalizeFileName(sourceTraceFileName), 'application/json');
+      downloadText(JSON.stringify(sidecar, null, 2), normalizeFileName(`${baseName}_quantity_annotation_v1.json`), 'application/json');
+      const withQuantities = sidecar.records.filter(r => r.analyses.length).length;
+      showMessage($('profileMessage'), 'info', `照合用JSON(${trace._trace_records.length}件)・数量注釈JSON(数量あり ${withQuantities}件、列役割候補 ${sidecar.column_role_candidates.length}列)を同一スナップショットから出力しました。`);
+    } catch (error) {
+      showMessage($('profileMessage'), 'error', `数量注釈JSON生成エラー: ${error.message}`);
+    }
+  }
+
   function validationHtml(issues) {
     const errors=issues.filter(i=>i.severity==='error').length,warnings=issues.filter(i=>i.severity==='warning').length;
     return `<div class="ws-bulk-summary"><div class="ws-bulk-card"><span>エラー</span><strong>${errors}</strong></div><div class="ws-bulk-card"><span>警告</span><strong>${warnings}</strong></div><div class="ws-bulk-card"><span>対象</span><strong>${currentData.length}</strong></div></div><div class="ws-validation-list">${issues.map(i=>`<div class="ws-validation-item ${escapeHtml(i.severity)}"><b>${escapeHtml(i.severity)}</b><code>${escapeHtml(i.path||'$')}</code><span>${escapeHtml(i.message)}</span></div>`).join('')}</div>`;
@@ -4080,6 +5019,7 @@ I/F = インターフェース"></textarea>
   $('saveTagRulesBtn').addEventListener('click', saveRulesToActiveProfile);
   $('applyProfileBtn').addEventListener('click', () => applyProfileToCurrentData(false));
   $('buildTraceBtn').addEventListener('click', () => applyProfileToCurrentData(true));
+  $('buildQuantityAnnotationBtn').addEventListener('click', exportQuantityAnnotationExcel);
   $('autoTagBtn').addEventListener('click', autoTagCurrentData);
   $('suggestTagsBtn').addEventListener('click', extractTagSuggestions);
   $('columnToTagBtn').addEventListener('click', bulkAssignColumnValuesAsTags);

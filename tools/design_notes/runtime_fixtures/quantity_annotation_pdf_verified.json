@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-07-19T11:40:46.178Z",
+  "generated_at": "2026-07-19T12:18:14.163Z",
   "sample_trace": {
     "file_name": "customer_hvac_requirements.pdf",
     "chapter_number": "TRACE",
     "chapter_title": "要求仕様",
     "trace_format": "chapter-section-trace-v1",
     "schema_version": "1.2",
-    "generated_at": "2026-07-19T11:40:46.160Z",
+    "generated_at": "2026-07-19T12:18:14.138Z",
     "generator": {
       "name": "仕様書PDF→JSON 変換・確認ツール",
       "version": "1.15-manual-guided-ui-20260714"
@@ -41,7 +41,7 @@
       "side": "sys",
       "source_file": "customer_hvac_requirements.pdf",
       "record_count": 5,
-      "generated_at": "2026-07-19T11:40:46.159Z"
+      "generated_at": "2026-07-19T12:18:14.137Z"
     },
     "_trace_records": [
       {
@@ -273,7 +273,7 @@
     "hash_algorithm": "SHA-256",
     "id_hash_algorithm": "SHA-256/128",
     "dataset_signature": "QA-SHA256:47ec4633cf54cd8f68854282b799e2445eb051edf6e042b1f10d6c904988b57e",
-    "generated_at": "2026-07-19T11:40:46.160Z",
+    "generated_at": "2026-07-19T12:18:14.138Z",
     "generator": {
       "tool": "quantity_extraction_prototype.js + semantic_mapping_prototype.js（本ツールへ統合）",
       "version": "v2.14 / v2.19"

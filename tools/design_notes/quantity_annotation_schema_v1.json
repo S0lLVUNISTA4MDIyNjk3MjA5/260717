@@ -45,6 +45,29 @@
     "records": {
       "type": "array",
       "items": { "$ref": "#/$defs/record" }
+    },
+    "column_role_candidates": {
+      "description": "Excel側(excel_to_json_conversion_tool_v2.0.8.html)のみが出力する任意フィールド。シート内で検出した数量所在列ごとに、列役割の候補(baseline_design/resolved_design/unknown)を保持する(shadow_mode_integration_design.md 2.3節)。候補のみで確定しない(confirmedフィールドを持たない)。PDF側の出力にはこのフィールド自体が存在しない。",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["column", "role_candidates"],
+        "properties": {
+          "column": { "type": "string", "minLength": 1 },
+          "role_candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["role", "confidence", "evidence"],
+              "properties": {
+                "role": { "enum": ["baseline_design", "resolved_design", "unknown"] },
+                "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+                "evidence": { "type": "array" }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {
