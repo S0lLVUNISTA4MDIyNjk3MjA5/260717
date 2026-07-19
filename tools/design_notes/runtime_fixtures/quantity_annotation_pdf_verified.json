@@ -1,0 +1,538 @@
+{
+  "generated_at": "2026-07-19T11:08:46.059Z",
+  "sample_sidecar": {
+    "schema_version": "quantity-annotation/1.0-rc1",
+    "side": "requirement",
+    "source_trace_file": "customer_hvac_requirements_trace_v1_3.json",
+    "hash_algorithm": "SHA-256",
+    "dataset_signature": "QA-SHA256:8e765163a7a33ac6bd51fd0f1d04136ee8f22e62807588ff09d633a5fbc47e6a",
+    "generated_at": "2026-07-19T11:08:46.046Z",
+    "generator": {
+      "tool": "quantity_extraction_prototype.js + semantic_mapping_prototype.js（本ツールへ統合）",
+      "version": "v2.14 / v2.19"
+    },
+    "ruleset_version": {
+      "quantity_extraction": "v2.14",
+      "semantics_rules": "v2.19",
+      "auto_applicable_thresholds": {
+        "modeConfidence": 0.4,
+        "margin": 0.2,
+        "propertyConfidence": 0.7
+      }
+    },
+    "records": [
+      {
+        "trace_id": "blk-3cb9ce6da3918f296957975b465aa64a",
+        "content_hash": "6a58c5388a92913dcd04c2e2a0ebdd45a53eae70a9de33a49fd8313ae9d1880f",
+        "analyses": [
+          {
+            "quantity_id": "q-c076435ba246baf6668642a4e1eabbef",
+            "source_field": "source_raw_text",
+            "occurrence_index": 0,
+            "source_span": {
+              "start": 5,
+              "end": 9
+            },
+            "normalized_text": "12kW",
+            "quantity": {
+              "source_text": "12kW",
+              "source_span": {
+                "start": 5,
+                "end": 9
+              },
+              "normalized_text": "12kW",
+              "quantity": {
+                "kind": "interval",
+                "lower": {
+                  "value": 12,
+                  "inclusive": true
+                },
+                "upper": null
+              },
+              "unit": {
+                "source": "kW",
+                "canonical": "kW",
+                "dimension": "power",
+                "standard_ref": {
+                  "standard": "JIS Z 8000-4",
+                  "category": "mechanics"
+                }
+              },
+              "context": {
+                "property": null,
+                "subject": null,
+                "state": null,
+                "tokens": []
+              },
+              "extraction": {
+                "confidence": 0.95,
+                "warnings": []
+              }
+            },
+            "interval_semantics_candidates": [
+              {
+                "value": "acceptable_region",
+                "confidence": 0.6,
+                "evidence": [
+                  {
+                    "type": "keyword",
+                    "value": "acceptable_region",
+                    "source_text": "冷房能力は12kW以上とすること。",
+                    "effect": "supports",
+                    "weight": 0.45
+                  },
+                  {
+                    "type": "quantity_shape",
+                    "value": "acceptable_region",
+                    "source_text": "冷房能力は12kW以上とすること。",
+                    "effect": "supports",
+                    "weight": 0.15
+                  }
+                ]
+              },
+              {
+                "value": "unknown",
+                "confidence": 0.15,
+                "evidence": [
+                  {
+                    "type": "baseline",
+                    "value": "unknown",
+                    "source_text": "(既定の受け皿。他候補が弱い場合の下限)",
+                    "effect": "supports",
+                    "weight": 0.15
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "trace_id": "blk-0e4181612d51e91d91cf8b40fdc6c76c",
+        "content_hash": "b44b30df21d4e5d676cacd1c6a37be14f194d5fc5ef8d43f2403a33ef4e7ca6e",
+        "analyses": [
+          {
+            "quantity_id": "q-82842bc627f35a77f18aaa95168b5075",
+            "source_field": "source_raw_text",
+            "occurrence_index": 0,
+            "source_span": {
+              "start": 13,
+              "end": 20
+            },
+            "normalized_text": "12.5 kW",
+            "quantity": {
+              "source_text": "12.5 kW",
+              "source_span": {
+                "start": 13,
+                "end": 20
+              },
+              "normalized_text": "12.5 kW",
+              "quantity": {
+                "kind": "interval",
+                "lower": {
+                  "value": 12.5,
+                  "inclusive": true
+                },
+                "upper": {
+                  "value": 12.5,
+                  "inclusive": true
+                }
+              },
+              "unit": {
+                "source": "kW",
+                "canonical": "kW",
+                "dimension": "power",
+                "standard_ref": {
+                  "standard": "JIS Z 8000-4",
+                  "category": "mechanics"
+                }
+              },
+              "context": {
+                "property": null,
+                "subject": null,
+                "state": null,
+                "tokens": []
+              },
+              "extraction": {
+                "confidence": 0.95,
+                "warnings": []
+              },
+              "condition_candidates": [
+                {
+                  "source_text": "50 °C",
+                  "source_span": {
+                    "start": 4,
+                    "end": 9
+                  },
+                  "quantity": {
+                    "kind": "interval",
+                    "lower": {
+                      "value": 50,
+                      "inclusive": true
+                    },
+                    "upper": {
+                      "value": 50,
+                      "inclusive": true
+                    }
+                  },
+                  "unit": {
+                    "source": "°C",
+                    "canonical": "degC",
+                    "dimension": "temperature",
+                    "standard_ref": {
+                      "standard": "JIS Z 8000-5",
+                      "category": "thermodynamics"
+                    }
+                  },
+                  "confidence": 0.7
+                }
+              ]
+            },
+            "interval_semantics_candidates": [
+              {
+                "value": "acceptable_region",
+                "confidence": 0.15,
+                "evidence": [
+                  {
+                    "type": "quantity_shape",
+                    "value": "acceptable_region",
+                    "source_text": "周囲温度50 °Cにおいて12.5 kWを実測。",
+                    "effect": "supports",
+                    "weight": 0.15
+                  }
+                ]
+              },
+              {
+                "value": "unknown",
+                "confidence": 0.15,
+                "evidence": [
+                  {
+                    "type": "baseline",
+                    "value": "unknown",
+                    "source_text": "(既定の受け皿。他候補が弱い場合の下限)",
+                    "effect": "supports",
+                    "weight": 0.15
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "quantity_id": "q-e4bf9fe3a892cdaaabd8d38e2793ce97",
+            "source_field": "source_raw_text",
+            "occurrence_index": 0,
+            "source_span": {
+              "start": 4,
+              "end": 9
+            },
+            "normalized_text": "50 °C",
+            "quantity": {
+              "source_text": "50 °C",
+              "normalized_text": "50 °C",
+              "quantity": {
+                "kind": "interval",
+                "lower": {
+                  "value": 50,
+                  "inclusive": true
+                },
+                "upper": {
+                  "value": 50,
+                  "inclusive": true
+                }
+              },
+              "unit": {
+                "source": "°C",
+                "canonical": "degC",
+                "dimension": "temperature",
+                "standard_ref": {
+                  "standard": "JIS Z 8000-5",
+                  "category": "thermodynamics"
+                }
+              },
+              "context": {
+                "property": null,
+                "subject": null,
+                "state": null,
+                "tokens": []
+              },
+              "extraction": {
+                "confidence": 0.7,
+                "warnings": [
+                  "工程4aのcondition_candidatesから補完した値"
+                ]
+              }
+            },
+            "is_condition_value": true,
+            "interval_semantics_candidates": [
+              {
+                "value": "unknown",
+                "confidence": 0.15,
+                "evidence": [
+                  {
+                    "type": "baseline",
+                    "value": "unknown",
+                    "source_text": "(既定の受け皿。他候補が弱い場合の下限)",
+                    "effect": "supports",
+                    "weight": 0.15
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "trace_id": "blk-8ec6bc4027182482d3970100b10bcd17",
+        "content_hash": "2fdca247bc4cb625b93f2d40f5e78d22d9d79a9d644ec9323a0b329848c452e6",
+        "analyses": [
+          {
+            "quantity_id": "q-b6648546ebb945cc96bf4b41b84bc1e5",
+            "source_field": "source_raw_text",
+            "occurrence_index": 0,
+            "source_span": {
+              "start": 3,
+              "end": 8
+            },
+            "normalized_text": "50 °C",
+            "quantity": {
+              "source_text": "50 °C",
+              "source_span": {
+                "start": 3,
+                "end": 8
+              },
+              "normalized_text": "50 °C",
+              "quantity": {
+                "kind": "interval",
+                "lower": {
+                  "value": 50,
+                  "inclusive": true
+                },
+                "upper": {
+                  "value": 50,
+                  "inclusive": true
+                }
+              },
+              "unit": {
+                "source": "°C",
+                "canonical": "degC",
+                "dimension": "temperature",
+                "standard_ref": {
+                  "standard": "JIS Z 8000-5",
+                  "category": "thermodynamics"
+                }
+              },
+              "context": {
+                "property": null,
+                "subject": null,
+                "state": null,
+                "tokens": []
+              },
+              "extraction": {
+                "confidence": 0.95,
+                "warnings": []
+              }
+            },
+            "interval_semantics_candidates": [
+              {
+                "value": "acceptable_region",
+                "confidence": 0.15,
+                "evidence": [
+                  {
+                    "type": "quantity_shape",
+                    "value": "acceptable_region",
+                    "source_text": "試験は50 °Cと50 °Cの両方で実施すること。",
+                    "effect": "supports",
+                    "weight": 0.15
+                  }
+                ]
+              },
+              {
+                "value": "unknown",
+                "confidence": 0.15,
+                "evidence": [
+                  {
+                    "type": "baseline",
+                    "value": "unknown",
+                    "source_text": "(既定の受け皿。他候補が弱い場合の下限)",
+                    "effect": "supports",
+                    "weight": 0.15
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "quantity_id": "q-8d3bdf32abddde6b8bb1e230db7c6b04",
+            "source_field": "source_raw_text",
+            "occurrence_index": 1,
+            "source_span": {
+              "start": 9,
+              "end": 14
+            },
+            "normalized_text": "50 °C",
+            "quantity": {
+              "source_text": "50 °C",
+              "source_span": {
+                "start": 9,
+                "end": 14
+              },
+              "normalized_text": "50 °C",
+              "quantity": {
+                "kind": "interval",
+                "lower": {
+                  "value": 50,
+                  "inclusive": true
+                },
+                "upper": {
+                  "value": 50,
+                  "inclusive": true
+                }
+              },
+              "unit": {
+                "source": "°C",
+                "canonical": "degC",
+                "dimension": "temperature",
+                "standard_ref": {
+                  "standard": "JIS Z 8000-5",
+                  "category": "thermodynamics"
+                }
+              },
+              "context": {
+                "property": null,
+                "subject": null,
+                "state": null,
+                "tokens": []
+              },
+              "extraction": {
+                "confidence": 0.95,
+                "warnings": []
+              }
+            },
+            "interval_semantics_candidates": [
+              {
+                "value": "acceptable_region",
+                "confidence": 0.15,
+                "evidence": [
+                  {
+                    "type": "quantity_shape",
+                    "value": "acceptable_region",
+                    "source_text": "試験は50 °Cと50 °Cの両方で実施すること。",
+                    "effect": "supports",
+                    "weight": 0.15
+                  }
+                ]
+              },
+              {
+                "value": "unknown",
+                "confidence": 0.15,
+                "evidence": [
+                  {
+                    "type": "baseline",
+                    "value": "unknown",
+                    "source_text": "(既定の受け皿。他候補が弱い場合の下限)",
+                    "effect": "supports",
+                    "weight": 0.15
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "trace_id": "blk-c0ca1bdd044e936bff98511cff6aa029",
+        "content_hash": "8ca4e9df0b4884b27c06d8f00dd6307917a54ec1107d1f5ab57b60921e960ce0",
+        "analyses": [
+          {
+            "quantity_id": "q-40870c828f7f4dddbb250fce3dba8529",
+            "source_field": "source_raw_text",
+            "occurrence_index": 0,
+            "source_span": {
+              "start": 5,
+              "end": 9
+            },
+            "normalized_text": "220V",
+            "quantity": {
+              "source_text": "220V",
+              "source_span": {
+                "start": 5,
+                "end": 9
+              },
+              "normalized_text": "220V",
+              "quantity": {
+                "kind": "interval",
+                "lower": {
+                  "value": 220,
+                  "inclusive": true
+                },
+                "upper": {
+                  "value": 220,
+                  "inclusive": true
+                }
+              },
+              "unit": {
+                "source": "V",
+                "canonical": "V",
+                "dimension": "voltage",
+                "standard_ref": {
+                  "standard": "JIS Z 8000-6",
+                  "category": "electromagnetism"
+                }
+              },
+              "context": {
+                "property": null,
+                "subject": null,
+                "state": null,
+                "tokens": []
+              },
+              "extraction": {
+                "confidence": 0.95,
+                "warnings": []
+              }
+            },
+            "interval_semantics_candidates": [
+              {
+                "value": "acceptable_region",
+                "confidence": 0.44999999999999996,
+                "evidence": [
+                  {
+                    "type": "keyword",
+                    "value": "acceptable_region",
+                    "source_text": "電源電圧は220Vとすること。",
+                    "effect": "supports",
+                    "weight": 0.3
+                  },
+                  {
+                    "type": "quantity_shape",
+                    "value": "acceptable_region",
+                    "source_text": "電源電圧は220Vとすること。",
+                    "effect": "supports",
+                    "weight": 0.15
+                  }
+                ]
+              },
+              {
+                "value": "unknown",
+                "confidence": 0.15,
+                "evidence": [
+                  {
+                    "type": "baseline",
+                    "value": "unknown",
+                    "source_text": "(既定の受け皿。他候補が弱い場合の下限)",
+                    "effect": "supports",
+                    "weight": 0.15
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "trace_id": "blk-dd6b8cee0f4c3ffb8f05c3dd626cc130",
+        "content_hash": "90deff3ce04f583c98ba9eba4ff30bd8a3043f1b5983e1a18508862e9d97e167",
+        "analyses": []
+      }
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 {
   "schema_version": "trace-comparison/1.0-rc1",
-  "generated_at": "2026-07-19T10:34:22.889Z",
+  "generated_at": "2026-07-19T11:08:41.286Z",
   "note": "trace_comparison_example_verification.jsにより実データ(samples/hvac_trace_sample_small/)から機械的に生成・検証済み。relationshipもruntime_fixtures/*.jsonから機械的に解決した(手打ちの値は含まない)。",
   "source": {
     "requirement_file": "JSON_A_customer_requirements_trace.json",

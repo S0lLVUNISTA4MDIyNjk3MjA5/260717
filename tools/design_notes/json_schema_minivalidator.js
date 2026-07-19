@@ -1,0 +1,87 @@
+// 依存ライブラリなしの最小JSON Schema検証器。
+// quantity_annotation_schema_v1.json / trace_comparison_schema_v1.md 系のスキーマが実際に
+// 使うキーワードのみをサポートする、汎用実装ではない限定的な検証器(ajv等は本プロジェクトの
+// 「依存ゼロ」原則によりnpm経由で導入できないため、必要な部分だけを自前で実装する)。
+// サポートするキーワード: type, const, enum, pattern, minLength, minimum, maximum,
+// required, properties, additionalProperties, items, $ref(同一ドキュメント内の#/...のみ)。
+'use strict';
+
+function resolveRef(root, ref) {
+  if (!ref.startsWith('#/')) throw new Error(`未対応の$ref(同一ドキュメント内のみ対応): ${ref}`);
+  const path = ref.slice(2).split('/');
+  let node = root;
+  for (const seg of path) {
+    node = node[seg];
+    if (node === undefined) throw new Error(`$refの解決に失敗しました: ${ref}`);
+  }
+  return node;
+}
+
+function typeOf(value) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  if (Number.isInteger(value)) return 'integer';
+  return typeof value; // 'number' | 'string' | 'boolean' | 'object'
+}
+
+function typeMatches(expected, value) {
+  const actual = typeOf(value);
+  if (expected === 'number') return actual === 'number' || actual === 'integer';
+  return actual === expected;
+}
+
+// errors: 検出したエラーメッセージ(path付き)を蓄積する配列
+function validateNode(schema, value, path, root, errors) {
+  if (schema.$ref) {
+    validateNode(resolveRef(root, schema.$ref), value, path, root, errors);
+    return;
+  }
+  if (schema.const !== undefined && value !== schema.const) {
+    errors.push(`${path}: const不一致 (期待値=${JSON.stringify(schema.const)}, 実際=${JSON.stringify(value)})`);
+  }
+  if (schema.enum !== undefined && !schema.enum.includes(value)) {
+    errors.push(`${path}: enum不一致 (期待値のいずれか=${JSON.stringify(schema.enum)}, 実際=${JSON.stringify(value)})`);
+  }
+  if (schema.type !== undefined && !typeMatches(schema.type, value)) {
+    errors.push(`${path}: type不一致 (期待値=${schema.type}, 実際=${typeOf(value)})`);
+    return; // 型が違えば以降の詳細検証は意味がないため打ち切る
+  }
+  if (typeof value === 'string') {
+    if (schema.pattern !== undefined && !new RegExp(schema.pattern).test(value)) {
+      errors.push(`${path}: pattern不一致 (/${schema.pattern}/, 実際=${JSON.stringify(value)})`);
+    }
+    if (schema.minLength !== undefined && value.length < schema.minLength) {
+      errors.push(`${path}: minLength未満 (期待値>=${schema.minLength}, 実際=${value.length})`);
+    }
+  }
+  if (typeof value === 'number') {
+    if (schema.minimum !== undefined && value < schema.minimum) errors.push(`${path}: minimum未満 (期待値>=${schema.minimum}, 実際=${value})`);
+    if (schema.maximum !== undefined && value > schema.maximum) errors.push(`${path}: maximum超過 (期待値<=${schema.maximum}, 実際=${value})`);
+  }
+  if (Array.isArray(value) && schema.items) {
+    value.forEach((item, i) => validateNode(schema.items, item, `${path}[${i}]`, root, errors));
+  }
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    for (const key of (schema.required || [])) {
+      if (!(key in value)) errors.push(`${path}: 必須フィールド不足: ${key}`);
+    }
+    if (schema.properties) {
+      for (const [key, subSchema] of Object.entries(schema.properties)) {
+        if (key in value) validateNode(subSchema, value[key], `${path}.${key}`, root, errors);
+      }
+    }
+    if (schema.additionalProperties === false && schema.properties) {
+      for (const key of Object.keys(value)) {
+        if (!(key in schema.properties)) errors.push(`${path}: 未定義フィールド(additionalProperties:false): ${key}`);
+      }
+    }
+  }
+}
+
+function validate(schema, value) {
+  const errors = [];
+  validateNode(schema, value, '$', schema, errors);
+  return { valid: errors.length === 0, errors };
+}
+
+module.exports = { validate };
