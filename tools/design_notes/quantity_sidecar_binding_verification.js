@@ -165,9 +165,52 @@ async function sidecar(trace, side) {
   const missingResult = await core.bindSide(requirementTrace, missing, 'requirement');
   check('sidecarレコード欠落は側全体を停止せず欠落レコードだけmissingにする', missingResult.ready && missingResult.bindings[0].status === 'missing');
   check('sidecarレコード欠落をnot_analyzed(reason:no_annotation)へ送る', missingResult.not_analyzed.length === 1 && missingResult.not_analyzed[0].trace_id === requirementTrace._trace_records[0].trace_id && missingResult.not_analyzed[0].reason_code === 'no_annotation');
+  check('bindSide()単体でもnot_analyzedへsideを付与する(7bc4182レビュー、requirement)', missingResult.not_analyzed[0].side === 'requirement');
   check('missing_annotationはwarningとして明示する', missingResult.diagnostics.some(d => d.code === 'missing_annotation' && d.severity === 'warning'));
   const missingPair = await core.bindInputPair({ requirementTrace, requirementAnnotation:missing, actualTrace, actualAnnotation });
   check('pair結合でも欠落だけをnot_analyzedへ集約し正常側を継続する', missingPair.ready && missingPair.not_analyzed.length === 1 && missingPair.actual.bindings[0].status === 'bound');
+  check('bindInputPair()の集約後もsideを保持する(7bc4182レビュー)', missingPair.not_analyzed[0].side === 'requirement');
+
+  // ── 【7bc4182レビューの回帰テスト】要求側・実仕様側の双方が同じtrace_id("same")を持つ
+  //    ケースで、結合層のnot_analyzedがside+trace_idの組で識別でき、配列の集約順序・要素順序に
+  //    依存しないことを検証する。sideを付与する前は、trace_idだけでは両側のnot_analyzedを
+  //    区別できず(bindInputPair()がrequirement.not_analyzedとactual.not_analyzedを単純結合するため)、
+  //    同じtrace_idを持つ行が要求側由来か実仕様側由来か判別できない欠陥だった。
+  const reqSame = reqTrace('same');
+  const actSame = actTrace('same');
+  const reqAnnotationSameFull = await sidecar(reqSame, 'requirement');
+  const actAnnotationSameFull = await sidecar(actSame, 'actual');
+  const reqAnnotationSameMissing = structuredClone(reqAnnotationSameFull); reqAnnotationSameMissing.records = [];
+  const actAnnotationSameMissing = structuredClone(actAnnotationSameFull); actAnnotationSameMissing.records = [];
+
+  const bothMissingPair = await core.bindInputPair({
+    requirementTrace:reqSame, requirementAnnotation:reqAnnotationSameMissing,
+    actualTrace:actSame, actualAnnotation:actAnnotationSameMissing,
+  });
+  check('双方のsidecarレコードが欠落しても、requirement:sameとactual:sameをsideで識別できる(7bc4182レビュー)',
+    bothMissingPair.not_analyzed.length === 2
+    && bothMissingPair.not_analyzed.some(n => n.side === 'requirement' && n.trace_id === 'same')
+    && bothMissingPair.not_analyzed.some(n => n.side === 'actual' && n.trace_id === 'same'),
+    bothMissingPair.not_analyzed);
+
+  const keyOf = n => `${n.side}|${n.trace_id}`;
+  const reversedMap = new Map([...bothMissingPair.not_analyzed].reverse().map(n => [keyOf(n), n]));
+  check('配列を逆順にしても、side+trace_idをキーに同じ結果を取得できる(7bc4182レビュー)',
+    reversedMap.size === 2
+    && reversedMap.get('requirement|same')?.reason_code === 'no_annotation'
+    && reversedMap.get('actual|same')?.reason_code === 'no_annotation',
+    [...reversedMap.entries()]);
+
+  const actualOnlyMissingPair = await core.bindInputPair({
+    requirementTrace:reqSame, requirementAnnotation:reqAnnotationSameFull,
+    actualTrace:actSame, actualAnnotation:actAnnotationSameMissing,
+  });
+  check('actual側だけ欠落した場合、side:"actual"として特定できる(7bc4182レビュー)',
+    actualOnlyMissingPair.not_analyzed.length === 1
+    && actualOnlyMissingPair.not_analyzed[0].side === 'actual'
+    && actualOnlyMissingPair.not_analyzed[0].trace_id === 'same'
+    && actualOnlyMissingPair.requirement.not_analyzed.length === 0,
+    actualOnlyMissingPair.not_analyzed);
 
   const duplicateTrace = reqTrace();
   duplicateTrace._trace_records.push(structuredClone(duplicateTrace._trace_records[0]));

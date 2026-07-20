@@ -205,7 +205,7 @@
       const sideRecord = annotationById.get(record.trace_id);
       if (!sideRecord) {
         diagnostics.push(diagnostic('missing_annotation', expectedSide, '該当するsidecarレコードがありません', record.trace_id, 'warning'));
-        notAnalyzed.push({ trace_id:record.trace_id, reason_code:'no_annotation', detail:'quantity-annotation側に該当trace_idがありません' });
+        notAnalyzed.push({ trace_id:record.trace_id, side:expectedSide, reason_code:'no_annotation', detail:'quantity-annotation側に該当trace_idがありません' });
         bindings.push({ trace_id:record.trace_id, status:'missing', annotation:null });
         continue;
       }

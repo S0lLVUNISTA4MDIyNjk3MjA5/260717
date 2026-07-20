@@ -214,6 +214,8 @@ if (ctx.sourceColumn === '検討結果') return { role: 'resolved_design', ... }
 >
 > Phase A実生成物との独立性不足も訂正した。Phase B自身のハッシュ関数でsidecarを再合成するテストだけに依存せず、既存runtime fixtureのPDF 5件・Excel work-JSON 4件・Excel実`.xlsx` 3件をそのまま入力し、再計算・結合・診断0件を恒久回帰として確認する。実ブラウザテストのA/B入力もPDF／Excel work-JSONの実生成fixtureへ置き換えた。
 
+> **訂正（`7bc4182`レビュー、2026-07-20）**：`bindSide()`が生成する`not_analyzed(reason_code:"no_annotation")`のレコードに`side`（`"requirement"`／`"actual"`）を持たせていなかった。`bindInputPair()`は`requirement.not_analyzed`と`actual.not_analyzed`を単純に配列結合するため、要求側・実仕様側の双方に同じ`trace_id`を持つレコードが存在し、かつ両側とも該当sidecarレコードが欠落しているケースでは、集約後の`not_analyzed`配列から「どちらの側の欠落か」を`trace_id`だけでは判別できなかった（`side`が無いため、`trace_id`だけをキーにすると要求側と実仕様側の欠落が衝突・混同されうる）。修正: `bindSide()`内の`notAnalyzed.push(...)`へ`side:expectedSide`を追加した。`bindInputPair()`側の集約処理自体（配列のスプレッド結合）は変更していない。各要素が`side`を保持するようになったことで、集約後も`side + trace_id`の組がそのまま安定した識別キーとして機能する。**結合層の`not_analyzed`は`side + trace_id`の組で識別し、配列内の格納順序・結合順序には依存しない契約とする**。回帰テストとして、要求側・実仕様側の双方が同じ`trace_id`（`"same"`）を持つケースについて、(a) 双方のsidecarレコードが欠落しても`requirement:same`と`actual:same`を`side`で識別できること、(b) 結果配列を逆順にしても`side + trace_id`をキーに同じ結果を再現できること（`Map`化して両エントリを引けることを確認）、(c) `actual`側だけ欠落した場合に`side:"actual"`として一意に特定でき、かつ`requirement`側の`not_analyzed`が0件のままであることを`quantity_sidecar_binding_verification.js`へ追加した。`side`付与を一時的に取り除くと、これら3件に加え既存の単側検証2件（`bindSide()`単体・`bindInputPair()`集約後のそれぞれで`side`を確認する強化済みの既存項目）の計5件が実際に失敗することを確認した上で復元している。
+
 ### 3.4 全組み合わせ生成の絞り込み（必須修正6・再指摘への対応）
 
 要求側`analyses[]`×実仕様側`analyses[]`の全直積をそのまま候補にするのではなく、次の順で段階的に絞り込む。
