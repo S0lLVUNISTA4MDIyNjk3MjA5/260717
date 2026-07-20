@@ -255,7 +255,170 @@
       matcher_b_id:row?.matcher_b_id || row?.B_ID || row?.['B_ID'] || null };
   }
 
+  // ── Phase B-2: 次元候補生成（3.4節 段階1のみ）。段階2以降（設計特性候補・条件候補・
+  // comparisonMode導出）は未実装のまま。次元が一致した組だけをcandidatesとして返し、
+  // それ以外は全直積を作らずバケット単位でnot_analyzedへ圧縮する。 ──
+
+  function bindingAnalysesByTraceId(sideResult) {
+    const map = new Map();
+    (sideResult?.bindings || []).forEach(binding => {
+      if (binding.status === 'bound' && binding.annotation) map.set(binding.trace_id, binding.annotation.analyses || []);
+    });
+    return map;
+  }
+
+  // 「sidecar内で」の重複検知は側ごとに独立させる。要求側sidecarと実仕様側sidecarは別ファイルであり、
+  // quantity_idは内容由来のハッシュのため、別ファイル同士がたまたま同じ値を持つことは
+  // データ破損の兆候ではない（各ファイル内で一意であればよい）。
+  function duplicateQuantityIds(analysesByTrace) {
+    const seen = new Set(), duplicates = new Set();
+    for (const analyses of analysesByTrace.values()) {
+      for (const analysis of analyses) {
+        const id = analysis?.quantity_id;
+        if (!id) continue;
+        if (seen.has(id)) duplicates.add(id);
+        seen.add(id);
+      }
+    }
+    return [...duplicates];
+  }
+
+  function dimensionOf(analysis) {
+    const value = analysis?.quantity?.unit?.dimension;
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  function groupByDimension(entries) {
+    const map = new Map();
+    entries.forEach(({ quantity_id, dimension }) => {
+      if (!map.has(dimension)) map.set(dimension, []);
+      map.get(dimension).push(quantity_id);
+    });
+    return map;
+  }
+
+  function blockedDimensionResult(diagnostics) {
+    return { ready:false, candidates:[], candidate_count:0, not_analyzed:[], excluded_pair_count:0, diagnostics };
+  }
+
+  function generateDimensionCandidates({ binding, relations }) {
+    if (!binding || !binding.ready) {
+      return blockedDimensionResult([{ code:'binding_not_ready', severity:'error', detail:'quantity_sidecar_binding_core.bindInputPair()がready:falseのため次元候補を生成できません' }]);
+    }
+
+    const reqAnalysesByTrace = bindingAnalysesByTraceId(binding.requirement);
+    const actAnalysesByTrace = bindingAnalysesByTraceId(binding.actual);
+
+    // 【必須修正3】sidecar内でquantity_idが重複した場合は、候補生成全体をここで停止する。
+    const reqDuplicateIds = duplicateQuantityIds(reqAnalysesByTrace);
+    const actDuplicateIds = duplicateQuantityIds(actAnalysesByTrace);
+    if (reqDuplicateIds.length || actDuplicateIds.length) {
+      const diagnostics = [
+        ...reqDuplicateIds.map(id => ({ code:'duplicate_quantity_id', severity:'error', side:'requirement', quantity_id:id, detail:'要求側sidecar内でquantity_idが重複しています' })),
+        ...actDuplicateIds.map(id => ({ code:'duplicate_quantity_id', severity:'error', side:'actual', quantity_id:id, detail:'実仕様側sidecar内でquantity_idが重複しています' })),
+      ];
+      return blockedDimensionResult(diagnostics);
+    }
+
+    const diagnostics = [];
+    const notAnalyzed = [];
+    let candidates = [];
+    let excludedPairCount = 0;
+
+    // 【必須修正2】同一の要求trace_id+実仕様trace_idを持つ照合行が複数存在する場合、
+    // どちらの照合行を採用すべきか自明でないため、いずれからも候補を生成しない。
+    const relationKey = row => `${row.requirement_trace_id}|${row.actual_trace_id}`;
+    const relationCounts = new Map();
+    (relations || []).forEach(row => {
+      if (!row?.requirement_trace_id || !row?.actual_trace_id) return; // A未対応/B未参照はペア自体が存在しない
+      const key = relationKey(row);
+      relationCounts.set(key, (relationCounts.get(key) || 0) + 1);
+    });
+    const duplicateRelationKeys = new Set([...relationCounts.entries()].filter(([, count]) => count > 1).map(([key]) => key));
+    duplicateRelationKeys.forEach(key => {
+      const [requirementTraceId, actualTraceId] = key.split('|');
+      diagnostics.push({ code:'duplicate_relation_pair', severity:'warning', requirement_trace_id:requirementTraceId, actual_trace_id:actualTraceId,
+        detail:'同一の要求trace_id+実仕様trace_idを持つ照合行が複数存在するため、いずれからも候補を生成しません' });
+    });
+
+    for (const row of (relations || [])) {
+      if (!row?.requirement_trace_id || !row?.actual_trace_id) continue;
+      if (duplicateRelationKeys.has(relationKey(row))) continue;
+
+      const reqAnalyses = reqAnalysesByTrace.get(row.requirement_trace_id) || [];
+      const actAnalyses = actAnalysesByTrace.get(row.actual_trace_id) || [];
+      if (!reqAnalyses.length || !actAnalyses.length) continue; // 未結合(missing/stale/unparsed)・数量ゼロ件は対象外
+
+      // 【必須修正4】dimensionが空文字・空白・未設定の数量は、他の解決可能な数量の処理を
+      // 止めずにdimension_unavailableへ個別に送る(バケット圧縮の対象はN×M組み合わせだけであり、
+      // 単一の数量自体の欠落は最大でも数量の総数でしか増えないため、圧縮の必要がない)。
+      const usable = (analyses, side, traceId) => {
+        const kept = [];
+        analyses.forEach(analysis => {
+          const dimension = dimensionOf(analysis);
+          if (!dimension) {
+            notAnalyzed.push({ side, trace_id:traceId, quantity_id:analysis?.quantity_id || null,
+              reason_code:'dimension_unavailable', detail:'quantity.unit.dimensionが空です' });
+            diagnostics.push({ code:'dimension_unavailable', severity:'warning', side, trace_id:traceId, quantity_id:analysis?.quantity_id || null });
+          } else {
+            kept.push({ quantity_id:analysis.quantity_id, dimension });
+          }
+        });
+        return kept;
+      };
+
+      const reqUsable = usable(reqAnalyses, 'requirement', row.requirement_trace_id);
+      const actUsable = usable(actAnalyses, 'actual', row.actual_trace_id);
+      const reqByDim = groupByDimension(reqUsable);
+      const actByDim = groupByDimension(actUsable);
+
+      for (const [reqDim, reqIds] of reqByDim) {
+        for (const [actDim, actIds] of actByDim) {
+          if (reqDim === actDim) {
+            for (const requirementQuantityId of reqIds) {
+              for (const actualQuantityId of actIds) {
+                candidates.push({
+                  quantity_pair_id:`${requirementQuantityId}::${actualQuantityId}`,
+                  requirement_quantity_id:requirementQuantityId, actual_quantity_id:actualQuantityId,
+                  requirement_trace_id:row.requirement_trace_id, actual_trace_id:row.actual_trace_id,
+                  matcher_a_id:row.matcher_a_id ?? null, matcher_b_id:row.matcher_b_id ?? null,
+                  dimension:reqDim,
+                });
+              }
+            }
+          } else {
+            // 【必須修正1】異次元の組み合わせは、個々のペアをnot_analyzedへ展開せず、
+            // 次元バケット単位で1件の圧縮監査記録にする(20×20なら400件ではなく1件)。
+            const pairCount = reqIds.length * actIds.length;
+            excludedPairCount += pairCount;
+            notAnalyzed.push({
+              reason_code:'dimension_mismatch',
+              requirement_quantity_ids:reqIds, actual_quantity_ids:actIds,
+              requirement_dimension:reqDim, actual_dimension:actDim,
+              excluded_pair_count:pairCount,
+              requirement_trace_id:row.requirement_trace_id, actual_trace_id:row.actual_trace_id,
+              matcher_a_id:row.matcher_a_id ?? null, matcher_b_id:row.matcher_b_id ?? null,
+            });
+          }
+        }
+      }
+    }
+
+    // 【必須修正3後半、防御的チェック】ここまでの重複排除(sidecar内quantity_id一意性、
+    // 重複照合行の除外)が正しく機能していれば構造的に起こり得ないはずだが、念のため
+    // 生成後のquantity_pair_id自体の重複も検査し、見つかった場合は該当候補をすべて除外する。
+    const pairIdCounts = new Map();
+    candidates.forEach(candidate => pairIdCounts.set(candidate.quantity_pair_id, (pairIdCounts.get(candidate.quantity_pair_id) || 0) + 1));
+    const duplicatedPairIds = new Set([...pairIdCounts.entries()].filter(([, count]) => count > 1).map(([id]) => id));
+    duplicatedPairIds.forEach(id => diagnostics.push({ code:'duplicate_quantity_pair_id', severity:'warning', quantity_pair_id:id,
+      detail:'生成後のquantity_pair_idが重複しています(防御的チェック)。該当候補をすべて除外します' }));
+    candidates = candidates.filter(candidate => !duplicatedPairIds.has(candidate.quantity_pair_id));
+
+    return { ready:isReady(diagnostics), candidates, candidate_count:candidates.length, not_analyzed:notAnalyzed,
+      excluded_pair_count:excludedPairCount, diagnostics };
+  }
+
   return Object.freeze({ SCHEMA_VERSION, SUPPORTED_RULESETS, validateAnnotationSchema, validateRulesetCompatibility,
     canonicalValue, canonicalJson, normalize, hashParts, computeDatasetSignature, computeRecordContentHash,
-    traceRecords, bindSide, bindInputPair, relationRefs });
+    traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates });
 });

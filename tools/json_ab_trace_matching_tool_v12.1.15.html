@@ -1676,6 +1676,39 @@
     };
   }
 
+  // Phase B-2: 次元候補は、結合状態(quantityBindingState)とtraceMatrixRows(照合行)の両方に
+  // 依存する。traceMatrixRowsは読み込み・照合フローの複数箇所(初回照合・再照合・phase7関連付け等)
+  // で更新されるため、loadQuantityBindings()の時点(traceMatrixRowsがまだ確定していないことがある)で
+  // 一度だけ計算してキャッシュすると、その後の再照合で古い照合行のまま表示され続ける危険がある
+  // (このプロジェクトでフェーズAから繰り返し問題になってきた「stale化した中間状態の使い回し」と
+  // 同種の欠陥になる)。そのため計算結果をキャッシュせず、参照するたびにtraceMatrixRowsの
+  // 現在値から都度再計算する。
+  function currentQuantityDimensionState() {
+    if (!quantityBindingState || !quantityBindingState.ready || !globalThis.QuantitySidecarBinding) return null;
+    return globalThis.QuantitySidecarBinding.generateDimensionCandidates({
+      binding:quantityBindingState,
+      relations:(traceMatrixRows || []).map(row => globalThis.QuantitySidecarBinding.relationRefs(row))
+    });
+  }
+
+  // 「圧縮された未解析レコード数」(not_analyzedの件数=圧縮バケット数+dimension_unavailable
+  // 個別件数)と、「excluded_pair_count合計」(実際に除外された数量ペアの総数)は必ず区別して
+  // 見せる——前者は監査記録の件数、後者は実際に比較を諦めた数量ペアの数であり、圧縮バケット1件が
+  // 数百件のペアを表すこともあるため、同じ数値として混同しないようにする(必須修正5)。
+  function quantityDimensionSummary(state = currentQuantityDimensionState()) {
+    if (!state) return { phase:'not_generated', ready:false, diagnostics:[], candidateCount:0, notAnalyzedRecordCount:0, excludedPairCount:0 };
+    const dimensionMismatchBuckets = (state.not_analyzed || []).filter(n => n.reason_code === 'dimension_mismatch').length;
+    const dimensionUnavailableCount = (state.not_analyzed || []).filter(n => n.reason_code === 'dimension_unavailable').length;
+    return {
+      phase:'dimension_stage', ready:!!state.ready,
+      diagnostics:(state.diagnostics || []).map(d => ({ ...d })),
+      candidateCount:state.candidate_count || 0,
+      notAnalyzedRecordCount:(state.not_analyzed || []).length,
+      dimensionMismatchBuckets, dimensionUnavailableCount,
+      excludedPairCount:state.excluded_pair_count || 0
+    };
+  }
+
   function renderQuantityBindingStatus() {
     const el = $('quantityBindingStatus');
     if (!el) return;
@@ -1684,14 +1717,33 @@
       return;
     }
     const s = quantityBindingSummary();
-    if (s.ready) {
-      el.textContent = `数量注釈の厳密結合が完了しました（要求 ${s.boundRequirement}件 / 実仕様 ${s.boundActual}件` + (s.notAnalyzed ? ` / 未解析 ${s.notAnalyzed}件` : '') + `）。Phase B-1では比較候補・数値比較・充足判定を生成しません。`;
+    if (!s.ready) {
+      const counts = {};
+      s.diagnostics.forEach(d => { counts[d.code] = (counts[d.code] || 0) + 1; });
+      const detail = Object.entries(counts).map(([code, count]) => `${code}:${count}`).join(' / ');
+      el.textContent = `数量注釈を結合できません（${detail || '診断なし'}）。不整合データから比較候補・充足判定は生成しません。`;
       return;
     }
-    const counts = {};
-    s.diagnostics.forEach(d => { counts[d.code] = (counts[d.code] || 0) + 1; });
-    const detail = Object.entries(counts).map(([code, count]) => `${code}:${count}`).join(' / ');
-    el.textContent = `数量注釈を結合できません（${detail || '診断なし'}）。不整合データから比較候補・充足判定は生成しません。`;
+    const ds = quantityDimensionSummary();
+    let text = `数量注釈の厳密結合が完了しました（要求 ${s.boundRequirement}件 / 実仕様 ${s.boundActual}件` + (s.notAnalyzed ? ` / 未解析 ${s.notAnalyzed}件` : '') + `）。`;
+    if (ds.phase === 'dimension_stage') {
+      if (ds.ready) {
+        // 「圧縮された未解析レコード数」と「除外された数量ペアの実数(excluded_pair_count合計)」は
+        // 異なる粒度の数値のため、必ず別々に表示する(必須修正5)。
+        text += ` 次元候補: ${ds.candidateCount}件` +
+          (ds.notAnalyzedRecordCount ? ` / 未解析レコード(圧縮後) ${ds.notAnalyzedRecordCount}件（うち次元不一致バケット ${ds.dimensionMismatchBuckets}件・次元未設定 ${ds.dimensionUnavailableCount}件）` : '') +
+          (ds.excludedPairCount ? ` / 除外された数量ペアの実数 ${ds.excludedPairCount}件（圧縮前の合計）` : '') +
+          `。段階2以降（設計特性候補・条件候補・comparisonMode導出）は未実装です。`;
+      } else {
+        const dCounts = {};
+        ds.diagnostics.forEach(d => { dCounts[d.code] = (dCounts[d.code] || 0) + 1; });
+        const dDetail = Object.entries(dCounts).map(([code, count]) => `${code}:${count}`).join(' / ');
+        text += ` 次元候補は生成できません（${dDetail || '診断なし'}）。`;
+      }
+    } else {
+      text += ` Phase B-1では比較候補・数値比較・充足判定を生成しません。`;
+    }
+    el.textContent = text;
   }
 
   async function loadQuantityBindings() {
@@ -1709,6 +1761,9 @@
       requirementTrace:sysData, requirementAnnotation,
       actualTrace:plmData, actualAnnotation
     });
+    // この時点ではtraceMatrixRowsがまだ確定していない(照合はこの後に走る)ため、次元候補の
+    // 計算はここでは行わない。renderQuantityBindingStatus()呼び出し側・診断用アクセサ双方が
+    // currentQuantityDimensionState()を通じてtraceMatrixRows確定後に都度再計算する。
     renderQuantityBindingStatus();
     return quantityBindingState;
   }
@@ -1716,6 +1771,8 @@
   window.__quantityBindingDiagnostics = Object.freeze({
     state:() => quantityBindingState ? JSON.parse(JSON.stringify(quantityBindingState)) : null,
     summary:() => quantityBindingSummary(),
+    dimensionState:() => { const s = currentQuantityDimensionState(); return s ? JSON.parse(JSON.stringify(s)) : null; },
+    dimensionSummary:() => quantityDimensionSummary(),
     relationRows:() => (traceMatrixRows || []).map(row => globalThis.QuantitySidecarBinding?.relationRefs(row) || ({
       requirement_trace_id:row?.requirement_trace_id || null, actual_trace_id:row?.actual_trace_id || null,
       matcher_a_id:row?.matcher_a_id || row?.['A_ID'] || null, matcher_b_id:row?.matcher_b_id || row?.['B_ID'] || null
@@ -2072,6 +2129,10 @@
 
     const resultStart = perfNow();
     traceMatrixRows = applyTraceDiff(buildTraceMatrixRows(sysList, plmList));
+    // traceMatrixRowsがこの照合実行分で確定したので、次元候補(currentQuantityDimensionState()、
+    // Phase B-2)を含む数量注釈結合状態の表示をここで更新する。loadQuantityBindings()の時点では
+    // まだ照合前でtraceMatrixRowsが確定していないため、そこでは更新しない(1750行目付近のコメント参照)。
+    renderQuantityBindingStatus();
     const resultBuildMs = perfNow() - resultStart;
     const timing = {
       annotationMs,

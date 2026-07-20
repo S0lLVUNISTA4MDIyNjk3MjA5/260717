@@ -58,10 +58,29 @@ function check(list, name, ok, detail) { list.push({ name, ok:!!ok, detail }); }
   const valid = await page.evaluate(() => ({
     summary:window.__quantityBindingDiagnostics.summary(),
     relations:window.__quantityBindingDiagnostics.relationRows(),
+    dimensionSummary:window.__quantityBindingDiagnostics.dimensionSummary(),
+    dimensionState:window.__quantityBindingDiagnostics.dimensionState(),
     text:document.querySelector('#quantityBindingStatus')?.textContent || ''
   }));
   check(checks, '実UIからPhase A実生成trace/sidecar A/Bを直接読み込める', valid.summary.ready && valid.summary.boundRequirement === 5 && valid.summary.boundActual === 4 && valid.text.includes('厳密結合が完了'));
   check(checks, '実UIの結合状態も比較候補・充足判定を生成しない', valid.summary.comparisonCandidates === 0 && valid.summary.satisfactionJudgements === 0);
+
+  // ── 【Phase B-2】実UI経由での次元候補生成の確認。traceMatrixRows(実際の照合結果)確定後に
+  // currentQuantityDimensionState()が呼ばれ、UIステータス文言・診断アクセサ双方に反映されること。 ──
+  check(checks, '実UI経由で次元候補(Phase B-2)が生成される(binding成功後、traceMatrixRows確定後)',
+    valid.dimensionSummary.phase === 'dimension_stage' && valid.dimensionSummary.ready === true, valid.dimensionSummary);
+  // 「次元候補」という文字列の有無だけでは、traceMatrixRows確定前のstaleな(0件の)状態のまま
+  // 表示され続けていても常に真になってしまう(必須修正1のUI版の陳腐化検出漏れ)。表示中の件数が
+  // 診断APIの実際の値(この時点でtraceMatrixRowsは確定済み)と一致することまで確認する。
+  check(checks, 'UIステータス文言の次元候補件数が、診断APIの実際の値(6件超の実データ)と一致する(表示のstale化検出)',
+    valid.dimensionSummary.candidateCount > 0 && valid.text.includes(`次元候補: ${valid.dimensionSummary.candidateCount}件`), valid.text);
+  check(checks, 'UIステータス文言の除外ペア数も、診断APIの実際の値と一致する(圧縮バケット1件が複数ペアを表すため必須修正5の直接確認)',
+    valid.dimensionSummary.excludedPairCount > 0 && valid.text.includes(`除外された数量ペアの実数 ${valid.dimensionSummary.excludedPairCount}件`), valid.text);
+  check(checks, '圧縮された未解析レコード数とexcluded_pair_count合計が別々の数値として区別できる(必須修正5)',
+    typeof valid.dimensionSummary.notAnalyzedRecordCount === 'number' && typeof valid.dimensionSummary.excludedPairCount === 'number', valid.dimensionSummary);
+  check(checks, 'dimensionState()がcandidates/not_analyzed配列を実際に返す', Array.isArray(valid.dimensionState?.candidates) && Array.isArray(valid.dimensionState?.not_analyzed), valid.dimensionState);
+  check(checks, '次元候補の各要素がquantity_pair_id(requirement::actual形式)を持つ',
+    valid.dimensionState.candidates.every(c => c.quantity_pair_id === `${c.requirement_quantity_id}::${c.actual_quantity_id}`), valid.dimensionState.candidates.slice(0, 3));
   const boundRelation = valid.relations.find(r => r.requirement_trace_id && r.actual_trace_id);
   check(checks, '実際の照合行がrequirement_trace_id/actual_trace_idを保持する', !!boundRelation, valid.relations.slice(0, 3));
   check(checks, '実際の照合行がmatcher_a_id/matcher_b_idを別途保持する', !!boundRelation?.matcher_a_id && !!boundRelation?.matcher_b_id, boundRelation);
@@ -76,9 +95,14 @@ function check(list, name, ok, detail) { list.push({ name, ok:!!ok, detail }); }
   await page.setInputFiles('#plmQuantityFile', badSidecarPath);
   await page.click('#loadBtn');
   await page.waitForFunction(() => (document.querySelector('#quantityBindingStatus')?.textContent || '').includes('source_mismatch'), null, { timeout:30000 });
-  const invalid = await page.evaluate(() => ({ summary:window.__quantityBindingDiagnostics.summary(), text:document.querySelector('#quantityBindingStatus')?.textContent || '' }));
+  const invalid = await page.evaluate(() => ({
+    summary:window.__quantityBindingDiagnostics.summary(),
+    dimensionSummary:window.__quantityBindingDiagnostics.dimensionSummary(),
+    text:document.querySelector('#quantityBindingStatus')?.textContent || ''
+  }));
   check(checks, '実UIでdataset_signature不一致をsource_mismatchとして明示する', !invalid.summary.ready && invalid.summary.diagnostics.some(d => d.code === 'source_mismatch') && invalid.text.includes('結合できません'));
   check(checks, '実UIの不整合時も比較候補・充足判定は0件', invalid.summary.comparisonCandidates === 0 && invalid.summary.satisfactionJudgements === 0);
+  check(checks, '結合(Phase B-1)が失敗している間は次元候補(Phase B-2)も生成しない', invalid.dimensionSummary.phase === 'not_generated' && invalid.dimensionSummary.ready === false, invalid.dimensionSummary);
 
   await page.setInputFiles('#plmQuantityFile', staleRulesetPath);
   await page.click('#loadBtn');
