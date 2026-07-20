@@ -15,6 +15,7 @@
 > - `929a365`→`e18f36d`：3経路（Node `crypto.createHash`／ブラウザ`crypto.subtle.digest`／純JSフォールバック`v12Sha256Fallback()`）のハッシュ同値テストを実施した。日本語・全角ASCII・CRLF・連続空白・絵文字・境界の曖昧性を試す組み合わせを含む11ベクトルすべてで3経路が一致することをPlaywrightで確認した（`shadow_mode_integration_design.md` §6回帰テスト27番）。この検証の過程で、検証スクリプトの`hashParts()`が実際の`v12HashParts()`と異なり`namespace`まで正規化していたことを発見し、訂正した（実際の契約は`namespace`を正規化しない）。
 > - `e18f36d`→本改訂：結果fixtureのみコミットし検証スクリプト自体はscratchに残していたため「一回限りの実証」に過ぎず、本体側の実装が将来壊れても自動検出できない、との指摘を受けた。`tools/design_notes/hash_3paths_verification.js`（Playwright必要、完全版）と`hash_3paths_node_check.js`（依存パッケージなし、`source_blob_sha`によるHTML変更検知＋Node側ハッシュの回帰確認）をリポジトリへ保存し、再実行可能にした。`-rc1`から正式版への昇格条件は`shadow_mode_integration_design.md` §9に記録した。
 > - 本改訂→Phase B-2実装（`00acf39`レビュー、2026-07-20）：3.4節「全組み合わせ生成の絞り込み」の段階1（canonical dimension一致）を`quantity_sidecar_binding_core.js`の`generateDimensionCandidates()`として実装した。当初の設計（本節が例示する`not_analyzed`個別ペアリスト）は、次元不一致のような「大きな塊で起こる除外」にまで個別ペア粒度を適用すると組み合わせ爆発を起こす欠陥があり（20要求×20実仕様の異次元合成データで実際に400件生成されることを確認）、次元段階だけはバケット単位の圧縮監査記録へ訂正した。詳細・訂正の経緯は`shadow_mode_integration_design.md` 3.4節を参照。段階2以降（設計特性候補の一致・条件候補の整合・comparisonMode導出）は当初の個別ペア粒度のまま未実装。
+> - `77f440f`レビュー（2026-07-20）：異次元の監査記録だけでなく、同一次元候補も数量ID全直積へ展開しない契約へ訂正した。段階1の出力は`candidate_buckets[]`（両数量ID集合、dimension、潜在ペア数、4参照ID）とし、段階2以降が逐次走査して個別ペアを絞り込む。照合行複合キーの区切り文字衝突、複数関係時の`dimension_unavailable`重複、手動関係変更後のUI表示陳腐化も同時に修正した。
 
 ## 1. 設計原則
 
@@ -475,13 +476,13 @@ all_confirmed =
 
 ## 13. 未確定・次工程
 
-**この改訂で解決した項目**：ハッシュアルゴリズムをSHA-256へ変更（2.0節）、`source_span`をプロトタイプへ実装し順序非依存の`quantity_id`を実現（2.1節、`quantity_extraction_prototype.js` v2.14）、`review`セクションを判断対象別オブジェクト＋依存関係へ再設計（10節）、§11の具体例を実データからの機械生成・機械検証へ差し替え（11節）。
+**この改訂で解決した項目**：ハッシュアルゴリズムをSHA-256へ変更（2.0節）、`source_span`をプロトタイプへ実装し順序非依存の`quantity_id`を実現（2.1節、`quantity_extraction_prototype.js` v2.14）、`review`セクションを判断対象別オブジェクト＋依存関係へ再設計（10節）、§11の具体例を実データからの機械生成・機械検証へ差し替え（11節）。Phase B-1の厳密結合と4参照ID保持、Phase B-2段階1の同一次元候補バケット／異次元監査バケットまで実装済み。
 
 **まだ未解決の項目**：
-- **shadow-mode挿入点**：`shadow_mode_integration_design.md`で設計済み（挿入点3箇所）だが、**`json_ab_trace_matching_tool_v12.1.15.html`側にはまだ実装されていない**（`requirement_trace_id`/`actual_trace_id`/`matcher_a_id`/`matcher_b_id`の保持、`quantity-annotation`ファイルの読み込み・突き合わせ機能等は未着手）。同資料§9に`-rc1`から正式版への昇格条件を記録した。
+- **shadow-mode挿入点の残作業**：`json_ab_trace_matching_tool_v12.1.15.html`への数量注釈読込み・厳密結合、4参照ID保持、次元バケット生成までは実装済み。設計特性・条件・comparison modeによる逐次絞り込み、数値比較、充足判定、`trace-comparison`正式出力は未着手。同資料§9に`-rc1`から正式版への昇格条件を記録した。
 - **`evaluateAutoApplicable()`のシグネチャ変更**：7節の`mapping`縮約に必要な`propertyCandidates`配列対応（`marginOf()`パターンの適用）は、プロトタイプ側（`semantic_mapping_prototype.js`）の未実装事項。§11の例は現行シグネチャ（`propertyConfidence`スカラー）のまま生成しており、変更後の実際の出力文言は未確認。
 - **Excel列の役割自動判定**：`shadow_mode_integration_design.md` §2.3参照。現行の`inferRole()`は列名の完全一致（`標準機種情報`/`検討結果`）のみに対応しており、同義の別見出しには対応しない。
-- **`not_analyzed`の粒度**（Phase B-2で段階1のみ解決）：件数集計ではなく、除外された数量IDペアと理由コードを保持する設計に変更済み。ただし段階（次元一致/意味一致/条件整合等）によって粒度を使い分ける契約に統一した——次元不一致（段階1、`generateDimensionCandidates()`で実装済み）は次元バケット単位の圧縮監査記録（個々のペアをすべて展開すると組み合わせ爆発を起こすため）、それ以外（段階2以降、未実装）は除外された数量IDペア単位の個別リストのまま。詳細は`shadow_mode_integration_design.md` §3.4参照。
+- **候補・`not_analyzed`の粒度**（Phase B-2で段階1のみ解決）：同一次元候補は`candidate_buckets[]`、異次元除外は次元バケット単位の圧縮監査記録とし、段階1では数量IDペアを全件展開しない。段階2以降は候補バケットを逐次走査し、意味・条件等で個別候補を除外した場合のみ数量IDペア単位の理由を保持する。詳細は`shadow_mode_integration_design.md` §3.4参照。
 - **ファイル命名・保存場所の規約**：`{requirement_file}_{actual_file}_comparison.json`のような命名規則、保存先ディレクトリは未検討。
 - **スキーマのバージョニング方針**：`schema_version`のインクリメント規則（フィールド追加は何もしなくてよいか、破壊的変更のみ上げるか）は未検討。
 - **`review`セクションの永続化先**：既存のレビュー状態が`localStorage`（`v11_trace_review_store`）を一次保存先としている（`baseline_v1_handoff.md` §7.2.4）のに対し、本スキーマの`review`はファイル内にフィールドとして持たせる設計にした。この不一致（一次保存先が二重に存在する）を統合時にどう扱うかは`shadow_mode_integration_design.md` §8で未解決のまま記録している。

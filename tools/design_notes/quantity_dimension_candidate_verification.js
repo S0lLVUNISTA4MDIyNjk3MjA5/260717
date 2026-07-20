@@ -93,7 +93,7 @@ function relation(requirementTraceId, actualTraceId, matcherA = `A-${requirement
   check('異次元ペアはcandidatesへ1件も生成されない', bigResult.candidates.length === 0);
   check('excluded_pair_count合計(トップレベル)が400になる', bigResult.excluded_pair_count === 400, bigResult.excluded_pair_count);
 
-  // ── 2. 同次元は候補として全直積を生成する(2×3=6件) ──
+  // ── 2. 同次元も全直積を展開せず、候補バケットとして保持する(2×3=6ペア) ──
   const reqPower2 = [analysis('rp0', 'power', 'kW'), analysis('rp1', 'power', 'kW')];
   const actPower3 = [analysis('ap0', 'power', 'kW'), analysis('ap1', 'power', 'kW'), analysis('ap2', 'power', 'kW')];
   const sameDimBinding = await bind(
@@ -101,12 +101,24 @@ function relation(requirementTraceId, actualTraceId, matcherA = `A-${requirement
     traceWith('act-power'), id => (id === 'act-power' ? actPower3 : [])
   );
   const sameDimResult = core.generateDimensionCandidates({ binding:sameDimBinding, relations:[relation('req-power', 'act-power')] });
-  check('同次元(2×3)は6件の候補を生成する', sameDimResult.candidates.length === 6, sameDimResult.candidates.length);
+  check('同次元(2×3)は6ペアを1候補バケットで表す', sameDimResult.candidate_count === 6 && sameDimResult.candidate_buckets.length === 1, sameDimResult);
+  check('同次元候補は数量ペアへ展開しない', sameDimResult.candidates.length === 0 && sameDimResult.candidates_materialized === false);
   check('同次元では圧縮記録を生成しない', sameDimResult.not_analyzed.length === 0);
-  check('候補のdimensionが正しい', sameDimResult.candidates.every(c => c.dimension === 'power'));
-  check('候補のquantity_pair_idがrequirement::actualの順で決定的', sameDimResult.candidates[0].quantity_pair_id === `${sameDimResult.candidates[0].requirement_quantity_id}::${sameDimResult.candidates[0].actual_quantity_id}`);
-  check('候補が両側のtrace_id/matcher_idを保持する',
-    sameDimResult.candidates.every(c => c.requirement_trace_id === 'req-power' && c.actual_trace_id === 'act-power' && c.matcher_a_id === 'A-req-power' && c.matcher_b_id === 'B-act-power'));
+  const sameBucket = sameDimResult.candidate_buckets[0];
+  check('候補バケットのdimensionと両数量ID集合が正しい', sameBucket?.dimension === 'power' && sameBucket.requirement_quantity_ids.length === 2 && sameBucket.actual_quantity_ids.length === 3 && sameBucket.candidate_pair_count === 6, sameBucket);
+  check('候補バケットが両側のtrace_id/matcher_idを保持する',
+    sameBucket?.requirement_trace_id === 'req-power' && sameBucket.actual_trace_id === 'act-power' && sameBucket.matcher_a_id === 'A-req-power' && sameBucket.matcher_b_id === 'B-act-power');
+
+  const reqPower200 = Array.from({ length:200 }, (_, i) => analysis(`r200-${i}`, 'power', 'kW'));
+  const actPower200 = Array.from({ length:200 }, (_, i) => analysis(`a200-${i}`, 'power', 'kW'));
+  const sameDimLargeBinding = await bind(
+    traceWith('req-power-200'), id => (id === 'req-power-200' ? reqPower200 : []),
+    traceWith('act-power-200'), id => (id === 'act-power-200' ? actPower200 : [])
+  );
+  const sameDimLarge = core.generateDimensionCandidates({ binding:sameDimLargeBinding, relations:[relation('req-power-200', 'act-power-200')] });
+  check('同次元200×200でも40,000個の候補オブジェクトを生成しない', sameDimLarge.candidates.length === 0 && sameDimLarge.candidate_buckets.length === 1, sameDimLarge);
+  check('同次元200×200の潜在ペア数40,000を数値として保持する', sameDimLarge.candidate_count === 40000 && sameDimLarge.candidate_buckets[0]?.candidate_pair_count === 40000);
+  check('同次元200×200のバケットが両側200 quantity_idを保持する', sameDimLarge.candidate_buckets[0]?.requirement_quantity_ids.length === 200 && sameDimLarge.candidate_buckets[0]?.actual_quantity_ids.length === 200);
 
   // ── 3. 1照合行の中に「一致する次元」と「複数の異なる不一致次元」が混在するケース ──
   const mixedReq = [analysis('mrp0', 'power', 'kW'), analysis('mrt0', 'temperature', '°C')];
@@ -116,7 +128,7 @@ function relation(requirementTraceId, actualTraceId, matcherA = `A-${requirement
     traceWith('act-mixed'), id => (id === 'act-mixed' ? mixedAct : [])
   );
   const mixedResult = core.generateDimensionCandidates({ binding:mixedBinding, relations:[relation('req-mixed', 'act-mixed')] });
-  check('一致するpower同士は1件の候補になる(混在ケース)', mixedResult.candidates.length === 1, mixedResult.candidates);
+  check('一致するpower同士は1ペアの候補バケットになる(混在ケース)', mixedResult.candidate_count === 1 && mixedResult.candidate_buckets.length === 1, mixedResult.candidate_buckets);
   // 要求側{power,temperature}×実仕様側{power,pressure}の次元の直積のうち、一致するのは
   // (power,power)の1組だけで、残り3組(power×pressure・temperature×power・temperature×pressure)
   // はすべて不一致のため、それぞれ独立した圧縮バケットになる(次元の異なり方ごとに1件、が正しい粒度)。
@@ -148,7 +160,7 @@ function relation(requirementTraceId, actualTraceId, matcherA = `A-${requirement
   );
   const dupRelations = [relation('req-dup', 'act-dup', 'A-1'), relation('req-dup', 'act-dup', 'A-2')];
   const dupResult = core.generateDimensionCandidates({ binding:dupBinding, relations:dupRelations });
-  check('重複照合行からは候補を生成しない(必須修正2)', dupResult.candidates.length === 0, dupResult.candidates);
+  check('重複照合行からは候補を生成しない(必須修正2)', dupResult.candidate_count === 0 && dupResult.candidate_buckets.length === 0, dupResult.candidate_buckets);
   check('重複照合行からは圧縮記録も生成しない(候補と同様、生成自体を止める)', dupResult.not_analyzed.length === 0);
   check('重複照合行がduplicate_relation_pair warningとして記録される', dupResult.diagnostics.some(d => d.code === 'duplicate_relation_pair' && d.severity === 'warning'), dupResult.diagnostics);
   check('duplicate_relation_pair発生時もreadyはtrue(warningであってerrorではない)', dupResult.ready === true);
@@ -162,7 +174,18 @@ function relation(requirementTraceId, actualTraceId, matcherA = `A-${requirement
   );
   const notDupRelations = [relation('req-a', 'act-a'), relation('req-b', 'act-b')];
   const notDupResult = core.generateDimensionCandidates({ binding:notDupBinding, relations:notDupRelations });
-  check('重複していない照合行は通常どおり候補を生成する(重複判定が誤検知しない)', notDupResult.candidates.length === 1, notDupResult);
+  check('重複していない照合行は通常どおり候補を生成する(重複判定が誤検知しない)', notDupResult.candidate_count === 1 && notDupResult.candidate_buckets.length === 1, notDupResult);
+
+  // 区切り文字を含むtrace_idでも異なる複合キーとして扱う。
+  const separatorBinding = await bind(
+    traceWithMany(['a|b', 'a']), id => [analysis(`sep-r-${id}`, 'power', 'kW')],
+    traceWithMany(['c', 'b|c']), id => [analysis(`sep-a-${id}`, 'power', 'kW')]
+  );
+  const separatorRelations = [relation('a|b', 'c'), relation('a', 'b|c')];
+  const separatorResult = core.generateDimensionCandidates({ binding:separatorBinding, relations:separatorRelations });
+  check('区切り文字を含む異なる2照合ペアを衝突させない', separatorResult.candidate_count === 2 && separatorResult.candidate_buckets.length === 2 && !separatorResult.diagnostics.some(d => d.code === 'duplicate_relation_pair'), separatorResult);
+  const separatorDuplicate = core.generateDimensionCandidates({ binding:separatorBinding, relations:[separatorRelations[0], structuredClone(separatorRelations[0])] });
+  check('区切り文字を含んでも完全に同一の照合ペア2行だけを重複扱いする', separatorDuplicate.candidate_count === 0 && separatorDuplicate.diagnostics.some(d => d.code === 'duplicate_relation_pair' && d.requirement_trace_id === 'a|b' && d.actual_trace_id === 'c'), separatorDuplicate);
 
   // ── 7. 【必須修正3】sidecar内でquantity_idが重複した場合、候補生成全体をerrorで停止する ──
   const dupQidAnalyses = [analysis('shared', 'power', 'kW'), analysis('shared', 'temperature', '°C')];
@@ -193,8 +216,8 @@ function relation(requirementTraceId, actualTraceId, matcherA = `A-${requirement
     dimAvailResult.not_analyzed);
   check('dimension_unavailableでもready:trueのまま(warningでありerrorではない)', dimAvailResult.ready === true);
   check('dimension未設定以外の数量(withdim)は候補生成を継続する(必須修正4)',
-    dimAvailResult.candidates.some(c => c.requirement_quantity_id === qid('withdim') && c.actual_quantity_id === qid('actdim')),
-    dimAvailResult.candidates);
+    dimAvailResult.candidate_buckets.some(c => c.requirement_quantity_ids.includes(qid('withdim')) && c.actual_quantity_ids.includes(qid('actdim'))),
+    dimAvailResult.candidate_buckets);
   const whitespaceDimBinding = await bind(
     traceWith('req-ws'), id => (id === 'req-ws' ? [analysis('wsdim', '   ', 'unknown')] : []),
     traceWith('act-ws'), id => (id === 'act-ws' ? [analysis('actws', 'power', 'kW')] : [])
@@ -202,6 +225,18 @@ function relation(requirementTraceId, actualTraceId, matcherA = `A-${requirement
   const whitespaceDimResult = core.generateDimensionCandidates({ binding:whitespaceDimBinding, relations:[relation('req-ws', 'act-ws')] });
   check('空白のみのdimensionも未設定として扱う(必須修正4)',
     whitespaceDimResult.not_analyzed.some(n => n.reason_code === 'dimension_unavailable' && n.quantity_id === qid('wsdim')), whitespaceDimResult.not_analyzed);
+
+  const unavailableMultiBinding = await bind(
+    traceWith('req-unavailable-multi'), () => [analysis('nodim-multi', '', 'unknown')],
+    traceWithMany(['act-multi-a', 'act-multi-b']), id => [analysis(`a-${id}`, 'power', 'kW')]
+  );
+  const unavailableMultiRelations = [relation('req-unavailable-multi', 'act-multi-a'), relation('req-unavailable-multi', 'act-multi-b')];
+  const unavailableMulti = core.generateDimensionCandidates({ binding:unavailableMultiBinding, relations:unavailableMultiRelations });
+  const unavailableEntries = unavailableMulti.not_analyzed.filter(n => n.reason_code === 'dimension_unavailable');
+  check('同じ次元欠落数量が複数照合行に現れても1件だけ記録する', unavailableEntries.length === 1 && unavailableEntries[0].side === 'requirement' && unavailableEntries[0].quantity_id === qid('nodim-multi'), unavailableEntries);
+  check('dimension_unavailable診断もside+trace_id+quantity_id+reason_codeで一意', unavailableMulti.diagnostics.filter(d => d.code === 'dimension_unavailable').length === 1, unavailableMulti.diagnostics);
+  const unavailableMultiReordered = core.generateDimensionCandidates({ binding:unavailableMultiBinding, relations:[...unavailableMultiRelations].reverse() });
+  check('照合行の順序を変えても次元欠落の記録件数が変わらない', unavailableMultiReordered.not_analyzed.filter(n => n.reason_code === 'dimension_unavailable').length === 1);
 
   // ── 9. bindInputPair()がready:falseの場合は次元候補生成そのものを行わない ──
   const notReadyBinding = { ready:false, requirement:{ bindings:[] }, actual:{ bindings:[] } };
@@ -249,7 +284,8 @@ function relation(requirementTraceId, actualTraceId, matcherA = `A-${requirement
   const realResult = core.generateDimensionCandidates({ binding:realBinding, relations:realRelations });
   check('実fixture同士でも次元候補生成が例外なく完了する(ready)', realResult.ready === true, realResult.diagnostics);
   check('実fixtureのexcluded_pair_countは常に0以上の整数', Number.isInteger(realResult.excluded_pair_count) && realResult.excluded_pair_count >= 0);
-  check('実fixtureのcandidates/not_analyzedはいずれも配列', Array.isArray(realResult.candidates) && Array.isArray(realResult.not_analyzed));
+  check('実fixtureのcandidate_buckets/candidates/not_analyzedはいずれも配列', Array.isArray(realResult.candidate_buckets) && Array.isArray(realResult.candidates) && Array.isArray(realResult.not_analyzed));
+  check('実fixtureでも数量ペア候補を配列へ展開しない', realResult.candidates.length === 0 && realResult.candidates_materialized === false);
 
   console.log('\n=== quantity_dimension_candidate_verification 結果 ===');
   let failed = 0;

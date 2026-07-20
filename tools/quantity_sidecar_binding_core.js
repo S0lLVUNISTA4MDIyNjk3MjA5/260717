@@ -256,8 +256,8 @@
   }
 
   // ── Phase B-2: 次元候補生成（3.4節 段階1のみ）。段階2以降（設計特性候補・条件候補・
-  // comparisonMode導出）は未実装のまま。次元が一致した組だけをcandidatesとして返し、
-  // それ以外は全直積を作らずバケット単位でnot_analyzedへ圧縮する。 ──
+  // comparisonMode導出）は未実装のまま。同次元・異次元とも数量IDの全直積を作らず、
+  // 次元バケットとして返す。段階2以降はcandidate_bucketsを逐次走査して絞り込む。 ──
 
   function bindingAnalysesByTraceId(sideResult) {
     const map = new Map();
@@ -297,8 +297,28 @@
     return map;
   }
 
+  function dimensionSideIndex(analysesByTrace, side) {
+    const byTrace = new Map();
+    for (const [traceId, analyses] of [...analysesByTrace.entries()].sort(([a], [b]) => String(a).localeCompare(String(b)))) {
+      const usable = [];
+      const unavailable = [];
+      for (const analysis of [...analyses].sort((a, b) => String(a?.quantity_id || '').localeCompare(String(b?.quantity_id || '')))) {
+        const dimension = dimensionOf(analysis);
+        if (!dimension) {
+          unavailable.push({ side, trace_id:traceId, quantity_id:analysis?.quantity_id || null,
+            reason_code:'dimension_unavailable', detail:'quantity.unit.dimensionが空です' });
+        } else {
+          usable.push({ quantity_id:analysis.quantity_id, dimension });
+        }
+      }
+      byTrace.set(traceId, { byDimension:groupByDimension(usable), unavailable });
+    }
+    return byTrace;
+  }
+
   function blockedDimensionResult(diagnostics) {
-    return { ready:false, candidates:[], candidate_count:0, not_analyzed:[], excluded_pair_count:0, diagnostics };
+    return { ready:false, candidates:[], candidate_buckets:[], candidate_bucket_count:0, candidate_count:0,
+      candidates_materialized:false, not_analyzed:[], excluded_pair_count:0, diagnostics };
   }
 
   function generateDimensionCandidates({ binding, relations }) {
@@ -322,22 +342,39 @@
 
     const diagnostics = [];
     const notAnalyzed = [];
-    let candidates = [];
+    const candidateBuckets = [];
+    let candidateCount = 0;
     let excludedPairCount = 0;
+
+    // dimension索引と欠落情報はsidecar/trace単位で一度だけ構築する。照合行ループ内で
+    // analysesを再走査しないため、同じtraceが複数相手と関係しても欠落診断は増殖しない。
+    const reqDimensionIndex = dimensionSideIndex(reqAnalysesByTrace, 'requirement');
+    const actDimensionIndex = dimensionSideIndex(actAnalysesByTrace, 'actual');
+    const emittedUnavailable = new Set();
+    const emitUnavailable = entry => {
+      const key = JSON.stringify([entry.side, entry.trace_id, entry.quantity_id, entry.reason_code]);
+      if (emittedUnavailable.has(key)) return;
+      emittedUnavailable.add(key);
+      notAnalyzed.push(entry);
+      diagnostics.push({ code:'dimension_unavailable', severity:'warning', side:entry.side,
+        trace_id:entry.trace_id, quantity_id:entry.quantity_id });
+    };
 
     // 【必須修正2】同一の要求trace_id+実仕様trace_idを持つ照合行が複数存在する場合、
     // どちらの照合行を採用すべきか自明でないため、いずれからも候補を生成しない。
-    const relationKey = row => `${row.requirement_trace_id}|${row.actual_trace_id}`;
+    const relationKey = row => JSON.stringify([row.requirement_trace_id, row.actual_trace_id]);
     const relationCounts = new Map();
+    const relationByKey = new Map();
     (relations || []).forEach(row => {
       if (!row?.requirement_trace_id || !row?.actual_trace_id) return; // A未対応/B未参照はペア自体が存在しない
       const key = relationKey(row);
       relationCounts.set(key, (relationCounts.get(key) || 0) + 1);
+      if (!relationByKey.has(key)) relationByKey.set(key, row);
     });
     const duplicateRelationKeys = new Set([...relationCounts.entries()].filter(([, count]) => count > 1).map(([key]) => key));
     duplicateRelationKeys.forEach(key => {
-      const [requirementTraceId, actualTraceId] = key.split('|');
-      diagnostics.push({ code:'duplicate_relation_pair', severity:'warning', requirement_trace_id:requirementTraceId, actual_trace_id:actualTraceId,
+      const row = relationByKey.get(key);
+      diagnostics.push({ code:'duplicate_relation_pair', severity:'warning', requirement_trace_id:row.requirement_trace_id, actual_trace_id:row.actual_trace_id,
         detail:'同一の要求trace_id+実仕様trace_idを持つ照合行が複数存在するため、いずれからも候補を生成しません' });
     });
 
@@ -345,47 +382,26 @@
       if (!row?.requirement_trace_id || !row?.actual_trace_id) continue;
       if (duplicateRelationKeys.has(relationKey(row))) continue;
 
-      const reqAnalyses = reqAnalysesByTrace.get(row.requirement_trace_id) || [];
-      const actAnalyses = actAnalysesByTrace.get(row.actual_trace_id) || [];
-      if (!reqAnalyses.length || !actAnalyses.length) continue; // 未結合(missing/stale/unparsed)・数量ゼロ件は対象外
-
-      // 【必須修正4】dimensionが空文字・空白・未設定の数量は、他の解決可能な数量の処理を
-      // 止めずにdimension_unavailableへ個別に送る(バケット圧縮の対象はN×M組み合わせだけであり、
-      // 単一の数量自体の欠落は最大でも数量の総数でしか増えないため、圧縮の必要がない)。
-      const usable = (analyses, side, traceId) => {
-        const kept = [];
-        analyses.forEach(analysis => {
-          const dimension = dimensionOf(analysis);
-          if (!dimension) {
-            notAnalyzed.push({ side, trace_id:traceId, quantity_id:analysis?.quantity_id || null,
-              reason_code:'dimension_unavailable', detail:'quantity.unit.dimensionが空です' });
-            diagnostics.push({ code:'dimension_unavailable', severity:'warning', side, trace_id:traceId, quantity_id:analysis?.quantity_id || null });
-          } else {
-            kept.push({ quantity_id:analysis.quantity_id, dimension });
-          }
-        });
-        return kept;
-      };
-
-      const reqUsable = usable(reqAnalyses, 'requirement', row.requirement_trace_id);
-      const actUsable = usable(actAnalyses, 'actual', row.actual_trace_id);
-      const reqByDim = groupByDimension(reqUsable);
-      const actByDim = groupByDimension(actUsable);
+      const reqTraceIndex = reqDimensionIndex.get(row.requirement_trace_id);
+      const actTraceIndex = actDimensionIndex.get(row.actual_trace_id);
+      if (!reqTraceIndex || !actTraceIndex) continue; // 未結合(missing/stale/unparsed)は対象外
+      reqTraceIndex.unavailable.forEach(emitUnavailable);
+      actTraceIndex.unavailable.forEach(emitUnavailable);
+      const reqByDim = reqTraceIndex.byDimension;
+      const actByDim = actTraceIndex.byDimension;
+      if (!reqByDim.size || !actByDim.size) continue;
 
       for (const [reqDim, reqIds] of reqByDim) {
         for (const [actDim, actIds] of actByDim) {
           if (reqDim === actDim) {
-            for (const requirementQuantityId of reqIds) {
-              for (const actualQuantityId of actIds) {
-                candidates.push({
-                  quantity_pair_id:`${requirementQuantityId}::${actualQuantityId}`,
-                  requirement_quantity_id:requirementQuantityId, actual_quantity_id:actualQuantityId,
-                  requirement_trace_id:row.requirement_trace_id, actual_trace_id:row.actual_trace_id,
-                  matcher_a_id:row.matcher_a_id ?? null, matcher_b_id:row.matcher_b_id ?? null,
-                  dimension:reqDim,
-                });
-              }
-            }
+            const pairCount = reqIds.length * actIds.length;
+            candidateCount += pairCount;
+            candidateBuckets.push({
+              requirement_quantity_ids:reqIds, actual_quantity_ids:actIds,
+              candidate_pair_count:pairCount, dimension:reqDim,
+              requirement_trace_id:row.requirement_trace_id, actual_trace_id:row.actual_trace_id,
+              matcher_a_id:row.matcher_a_id ?? null, matcher_b_id:row.matcher_b_id ?? null,
+            });
           } else {
             // 【必須修正1】異次元の組み合わせは、個々のペアをnot_analyzedへ展開せず、
             // 次元バケット単位で1件の圧縮監査記録にする(20×20なら400件ではなく1件)。
@@ -404,18 +420,9 @@
       }
     }
 
-    // 【必須修正3後半、防御的チェック】ここまでの重複排除(sidecar内quantity_id一意性、
-    // 重複照合行の除外)が正しく機能していれば構造的に起こり得ないはずだが、念のため
-    // 生成後のquantity_pair_id自体の重複も検査し、見つかった場合は該当候補をすべて除外する。
-    const pairIdCounts = new Map();
-    candidates.forEach(candidate => pairIdCounts.set(candidate.quantity_pair_id, (pairIdCounts.get(candidate.quantity_pair_id) || 0) + 1));
-    const duplicatedPairIds = new Set([...pairIdCounts.entries()].filter(([, count]) => count > 1).map(([id]) => id));
-    duplicatedPairIds.forEach(id => diagnostics.push({ code:'duplicate_quantity_pair_id', severity:'warning', quantity_pair_id:id,
-      detail:'生成後のquantity_pair_idが重複しています(防御的チェック)。該当候補をすべて除外します' }));
-    candidates = candidates.filter(candidate => !duplicatedPairIds.has(candidate.quantity_pair_id));
-
-    return { ready:isReady(diagnostics), candidates, candidate_count:candidates.length, not_analyzed:notAnalyzed,
-      excluded_pair_count:excludedPairCount, diagnostics };
+    return { ready:isReady(diagnostics), candidates:[], candidate_buckets:candidateBuckets,
+      candidate_bucket_count:candidateBuckets.length, candidate_count:candidateCount,
+      candidates_materialized:false, not_analyzed:notAnalyzed, excluded_pair_count:excludedPairCount, diagnostics };
   }
 
   return Object.freeze({ SCHEMA_VERSION, SUPPORTED_RULESETS, validateAnnotationSchema, validateRulesetCompatibility,
