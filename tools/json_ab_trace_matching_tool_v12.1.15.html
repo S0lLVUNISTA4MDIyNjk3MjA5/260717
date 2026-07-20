@@ -55,6 +55,7 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <!-- 軽量形態素解析（読み込み失敗時は文字種チャンクに自動フォールバック） -->
   <script src="https://unpkg.com/tiny-segmenter@0.2.0/dist/tiny-segmenter-0.2.0.js" onerror="window.__tsLoadFailed=true"></script>
+  <script src="./generated/quantity_annotation_schema_v1.browser.js"></script>
   <script src="./quantity_sidecar_binding_core.js"></script>
   <style>
     :root {
@@ -1663,12 +1664,13 @@
   }
 
   function quantityBindingSummary(state = quantityBindingState) {
-    if (!state) return { phase:'not_selected', ready:false, diagnostics:[], boundRequirement:0, boundActual:0, comparisonCandidates:0, satisfactionJudgements:0 };
+    if (!state) return { phase:'not_selected', ready:false, diagnostics:[], boundRequirement:0, boundActual:0, notAnalyzed:0, comparisonCandidates:0, satisfactionJudgements:0 };
     return {
       phase:'binding_only', ready:!!state.ready,
       diagnostics:(state.diagnostics || []).map(d => ({ ...d })),
       boundRequirement:(state.requirement?.bindings || []).filter(b => b.status === 'bound').length,
       boundActual:(state.actual?.bindings || []).filter(b => b.status === 'bound').length,
+      notAnalyzed:(state.not_analyzed || []).length,
       comparisonCandidates:(state.comparison_candidates || []).length,
       satisfactionJudgements:(state.satisfaction_judgements || []).length
     };
@@ -1683,7 +1685,7 @@
     }
     const s = quantityBindingSummary();
     if (s.ready) {
-      el.textContent = `数量注釈の厳密結合が完了しました（要求 ${s.boundRequirement}件 / 実仕様 ${s.boundActual}件）。Phase B-1では比較候補・数値比較・充足判定を生成しません。`;
+      el.textContent = `数量注釈の厳密結合が完了しました（要求 ${s.boundRequirement}件 / 実仕様 ${s.boundActual}件` + (s.notAnalyzed ? ` / 未解析 ${s.notAnalyzed}件` : '') + `）。Phase B-1では比較候補・数値比較・充足判定を生成しません。`;
       return;
     }
     const counts = {};

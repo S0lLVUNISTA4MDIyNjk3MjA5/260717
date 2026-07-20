@@ -1,0 +1,475 @@
+/* AUTO-GENERATED from tools/design_notes/quantity_annotation_schema_v1.json.
+ * Run: node tools/design_notes/generate_quantity_annotation_browser_schema.js
+ */
+(function(root, factory) {
+  const schema = factory();
+  if (typeof module === 'object' && module.exports) module.exports = schema;
+  if (root) root.QuantityAnnotationSchemaV1 = schema;
+})(typeof globalThis !== 'undefined' ? globalThis : this, function() {
+  return {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "quantity-annotation/1.0-rc1",
+  "title": "quantity-annotation/1.0-rc1",
+  "description": "PDF側(spec_to_json_conversion_tool_v1.18.html)・Excel側(excel_to_json_conversion_tool_v2.0.8.html)が、既存の照合用JSON(trace_format)と同一スナップショットから出力する数量抽出+意味候補の付加情報。候補は候補のまま(confirmedフィールドを持たない)。設計根拠はtools/design_notes/shadow_mode_integration_design.md 2節を参照。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "side",
+    "source_trace_file",
+    "hash_algorithm",
+    "id_hash_algorithm",
+    "dataset_signature",
+    "generated_at",
+    "generator",
+    "ruleset_version",
+    "records"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "quantity-annotation/1.0-rc1"
+    },
+    "side": {
+      "enum": [
+        "requirement",
+        "actual"
+      ]
+    },
+    "source_trace_file": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hash_algorithm": {
+      "const": "SHA-256",
+      "description": "content_hash/dataset_signature(64桁、切り詰めなし)で使ったアルゴリズム。"
+    },
+    "id_hash_algorithm": {
+      "const": "SHA-256/128",
+      "description": "quantity_id(32桁、128-bitに切り詰め)で使ったアルゴリズム。hash_algorithmとは別の値である点に注意(shadow_mode_integration_design.md 2.0節)。"
+    },
+    "dataset_signature": {
+      "type": "string",
+      "pattern": "^QA-SHA256:[0-9a-f]{64}$"
+    },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool",
+        "version"
+      ],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "ruleset_version": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "quantity_extraction",
+        "semantics_rules",
+        "auto_applicable_thresholds"
+      ],
+      "properties": {
+        "quantity_extraction": {
+          "type": "string",
+          "minLength": 1
+        },
+        "semantics_rules": {
+          "type": "string",
+          "minLength": 1
+        },
+        "auto_applicable_thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "modeConfidence",
+            "margin",
+            "propertyConfidence"
+          ],
+          "properties": {
+            "modeConfidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "margin": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "propertyConfidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        }
+      }
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/record"
+      }
+    },
+    "column_role_candidates": {
+      "description": "Excel側(excel_to_json_conversion_tool_v2.0.8.html)のみが出力する任意フィールド。シート内で検出した数量所在列ごとに、列役割の候補(baseline_design/resolved_design/unknown)を保持する(shadow_mode_integration_design.md 2.3節)。候補のみで確定しない(confirmedフィールドを持たない)。PDF側の出力にはこのフィールド自体が存在しない。",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "column",
+          "role_candidates"
+        ],
+        "properties": {
+          "column": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role_candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "role",
+                "confidence",
+                "evidence"
+              ],
+              "properties": {
+                "role": {
+                  "enum": [
+                    "baseline_design",
+                    "resolved_design",
+                    "unknown"
+                  ]
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "evidence": {
+                  "type": "array"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trace_id",
+        "content_hash",
+        "analyses"
+      ],
+      "properties": {
+        "trace_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "analyses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/analysis"
+          }
+        }
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "quantity_id",
+        "source_field",
+        "occurrence_index",
+        "source_span",
+        "normalized_text",
+        "quantity",
+        "interval_semantics_candidates"
+      ],
+      "properties": {
+        "quantity_id": {
+          "type": "string",
+          "pattern": "^q-[0-9a-f]{32}$"
+        },
+        "source_field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "occurrence_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_span": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "start",
+            "end"
+          ],
+          "properties": {
+            "start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "normalized_text": {
+          "type": "string"
+        },
+        "quantity": {
+          "description": "quantity_extraction_prototype.js(extractQuantities()の1件、またはcondition_candidatesをv12NormalizeConditionAsRecord()で正規化した1件)の出力オブジェクト。抽出ロジック自体の細部(単位表記の解釈等)の検証はquantity_extraction_prototype.js自身の回帰テスト(68件)が担うため、ここでは下流処理(比較エンジン)が直接依存する区間・単位・抽出信頼度の必須フィールドのみを検証する。",
+          "$ref": "#/$defs/quantityRecord"
+        },
+        "interval_semantics_candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "confidence",
+              "evidence"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "minLength": 1
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/evidenceItem"
+                }
+              }
+            }
+          }
+        },
+        "is_condition_value": {
+          "type": "boolean"
+        },
+        "source_representation": {
+          "description": "Excel側のみが出力する任意フィールド。source_span/normalized_textが、セルの生値をそのまま文字列化したテキスト('raw_value')と、セルの表示形式(number format)を適用した表示文字列('formatted_display'、例: 単位付き書式を持つ数値セル)のどちらに対する位置・テキストなのかを明示する。PDF側の出力にはこのフィールド自体が存在しない。",
+          "enum": [
+            "raw_value",
+            "formatted_display"
+          ]
+        },
+        "source_value_text": {
+          "description": "Excel側のみが出力する任意フィールド。source_representationが指すテキスト全体(抽出対象になったセルの値そのもの)。normalized_textは数量部分だけの正規化後テキストなので、それとは異なる。",
+          "type": "string"
+        }
+      }
+    },
+    "quantityRecord": {
+      "type": "object",
+      "required": [
+        "source_text",
+        "quantity",
+        "unit",
+        "extraction"
+      ],
+      "properties": {
+        "source_text": {
+          "type": "string"
+        },
+        "source_span": {
+          "type": "object",
+          "required": [
+            "start",
+            "end"
+          ],
+          "properties": {
+            "start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "normalized_text": {
+          "type": "string"
+        },
+        "quantity": {
+          "description": "kindによって形が変わる判別可能な共用体(quantity_extraction_prototype.jsの2種類の出力形、112〜452行目参照)。区間形式(kind:'interval')以外に、「12/15 kW」のような並列値(kind:'alternatives'、297行目。lower/upperを持たずoptions/selection_semanticsを持つ)も実際に生成される。レビューでconst:'interval'への変更を提案されたが、alternatives形を誤って拒否するため採用しなかった(修正時に実際に'12/15 kW'を抽出させ、alternatives形が生成されることを確認済み)。",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "lower",
+                "upper"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "interval"
+                },
+                "lower": {
+                  "$ref": "#/$defs/intervalBound"
+                },
+                "upper": {
+                  "$ref": "#/$defs/intervalBound"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "options",
+                "selection_semantics"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "alternatives"
+                },
+                "options": {
+                  "type": "array"
+                },
+                "selection_semantics": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          ]
+        },
+        "unit": {
+          "type": "object",
+          "required": [
+            "source",
+            "canonical",
+            "dimension"
+          ],
+          "properties": {
+            "source": {
+              "type": "string"
+            },
+            "canonical": {
+              "type": "string"
+            },
+            "dimension": {
+              "type": "string"
+            },
+            "standard_ref": {
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          }
+        },
+        "context": {
+          "type": "object"
+        },
+        "extraction": {
+          "type": "object",
+          "required": [
+            "confidence",
+            "warnings"
+          ],
+          "properties": {
+            "confidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "warnings": {
+              "type": "array"
+            }
+          }
+        },
+        "condition_candidates": {
+          "type": "array"
+        }
+      }
+    },
+    "intervalBound": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "value",
+        "inclusive"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "number"
+        },
+        "inclusive": {
+          "type": "boolean"
+        }
+      }
+    },
+    "evidenceItem": {
+      "type": "object",
+      "required": [
+        "type",
+        "value",
+        "source_text",
+        "effect",
+        "weight"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_text": {
+          "type": "string"
+        },
+        "effect": {
+          "enum": [
+            "supports",
+            "opposes"
+          ]
+        },
+        "weight": {
+          "type": "number"
+        }
+      }
+    }
+  }
+};
+});

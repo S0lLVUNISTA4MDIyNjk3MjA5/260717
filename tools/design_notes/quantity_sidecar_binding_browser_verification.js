@@ -3,43 +3,40 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { chromium } = require('playwright');
-const core = require('../quantity_sidecar_binding_core.js');
 
 const root = path.resolve(__dirname, '..', '..');
 const htmlPath = path.join(root, 'tools', 'json_ab_trace_matching_tool_v12.1.15.html');
-const requirementTracePath = path.join(root, 'samples', 'hvac_trace_sample_small', 'JSON_A_customer_requirements_trace.json');
-const actualTracePath = path.join(root, 'samples', 'hvac_trace_sample_small', 'JSON_B_design_review_trace.json');
+const requirementFixturePath = path.join(__dirname, 'runtime_fixtures', 'quantity_annotation_pdf_verified.json');
+const actualFixturePath = path.join(__dirname, 'runtime_fixtures', 'quantity_annotation_excel_verified.json');
 
 function loadJson(file) { return JSON.parse(fs.readFileSync(file, 'utf8')); }
 function check(list, name, ok, detail) { list.push({ name, ok:!!ok, detail }); }
 
-async function annotation(trace, side) {
-  const records = core.traceRecords(trace);
-  return {
-    schema_version:core.SCHEMA_VERSION, side, source_trace_file:path.basename(side === 'requirement' ? requirementTracePath : actualTracePath),
-    hash_algorithm:'SHA-256', id_hash_algorithm:'SHA-256/128',
-    dataset_signature:await core.computeDatasetSignature(records), generated_at:'2026-07-20T00:00:00Z',
-    generator:{ tool:'browser-verification', version:'1' },
-    ruleset_version:{ quantity_extraction:'v2.14', semantics_rules:'v2.19', auto_applicable_thresholds:{ modeConfidence:0.4, margin:0.2, propertyConfidence:0.7 } },
-    records:await Promise.all(records.map(async record => ({ trace_id:record.trace_id, content_hash:await core.computeRecordContentHash(record), analyses:[] })))
-  };
-}
-
 (async () => {
   const checks = [];
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'quantity-binding-browser-'));
-  const requirementTrace = loadJson(requirementTracePath);
-  const actualTrace = loadJson(actualTracePath);
-  const requirementAnnotation = await annotation(requirementTrace, 'requirement');
-  const actualAnnotation = await annotation(actualTrace, 'actual');
+  const requirementFixture = loadJson(requirementFixturePath);
+  const actualFixture = loadJson(actualFixturePath);
+  const requirementTrace = requirementFixture.sample_trace;
+  const actualTrace = actualFixture.sample_trace;
+  const requirementAnnotation = requirementFixture.sample_sidecar;
+  const actualAnnotation = actualFixture.sample_sidecar;
+  const requirementTracePath = path.join(tempDir, 'requirement_trace.json');
+  const actualTracePath = path.join(tempDir, 'actual_trace.json');
   const reqSidecarPath = path.join(tempDir, 'requirement_quantity.json');
   const actSidecarPath = path.join(tempDir, 'actual_quantity.json');
   const badSidecarPath = path.join(tempDir, 'actual_quantity_mismatch.json');
+  const staleRulesetPath = path.join(tempDir, 'actual_quantity_stale_ruleset.json');
+  fs.writeFileSync(requirementTracePath, JSON.stringify(requirementTrace));
+  fs.writeFileSync(actualTracePath, JSON.stringify(actualTrace));
   fs.writeFileSync(reqSidecarPath, JSON.stringify(requirementAnnotation));
   fs.writeFileSync(actSidecarPath, JSON.stringify(actualAnnotation));
   const mismatch = structuredClone(actualAnnotation);
   mismatch.dataset_signature = 'QA-SHA256:' + 'f'.repeat(64);
   fs.writeFileSync(badSidecarPath, JSON.stringify(mismatch));
+  const staleRuleset = structuredClone(actualAnnotation);
+  staleRuleset.ruleset_version.quantity_extraction = 'v0.0';
+  fs.writeFileSync(staleRulesetPath, JSON.stringify(staleRuleset));
 
   const browser = await chromium.launch();
   const page = await browser.newPage();
@@ -63,7 +60,7 @@ async function annotation(trace, side) {
     relations:window.__quantityBindingDiagnostics.relationRows(),
     text:document.querySelector('#quantityBindingStatus')?.textContent || ''
   }));
-  check(checks, '実UIからtrace JSON A/Bとsidecar A/Bを読み込める', valid.summary.ready && valid.text.includes('厳密結合が完了'));
+  check(checks, '実UIからPhase A実生成trace/sidecar A/Bを直接読み込める', valid.summary.ready && valid.summary.boundRequirement === 5 && valid.summary.boundActual === 4 && valid.text.includes('厳密結合が完了'));
   check(checks, '実UIの結合状態も比較候補・充足判定を生成しない', valid.summary.comparisonCandidates === 0 && valid.summary.satisfactionJudgements === 0);
   const boundRelation = valid.relations.find(r => r.requirement_trace_id && r.actual_trace_id);
   check(checks, '実際の照合行がrequirement_trace_id/actual_trace_idを保持する', !!boundRelation, valid.relations.slice(0, 3));
@@ -82,6 +79,13 @@ async function annotation(trace, side) {
   const invalid = await page.evaluate(() => ({ summary:window.__quantityBindingDiagnostics.summary(), text:document.querySelector('#quantityBindingStatus')?.textContent || '' }));
   check(checks, '実UIでdataset_signature不一致をsource_mismatchとして明示する', !invalid.summary.ready && invalid.summary.diagnostics.some(d => d.code === 'source_mismatch') && invalid.text.includes('結合できません'));
   check(checks, '実UIの不整合時も比較候補・充足判定は0件', invalid.summary.comparisonCandidates === 0 && invalid.summary.satisfactionJudgements === 0);
+
+  await page.setInputFiles('#plmQuantityFile', staleRulesetPath);
+  await page.click('#loadBtn');
+  await page.waitForFunction(() => (document.querySelector('#quantityBindingStatus')?.textContent || '').includes('ruleset_mismatch'), null, { timeout:30000 });
+  const staleRulesetUi = await page.evaluate(() => ({ summary:window.__quantityBindingDiagnostics.summary(), text:document.querySelector('#quantityBindingStatus')?.textContent || '' }));
+  check(checks, '実UIで非対応rulesetをruleset_mismatchとして停止する', !staleRulesetUi.summary.ready && staleRulesetUi.summary.diagnostics.some(d => d.code === 'ruleset_mismatch') && staleRulesetUi.text.includes('結合できません'));
+  check(checks, '実UIのruleset不一致時も比較候補・充足判定は0件', staleRulesetUi.summary.comparisonCandidates === 0 && staleRulesetUi.summary.satisfactionJudgements === 0);
   check(checks, 'ページエラーなし', pageErrors.length === 0, pageErrors);
 
   await browser.close();
