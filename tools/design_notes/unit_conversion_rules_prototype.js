@@ -226,6 +226,12 @@ function applyLinearConversion(quantityValue, plan) {
 
   const convert = value => value * plan.factor + plan.offset;
   if (quantityValue.kind === 'interval') {
+    // 【レビュー指摘、重大(6巡目)】変換前に正の幅(lower<upper)があった区間は、変換後も
+    // inclusiveの組み合わせに関係なく幅を保っていなければならない。修正前は空区間判定
+    // (lower>upper、または同値かつ片側以上排他的)しか見ておらず、両側inclusiveのまま
+    // 同値へ潰れるケース(例: Number.MIN_VALUE付近の区間がfactor:1e-6で[0,0]へ潰れる)を
+    // 通過させてしまうことを実際に確認した。変換前に幅があったかを先に記録しておく。
+    const hadPositiveWidth = !!(quantityValue.lower && quantityValue.upper && quantityValue.lower.value < quantityValue.upper.value);
     const lower = quantityValue.lower ? { value:convert(quantityValue.lower.value), inclusive:quantityValue.lower.inclusive } : null;
     const upper = quantityValue.upper ? { value:convert(quantityValue.upper.value), inclusive:quantityValue.upper.inclusive } : null;
     // 変換後の値も有限数であることを確認する(入力は有限でも、演算結果がNumber.MAX_VALUEを
@@ -233,22 +239,32 @@ function applyLinearConversion(quantityValue, plan) {
     if ((lower && !isFiniteNumber(lower.value)) || (upper && !isFiniteNumber(upper.value))) {
       return { outcome:'unsupported', reason_code:'quantity_conversion_non_finite' };
     }
-    // 【レビュー指摘、重大(5巡目)】変換前は非空(lower<upper)でも、極端なfactor/offsetによる
-    // 浮動小数点の丸め(アンダーフロー等)で変換後の値が同値へ潰れうることを実際に確認した
-    // (例: Pa→MPa方向のfactor:1e-6でNumber.MIN_VALUE付近の区間が[0,0)へ潰れる)。変換前と同じ
-    // 空区間判定(isEmptyInterval()と同じ基準)を変換後の値にも適用する。真の点([5,5]等)は
-    // inclusiveが両側とも変化せず値も同じままのため誤って拒否されない。
-    if (lower && upper && (lower.value > upper.value || (lower.value === upper.value && !(lower.inclusive && upper.inclusive)))) {
+    // 幅を失った(lower>=upperになった)場合はinclusiveを問わず精度損失として拒否する。
+    // 変換前と同じ空区間判定(isEmptyInterval()基準)も残す(hadPositiveWidth===falseでも
+    // lower>upperや同値排他的境界は依然として空集合のため)。真の点([5,5]等、
+    // hadPositiveWidth===false)は値・inclusiveとも変化しないため誤って拒否されない。
+    if (lower && upper && ((hadPositiveWidth && lower.value >= upper.value)
+      || lower.value > upper.value || (lower.value === upper.value && !(lower.inclusive && upper.inclusive)))) {
       return { outcome:'unsupported', reason_code:'quantity_conversion_precision_loss' };
     }
     return { outcome:'converted', value:{ kind:'interval', lower, upper } };
   }
   // kind === 'alternatives'(validateQuantityValueStructure()が既に件数・入力の有限性を確認済み)。
   // 添字ループで新しい配列へ格納する(中3、上書きされた.map()/.every()に依存しない)。
+  // 【レビュー指摘、中(6巡目)】異なる入力値が変換後に同じ値へ潰れる(精度損失で区別不能になる)
+  // ケースも同様に拒否する。元から同値だったoptionsの重複自体は禁止しない契約のため、
+  // 変換後の値をキーに「最初に生成した元の値」だけを記録し、以後別の元の値が同じ変換後の値に
+  // 一致したら拒否する(件数上限が64件のためMapのコストは無視できる)。
   const options = [];
+  const sourceByConverted = new Map();
   for (let i = 0; i < quantityValue.options.length; i++) {
-    const converted = convert(quantityValue.options[i]);
+    const source = quantityValue.options[i];
+    const converted = convert(source);
     if (!isFiniteNumber(converted)) return { outcome:'unsupported', reason_code:'quantity_conversion_non_finite' };
+    if (sourceByConverted.has(converted) && sourceByConverted.get(converted) !== source) {
+      return { outcome:'unsupported', reason_code:'quantity_conversion_precision_loss' };
+    }
+    sourceByConverted.set(converted, source);
     options.push(converted);
   }
   return { outcome:'converted', value:{ kind:'alternatives', options, selection_semantics:quantityValue.selection_semantics } };
@@ -359,6 +375,20 @@ if (require.main === module) {
       applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:{ value:5, inclusive:true } }, planMPaToKPa).outcome === 'converted');
     check('片側null区間は引き続き成功する(5巡目、回帰防止)',
       applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:null }, planMPaToKPa).outcome === 'converted');
+
+    // ── 【レビュー修正、重大(6巡目)】両側inclusiveのまま点へ潰れる精度損失 ──
+    check('幅のある両側inclusive区間がアンダーフローで点へ潰れる場合はquantity_conversion_precision_loss(6巡目)',
+      applyLinearConversion({ kind:'interval', lower:{ value:Number.MIN_VALUE, inclusive:true }, upper:{ value:Number.MIN_VALUE * 2, inclusive:true } }, { factor:1e-6, offset:0 }).reason_code === 'quantity_conversion_precision_loss');
+    check('幅のある両側inclusive区間が巨大offsetで点へ潰れる場合はquantity_conversion_precision_loss(6巡目)',
+      applyLinearConversion({ kind:'interval', lower:{ value:1, inclusive:true }, upper:{ value:2, inclusive:true } }, { factor:1, offset:1e308 }).reason_code === 'quantity_conversion_precision_loss');
+    check('入力が最初から真の点[5,5]なら変換後も成功する(6巡目、回帰防止)',
+      applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:{ value:5, inclusive:true } }, { factor:1e-6, offset:0 }).outcome === 'converted');
+
+    // ── 【レビュー修正、中(6巡目)】alternativesで異なる値が変換後に同値へ潰れる精度損失 ──
+    check('異なるalternativesが変換後に同値へ潰れる場合はquantity_conversion_precision_loss(6巡目)',
+      applyLinearConversion({ kind:'alternatives', options:[Number.MIN_VALUE, Number.MIN_VALUE * 2], selection_semantics:'unknown' }, { factor:1e-6, offset:0 }).reason_code === 'quantity_conversion_precision_loss');
+    check('元から同値のalternativesは重複自体を禁止せず成功する(6巡目、回帰防止)',
+      applyLinearConversion({ kind:'alternatives', options:[5, 5], selection_semantics:'unknown' }, planMPaToKPa).outcome === 'converted');
 
     // ── 【レビュー修正、中1(3巡目)】interval境界のinclusive型検証 ──
     check('inclusiveが欠落している境界はquantity_value_invalid(中1、3巡目)',
