@@ -1324,10 +1324,94 @@
       not_analyzed:dedupeByCanonicalJson([...comparisonResult.not_analyzed, ...conditionResult.not_analyzed]) };
   }
 
+  // ── Phase B-2.3b: 段階3-3。両側とも条件が`resolved`の比較候補について、固定の対応表
+  // (COMPARISON_MODE_DERIVATION_TABLE、semantic_mapping_prototype.jsから一字一句移植)から
+  // comparison mode候補を導出するだけの段階。単位変換・数値比較・区間包含判定・
+  // auto applicability・充足判定はまだ行わない(3.4節 段階4以降、未着手のまま)。
+  // quantity-annotation/1.0-rc1: comparisonMode導出ライブラリ(移植、semantic_mapping_prototype.jsの
+  // COMPARISON_MODE_DERIVATION_TABLEから一字一句移植。乖離検出はquantity_annotation_ported_lib_check.js
+  // で行う。改変禁止、移植元を直接編集してから再度移植すること。required_capability_domain×achieved_point
+  // が意図的に対応表から除外されていることに注意: 単一の達成点は、要求された能力領域全体をカバーした
+  // 証明にはならないため、v2.10で安全側の判断として除外された)
+  const COMPARISON_MODE_DERIVATION_TABLE = [
+    { requirement: 'acceptable_region', actual: 'achieved_point', mode: 'point_in_region' },
+    { requirement: 'required_capability_domain', actual: 'capability_domain', mode: 'actual_covers_requirement' },
+    { requirement: 'acceptable_region', actual: 'outcome_range', mode: 'requirement_covers_actual' },
+    { requirement: 'acceptable_region', actual: 'guaranteed_minimum', mode: 'requirement_covers_actual' },
+    { requirement: 'acceptable_region', actual: 'guaranteed_maximum', mode: 'requirement_covers_actual' },
+  ];
+  // ── quantity-annotation/1.0-rc1: comparisonMode導出ライブラリ(移植)ここまで ──
+
+  function blockedComparisonModeResult(diagnostics, binding, conditionAnnotatedResult) {
+    return { ready:false, comparison_mode_candidates:[], candidate_count:0, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(binding?.diagnostics || []), ...(conditionAnnotatedResult?.diagnostics || [])]),
+      not_analyzed:dedupeByCanonicalJson([...(binding?.not_analyzed || []), ...(conditionAnnotatedResult?.not_analyzed || [])]) };
+  }
+
+  function generateComparisonModeCandidates({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    // conditionAnnotatedResultは呼び出し側から別引数として受け取らず、必ずこの関数の内部で
+    // 同じbindingから計算する(B-2.2a round1以来一貫した設計方針)。
+    const conditionAnnotatedResult = generateConditionAnnotatedComparisonCandidates({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (conditionAnnotatedResult.ready !== true || conditionAnnotatedResult.result_complete !== true) {
+      return blockedComparisonModeResult([{ code:'condition_annotated_candidates_not_ready_or_incomplete', severity:'error',
+        detail:`generateConditionAnnotatedComparisonCandidates()がready=${JSON.stringify(conditionAnnotatedResult.ready)}、result_complete=${JSON.stringify(conditionAnnotatedResult.result_complete)}のためcomparison mode候補を生成できません(段階3以降はready===trueかつresult_complete===trueを要求してfail closedする契約)` }],
+        binding, conditionAnnotatedResult);
+    }
+
+    const notAnalyzed = [];
+    const comparisonModeCandidates = [];
+    for (const candidate of conditionAnnotatedResult.comparison_candidates) {
+      const auditBase = {
+        requirement_quantity_id:candidate.requirement_quantity_id, actual_quantity_id:candidate.actual_quantity_id,
+        requirement_condition_status:candidate.requirement_condition_status, actual_condition_status:candidate.actual_condition_status,
+        requirement_condition_value:candidate.requirement_condition_value, actual_condition_value:candidate.actual_condition_value,
+        requirement_condition_has_opposing_evidence:candidate.requirement_condition_has_opposing_evidence,
+        actual_condition_has_opposing_evidence:candidate.actual_condition_has_opposing_evidence,
+        concept_id:candidate.concept_id, dimension:candidate.dimension,
+        requirement_trace_id:candidate.requirement_trace_id, actual_trace_id:candidate.actual_trace_id,
+        matcher_a_id:candidate.matcher_a_id ?? null, matcher_b_id:candidate.matcher_b_id ?? null,
+      };
+      // 両側resolvedでなければ推測しない(ambiguous/unavailableいずれも対象外)。
+      if (candidate.requirement_condition_status !== 'resolved' || candidate.actual_condition_status !== 'resolved') {
+        notAnalyzed.push({ reason_code:'condition_unresolved', ...auditBase });
+        continue;
+      }
+      // 両側resolvedでも、どちらかに否定根拠(effect:'opposes')があれば自動導出へ進めない。
+      // auto applicability自体はまだ実装しないため、候補を生成した上でauto_applicable:falseを
+      // 付ける案ではなく、最も安全な「候補生成せず保留」を選ぶ(レビューで明示的に指示された方針)。
+      if (candidate.requirement_condition_has_opposing_evidence === true || candidate.actual_condition_has_opposing_evidence === true) {
+        notAnalyzed.push({ reason_code:'condition_opposing_evidence', ...auditBase });
+        continue;
+      }
+      // 固定表に無い組み合わせは推測でmodeを生成しない。requirement_condition_value/
+      // actual_condition_valueは、この時点で両側ともstatus:'resolved'であることが確定して
+      // いるため、KNOWN_CONDITION_SEMANTICS_VALUESに含まれる既知の値であり'unknown'では
+      // あり得ない(resolveConditionStatus()の契約により'unknown'はresolvedにならない)。
+      const entry = COMPARISON_MODE_DERIVATION_TABLE.find(e => e.requirement === candidate.requirement_condition_value && e.actual === candidate.actual_condition_value);
+      if (!entry) {
+        notAnalyzed.push({ reason_code:'comparison_mode_unavailable', ...auditBase });
+        continue;
+      }
+      comparisonModeCandidates.push({
+        ...candidate,
+        comparison_mode_candidate: entry.mode,
+        comparison_mode_confidence: Math.min(candidate.requirement_condition_top_confidence, candidate.actual_condition_top_confidence),
+        derived_from: { requirement_condition_value:candidate.requirement_condition_value, actual_condition_value:candidate.actual_condition_value },
+      });
+    }
+
+    return { ready:true, comparison_mode_candidates:comparisonModeCandidates, candidate_count:comparisonModeCandidates.length, result_complete:true,
+      diagnostics: conditionAnnotatedResult.diagnostics,
+      not_analyzed: [...conditionAnnotatedResult.not_analyzed, ...notAnalyzed] };
+  }
+
   return Object.freeze({ SCHEMA_VERSION, SUPPORTED_RULESETS, validateAnnotationSchema, validateRulesetCompatibility,
     canonicalValue, canonicalJson, normalize, hashParts, computeDatasetSignature, computeRecordContentHash,
     traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates,
     CONCEPT_DICTIONARY, generatePropertyCandidates, generatePropertyResolutions,
     DEFAULT_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT,
-    generateComparisonCandidates, generateConditionResolutions, generateConditionAnnotatedComparisonCandidates });
+    generateComparisonCandidates, generateConditionResolutions, generateConditionAnnotatedComparisonCandidates,
+    COMPARISON_MODE_DERIVATION_TABLE, generateComparisonModeCandidates });
 });

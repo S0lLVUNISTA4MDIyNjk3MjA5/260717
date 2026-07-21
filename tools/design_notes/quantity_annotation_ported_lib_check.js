@@ -22,6 +22,7 @@ const QUANTITY_LIB_RANGE_B = [458, 469]; // isEmptyInterval() 〜 isGenuinePoint
 const SEMANTICS_LIB_RANGE = [76, 367];   // isTwoSidedRange() 〜 generateIntervalSemanticsCandidates()
 const PROPERTY_LIB_RANGE_A = [400, 408]; // marginOf() 〜 hasOpposingEvidence()
 const PROPERTY_LIB_RANGE_B = [438, 511]; // CONCEPT_DICTIONARY 〜 generatePropertyCandidates()
+const COMPARISON_MODE_TABLE_RANGE = [368, 374]; // COMPARISON_MODE_DERIVATION_TABLE
 
 const assertions = [];
 function check(name, ok, detail) { assertions.push({ name, ok: !!ok, detail }); }
@@ -91,6 +92,26 @@ function checkPortedPropertyLib() {
     actual.trim() === expected.trim() ? undefined : { actualLen: actual.length, expectedLen: expected.length });
 }
 
+// Phase B-2.3b: quantity_sidecar_binding_core.jsへ移植したCOMPARISON_MODE_DERIVATION_TABLEの
+// 乖離検出。表の組数が意図せず増減した場合(例えば安全側の理由で除外されたrequired_capability_domain
+// ×achieved_pointが誤って復活する等)も、この完全一致比較で検知される。
+function checkPortedComparisonModeTable() {
+  const expected = readLinesFrom(SEMANTICS_LIB_PATH, COMPARISON_MODE_TABLE_RANGE[0], COMPARISON_MODE_TABLE_RANGE[1] - COMPARISON_MODE_TABLE_RANGE[0] + 1);
+
+  const lines = fs.readFileSync(BINDING_CORE_PATH, 'utf8').split('\n');
+  const startIdx = lines.findIndex(l => l.includes('const COMPARISON_MODE_DERIVATION_TABLE = ['));
+  const endMarkerIdx = lines.findIndex(l => l.includes('comparisonMode導出ライブラリ(移植)ここまで'));
+
+  check('[quantity_sidecar_binding_core.js] マーカー(comparisonMode導出ライブラリ開始、const COMPARISON_MODE_DERIVATION_TABLE)が見つかる', startIdx !== -1);
+  check('[quantity_sidecar_binding_core.js] マーカーコメント(comparisonMode導出ライブラリの終端)が見つかる', endMarkerIdx !== -1);
+  if (startIdx === -1 || endMarkerIdx === -1) return;
+
+  const actual = stripIndent(lines.slice(startIdx, endMarkerIdx).join('\n').replace(/\n+$/, ''), '  ');
+  check('[quantity_sidecar_binding_core.js] comparisonMode導出ライブラリ(COMPARISON_MODE_DERIVATION_TABLE)が移植元(semantic_mapping_prototype.js)と完全一致する(乖離検出、組数の意図しない増減も検知)',
+    actual.trim() === expected.trim(),
+    actual.trim() === expected.trim() ? undefined : { actualLen: actual.length, expectedLen: expected.length });
+}
+
 if (require.main === module) {
   main();
 }
@@ -99,6 +120,7 @@ function main() {
   checkPortedLibsIn('PDF側', path.join(REPO_ROOT, 'tools/spec_to_json_conversion_tool_v1.18.html'), '');
   checkPortedLibsIn('Excel側', path.join(REPO_ROOT, 'tools/excel_to_json_conversion_tool_v2.0.8.html'), '  ');
   checkPortedPropertyLib();
+  checkPortedComparisonModeTable();
 
   console.log('\n=== quantity_annotation_ported_lib_check 結果 ===');
   let fail = 0;
