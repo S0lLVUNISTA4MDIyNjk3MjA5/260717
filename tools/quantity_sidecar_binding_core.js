@@ -1658,6 +1658,14 @@
       if ((lower && !isFiniteNumber(lower.value)) || (upper && !isFiniteNumber(upper.value))) {
         return { outcome:'unsupported', reason_code:'quantity_conversion_non_finite' };
       }
+      // 【レビュー指摘、重大(5巡目)】変換前は非空(lower<upper)でも、極端なfactor/offsetによる
+      // 浮動小数点の丸め(アンダーフロー等)で変換後の値が同値へ潰れうることを実際に確認した
+      // (例: Pa→MPa方向のfactor:1e-6でNumber.MIN_VALUE付近の区間が[0,0)へ潰れる)。変換前と同じ
+      // 空区間判定(isEmptyInterval()と同じ基準)を変換後の値にも適用する。真の点([5,5]等)は
+      // inclusiveが両側とも変化せず値も同じままのため誤って拒否されない。
+      if (lower && upper && (lower.value > upper.value || (lower.value === upper.value && !(lower.inclusive && upper.inclusive)))) {
+        return { outcome:'unsupported', reason_code:'quantity_conversion_precision_loss' };
+      }
       return { outcome:'converted', value:{ kind:'interval', lower, upper } };
     }
     // kind === 'alternatives'(validateQuantityValueStructure()が既に件数・入力の有限性を確認済み)。

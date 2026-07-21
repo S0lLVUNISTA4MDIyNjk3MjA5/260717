@@ -233,6 +233,14 @@ function applyLinearConversion(quantityValue, plan) {
     if ((lower && !isFiniteNumber(lower.value)) || (upper && !isFiniteNumber(upper.value))) {
       return { outcome:'unsupported', reason_code:'quantity_conversion_non_finite' };
     }
+    // 【レビュー指摘、重大(5巡目)】変換前は非空(lower<upper)でも、極端なfactor/offsetによる
+    // 浮動小数点の丸め(アンダーフロー等)で変換後の値が同値へ潰れうることを実際に確認した
+    // (例: Pa→MPa方向のfactor:1e-6でNumber.MIN_VALUE付近の区間が[0,0)へ潰れる)。変換前と同じ
+    // 空区間判定(isEmptyInterval()と同じ基準)を変換後の値にも適用する。真の点([5,5]等)は
+    // inclusiveが両側とも変化せず値も同じままのため誤って拒否されない。
+    if (lower && upper && (lower.value > upper.value || (lower.value === upper.value && !(lower.inclusive && upper.inclusive)))) {
+      return { outcome:'unsupported', reason_code:'quantity_conversion_precision_loss' };
+    }
     return { outcome:'converted', value:{ kind:'interval', lower, upper } };
   }
   // kind === 'alternatives'(validateQuantityValueStructure()が既に件数・入力の有限性を確認済み)。
@@ -339,6 +347,18 @@ if (require.main === module) {
       applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:{ value:5, inclusive:true } }, planMPaToKPa).outcome === 'converted');
     check('lower<upperなら両側排他的境界でも変換に成功する(重大1、3巡目、回帰防止)',
       applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:false }, upper:{ value:8, inclusive:false } }, planMPaToKPa).outcome === 'converted');
+
+    // ── 【レビュー修正、重大(5巡目)】変換後に精度損失で区間が潰れる場合 ──
+    check('アンダーフローで[0,0)へ潰れる区間はquantity_conversion_precision_loss(5巡目)',
+      applyLinearConversion({ kind:'interval', lower:{ value:Number.MIN_VALUE, inclusive:true }, upper:{ value:Number.MIN_VALUE * 2, inclusive:false } }, { factor:1e-6, offset:0 }).reason_code === 'quantity_conversion_precision_loss');
+    check('巨大offsetの丸めで同値へ潰れる区間はquantity_conversion_precision_loss(5巡目)',
+      applyLinearConversion({ kind:'interval', lower:{ value:1, inclusive:true }, upper:{ value:2, inclusive:false } }, { factor:1, offset:1e308 }).reason_code === 'quantity_conversion_precision_loss');
+    check('通常のMPa→kPaでは回帰しない(5巡目)',
+      applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:{ value:8, inclusive:false } }, planMPaToKPa).outcome === 'converted');
+    check('真の点[5,5]は変換後も点として成功する(5巡目、回帰防止)',
+      applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:{ value:5, inclusive:true } }, planMPaToKPa).outcome === 'converted');
+    check('片側null区間は引き続き成功する(5巡目、回帰防止)',
+      applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:null }, planMPaToKPa).outcome === 'converted');
 
     // ── 【レビュー修正、中1(3巡目)】interval境界のinclusive型検証 ──
     check('inclusiveが欠落している境界はquantity_value_invalid(中1、3巡目)',
