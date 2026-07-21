@@ -219,6 +219,26 @@ async function pairBindingPower() {
     check('空白だけのdimensionは既知単位として扱わない(重大1)', r.outcome === 'unsupported' && r.reason_code === 'unit_metadata_unsupported', r);
   }
 
+  // ── 【レビュー修正、重大1(2巡目)】KNOWN_CANONICAL_UNITS_BY_DIMENSION/LINEAR_UNIT_SCALE_TO_BASEは
+  //    通常のオブジェクトリテラルでありObject.prototypeを継承するため、`obj[key]`の真偽値判定や
+  //    `key in obj`は継承プロパティ('toString'・'constructor'・'__proto__'・'hasOwnProperty'等)
+  //    にもtrueを返してしまう。own propertyだけを認めるhasOwn()に置き換える前は、これらの
+  //    プロパティ名をcanonical/dimensionとして渡すと誤って既知単位として扱われることを実際に
+  //    再現して確認した(修正前は'toString'×'toString'がidentity計画になり、pressureで
+  //    異なる継承キー同士('toString'×'constructor')を指定すると関数オブジェクト同士の除算で
+  //    factor:NaNのlinear_scale計画を生成していた)。 ──
+  const prototypeChainKeys = ['toString', 'constructor', '__proto__', 'hasOwnProperty'];
+  for (const key of prototypeChainKeys) {
+    const r = unitRules.classifyUnitConversion({ canonical:key, dimension:'power' }, { canonical:key, dimension:'power' });
+    check(`Object.prototype継承キー(${key}×${key}、power)は既知単位として扱われずunit_metadata_unsupportedになる(重大1、2巡目)`,
+      r.outcome === 'unsupported' && r.reason_code === 'unit_metadata_unsupported', r);
+  }
+  {
+    const r = unitRules.classifyUnitConversion({ canonical:'toString', dimension:'pressure' }, { canonical:'constructor', dimension:'pressure' });
+    check('異なる継承キー同士(toString×constructor、pressure)は計画を生成せず、NaN係数も生成しない(重大1、2巡目)',
+      r.outcome === 'unsupported' && (typeof r.plan === 'undefined' || Number.isFinite(r.plan?.factor)), r);
+  }
+
   // ── KNOWN_CANONICAL_UNITS_BY_DIMENSIONに実在する既知の全(dimension,canonical)組は、
   //    単独かつ両側一致であればidentityになる(allowlistが既存の正しい単位自体を締め出して
   //    いないことの確認、B-2.3aのKNOWN_CONDITION_SEMANTICS_VALUESテストと同型)。 ──
@@ -361,6 +381,26 @@ async function pairBindingPower() {
     check('不正sidecar(既知canonical kWが誤dimension voltageと組み合わされている)はgenerateUnitConversionPlans()のend-to-endでも計画を生成しない(重大1、必須テスト)',
       result.unit_conversion_plans.length === 0
       && result.not_analyzed.some(n => n.reason_code === 'unit_metadata_unsupported' && n.requirement_unit_canonical === 'kW' && n.requirement_unit_dimension === 'voltage'),
+      result);
+  }
+  {
+    // 【レビュー修正、重大1(2巡目)、必須テスト】canonical:'toString', dimension:'power'という
+    // Object.prototype継承キーを含む不正sidecarを、公開パイプラインgenerateUnitConversionPlans()
+    // 経由でも正しく拒否できることを確認する(classifyUnitConversion()を直接呼ぶテストだけでは、
+    // isKnownUnit()/hasOwn()の修正が実際のbinding経由の呼び出し経路にも一字一句移植されている
+    // ことまでは検証できないため)。
+    const reqTrace = traceWithText('req-bad-unit-3', '冷房能力12 kW以上を確保すること。', ['冷房能力']);
+    const actTrace = traceWithText('act-bad-unit-3', '冷房能力12.5 kWを実測した。', ['冷房能力']);
+    const binding = await bind(
+      reqTrace, id => (id === 'req-bad-unit-3' ? [analysis('bu3-r', 'power', 'toString', 'source_raw_text', [conditionCandidate('acceptable_region', 0.9), conditionCandidate('unknown', 0.15)])] : []),
+      actTrace, id => (id === 'act-bad-unit-3' ? [analysis('bu3-a', 'power', 'toString', 'source_raw_text', [conditionCandidate('achieved_point', 0.6), conditionCandidate('unknown', 0.15)])] : [])
+    );
+    const result = core.generateUnitConversionPlans({ binding, relations:[relation('req-bad-unit-3', 'act-bad-unit-3')] });
+    check('前提確認: 不正sidecar(Object.prototype継承キー toString)でもconcept解決・comparison mode導出まではready:trueで到達する',
+      result.ready === true, result);
+    check('不正sidecar(canonical:"toString", dimension:"power")はgenerateUnitConversionPlans()のend-to-endでもidentity計画を生成しない(重大1、2巡目、必須テスト)',
+      result.unit_conversion_plans.length === 0
+      && result.not_analyzed.some(n => n.reason_code === 'unit_metadata_unsupported' && n.requirement_unit_canonical === 'toString' && n.actual_unit_canonical === 'toString'),
       result);
   }
 

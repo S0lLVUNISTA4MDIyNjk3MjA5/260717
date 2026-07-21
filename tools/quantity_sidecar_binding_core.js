@@ -1470,13 +1470,28 @@
   Object.values(LINEAR_UNIT_SCALE_TO_BASE).forEach(Object.freeze);
   Object.freeze(LINEAR_UNIT_SCALE_TO_BASE);
 
+  // 【レビュー指摘、重大1(2巡目)】KNOWN_CANONICAL_UNITS_BY_DIMENSION/LINEAR_UNIT_SCALE_TO_BASEは
+  // 通常のJavaScriptオブジェクトリテラルであり、Object.prototypeを継承する。`obj[key]`の真偽値
+  // 判定や`key in obj`は継承プロパティ('toString'・'constructor'・'hasOwnProperty'等)にもtrueを
+  // 返すため、修正前の実装ではこれらのプロパティ名をcanonical/dimensionとして渡すと「登録済み
+  // 単位」であるかのように扱われ、identity計画(canonical同士が同名文字列で一致)や、pressureで
+  // 異なる継承キー同士(例: 'toString'×'constructor')を指定するとscaleTable[canonical]が関数
+  // オブジェクトになり、除算結果がNaNのlinear_scale計画を生成してしまうことを実際に確認した
+  // (Object.freeze()はプロパティの追加・変更を防ぐが、継承プロパティ自体を除去したり
+  // Object.prototypeを凍結したりはしない)。own propertyだけを認めるhasOwn()に置き換える。
+  function hasOwn(object, key) {
+    return Object.prototype.hasOwnProperty.call(object, key);
+  }
+
   // unit.canonical/unit.dimensionが非空文字列で、かつKNOWN_CANONICAL_UNITS_BY_DIMENSIONに
-  // 実在する(dimension, canonical)の組であることを確認する。
+  // 実在する(dimension, canonical)の組(own propertyとして)であることを確認する。
   function isKnownUnit(unit) {
-    return !!unit && typeof unit.canonical === 'string' && unit.canonical.length > 0
-      && typeof unit.dimension === 'string' && unit.dimension.length > 0
-      && !!KNOWN_CANONICAL_UNITS_BY_DIMENSION[unit.dimension]
-      && !!KNOWN_CANONICAL_UNITS_BY_DIMENSION[unit.dimension][unit.canonical];
+    if (!unit || typeof unit.canonical !== 'string' || unit.canonical.length === 0
+      || typeof unit.dimension !== 'string' || unit.dimension.length === 0) {
+      return false;
+    }
+    if (!hasOwn(KNOWN_CANONICAL_UNITS_BY_DIMENSION, unit.dimension)) return false;
+    return hasOwn(KNOWN_CANONICAL_UNITS_BY_DIMENSION[unit.dimension], unit.canonical);
   }
 
   // 戻り値のoutcome: 'plan'(変換計画を生成、`plan`フィールドを持つ)／'unsupported'(推測せず
@@ -1497,13 +1512,20 @@
         source_unit:actualUnit.canonical, target_unit:requirementUnit.canonical, factor:1, offset:0 } };
     }
     const scaleTable = LINEAR_UNIT_SCALE_TO_BASE[requirementUnit.dimension];
-    if (!scaleTable || !(requirementUnit.canonical in scaleTable) || !(actualUnit.canonical in scaleTable)) {
+    if (!scaleTable || !hasOwn(scaleTable, requirementUnit.canonical) || !hasOwn(scaleTable, actualUnit.canonical)) {
       return { outcome:'unsupported', reason_code:'unit_conversion_unsupported',
         requirement_unit_canonical:requirementUnit.canonical, actual_unit_canonical:actualUnit.canonical };
     }
     // 実仕様側の単位を要求側の単位へ変換する計画を、常にactual→requirement方向で生成する
     // (将来、差分値や判定結果を要求仕様の単位で表示できるようにするための固定方向)。
     const factor = scaleTable[actualUnit.canonical] / scaleTable[requirementUnit.canonical];
+    // 【レビュー指摘、重大1(2巡目)、最後の防御】hasOwn()検査により継承プロパティ経由での
+    // 数値以外の混入は塞いだが、念のため計算結果自体が有限数であることも確認する(この表の値は
+    // 常に正の有限数のため、ここに到達するのは万一のデータ不整合時のみのはずである)。
+    if (!Number.isFinite(factor)) {
+      return { outcome:'unsupported', reason_code:'unit_conversion_invalid_factor',
+        requirement_unit_canonical:requirementUnit.canonical, actual_unit_canonical:actualUnit.canonical };
+    }
     return { outcome:'plan', plan:{ conversion_required:true, conversion_operation:'linear_scale',
       source_side:'actual', source_canonical_unit:actualUnit.canonical,
       target_side:'requirement', target_canonical_unit:requirementUnit.canonical,
