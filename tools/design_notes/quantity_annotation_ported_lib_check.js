@@ -13,12 +13,15 @@ const path = require('path');
 const REPO_ROOT = path.join(__dirname, '..', '..');
 const QUANTITY_LIB_PATH = path.join(__dirname, 'quantity_extraction_prototype.js');
 const SEMANTICS_LIB_PATH = path.join(__dirname, 'semantic_mapping_prototype.js');
+const BINDING_CORE_PATH = path.join(REPO_ROOT, 'tools/quantity_sidecar_binding_core.js');
 
 // ── 移植ブロックの範囲(full_insertion.js作成時に確定した行範囲。移植元が変更された場合は
 //    この行範囲そのものを見直す必要がある) ──
 const QUANTITY_LIB_RANGE_A = [112, 452]; // UNIT_DEFS 〜 extractQuantities()
 const QUANTITY_LIB_RANGE_B = [458, 469]; // isEmptyInterval() 〜 isGenuinePoint()
 const SEMANTICS_LIB_RANGE = [76, 367];   // isTwoSidedRange() 〜 generateIntervalSemanticsCandidates()
+const PROPERTY_LIB_RANGE_A = [400, 404]; // marginOf()
+const PROPERTY_LIB_RANGE_B = [438, 511]; // CONCEPT_DICTIONARY 〜 generatePropertyCandidates()
 
 const assertions = [];
 function check(name, ok, detail) { assertions.push({ name, ok: !!ok, detail }); }
@@ -67,6 +70,27 @@ function checkPortedLibsIn(label, htmlPath, indent) {
   }
 }
 
+// Phase B-2.2a: quantity_sidecar_binding_core.jsへ移植したmarginOf()・CONCEPT_DICTIONARY・
+// generatePropertyCandidates()の乖離検出。PDF/Excel側のマーカーコメントは`/* ... */`ブロック
+// コメントだが、こちらは`//`行コメントで挟んでいるため、専用の検出ロジックにしている。
+function checkPortedPropertyLib() {
+  const expected = readLinesFrom(SEMANTICS_LIB_PATH, PROPERTY_LIB_RANGE_A[0], PROPERTY_LIB_RANGE_A[1] - PROPERTY_LIB_RANGE_A[0] + 1)
+    + '\n\n' + readLinesFrom(SEMANTICS_LIB_PATH, PROPERTY_LIB_RANGE_B[0], PROPERTY_LIB_RANGE_B[1] - PROPERTY_LIB_RANGE_B[0] + 1);
+
+  const lines = fs.readFileSync(BINDING_CORE_PATH, 'utf8').split('\n');
+  const startIdx = lines.findIndex(l => l.includes('function marginOf(candidates) {'));
+  const endMarkerIdx = lines.findIndex(l => l.includes('概念候補生成ライブラリ(移植)ここまで'));
+
+  check('[quantity_sidecar_binding_core.js] マーカー(概念候補生成ライブラリ開始、function marginOf)が見つかる', startIdx !== -1);
+  check('[quantity_sidecar_binding_core.js] マーカーコメント(概念候補生成ライブラリの終端)が見つかる', endMarkerIdx !== -1);
+  if (startIdx === -1 || endMarkerIdx === -1) return;
+
+  const actual = stripIndent(lines.slice(startIdx, endMarkerIdx).join('\n').replace(/\n+$/, ''), '  ');
+  check('[quantity_sidecar_binding_core.js] 概念候補生成ライブラリが移植元(semantic_mapping_prototype.js)と完全一致する(乖離検出)',
+    actual.trim() === expected.trim(),
+    actual.trim() === expected.trim() ? undefined : { actualLen: actual.length, expectedLen: expected.length });
+}
+
 if (require.main === module) {
   main();
 }
@@ -74,6 +98,7 @@ if (require.main === module) {
 function main() {
   checkPortedLibsIn('PDF側', path.join(REPO_ROOT, 'tools/spec_to_json_conversion_tool_v1.18.html'), '');
   checkPortedLibsIn('Excel側', path.join(REPO_ROOT, 'tools/excel_to_json_conversion_tool_v2.0.8.html'), '  ');
+  checkPortedPropertyLib();
 
   console.log('\n=== quantity_annotation_ported_lib_check 結果 ===');
   let fail = 0;

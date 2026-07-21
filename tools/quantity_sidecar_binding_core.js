@@ -425,7 +425,200 @@
       candidates_materialized:false, not_analyzed:notAnalyzed, excluded_pair_count:excludedPairCount, diagnostics };
   }
 
+  // quantity-annotation/1.0-rc1: 概念候補生成ライブラリ(移植、semantic_mapping_prototype.jsの
+  // marginOf()・CONCEPT_DICTIONARY・generatePropertyCandidates()から一字一句移植。乖離検出は
+  // quantity_annotation_ported_lib_check.jsで行う。改変禁止、移植元を直接編集してから再度移植すること)
+  function marginOf(candidates) {
+    if (!candidates || candidates.length === 0) return 0;
+    if (candidates.length === 1) return candidates[0].confidence;
+    return candidates[0].confidence - candidates[1].confidence;
+  }
+
+  const CONCEPT_DICTIONARY = [
+    {
+      concept_id: 'environment.ambient_operating_temperature',
+      label: '周囲使用温度',
+      expected_dimension: 'temperature',
+      keywords: ['周囲温度', '使用温度', '運転温度'],
+      tags: ['使用温度'],
+    },
+    {
+      concept_id: 'performance.cooling_capacity',
+      label: '冷房能力',
+      expected_dimension: 'power',
+      keywords: ['冷房能力', '冷却能力'],
+      tags: ['冷房能力'],
+    },
+    {
+      concept_id: 'power_supply.voltage',
+      label: '電源電圧',
+      expected_dimension: 'voltage',
+      keywords: ['電源電圧', '定格電圧', '電源'],
+      tags: ['電源電圧'],
+    },
+    {
+      concept_id: 'power_supply.frequency',
+      label: '周波数',
+      expected_dimension: 'frequency',
+      keywords: ['周波数'],
+      tags: ['周波数'],
+    },
+    {
+      concept_id: 'acoustics.operating_noise',
+      label: '運転騒音',
+      expected_dimension: 'sound_pressure_level',
+      keywords: ['騒音値', '運転騒音', '騒音'],
+      tags: ['騒音'],
+    },
+    {
+      concept_id: 'maintenance.access_space',
+      label: '保守作業スペース',
+      expected_dimension: 'length',
+      keywords: ['保守作業スペース', '保守スペース', '保守'],
+      tags: ['保守性'],
+    },
+  ];
+
+  // ── 概念候補の生成: unit.dimension一致 + 周辺語一致 + タグ一致を独立した根拠として積み上げる ──
+  function generatePropertyCandidates(quantity, ctx) {
+    const nearbyText = ctx.nearbyText || '';
+    const tags = ctx.tags || [];
+    const candidates = [];
+    for (const concept of CONCEPT_DICTIONARY) {
+      let score = 0;
+      const evidence = [];
+      if (quantity.unit.dimension === concept.expected_dimension) {
+        score += 0.4;
+        evidence.push(`単位次元一致: ${quantity.unit.dimension}`);
+      }
+      const kwHit = concept.keywords.find(k => nearbyText.includes(k));
+      if (kwHit) {
+        score += 0.35;
+        evidence.push(`周辺語: ${kwHit}`);
+      }
+      const tagHit = concept.tags.find(t => tags.includes(t));
+      if (tagHit) {
+        score += 0.25;
+        evidence.push(`タグ: ${tagHit}`);
+      }
+      if (score > 0) {
+        candidates.push({ concept_id: concept.concept_id, label: concept.label, confidence: Math.min(0.99, score), evidence });
+      }
+    }
+    candidates.sort((a, b) => b.confidence - a.confidence);
+    return candidates;
+  }
+  // ── quantity-annotation/1.0-rc1: 概念候補生成ライブラリ(移植)ここまで ──
+
+  // ── Phase B-2.2a: 数量ごとのproperty候補生成・解決状態の正規化。段階1
+  // (generateDimensionCandidates())とは独立に、bindInputPair()で結合済みのanalysesだけを対象に、
+  // 数量1件につきちょうど1回generatePropertyCandidates()を評価する(relationをまたいで再計算しない。
+  // 呼び出し側はrelationループの中でside+quantity_idをキーにこの結果を引くだけでよい)。
+  // concept間の結合・除外バケット化・数値比較・comparisonMode導出・充足判定はまだ行わない
+  // (3.4節 段階2b以降、B-2.2a完了・レビュー承認後に着手する)。
+
+  const PROPERTY_MANAGEMENT_FIELD_NAMES = new Set([
+    'tags', 'unregistered_tags', 'review_status', 'review_method', 'reviewed_at', 'review_comment',
+    'exclusion_reason', 'trace_id', 'content_hash', 'stable_uid', 'stable_key',
+  ]);
+
+  function isPropertyManagementField(key) {
+    const k = String(key);
+    if (PROPERTY_MANAGEMENT_FIELD_NAMES.has(k)) return true;
+    return /^(No|ID|行番号)$/i.test(k) || /_id$/i.test(k) || /_hash$/i.test(k);
+  }
+
+  // PDF側(source_raw_text)はその段落・文自体をnearbyTextとする。Excel側(source_record)は、
+  // 数量が入っている列自体ではなく同じ行の他列(例:「設計項目」列の"冷房能力")が概念の主な
+  // 手がかりになるため、管理列を除いた全列の値を連結する。generateIntervalSemanticsCandidates()
+  // 用のnearbyText(対象セル自身のみに限定。shadow_mode_integration_design.md 2.3節の訂正で、
+  // 列見出し・他列の値をinterval_semantics候補へ混ぜてはいけないと確定した)とは別の用途であり、
+  // この関数はもっぱら概念(property)候補生成専用として意図的に別定義にしている。
+  function nearbyTextForRecord(record) {
+    if (typeof record?.source_raw_text === 'string') return record.source_raw_text;
+    if (record?.source_record && typeof record.source_record === 'object' && !Array.isArray(record.source_record)) {
+      return Object.entries(record.source_record)
+        .filter(([key]) => !isPropertyManagementField(key))
+        .map(([, value]) => (typeof value === 'string' || typeof value === 'number') ? String(value) : '')
+        .filter(Boolean)
+        .join(' / ');
+    }
+    return '';
+  }
+
+  function recordsByTraceId(trace) {
+    const map = new Map();
+    (traceRecords(trace) || []).forEach(record => {
+      if (record && typeof record.trace_id === 'string') map.set(record.trace_id, record);
+    });
+    return map;
+  }
+
+  // resolved: 最上位候補の確信度がruleset.auto_applicable_thresholds.propertyConfidence以上、
+  // かつmarginOf()がthresholds.margin以上(次点候補との差が十分)。候補が1件のみの場合は
+  // marginOf()がその候補自身のconfidenceを返すため、実質propertyConfidence判定だけで決まる
+  // (弱い1件だけの候補を安易にresolvedにしないための、既存の2つの閾値の組み合わせ)。
+  // unavailable: 候補が1件もない。
+  // ambiguous: 候補はあるがresolvedの条件を満たさない(確信度不足、または次点との僅差)。
+  // 新しい閾値は発明せず、既存のruleset(AUTO_APPLICABLE_THRESHOLDS由来のmargin・
+  // propertyConfidence)をそのまま使う(shadow_mode_integration_design.md 7節のmarginOf()
+  // パターンをproperty_candidatesへ適用する、という元の設計をそのまま踏襲)。
+  function resolvePropertyStatus(candidates, thresholds) {
+    if (!candidates.length) return 'unavailable';
+    const top = candidates[0];
+    const margin = marginOf(candidates);
+    if (top.confidence >= thresholds.propertyConfidence && margin >= thresholds.margin) return 'resolved';
+    return 'ambiguous';
+  }
+
+  function blockedPropertyResult(diagnostics) {
+    return { ready:false, resolutions:[], diagnostics };
+  }
+
+  function generatePropertyResolutions({ binding, requirementTrace, actualTrace }) {
+    if (!binding || !binding.ready) {
+      return blockedPropertyResult([{ code:'binding_not_ready', severity:'error',
+        detail:'quantity_sidecar_binding_core.bindInputPair()がready:falseのためproperty候補を生成できません' }]);
+    }
+    // 両側とも同じ検証済みrulesetを共有している前提(bindSide()がSUPPORTED_RULESETSとの
+    // 完全一致を要求しているため、ready:trueならrequirement/actual双方の閾値は同一のはず)。
+    // 念のため一方が欠けていても他方から解決できるようフォールバックする。
+    const thresholds = binding.requirement?.ruleset_version?.auto_applicable_thresholds
+      || binding.actual?.ruleset_version?.auto_applicable_thresholds;
+    if (!thresholds) {
+      return blockedPropertyResult([{ code:'ruleset_thresholds_unavailable', severity:'error',
+        detail:'auto_applicable_thresholds(margin/propertyConfidence)を解決できません' }]);
+    }
+
+    const reqAnalysesByTrace = bindingAnalysesByTraceId(binding.requirement);
+    const actAnalysesByTrace = bindingAnalysesByTraceId(binding.actual);
+    const reqRecordsByTrace = recordsByTraceId(requirementTrace);
+    const actRecordsByTrace = recordsByTraceId(actualTrace);
+
+    const resolutions = [];
+    const process = (analysesByTrace, recordsByTrace, side) => {
+      for (const [traceId, analyses] of [...analysesByTrace.entries()].sort(([a], [b]) => String(a).localeCompare(String(b)))) {
+        const record = recordsByTrace.get(traceId);
+        const ctx = { nearbyText:nearbyTextForRecord(record), tags:record?.tags || [] };
+        for (const analysis of [...analyses].sort((a, b) => String(a?.quantity_id || '').localeCompare(String(b?.quantity_id || '')))) {
+          const candidates = generatePropertyCandidates(analysis.quantity, ctx);
+          const status = resolvePropertyStatus(candidates, thresholds);
+          resolutions.push({
+            side, trace_id:traceId, quantity_id:analysis.quantity_id, status,
+            concept_id: status === 'resolved' ? candidates[0].concept_id : null,
+            candidates,
+          });
+        }
+      }
+    };
+    process(reqAnalysesByTrace, reqRecordsByTrace, 'requirement');
+    process(actAnalysesByTrace, actRecordsByTrace, 'actual');
+
+    return { ready:true, resolutions, diagnostics:[] };
+  }
+
   return Object.freeze({ SCHEMA_VERSION, SUPPORTED_RULESETS, validateAnnotationSchema, validateRulesetCompatibility,
     canonicalValue, canonicalJson, normalize, hashParts, computeDatasetSignature, computeRecordContentHash,
-    traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates });
+    traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates,
+    CONCEPT_DICTIONARY, generatePropertyCandidates, generatePropertyResolutions });
 });

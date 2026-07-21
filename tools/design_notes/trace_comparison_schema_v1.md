@@ -16,6 +16,7 @@
 > - `e18f36d`→本改訂：結果fixtureのみコミットし検証スクリプト自体はscratchに残していたため「一回限りの実証」に過ぎず、本体側の実装が将来壊れても自動検出できない、との指摘を受けた。`tools/design_notes/hash_3paths_verification.js`（Playwright必要、完全版）と`hash_3paths_node_check.js`（依存パッケージなし、`source_blob_sha`によるHTML変更検知＋Node側ハッシュの回帰確認）をリポジトリへ保存し、再実行可能にした。`-rc1`から正式版への昇格条件は`shadow_mode_integration_design.md` §9に記録した。
 > - 本改訂→Phase B-2実装（`00acf39`レビュー、2026-07-20）：3.4節「全組み合わせ生成の絞り込み」の段階1（canonical dimension一致）を`quantity_sidecar_binding_core.js`の`generateDimensionCandidates()`として実装した。当初の設計（本節が例示する`not_analyzed`個別ペアリスト）は、次元不一致のような「大きな塊で起こる除外」にまで個別ペア粒度を適用すると組み合わせ爆発を起こす欠陥があり（20要求×20実仕様の異次元合成データで実際に400件生成されることを確認）、次元段階だけはバケット単位の圧縮監査記録へ訂正した。詳細・訂正の経緯は`shadow_mode_integration_design.md` 3.4節を参照。段階2以降（設計特性候補の一致・条件候補の整合・comparisonMode導出）は当初の個別ペア粒度のまま未実装。
 > - `77f440f`レビュー（2026-07-20）：異次元の監査記録だけでなく、同一次元候補も数量ID全直積へ展開しない契約へ訂正した。段階1の出力は`candidate_buckets[]`（両数量ID集合、dimension、潜在ペア数、4参照ID）とし、段階2以降が逐次走査して個別ペアを絞り込む。照合行複合キーの区切り文字衝突、複数関係時の`dimension_unavailable`重複、手動関係変更後のUI表示陳腐化も同時に修正した。
+> - `9c06125`→本改訂（Phase B-2.2a実装、2026-07-20）：3.4節 段階2の最初の単位として、数量ごとのproperty候補生成・解決状態の正規化を`generatePropertyResolutions()`として実装した。`semantic_mapping_prototype.js`の`marginOf()`・`CONCEPT_DICTIONARY`・`generatePropertyCandidates()`を一字一句移植し、独自の別ロジックは作らなかった。7節の`mapping.status`を`resolved`／`unavailable`／`ambiguous`の3状態へ訂正した経緯は7節を参照。この段階ではconcept間の結合・除外バケット化・数値比較・comparisonMode導出・充足判定は実装していない（段階2b、未着手）。
 
 ## 1. 設計原則
 
@@ -216,8 +217,10 @@ comparison_id     = requirement_ref.trace_id + "::" + actual_ref.trace_id + "::"
 }
 ```
 
-- `status`：`"resolved"`（上位候補と次点候補の差が閾値`AUTO_APPLICABLE_THRESHOLDS.margin`以上）または`"ambiguous"`（差が閾値未満、または候補が1件以下）。
-- `status: "ambiguous"`の場合、`concept_id`は`null`、`margin`は算出できた値のみ入れる（候補0件なら`null`）。この場合、`automation.auto_applicable`の計算へは進まず、`fail_reasons`に`"設計特性の対応が一意に決まらない"`を追加する（8節）。
+- `status`：`"resolved"`（最上位候補の確信度が閾値`AUTO_APPLICABLE_THRESHOLDS.propertyConfidence`以上、**かつ**上位候補と次点候補の差(`marginOf()`)が閾値`AUTO_APPLICABLE_THRESHOLDS.margin`以上）／`"unavailable"`（候補が1件もない）／`"ambiguous"`（候補は1件以上あるが`resolved`の条件を満たさない：確信度不足、または次点候補との差が僅少）。
+- `status: "ambiguous"`または`"unavailable"`の場合、`concept_id`は`null`、`margin`は算出できた値のみ入れる（候補0件なら`null`）。この場合、`automation.auto_applicable`の計算へは進まず、`fail_reasons`に`"設計特性の対応が一意に決まらない"`を追加する（8節）。
+
+> **訂正（Phase B-2.2a実装、2026-07-20）**：上記は当初`"resolved"`／`"ambiguous"`の2状態のみで、「候補が1件以下」を一律`"ambiguous"`とする曖昧な規則だった。実装（`quantity_sidecar_binding_core.js`の`generatePropertyResolutions()`）にあたり、「候補0件」（そもそも対応する概念が見つからない）と「候補はあるが確信度・差が不十分」（見つかったが確定できない）は診断として区別すべきと判断し、`"unavailable"`／`"ambiguous"`の3状態へ分けた。また、`marginOf()`は候補が1件のみのとき「その候補自身のconfidence」を返す実装（`semantic_mapping_prototype.js` 400〜404行目）であるため、`margin`閾値だけで判定すると、周辺語一致1件だけ（confidence 0.35程度）のような弱い単独候補が`margin(0.2)`をやすやすと超えて`resolved`になってしまう欠陥がある。これを避けるため、既存の2つの閾値（`margin`・`propertyConfidence`）を両方満たすことを`resolved`の条件にした——`propertyConfidence`(0.7)が絶対的な強さの下限、`margin`(0.2)が複数候補時の相対的な明確さの下限として、それぞれ別の役割を持つ。新しい閾値は発明していない。回帰テストは`quantity_property_candidate_verification.js`（28件、僅差候補・弱い単独候補いずれも`resolved`にしないことを個別に確認、実fixtureでのend-to-end確認を含む）。
 - `candidates`：`generatePropertyCandidates()`の全候補を保持する（縮約前の情報を消さない。監査・再レビュー用）。上記の値は`trace_comparison_example_verification.js`が実データ（`design-cooling-capacity`）から実際に計算した結果（`CONCEPT_DICTIONARY`の実在する2エントリ）である。**次点候補が「無関係な温度の概念」ではなく実際に本レコードに含まれる「周囲温度」（条件節の値）である点が重要**：`検討結果`セルの値だけを周辺語コンテキストに使うと、この2候補の差はわずか0.05しかなく`status: "ambiguous"`になってしまうことを実データで確認した（11節）。行内の他フィールド（`設計項目`列や列見出し自体）を周辺語コンテキストに含めることで、`confidence`が0.99まで上がり`margin`が確保される。
 - `source`：本体統合時は`generatePropertyCandidates()`の実出力を使う（`CONCEPT_DICTIONARY`・`groupByTopConcept()`はHVACサンプル限定のたたき台であり、本体の概念辞書は別途用意する必要がある、`baseline_v1_handoff.md` §8末尾の注記を参照）。
 
