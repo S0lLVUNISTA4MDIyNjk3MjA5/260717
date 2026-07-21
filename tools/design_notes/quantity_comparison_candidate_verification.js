@@ -105,6 +105,7 @@ function relation(requirementTraceId, actualTraceId, matcherA = `A-${requirement
     && result1.comparison_candidates[0]?.matcher_a_id === 'A-req-1' && result1.comparison_candidates[0]?.matcher_b_id === 'B-act-1',
     result1.comparison_candidates[0]);
   check('candidate_countがcomparison_candidates.lengthと一致する', result1.candidate_count === result1.comparison_candidates.length);
+  check('【round2必須修正、重大2】切り詰めが発生しなかった場合、result_complete===trueになる', result1.result_complete === true, result1.result_complete);
 
   // ── 2. property_unresolved: 片側の数量がresolvedに至らない(ambiguous)場合、comparison候補は
   //    生成されず、reason_code:property_unresolvedとしてstatus付きで圧縮記録される ──
@@ -174,6 +175,8 @@ function relation(requirementTraceId, actualTraceId, matcherA = `A-${requirement
     resultMany.comparison_candidates.every(c => c.requirement_quantity_id === qid('many-r0'))
     && new Set(resultMany.comparison_candidates.map(c => c.actual_quantity_id)).size === 5,
     resultMany.comparison_candidates);
+  check('【round2必須修正、重大2】per-group切り詰めが発生した場合、result_complete===falseで機械的に検知できる',
+    resultMany.result_complete === false, resultMany.result_complete);
 
   // ── 5. candidateLimitを超えないケース(既定値50)では、切り詰め・candidate_limit_exceededが
   //    一切発生しないこと(誤検出しないことの確認) ──
@@ -294,24 +297,25 @@ function relation(requirementTraceId, actualTraceId, matcherA = `A-${requirement
   check('totalCandidateLimitの不正値(Infinity)もfail closedする(round1必須修正、中)',
     badTotalResult.ready === false && badTotalResult.diagnostics.some(d => d.code === 'total_candidate_limit_invalid'), badTotalResult.diagnostics);
 
-  // ── 13. 【round1レビュー修正、重大2】per-group上限(candidateLimit)は「1つの(bucket,concept_id)組
-  //    あたり」の上限にすぎない。1つの組だけでcandidateLimitを超えて生成された場合も、
-  //    複数の組にまたがって合計が積み上がった場合も、totalCandidateLimitを超えたら
-  //    comparison_candidates全体をfail closedすることを確認する(恣意的な部分採用をしない)。 ──
+  // ── 13. 【round2レビュー修正、重大1・重大3】全体上限(totalCandidateLimit)の判定対象は、
+  //    切り詰め後の実現候補数ではなく、切り詰め前の潜在ペア数の合計でなければならない、と
+  //    指摘された。1つの組だけでcandidateLimitを超える場合(単一グループが巨大)も、複数の組の
+  //    潜在ペア数の合計が積み上がる場合(小さなグループが大量)も、いずれも候補オブジェクトを
+  //    1件も生成せずfail closedすることを確認する。 ──
   const singleGroupOverTotal = core.generateComparisonCandidates({
     binding:bindingMany, relations:[relation('req-many', 'act-many')], candidateLimit:20, totalCandidateLimit:10,
   });
-  check('単一(bucket,concept)組だけでtotalCandidateLimitを超える場合もfail closedする(round1必須修正、重大2)',
-    singleGroupOverTotal.ready === false && singleGroupOverTotal.comparison_candidates.length === 0,
+  check('単一(bucket,concept)組の潜在ペア数(100)だけでtotalCandidateLimit(10)を超える場合もfail closedする(round2必須修正、重大1・重大3)',
+    singleGroupOverTotal.ready === false && singleGroupOverTotal.comparison_candidates.length === 0 && singleGroupOverTotal.result_complete === false,
     singleGroupOverTotal);
   check('total_candidate_limit_exceededがerror severityの診断として記録される',
     singleGroupOverTotal.diagnostics.some(d => d.code === 'total_candidate_limit_exceeded' && d.severity === 'error'),
     singleGroupOverTotal.diagnostics);
-  check('total_candidate_limit_exceededのnot_analyzedに実際の合計件数と上限が記録される',
-    singleGroupOverTotal.not_analyzed.some(n => n.reason_code === 'total_candidate_limit_exceeded' && n.total_candidate_count === 20 && n.total_candidate_limit === 10),
+  check('total_candidate_limit_exceededのnot_analyzedに「切り詰め前の」潜在ペア数合計(100、candidateLimit適用後の20ではない)と上限が記録される(round2必須修正、重大3)',
+    singleGroupOverTotal.not_analyzed.some(n => n.reason_code === 'total_candidate_limit_exceeded' && n.total_potential_pair_count === 100 && n.total_candidate_limit === 10),
     singleGroupOverTotal.not_analyzed);
-  check('個々のバケットのcandidate_limit_exceeded監査記録も併せて残り、超過の内訳を追跡できる',
-    singleGroupOverTotal.diagnostics.some(d => d.code === 'candidate_limit_exceeded'), singleGroupOverTotal.diagnostics);
+  check('個々のバケットのcandidate_limit_exceeded監査記録も、候補を実際には生成していないfail closed経路でも併せて残り、超過の内訳を追跡できる',
+    singleGroupOverTotal.diagnostics.some(d => d.code === 'candidate_limit_exceeded' && d.severity === 'warning'), singleGroupOverTotal.diagnostics);
 
   const multiBucketReqTrace = { _trace_records:[
     { trace_id:'mb-req-1', source_raw_text:'冷房能力12 kW以上を確保すること。', tags:['冷房能力'] },
@@ -331,16 +335,45 @@ function relation(requirementTraceId, actualTraceId, matcherA = `A-${requirement
   check('前提確認: 3バケットそれぞれ1件ずつ、合計3件のcomparison候補が生成される(いずれもper-group上限内)',
     multiBucketUnderLimit.ready === true && multiBucketUnderLimit.comparison_candidates.length === 3, multiBucketUnderLimit);
   const multiBucketOverTotal = core.generateComparisonCandidates({ binding:multiBucketBinding, relations:multiBucketRelations, totalCandidateLimit:2 });
-  check('個々のバケットはper-group上限内でも、複数バケットにまたがる合計がtotalCandidateLimitを超えればfail closedする(round1必須修正、重大2)',
-    multiBucketOverTotal.ready === false && multiBucketOverTotal.comparison_candidates.length === 0
-    && multiBucketOverTotal.not_analyzed.some(n => n.reason_code === 'total_candidate_limit_exceeded' && n.total_candidate_count === 3 && n.total_candidate_limit === 2),
+  check('個々のバケットはper-group上限内でも、複数バケットの潜在ペア数の合計がtotalCandidateLimitを超えればfail closedする(round1/round2必須修正、重大2・重大3)',
+    multiBucketOverTotal.ready === false && multiBucketOverTotal.comparison_candidates.length === 0 && multiBucketOverTotal.result_complete === false
+    && multiBucketOverTotal.not_analyzed.some(n => n.reason_code === 'total_candidate_limit_exceeded' && n.total_potential_pair_count === 3 && n.total_candidate_limit === 2),
     multiBucketOverTotal);
 
-  // ── 14. 【round1レビュー修正、重大1、性能面の直接証拠】2000×2000(=400万潜在ペア)でも
-  //    generateComparisonCandidates()自体が短時間で完了すること。全直積を中間配列として
-  //    生成する実装であれば数百万要素のpush()で顕著に時間がかかるはずであり、直接ループで
-  //    上限到達時に打ち切る実装であれば経過時間はcandidateLimitやID数のソートに比例するだけで
-  //    済む(この差を時間で直接検出する)。 ──
+  // ── 13b. 【round2レビュー修正、重大3の具体例】「多数の小さなグループ」ケース: 20バケットそれぞれ
+  //    潜在20件(要求側20×実仕様側1)、candidateLimit=1で切り詰めれば各バケットの実現後件数はわずか
+  //    1件(=バケット合計20件)にすぎないが、切り詰め前の真の潜在合計は400件になる。totalCandidateLimit
+  //    を20より大きく400より小さい値(100)に設定すると、「実現後の合計」で判定していれば
+  //    (20<100)見逃していたはずの超過を、「切り詰め前の潜在合計」で判定することで正しく検出できる
+  //    ことを直接確認する(レビューが提示した反例と同じ構造)。 ──
+  const scaleN = 20;
+  const scaleReqTrace = { _trace_records:Array.from({ length:scaleN }, (_, i) =>
+    ({ trace_id:`scale-req-${i}`, source_raw_text:'冷房能力12 kW以上を確保すること。', tags:['冷房能力'] })) };
+  const scaleActTrace = { _trace_records:Array.from({ length:scaleN }, (_, i) =>
+    ({ trace_id:`scale-act-${i}`, source_raw_text:'冷房能力12.5 kWを実測した。', tags:['冷房能力'] })) };
+  const scaleReqAnalyses = id => Array.from({ length:scaleN }, (_, j) => analysis(`${id}-r${j}`, 'power', 'kW'));
+  const scaleActAnalyses = id => [analysis(`${id}-a`, 'power', 'kW')];
+  const scaleBinding = await bind(scaleReqTrace, scaleReqAnalyses, scaleActTrace, scaleActAnalyses);
+  check('前提確認: 多数小グループ合成データのbindInputPair自体はready', scaleBinding.ready, scaleBinding.diagnostics);
+  const scaleRelations = Array.from({ length:scaleN }, (_, i) => relation(`scale-req-${i}`, `scale-act-${i}`));
+  const scaleResult = core.generateComparisonCandidates({ binding:scaleBinding, relations:scaleRelations, candidateLimit:1, totalCandidateLimit:100 });
+  check('20バケット×潜在20件(合計400)は各バケットの実現後件数(1、合計20)が上限(100)未満でも、切り詰め前の潜在合計(400)で判定してfail closedする(round2必須修正、重大3)',
+    scaleResult.ready === false && scaleResult.comparison_candidates.length === 0
+    && scaleResult.not_analyzed.some(n => n.reason_code === 'total_candidate_limit_exceeded' && n.total_potential_pair_count === 400 && n.total_candidate_limit === 100),
+    scaleResult);
+
+  // ── 14. 【round1/round2レビュー修正、重大1、性能面の直接証拠】2000×2000(=400万潜在ペア)の
+  //    合成データを2通りの上限設定で評価する。
+  //    (a) totalCandidateLimitを小さく設定し、Pass 1(潜在ペア数の集計のみ、候補オブジェクトは
+  //    一切生成しない)だけでfail closedへ到達する経路。この経路の所要時間は「バケット数×concept数」
+  //    にしか比例しないはずであり、構造的にO(1)に近い(全直積を作る実装に戻すと明確に遅くなる)。
+  //    round2レビューで、1秒固定のタイミング判定はCI環境のばらつきの影響を受けやすいと指摘された
+  //    ため、このケースでは緩めの閾値(500ms、正しい実装なら数msで終わるはずの十分な余裕)を
+  //    主たる合否判定に使い、より厳密な検証は「fail closedであること」「潜在ペア数が正しく
+  //    400万件と計測されていること」という時間に依存しない構造的なアサーションで行う。
+  //    (b) totalCandidateLimitを潜在ペア数より大きく設定し、実際にPass 2(候補生成)まで進む経路。
+  //    こちらは経過時間を計測してログに残すのみとし(レビューの要望どおり非ブロッキング)、
+  //    合否判定には使わない。 ──
   const bigN = 2000;
   const bigReqAnalyses = Array.from({ length:bigN }, (_, i) => analysis(`big-r${i}`, 'power', 'kW'));
   const bigActAnalyses = Array.from({ length:bigN }, (_, i) => analysis(`big-a${i}`, 'power', 'kW'));
@@ -351,18 +384,32 @@ function relation(requirementTraceId, actualTraceId, matcherA = `A-${requirement
     bigActTrace, id => (id === 'act-big' ? bigActAnalyses : [])
   );
   check('前提確認: 2000×2000合成データのbindInputPair自体はready', bigBinding.ready, bigBinding.diagnostics);
-  const bigStart = Date.now();
-  const bigResult = core.generateComparisonCandidates({
+
+  const bigRejectStart = Date.now();
+  const bigRejectResult = core.generateComparisonCandidates({
     binding:bigBinding, relations:[relation('req-big', 'act-big')], candidateLimit:50, totalCandidateLimit:1000,
   });
-  const bigElapsedMs = Date.now() - bigStart;
-  check(`2000×2000(潜在ペア400万件)でもgenerateComparisonCandidates()が1秒未満で完了する(round1必須修正、重大1の性能的な証拠。経過時間=${bigElapsedMs}ms)`,
-    bigElapsedMs < 1000, { bigElapsedMs });
-  check('2000×2000でもcomparison_candidatesはcandidateLimit(50)ちょうどになる', bigResult.comparison_candidates.length === 50, bigResult.comparison_candidates.length);
-  check('2000×2000の超過分(399万9950件)が個別展開されず1件のcandidate_limit_exceededへ圧縮される',
-    bigResult.not_analyzed.filter(n => n.reason_code === 'candidate_limit_exceeded').length === 1
-    && bigResult.not_analyzed.find(n => n.reason_code === 'candidate_limit_exceeded')?.excluded_pair_count === (bigN * bigN - 50),
-    bigResult.not_analyzed.filter(n => n.reason_code === 'candidate_limit_exceeded'));
+  const bigRejectElapsedMs = Date.now() - bigRejectStart;
+  check('2000×2000(潜在400万件)はtotalCandidateLimit(1000)を超えるため候補を1件も生成せずfail closedする(round2必須修正、重大1)',
+    bigRejectResult.ready === false && bigRejectResult.comparison_candidates.length === 0, bigRejectResult.comparison_candidates.length);
+  check('fail closed時のnot_analyzedに正確な潜在ペア数(400万件)が記録される(round2必須修正、重大3)',
+    bigRejectResult.not_analyzed.some(n => n.reason_code === 'total_candidate_limit_exceeded' && n.total_potential_pair_count === bigN * bigN && n.total_candidate_limit === 1000),
+    bigRejectResult.not_analyzed);
+  check(`2000×2000でもPass 1(潜在ペア数集計のみ)経由のfail closedは500ms未満で完了する(round1/round2必須修正、重大1の性能的な証拠、CI環境差を考慮した緩めの閾値。経過時間=${bigRejectElapsedMs}ms)`,
+    bigRejectElapsedMs < 500, { bigRejectElapsedMs });
+
+  // (b) 実際にPass 2まで進む経路は、経過時間をログにのみ残す(合否判定には使わない、レビューの要望どおり非ブロッキング)。
+  const bigAcceptStart = Date.now();
+  const bigAcceptResult = core.generateComparisonCandidates({
+    binding:bigBinding, relations:[relation('req-big', 'act-big')], candidateLimit:50, totalCandidateLimit:bigN * bigN,
+  });
+  const bigAcceptElapsedMs = Date.now() - bigAcceptStart;
+  console.log(`[INFO] 2000×2000でPass 2(候補生成)まで進んだ場合の経過時間(非ブロッキング、参考値): ${bigAcceptElapsedMs}ms`);
+  check('Pass 2まで進んだ場合もcomparison_candidatesはcandidateLimit(50)ちょうどになる', bigAcceptResult.comparison_candidates.length === 50, bigAcceptResult.comparison_candidates.length);
+  check('Pass 2まで進んだ場合、超過分(399万9950件)が個別展開されず1件のcandidate_limit_exceededへ圧縮される',
+    bigAcceptResult.not_analyzed.filter(n => n.reason_code === 'candidate_limit_exceeded').length === 1
+    && bigAcceptResult.not_analyzed.find(n => n.reason_code === 'candidate_limit_exceeded')?.excluded_pair_count === (bigN * bigN - 50),
+    bigAcceptResult.not_analyzed.filter(n => n.reason_code === 'candidate_limit_exceeded'));
 
   console.log('\n=== quantity_comparison_candidate_verification 結果 ===');
   let failed = 0;
