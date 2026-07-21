@@ -107,7 +107,33 @@ function classifyUnitConversion(requirementUnit, actualUnit) {
     dimension:requirementUnit.dimension, factor, offset:0 } };
 }
 
-module.exports = { KNOWN_CANONICAL_UNITS_BY_DIMENSION, LINEAR_UNIT_SCALE_TO_BASE, isKnownUnit, classifyUnitConversion };
+// Phase B-2.4b: classifyUnitConversion()が返す計画(`factor`/`offset`)を、数量値
+// (`quantity_extraction_prototype.js`が生成するkind:'interval'|'alternatives'の
+// どちらか)の複製へ適用し、要求側の単位で表した新しい数量値を返す。引数のquantityValue
+// 自体は一切変更しない(常に新しいオブジェクトを返す。identity計画(factor:1, offset:0)の
+// 場合でも同じ経路を通り、値が同じでも別オブジェクトを返す——呼び出し側が「複製されている」
+// という契約に依存できるようにするため)。区間の`lower`/`upper`がnull(片側無限)の場合は
+// 変換せずnullのまま返す(値が存在しないものを変換できないため)。
+// kindが'interval'/'alternatives'のいずれでもない場合はnullを返す(呼び出し側で
+// not_analyzedへ回す想定の防御的分岐。quantity-annotationのJSON Schemaはkindをこの2値の
+// 判別可能な共用体としてのみ許可しており、bindSide()はスキーマ検証に失敗した文書全体を
+// bindしない(fail closed)ため、bindingを経由して渡されるquantityValueのkindがこの2値以外に
+// なることは構造的に起こらないはずである。それでも、他の防御的分岐(unit_plan_quantity_missing
+// 等)と同じ理由で、万一の不整合に備えて推測せず弾く)。
+function applyLinearConversion(quantityValue, plan) {
+  const convert = value => value * plan.factor + plan.offset;
+  if (quantityValue.kind === 'interval') {
+    return { kind:'interval',
+      lower: quantityValue.lower ? { value:convert(quantityValue.lower.value), inclusive:quantityValue.lower.inclusive } : null,
+      upper: quantityValue.upper ? { value:convert(quantityValue.upper.value), inclusive:quantityValue.upper.inclusive } : null };
+  }
+  if (quantityValue.kind === 'alternatives') {
+    return { kind:'alternatives', options: quantityValue.options.map(convert), selection_semantics:quantityValue.selection_semantics };
+  }
+  return null;
+}
+
+module.exports = { KNOWN_CANONICAL_UNITS_BY_DIMENSION, LINEAR_UNIT_SCALE_TO_BASE, isKnownUnit, classifyUnitConversion, applyLinearConversion };
 
 if (require.main === module) {
   const checks = [];
@@ -126,6 +152,26 @@ if (require.main === module) {
     classifyUnitConversion({ canonical:'toString', dimension:'power' }, { canonical:'toString', dimension:'power' }).reason_code === 'unit_metadata_unsupported');
   check('異なる継承キー同士(toString×constructor、pressure)もNaN係数を生成せずunsupportedになる(重大1、2巡目)',
     classifyUnitConversion({ canonical:'toString', dimension:'pressure' }, { canonical:'constructor', dimension:'pressure' }).outcome === 'unsupported');
+
+  {
+    // B-2.4b: applyLinearConversion()のセルフチェック。
+    const planMPaToKPa = classifyUnitConversion({ canonical:'kPa', dimension:'pressure' }, { canonical:'MPa', dimension:'pressure' }).plan;
+    const converted = applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:{ value:8, inclusive:false } }, planMPaToKPa);
+    check('interval(両側あり)、MPa→kPaでlower/upperがそれぞれ1000倍される',
+      converted.lower.value === 5000 && converted.lower.inclusive === true && converted.upper.value === 8000 && converted.upper.inclusive === false, converted);
+
+    const original = { kind:'interval', lower:{ value:12, inclusive:true }, upper:null };
+    const identity = applyLinearConversion(original, { factor:1, offset:0 });
+    check('片側のみ(upper:null)の区間はnullのまま変換されない', identity.upper === null, identity);
+    check('identity計画(factor:1,offset:0)でも値は変化しない', identity.lower.value === 12, identity);
+    check('identity計画でも常に新しいオブジェクトを返す(元のオブジェクトと同一参照ではない)',
+      identity !== original && identity.lower !== original.lower, { original, identity });
+
+    const alt = applyLinearConversion({ kind:'alternatives', options:[5, 8], selection_semantics:'unknown' }, planMPaToKPa);
+    check('alternatives(kind)は各optionsがそれぞれ変換される', alt.kind === 'alternatives' && alt.options[0] === 5000 && alt.options[1] === 8000, alt);
+
+    check('未知のkindはnullを返す(防御的)', applyLinearConversion({ kind:'unknown_kind' }, planMPaToKPa) === null);
+  }
 
   console.log('\n=== unit_conversion_rules_prototype セルフチェック結果 ===');
   let failed = 0;

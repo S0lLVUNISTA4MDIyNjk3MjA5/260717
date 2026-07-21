@@ -24,7 +24,7 @@ const SEMANTICS_LIB_RANGE = [76, 367];   // isTwoSidedRange() 〜 generateInterv
 const PROPERTY_LIB_RANGE_A = [400, 408]; // marginOf() 〜 hasOpposingEvidence()
 const PROPERTY_LIB_RANGE_B = [438, 511]; // CONCEPT_DICTIONARY 〜 generatePropertyCandidates()
 const COMPARISON_MODE_TABLE_RANGE = [368, 374]; // COMPARISON_MODE_DERIVATION_TABLE
-const UNIT_RULES_RANGE = [25, 108]; // KNOWN_CANONICAL_UNITS_BY_DIMENSION 〜 classifyUnitConversion()
+const UNIT_RULES_RANGE = [25, 134]; // KNOWN_CANONICAL_UNITS_BY_DIMENSION 〜 applyLinearConversion()(B-2.4b追加)
 
 const assertions = [];
 function check(name, ok, detail) { assertions.push({ name, ok: !!ok, detail }); }

@@ -1531,6 +1531,32 @@
       target_side:'requirement', target_canonical_unit:requirementUnit.canonical,
       dimension:requirementUnit.dimension, factor, offset:0 } };
   }
+
+  // Phase B-2.4b: classifyUnitConversion()が返す計画(`factor`/`offset`)を、数量値
+  // (`quantity_extraction_prototype.js`が生成するkind:'interval'|'alternatives'の
+  // どちらか)の複製へ適用し、要求側の単位で表した新しい数量値を返す。引数のquantityValue
+  // 自体は一切変更しない(常に新しいオブジェクトを返す。identity計画(factor:1, offset:0)の
+  // 場合でも同じ経路を通り、値が同じでも別オブジェクトを返す——呼び出し側が「複製されている」
+  // という契約に依存できるようにするため)。区間の`lower`/`upper`がnull(片側無限)の場合は
+  // 変換せずnullのまま返す(値が存在しないものを変換できないため)。
+  // kindが'interval'/'alternatives'のいずれでもない場合はnullを返す(呼び出し側で
+  // not_analyzedへ回す想定の防御的分岐。quantity-annotationのJSON Schemaはkindをこの2値の
+  // 判別可能な共用体としてのみ許可しており、bindSide()はスキーマ検証に失敗した文書全体を
+  // bindしない(fail closed)ため、bindingを経由して渡されるquantityValueのkindがこの2値以外に
+  // なることは構造的に起こらないはずである。それでも、他の防御的分岐(unit_plan_quantity_missing
+  // 等)と同じ理由で、万一の不整合に備えて推測せず弾く)。
+  function applyLinearConversion(quantityValue, plan) {
+    const convert = value => value * plan.factor + plan.offset;
+    if (quantityValue.kind === 'interval') {
+      return { kind:'interval',
+        lower: quantityValue.lower ? { value:convert(quantityValue.lower.value), inclusive:quantityValue.lower.inclusive } : null,
+        upper: quantityValue.upper ? { value:convert(quantityValue.upper.value), inclusive:quantityValue.upper.inclusive } : null };
+    }
+    if (quantityValue.kind === 'alternatives') {
+      return { kind:'alternatives', options: quantityValue.options.map(convert), selection_semantics:quantityValue.selection_semantics };
+    }
+    return null;
+  }
   // ── quantity-annotation/1.0-rc1: 単位互換性判定・変換計画生成ライブラリ(移植)ここまで ──
 
   // quantity_idをキーに、bindingへ結合済みのanalysisを1件引く(段階1のbindingAnalysesByTraceId()
@@ -1636,6 +1662,75 @@
       not_analyzed: [...modeResult.not_analyzed, ...notAnalyzed] };
   }
 
+  function blockedNormalizedQuantityViewResult(diagnostics, planResult) {
+    return { ready:false, normalized_quantity_views:[], candidate_count:0, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(planResult?.diagnostics || [])]),
+      not_analyzed:dedupeByCanonicalJson(planResult?.not_analyzed || []) };
+  }
+
+  // Phase B-2.4b: 段階4の後半として、generateUnitConversionPlans()の各計画を実仕様側の数量値の
+  // 複製へ適用し、要求側の単位で表した正規化ビューを生成する。数値比較・区間包含判定・
+  // gap計算・auto applicability・充足判定はこの段階でも一切行わない(範囲外、B-2.4bはあくまで
+  // 「複製を要求単位へ変換するだけ」の段階)。planResultは呼び出し側から別引数として受け取らず、
+  // 必ずこの関数の内部で同じbinding/relationsから計算する(B-2.2a round1以来一貫した設計方針)。
+  function generateNormalizedQuantityViews({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    const planResult = generateUnitConversionPlans({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (planResult.ready !== true || planResult.result_complete !== true) {
+      return blockedNormalizedQuantityViewResult([{ code:'unit_conversion_plans_not_ready_or_incomplete', severity:'error',
+        detail:`generateUnitConversionPlans()がready=${JSON.stringify(planResult.ready)}、result_complete=${JSON.stringify(planResult.result_complete)}のため正規化ビューを生成できません(段階3以降と同じくready===trueかつresult_complete===trueを要求してfail closedする契約)` }],
+        planResult);
+    }
+
+    // quantity値そのものはunit_conversion_plansが保持していないため、binding内のanalysisを
+    // (generateUnitConversionPlans()の内部と同様に)quantity_id単位で再度索引化して取得する。
+    // 別引数として渡された値やunit_conversion_plans以外の中間結果は受け取らず、常にbindingから
+    // 再計算する(B-2.2a round1以来の設計方針の踏襲)。
+    const reqAnalysisById = analysisByQuantityId(binding.requirement);
+    const actAnalysisById = analysisByQuantityId(binding.actual);
+
+    // 段階1: 対応するquantityがbinding内に見つからない計画が1件でもあれば、部分的に続行せず
+    // 呼び出し全体をfail closedする(unit_plan_quantity_missingと同じ位置づけの防御的検査。
+    // planResultは同じbindingから直前に同期的に計算したばかりであり、その間にbindingが変化する
+    // 余地は無い(binding自体が既にdeepFreeze済みで、この関数はawaitを挟まない)ため、構造的には
+    // 到達不能なはずである)。
+    const missingDiagnostics = [];
+    for (const entry of planResult.unit_conversion_plans) {
+      if (!reqAnalysisById.has(entry.requirement_quantity_id) || !actAnalysisById.has(entry.actual_quantity_id)) {
+        missingDiagnostics.push({ code:'normalized_view_quantity_missing', severity:'error',
+          requirement_quantity_id:entry.requirement_quantity_id, actual_quantity_id:entry.actual_quantity_id,
+          detail:'単位変換計画のquantity_idに対応するanalysisがbinding内に見つかりません' });
+      }
+    }
+    if (missingDiagnostics.length) return blockedNormalizedQuantityViewResult(missingDiagnostics, planResult);
+
+    // 段階2: 各計画へapplyLinearConversion()を適用し、正規化ビューを組み立てる。
+    // kindが未知(構造的に到達不能なはずの防御的分岐、上記参照)でapplyLinearConversion()が
+    // nullを返した場合は、推測せずnot_analyzedへ回す(呼び出し全体は止めない。単位metadataの
+    // 不備と同じ「個々の候補だけを除外する」扱い)。
+    const notAnalyzed = [];
+    const normalizedQuantityViews = [];
+    for (const entry of planResult.unit_conversion_plans) {
+      const requirementQuantityValue = reqAnalysisById.get(entry.requirement_quantity_id).quantity.quantity;
+      const actualQuantityValueOriginal = actAnalysisById.get(entry.actual_quantity_id).quantity.quantity;
+      const actualQuantityValueNormalized = applyLinearConversion(actualQuantityValueOriginal, entry.unit_conversion_plan);
+      if (actualQuantityValueNormalized === null) {
+        notAnalyzed.push({ reason_code:'quantity_value_kind_unsupported', ...entry,
+          actual_quantity_value_kind: actualQuantityValueOriginal.kind });
+        continue;
+      }
+      normalizedQuantityViews.push({ ...entry,
+        requirement_quantity_value: requirementQuantityValue,
+        actual_quantity_value_original: actualQuantityValueOriginal,
+        actual_quantity_value_normalized: actualQuantityValueNormalized });
+    }
+
+    return { ready:true, normalized_quantity_views:normalizedQuantityViews, candidate_count:normalizedQuantityViews.length, result_complete:true,
+      diagnostics: planResult.diagnostics,
+      not_analyzed: [...planResult.not_analyzed, ...notAnalyzed] };
+  }
+
   return Object.freeze({ SCHEMA_VERSION, SUPPORTED_RULESETS, validateAnnotationSchema, validateRulesetCompatibility,
     canonicalValue, canonicalJson, normalize, hashParts, computeDatasetSignature, computeRecordContentHash,
     traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates,
@@ -1643,5 +1738,6 @@
     DEFAULT_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT,
     generateComparisonCandidates, generateConditionResolutions, generateConditionAnnotatedComparisonCandidates,
     COMPARISON_MODE_DERIVATION_TABLE, generateComparisonModeCandidates,
-    KNOWN_CANONICAL_UNITS_BY_DIMENSION, LINEAR_UNIT_SCALE_TO_BASE, generateUnitConversionPlans });
+    KNOWN_CANONICAL_UNITS_BY_DIMENSION, LINEAR_UNIT_SCALE_TO_BASE, generateUnitConversionPlans,
+    generateNormalizedQuantityViews });
 });
