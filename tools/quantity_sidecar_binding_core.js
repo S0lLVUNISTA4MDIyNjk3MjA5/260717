@@ -1428,11 +1428,186 @@
       not_analyzed: [...conditionAnnotatedResult.not_analyzed, ...notAnalyzed] };
   }
 
+  // ── Phase B-2.4a: 段階4の最初の部分。comparison mode候補について単位互換性を判定し、
+  // 必要な変換方法を「計画」として記録するだけの段階。数量値・区間境界へは一切変換を
+  // 適用しない(lower/upper/alternatives内の値は不変のまま)。数値比較・区間包含判定・
+  // gap計算・auto applicability・充足判定はまだ行わない(3.4節 段階4の残り、未着手のまま)。
+  // 既存のquantity_extraction_prototype.jsのcoverageGap()は、canonical単位が異なるだけで
+  // 比較不能にした上で数値比較・充足判定まで一気に進む設計であり、単位互換性判定だけを
+  // 切り出したこの段階とは責務が異なるため、呼び出さない。 ──
+
+  // JIS Z 8203準拠のUNIT_DEFS(quantity_extraction_prototype.js 112-136行目)では、pressure
+  // (Pa/kPa/MPa)だけが同一dimension内に複数のcanonical単位を持つ。他の全dimension
+  // (temperature=degC、power=kW、voltage=V、frequency=Hz、sound_pressure_level=dB(A)、
+  // length=mm、apparent_power=kVA)はcanonical単位が各1種類のため、非identity変換は現時点
+  // ではpressureだけで十分である(新しい単位辞書エントリが追加された場合はこの表も追随して
+  // 更新する)。基準単位はPa(倍率1)とする。
+  const LINEAR_UNIT_SCALE_TO_BASE = {
+    pressure: { Pa: 1, kPa: 1000, MPa: 1000000 },
+  };
+  // 【B-2.3bと同じ欠陥を作り込まないための必須要件】この表はexportされ、呼び出し側から係数を
+  // 書き換えられると後続の数値比較結果を任意に操作できてしまうため、内側のdimension別
+  // オブジェクトと外側のオブジェクトの両方を凍結する。
+  Object.values(LINEAR_UNIT_SCALE_TO_BASE).forEach(Object.freeze);
+  Object.freeze(LINEAR_UNIT_SCALE_TO_BASE);
+
+  // quantity_idをキーに、bindingへ結合済みのanalysisを1件引く(段階1のbindingAnalysesByTraceId()
+  // がtrace_id単位で索引化するのに対し、この段階はcomparison mode候補が持つ
+  // requirement_quantity_id/actual_quantity_idから直接analysisを引く必要があるため、
+  // quantity_id単位で別途索引化する)。上流(段階1〜3-3)が既にsidecar内quantity_id重複を
+  // 検査済みのため、ここで重複キーの上書きが起こることは構造的にない。
+  function analysisByQuantityId(sideResult) {
+    const map = new Map();
+    (sideResult?.bindings || []).forEach(binding => {
+      if (binding.status === 'bound' && binding.annotation) {
+        (binding.annotation.analyses || []).forEach(analysis => {
+          if (analysis?.quantity_id) map.set(analysis.quantity_id, analysis);
+        });
+      }
+    });
+    return map;
+  }
+
+  // unit.canonical/unit.dimensionがどちらも非空文字列であり、dimensionが
+  // unitInfo()(quantity_extraction_prototype.js)のフォールバック値'unknown'(=そもそも
+  // 抽出時に単位記号を認識できなかった)ではないことを確認する。JSON Schema自体は
+  // canonical/dimensionを必須の文字列としてしか検証しない(空文字列も型としては許容する)ため、
+  // ここで意味的な使用可否を判定する。
+  function isUsableUnitMetadata(unit) {
+    return !!unit && typeof unit.canonical === 'string' && unit.canonical.length > 0
+      && typeof unit.dimension === 'string' && unit.dimension.length > 0 && unit.dimension !== 'unknown';
+  }
+
+  // 両側のunit({canonical, dimension}を持つオブジェクト、analysis.quantity.unitと同じ形)から、
+  // 単位互換性の分類と(可能なら)変換計画を決定する純粋関数。generateUnitConversionPlans()から
+  // 独立してテストできるよう単体で公開する(CONCEPT_DICTIONARY(B-2.2a)にpressure次元の概念が
+  // 存在しないため、pressure次元の数量はconcept解決でresolvedに至れず、comparison_mode_candidate
+  // まで到達できない。したがってPa/kPa/MPa間の変換計算そのものは、この純粋関数を直接呼ぶ形で
+  // 検証する。generateUnitConversionPlans()自体の配線(fail closedゲート・quantity参照・
+  // 監査フィールド伝播)は、到達可能なpower/kW(canonical単位1種類のみ)経由のend-to-endテストで
+  // 別途検証する)。
+  // 戻り値のoutcome: 'plan'(変換計画を生成、`plan`フィールドを持つ)／'unsupported'(推測せず
+  // not_analyzedへ送る対象、`reason_code`を持つ)／'inconsistent'(呼び出し側がfail closedすべき
+  // 構造的矛盾、`reason_code`を持つ)。
+  function classifyUnitConversion(requirementUnit, actualUnit) {
+    if (!isUsableUnitMetadata(requirementUnit) || !isUsableUnitMetadata(actualUnit)) {
+      return { outcome:'unsupported', reason_code:'unit_metadata_unsupported',
+        requirement_unit_dimension:requirementUnit?.dimension ?? null, actual_unit_dimension:actualUnit?.dimension ?? null,
+        requirement_unit_canonical:requirementUnit?.canonical ?? null, actual_unit_canonical:actualUnit?.canonical ?? null };
+    }
+    if (requirementUnit.dimension !== actualUnit.dimension) {
+      return { outcome:'inconsistent', reason_code:'unit_dimension_inconsistent',
+        requirement_unit_dimension:requirementUnit.dimension, actual_unit_dimension:actualUnit.dimension };
+    }
+    if (requirementUnit.canonical === actualUnit.canonical) {
+      return { outcome:'plan', plan:{ conversion_required:false, conversion_operation:'identity',
+        source_unit:actualUnit.canonical, target_unit:requirementUnit.canonical, factor:1, offset:0 } };
+    }
+    const scaleTable = LINEAR_UNIT_SCALE_TO_BASE[requirementUnit.dimension];
+    if (!scaleTable || !(requirementUnit.canonical in scaleTable) || !(actualUnit.canonical in scaleTable)) {
+      return { outcome:'unsupported', reason_code:'unit_conversion_unsupported',
+        requirement_unit_canonical:requirementUnit.canonical, actual_unit_canonical:actualUnit.canonical };
+    }
+    // 実仕様側の単位を要求側の単位へ変換する計画を、常にactual→requirement方向で生成する
+    // (将来、差分値や判定結果を要求仕様の単位で表示できるようにするための固定方向)。
+    const factor = scaleTable[actualUnit.canonical] / scaleTable[requirementUnit.canonical];
+    return { outcome:'plan', plan:{ conversion_required:true, conversion_operation:'linear_scale',
+      source_side:'actual', source_canonical_unit:actualUnit.canonical,
+      target_side:'requirement', target_canonical_unit:requirementUnit.canonical,
+      dimension:requirementUnit.dimension, factor, offset:0 } };
+  }
+
+  function blockedUnitConversionPlanResult(diagnostics, binding, modeResult) {
+    return { ready:false, unit_conversion_plans:[], candidate_count:0, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(binding?.diagnostics || []), ...(modeResult?.diagnostics || [])]),
+      not_analyzed:dedupeByCanonicalJson([...(binding?.not_analyzed || []), ...(modeResult?.not_analyzed || [])]) };
+  }
+
+  function generateUnitConversionPlans({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    // modeResultは呼び出し側から別引数として受け取らず、必ずこの関数の内部で同じbindingから
+    // 計算する(B-2.2a round1以来一貫した設計方針)。
+    const modeResult = generateComparisonModeCandidates({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (modeResult.ready !== true || modeResult.result_complete !== true) {
+      return blockedUnitConversionPlanResult([{ code:'comparison_mode_candidates_not_ready_or_incomplete', severity:'error',
+        detail:`generateComparisonModeCandidates()がready=${JSON.stringify(modeResult.ready)}、result_complete=${JSON.stringify(modeResult.result_complete)}のため単位変換計画を生成できません(段階3以降はready===trueかつresult_complete===trueを要求してfail closedする契約)` }],
+        binding, modeResult);
+    }
+
+    const reqAnalysisById = analysisByQuantityId(binding.requirement);
+    const actAnalysisById = analysisByQuantityId(binding.actual);
+
+    // 段階1: 対応するquantityがbinding内に見つからない候補が1件でもあれば、部分的に続行せず
+    // 呼び出し全体をfail closedする(analysisやquantity情報を外部引数として受け取れるAPIには
+    // せず、必ずbindingから再参照するという設計方針を守った上での、防御的な整合性検査)。
+    const missingDiagnostics = [];
+    for (const candidate of modeResult.comparison_mode_candidates) {
+      if (!reqAnalysisById.has(candidate.requirement_quantity_id) || !actAnalysisById.has(candidate.actual_quantity_id)) {
+        missingDiagnostics.push({ code:'unit_plan_quantity_missing', severity:'error',
+          requirement_quantity_id:candidate.requirement_quantity_id, actual_quantity_id:candidate.actual_quantity_id,
+          detail:'comparison mode候補のquantity_idに対応するanalysisがbinding内に見つかりません' });
+      }
+    }
+    if (missingDiagnostics.length) return blockedUnitConversionPlanResult(missingDiagnostics, binding, modeResult);
+
+    // 段階2: 単位metadata・分類を1件ずつ確定する(曖昧な組み合わせを推測せず、既知の単位定義・
+    // 固定の線形変換表だけを使う。lower/upper/alternativesの値・区間境界には一切触れない)。
+    const classified = modeResult.comparison_mode_candidates.map(candidate => ({
+      candidate,
+      outcome: classifyUnitConversion(
+        reqAnalysisById.get(candidate.requirement_quantity_id)?.quantity?.unit,
+        actAnalysisById.get(candidate.actual_quantity_id)?.quantity?.unit,
+      ),
+    }));
+
+    // 段階3: dimensionが一致しない('inconsistent')候補が1件でもあれば呼び出し全体をfail closed
+    // する。通常はここに到達しないはずである(段階1のconcept/dimension絞り込みにより、同じ
+    // 次元同士でなければcomparison候補自体が生成されない)。到達した場合、上流結果とquantity
+    // 実体が矛盾しているという構造的な異常を意味するため、個々の候補を静かに除外するのでは
+    // なく、fail closedする。
+    const dimensionInconsistentDiagnostics = classified
+      .filter(({ outcome }) => outcome.outcome === 'inconsistent')
+      .map(({ candidate, outcome }) => ({
+        code:'unit_dimension_inconsistent', severity:'error',
+        requirement_quantity_id:candidate.requirement_quantity_id, actual_quantity_id:candidate.actual_quantity_id,
+        concept_id:candidate.concept_id, dimension:candidate.dimension,
+        requirement_unit_dimension:outcome.requirement_unit_dimension, actual_unit_dimension:outcome.actual_unit_dimension,
+        requirement_trace_id:candidate.requirement_trace_id, actual_trace_id:candidate.actual_trace_id,
+        matcher_a_id:candidate.matcher_a_id ?? null, matcher_b_id:candidate.matcher_b_id ?? null,
+        detail:'comparison mode候補の両側でunit.dimensionが一致しません(上流のdimension/concept絞り込みと矛盾するデータ)' }));
+    if (dimensionInconsistentDiagnostics.length) return blockedUnitConversionPlanResult(dimensionInconsistentDiagnostics, binding, modeResult);
+
+    // 段階4: 残りの候補を分類結果どおりnot_analyzed/計画へ振り分ける。
+    const notAnalyzed = [];
+    const unitConversionPlans = [];
+    for (const { candidate, outcome } of classified) {
+      const auditBase = {
+        requirement_quantity_id:candidate.requirement_quantity_id, actual_quantity_id:candidate.actual_quantity_id,
+        concept_id:candidate.concept_id, dimension:candidate.dimension,
+        requirement_trace_id:candidate.requirement_trace_id, actual_trace_id:candidate.actual_trace_id,
+        matcher_a_id:candidate.matcher_a_id ?? null, matcher_b_id:candidate.matcher_b_id ?? null,
+      };
+      if (outcome.outcome === 'unsupported') {
+        notAnalyzed.push({ reason_code:outcome.reason_code, ...auditBase,
+          ...(outcome.requirement_unit_dimension !== undefined ? { requirement_unit_dimension:outcome.requirement_unit_dimension, actual_unit_dimension:outcome.actual_unit_dimension } : {}),
+          ...(outcome.requirement_unit_canonical !== undefined ? { requirement_unit_canonical:outcome.requirement_unit_canonical, actual_unit_canonical:outcome.actual_unit_canonical } : {}) });
+        continue;
+      }
+      unitConversionPlans.push({ ...candidate, unit_conversion_plan:outcome.plan });
+    }
+
+    return { ready:true, unit_conversion_plans:unitConversionPlans, candidate_count:unitConversionPlans.length, result_complete:true,
+      diagnostics: modeResult.diagnostics,
+      not_analyzed: [...modeResult.not_analyzed, ...notAnalyzed] };
+  }
+
   return Object.freeze({ SCHEMA_VERSION, SUPPORTED_RULESETS, validateAnnotationSchema, validateRulesetCompatibility,
     canonicalValue, canonicalJson, normalize, hashParts, computeDatasetSignature, computeRecordContentHash,
     traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates,
     CONCEPT_DICTIONARY, generatePropertyCandidates, generatePropertyResolutions,
     DEFAULT_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT,
     generateComparisonCandidates, generateConditionResolutions, generateConditionAnnotatedComparisonCandidates,
-    COMPARISON_MODE_DERIVATION_TABLE, generateComparisonModeCandidates });
+    COMPARISON_MODE_DERIVATION_TABLE, generateComparisonModeCandidates,
+    LINEAR_UNIT_SCALE_TO_BASE, classifyUnitConversion, generateUnitConversionPlans });
 });
