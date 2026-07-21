@@ -107,6 +107,56 @@ function classifyUnitConversion(requirementUnit, actualUnit) {
     dimension:requirementUnit.dimension, factor, offset:0 } };
 }
 
+// 【レビュー指摘、重大1】JSON Schema(quantity_annotation_schema_v1.json)は`interval.lower/upper`の
+// `value`をtype:'number'としてしか検証せず、`Number.isFinite()`は検査しない(独自validatorの
+// typeMatches()もtypeof value==='number'相当のみで、NaN/Infinityはどちらもtypeof 'number'を
+// 満たすため素通りする)。`alternatives.options`にいたっては要素の型自体が未検証(`{type:'array'}`
+// のみでitemsが無い)。そのため、options:[null, '5', {}, true, NaN, Infinity]のような値も
+// スキーマ検証(validateAnnotationSchema())を通過し、bindingへ結合されうることを実際に再現して
+// 確認した(JSON.parse()されたテキストからは通常NaN/Infinityは生じないが、この関数はbinding経由で
+// 渡された値をそのまま信頼する契約にはできない——プログラム的に構築されたsidecarや、将来の
+// 抽出ツール側のバグが非数値を混入させる経路を塞ぐため)。型・有限性は変換の前後どちらでも
+// 検査する(前:入力自体が不正、後:有限入力同士の演算がオーバーフローしてInfinityになる場合)。
+function isFiniteNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+// 【レビュー指摘、重大3】`alternatives.options`はJSON Schema上サイズ上限(maxItems)が無い。
+// 正常な抽出器(quantity_extraction_prototype.js 297行目)が生成する並列値は常に2要素だが、
+// スキーマ自体はこれを保証しない。件数検査より前に`.map()`で全件複製すると、
+// B-2.2b/B-2.3aで対策した組み合わせ爆発と同種の、入力サイズに比例した未対策コストが生じる。
+// interval_semantics_candidatesの上限(MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY、64)と
+// 同じ値を踏襲する。
+const MAX_ALTERNATIVE_VALUES_PER_QUANTITY = 64;
+
+// 数量値(kind:'interval'|'alternatives')が、変換の有無によらず後続処理で安全に扱える構造で
+// あることを検証する(型・有限性・件数上限のみ。値の変換は行わない)。変換対象のactual側だけで
+// なく、変換をそもそも適用しない(既に要求単位の)requirement側にも同じ検証を適用する
+// 【レビュー指摘、重大2】(この段階の出力は後続の数値比較の入力になるため、両側とも比較可能な
+// 数値構造であることをここで確定させる)。
+function validateQuantityValueStructure(quantityValue) {
+  if (quantityValue.kind === 'interval') {
+    if (quantityValue.lower && !isFiniteNumber(quantityValue.lower.value)) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+    if (quantityValue.upper && !isFiniteNumber(quantityValue.upper.value)) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+    return { outcome:'ok' };
+  }
+  if (quantityValue.kind === 'alternatives') {
+    // 件数検査を、要素へ触れるいかなる走査(.every()・.map()等)よりも前に行う(重大3)。
+    if (quantityValue.options.length > MAX_ALTERNATIVE_VALUES_PER_QUANTITY) {
+      return { outcome:'unsupported', reason_code:'quantity_value_limit_exceeded',
+        observed_count:quantityValue.options.length, limit:MAX_ALTERNATIVE_VALUES_PER_QUANTITY };
+    }
+    if (!quantityValue.options.every(isFiniteNumber)) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+    return { outcome:'ok' };
+  }
+  // kindが'interval'/'alternatives'のいずれでもない場合(防御的分岐。quantity-annotationの
+  // JSON Schemaはkindをこの2値の判別可能な共用体としてのみ許可しており、bindSide()はスキーマ
+  // 検証に失敗した文書全体をbindしない(fail closed)ため、bindingを経由して渡されるkindが
+  // この2値以外になることは構造的に起こらないはずである。それでも、他の防御的分岐
+  // (unit_plan_quantity_missing等)と同じ理由で、万一の不整合に備えて推測せず弾く)。
+  return { outcome:'unsupported', reason_code:'quantity_value_kind_unsupported' };
+}
+
 // Phase B-2.4b: classifyUnitConversion()が返す計画(`factor`/`offset`)を、数量値
 // (`quantity_extraction_prototype.js`が生成するkind:'interval'|'alternatives'の
 // どちらか)の複製へ適用し、要求側の単位で表した新しい数量値を返す。引数のquantityValue
@@ -114,26 +164,40 @@ function classifyUnitConversion(requirementUnit, actualUnit) {
 // 場合でも同じ経路を通り、値が同じでも別オブジェクトを返す——呼び出し側が「複製されている」
 // という契約に依存できるようにするため)。区間の`lower`/`upper`がnull(片側無限)の場合は
 // 変換せずnullのまま返す(値が存在しないものを変換できないため)。
-// kindが'interval'/'alternatives'のいずれでもない場合はnullを返す(呼び出し側で
-// not_analyzedへ回す想定の防御的分岐。quantity-annotationのJSON Schemaはkindをこの2値の
-// 判別可能な共用体としてのみ許可しており、bindSide()はスキーマ検証に失敗した文書全体を
-// bindしない(fail closed)ため、bindingを経由して渡されるquantityValueのkindがこの2値以外に
-// なることは構造的に起こらないはずである。それでも、他の防御的分岐(unit_plan_quantity_missing
-// 等)と同じ理由で、万一の不整合に備えて推測せず弾く)。
+// 戻り値のoutcome: 'converted'(変換成功、`value`フィールドを持つ)／'unsupported'(推測せず
+// not_analyzedへ送る対象、`reason_code`を持つ)。
+// 【レビュー指摘、中1】この関数は独立ライブラリからexportされる純粋関数であり、coreの正常経路
+// ではclassifyUnitConversion()が返す(常に有限・正の)factorしか渡らないが、`plan`自体は
+// 呼び出し側から任意に構築できるため、`factor`/`offset`が有限数であること・`factor`が正数で
+// あることも変換前に確認する(負のfactorはlower/upperの入れ替えが必要になるが現在は未対応の
+// ため、推測せず拒否する。現在の登録データ(Pa/kPa/MPa)はすべて正のfactorのため、coreの正常
+// 経路ではこの分岐へは構造的に到達しないはずである)。
 function applyLinearConversion(quantityValue, plan) {
+  if (!isFiniteNumber(plan.factor) || !isFiniteNumber(plan.offset) || plan.factor <= 0) {
+    return { outcome:'unsupported', reason_code:'quantity_conversion_plan_invalid' };
+  }
+  const structureCheck = validateQuantityValueStructure(quantityValue);
+  if (structureCheck.outcome !== 'ok') return structureCheck;
+
   const convert = value => value * plan.factor + plan.offset;
   if (quantityValue.kind === 'interval') {
-    return { kind:'interval',
-      lower: quantityValue.lower ? { value:convert(quantityValue.lower.value), inclusive:quantityValue.lower.inclusive } : null,
-      upper: quantityValue.upper ? { value:convert(quantityValue.upper.value), inclusive:quantityValue.upper.inclusive } : null };
+    const lower = quantityValue.lower ? { value:convert(quantityValue.lower.value), inclusive:quantityValue.lower.inclusive } : null;
+    const upper = quantityValue.upper ? { value:convert(quantityValue.upper.value), inclusive:quantityValue.upper.inclusive } : null;
+    // 変換後の値も有限数であることを確認する(入力は有限でも、演算結果がNumber.MAX_VALUEを
+    // 超えてInfinityへオーバーフローしうるため)。
+    if ((lower && !isFiniteNumber(lower.value)) || (upper && !isFiniteNumber(upper.value))) {
+      return { outcome:'unsupported', reason_code:'quantity_conversion_non_finite' };
+    }
+    return { outcome:'converted', value:{ kind:'interval', lower, upper } };
   }
-  if (quantityValue.kind === 'alternatives') {
-    return { kind:'alternatives', options: quantityValue.options.map(convert), selection_semantics:quantityValue.selection_semantics };
-  }
-  return null;
+  // kind === 'alternatives'(validateQuantityValueStructure()が既に件数・入力の有限性を確認済み)
+  const options = quantityValue.options.map(convert);
+  if (!options.every(isFiniteNumber)) return { outcome:'unsupported', reason_code:'quantity_conversion_non_finite' };
+  return { outcome:'converted', value:{ kind:'alternatives', options, selection_semantics:quantityValue.selection_semantics } };
 }
 
-module.exports = { KNOWN_CANONICAL_UNITS_BY_DIMENSION, LINEAR_UNIT_SCALE_TO_BASE, isKnownUnit, classifyUnitConversion, applyLinearConversion };
+module.exports = { KNOWN_CANONICAL_UNITS_BY_DIMENSION, LINEAR_UNIT_SCALE_TO_BASE, isKnownUnit, classifyUnitConversion,
+  MAX_ALTERNATIVE_VALUES_PER_QUANTITY, validateQuantityValueStructure, applyLinearConversion };
 
 if (require.main === module) {
   const checks = [];
@@ -154,23 +218,81 @@ if (require.main === module) {
     classifyUnitConversion({ canonical:'toString', dimension:'pressure' }, { canonical:'constructor', dimension:'pressure' }).outcome === 'unsupported');
 
   {
-    // B-2.4b: applyLinearConversion()のセルフチェック。
+    // B-2.4b: applyLinearConversion()のセルフチェック(戻り値はoutcome:'converted'|'unsupported'の
+    // 判別可能な共用体)。
     const planMPaToKPa = classifyUnitConversion({ canonical:'kPa', dimension:'pressure' }, { canonical:'MPa', dimension:'pressure' }).plan;
-    const converted = applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:{ value:8, inclusive:false } }, planMPaToKPa);
+    const r1 = applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:{ value:8, inclusive:false } }, planMPaToKPa);
     check('interval(両側あり)、MPa→kPaでlower/upperがそれぞれ1000倍される',
-      converted.lower.value === 5000 && converted.lower.inclusive === true && converted.upper.value === 8000 && converted.upper.inclusive === false, converted);
+      r1.outcome === 'converted' && r1.value.lower.value === 5000 && r1.value.lower.inclusive === true
+      && r1.value.upper.value === 8000 && r1.value.upper.inclusive === false, r1);
 
     const original = { kind:'interval', lower:{ value:12, inclusive:true }, upper:null };
-    const identity = applyLinearConversion(original, { factor:1, offset:0 });
-    check('片側のみ(upper:null)の区間はnullのまま変換されない', identity.upper === null, identity);
-    check('identity計画(factor:1,offset:0)でも値は変化しない', identity.lower.value === 12, identity);
+    const r2 = applyLinearConversion(original, { factor:1, offset:0 });
+    check('片側のみ(upper:null)の区間はnullのまま変換されない', r2.value.upper === null, r2);
+    check('identity計画(factor:1,offset:0)でも値は変化しない', r2.value.lower.value === 12, r2);
     check('identity計画でも常に新しいオブジェクトを返す(元のオブジェクトと同一参照ではない)',
-      identity !== original && identity.lower !== original.lower, { original, identity });
+      r2.value !== original && r2.value.lower !== original.lower, { original, r2 });
 
-    const alt = applyLinearConversion({ kind:'alternatives', options:[5, 8], selection_semantics:'unknown' }, planMPaToKPa);
-    check('alternatives(kind)は各optionsがそれぞれ変換される', alt.kind === 'alternatives' && alt.options[0] === 5000 && alt.options[1] === 8000, alt);
+    const r3 = applyLinearConversion({ kind:'alternatives', options:[5, 8], selection_semantics:'unknown' }, planMPaToKPa);
+    check('alternatives(kind)は各optionsがそれぞれ変換される',
+      r3.outcome === 'converted' && r3.value.kind === 'alternatives' && r3.value.options[0] === 5000 && r3.value.options[1] === 8000, r3);
 
-    check('未知のkindはnullを返す(防御的)', applyLinearConversion({ kind:'unknown_kind' }, planMPaToKPa) === null);
+    check('未知のkindはquantity_value_kind_unsupportedを返す(防御的、B-2.4b)',
+      applyLinearConversion({ kind:'unknown_kind' }, planMPaToKPa).reason_code === 'quantity_value_kind_unsupported');
+
+    // ── 【レビュー修正、重大1】非数値・非有限数の混入をJSON Schema通過後も検査する ──
+    check('alternativesのnull要素はquantity_value_invalid(重大1、必須テスト3)',
+      applyLinearConversion({ kind:'alternatives', options:[null, 5], selection_semantics:'unknown' }, planMPaToKPa).reason_code === 'quantity_value_invalid');
+    check('alternativesの文字列要素はquantity_value_invalid(重大1、必須テスト4)',
+      applyLinearConversion({ kind:'alternatives', options:['5', 8], selection_semantics:'unknown' }, planMPaToKPa).reason_code === 'quantity_value_invalid');
+    check('alternativesのobject要素はquantity_value_invalid(重大1、必須テスト5)',
+      applyLinearConversion({ kind:'alternatives', options:[{}, 8], selection_semantics:'unknown' }, planMPaToKPa).reason_code === 'quantity_value_invalid');
+    check('alternativesのNaN/Infinity要素はquantity_value_invalid(重大1、必須テスト6)',
+      applyLinearConversion({ kind:'alternatives', options:[NaN, Infinity], selection_semantics:'unknown' }, planMPaToKPa).reason_code === 'quantity_value_invalid');
+    check('intervalのlower/upperがNaN/Infinityならquantity_value_invalid(重大1、必須テスト7)',
+      applyLinearConversion({ kind:'interval', lower:{ value:NaN, inclusive:true }, upper:{ value:Infinity, inclusive:false } }, planMPaToKPa).reason_code === 'quantity_value_invalid');
+    check('alternativesの空配列は変換に成功する(0要素は構造上有効)',
+      applyLinearConversion({ kind:'alternatives', options:[], selection_semantics:'unknown' }, planMPaToKPa).outcome === 'converted');
+
+    // ── 【レビュー修正、重大1】演算結果がオーバーフローしてInfinityになる場合(必須テスト8) ──
+    const overflowPlan = { factor:1e10, offset:0 };
+    check('演算結果がInfinityへオーバーフローする場合はquantity_conversion_non_finite(重大1、必須テスト8)',
+      applyLinearConversion({ kind:'interval', lower:{ value:1e300, inclusive:true }, upper:null }, overflowPlan).reason_code === 'quantity_conversion_non_finite');
+
+    // ── 【レビュー修正、中1】計画自体(factor/offset)の検証(必須テスト9・10) ──
+    check('factorがNaNならquantity_conversion_plan_invalid(中1、必須テスト9)',
+      applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:null }, { factor:NaN, offset:0 }).reason_code === 'quantity_conversion_plan_invalid');
+    check('offsetがInfinityならquantity_conversion_plan_invalid(中1、必須テスト9)',
+      applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:null }, { factor:1, offset:Infinity }).reason_code === 'quantity_conversion_plan_invalid');
+    check('factorが0ならquantity_conversion_plan_invalid(中1、必須テスト10)',
+      applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:null }, { factor:0, offset:0 }).reason_code === 'quantity_conversion_plan_invalid');
+    check('factorが負数ならquantity_conversion_plan_invalid(中1、必須テスト10)',
+      applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:null }, { factor:-1, offset:0 }).reason_code === 'quantity_conversion_plan_invalid');
+
+    // ── 【レビュー修正、重大3】alternatives件数上限(必須テスト11・12・13) ──
+    const atLimit = Array.from({ length:MAX_ALTERNATIVE_VALUES_PER_QUANTITY }, (_, i) => i + 1);
+    check('optionsが上限(64件)ちょうどなら変換に成功する(必須テスト11)',
+      applyLinearConversion({ kind:'alternatives', options:atLimit, selection_semantics:'unknown' }, planMPaToKPa).outcome === 'converted');
+    const overLimit = Array.from({ length:MAX_ALTERNATIVE_VALUES_PER_QUANTITY + 1 }, (_, i) => i + 1);
+    check('optionsが上限を1件超過するとquantity_value_limit_exceeded(必須テスト12)', (() => {
+      const r = applyLinearConversion({ kind:'alternatives', options:overLimit, selection_semantics:'unknown' }, planMPaToKPa);
+      return r.reason_code === 'quantity_value_limit_exceeded' && r.observed_count === MAX_ALTERNATIVE_VALUES_PER_QUANTITY + 1 && r.limit === MAX_ALTERNATIVE_VALUES_PER_QUANTITY;
+    })());
+    // Proxyで.map()/.every()/イテレータへのアクセスを検知し、件数超過時にはこれらへ一切
+    // 到達しない(=複製・全件走査を行わない)ことを直接証明する。
+    const explosiveOptions = new Proxy([], {
+      get(target, prop) {
+        if (prop === 'length') return MAX_ALTERNATIVE_VALUES_PER_QUANTITY + 1;
+        if (prop === 'map' || prop === 'every' || prop === Symbol.iterator) throw new Error(`件数超過確定後に${String(prop)}へアクセスしてはならない`);
+        return target[prop];
+      },
+    });
+    check('上限超過時は.map()/.every()等の全件走査へ一切到達しない(重大3、必須テスト13)', (() => {
+      try {
+        const r = applyLinearConversion({ kind:'alternatives', options:explosiveOptions, selection_semantics:'unknown' }, planMPaToKPa);
+        return r.reason_code === 'quantity_value_limit_exceeded';
+      } catch (e) { return false; }
+    })());
   }
 
   console.log('\n=== unit_conversion_rules_prototype セルフチェック結果 ===');
