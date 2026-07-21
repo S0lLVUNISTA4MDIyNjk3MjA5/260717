@@ -1436,61 +1436,54 @@
   // 比較不能にした上で数値比較・充足判定まで一気に進む設計であり、単位互換性判定だけを
   // 切り出したこの段階とは責務が異なるため、呼び出さない。 ──
 
-  // JIS Z 8203準拠のUNIT_DEFS(quantity_extraction_prototype.js 112-136行目)では、pressure
-  // (Pa/kPa/MPa)だけが同一dimension内に複数のcanonical単位を持つ。他の全dimension
-  // (temperature=degC、power=kW、voltage=V、frequency=Hz、sound_pressure_level=dB(A)、
-  // length=mm、apparent_power=kVA)はcanonical単位が各1種類のため、非identity変換は現時点
-  // ではpressureだけで十分である(新しい単位辞書エントリが追加された場合はこの表も追随して
-  // 更新する)。基準単位はPa(倍率1)とする。
+  // quantity-annotation/1.0-rc1: 単位互換性判定・変換計画生成ライブラリ(移植、
+  // unit_conversion_rules_prototype.jsから一字一句移植。乖離検出はquantity_annotation_ported_lib_check.js
+  // で行う。改変禁止、移植元を直接編集してから再度移植すること。【レビュー指摘、中1】
+  // classifyUnitConversion()はbindingを経由せず任意のunitオブジェクトを受け取れる純粋関数で
+  // あり、quantity_sidecar_binding_core.jsの公開APIに直接置くと「公開APIはbinding経由のみ」
+  // という信頼境界の外側から呼べる入口を増やしてしまうため、独立ライブラリとして切り出し、
+  // ここでは非公開の実装詳細としてのみ使う。Pa/kPa/MPa間の変換計算・重大1の既知単位検証は
+  // unit_conversion_rules_prototype.js自身の回帰テストで検証し、generateUnitConversionPlans()
+  // 自体の配線(fail closedゲート・quantity参照・監査フィールド伝播)は、
+  // quantity_unit_conversion_plan_verification.jsが到達可能なpower/kW(canonical単位1種類のみ)
+  // 経由のend-to-endテストで別途検証する)
+  const KNOWN_CANONICAL_UNITS_BY_DIMENSION = {
+    temperature: { degC: true },
+    power: { kW: true },
+    voltage: { V: true },
+    frequency: { Hz: true },
+    sound_pressure_level: { 'dB(A)': true },
+    length: { mm: true },
+    pressure: { Pa: true, kPa: true, MPa: true },
+    apparent_power: { kVA: true },
+  };
+  Object.values(KNOWN_CANONICAL_UNITS_BY_DIMENSION).forEach(Object.freeze);
+  Object.freeze(KNOWN_CANONICAL_UNITS_BY_DIMENSION);
+
+  // UNIT_DEFSの各standard_refが実際に参照するのはJIS Z 8203ではなくJIS Z 8000規格群(全12部、
+  // quantity_extraction_prototype.js 90-101行目参照)であり、pressureはJIS Z 8000-4(力学)に
+  // 分類される。pressure(Pa/kPa/MPa)だけが同一dimension内に複数のcanonical単位を持つため、
+  // 非identity変換は現時点ではpressureだけで十分である。基準単位はPa(倍率1)とする。
   const LINEAR_UNIT_SCALE_TO_BASE = {
     pressure: { Pa: 1, kPa: 1000, MPa: 1000000 },
   };
-  // 【B-2.3bと同じ欠陥を作り込まないための必須要件】この表はexportされ、呼び出し側から係数を
-  // 書き換えられると後続の数値比較結果を任意に操作できてしまうため、内側のdimension別
-  // オブジェクトと外側のオブジェクトの両方を凍結する。
   Object.values(LINEAR_UNIT_SCALE_TO_BASE).forEach(Object.freeze);
   Object.freeze(LINEAR_UNIT_SCALE_TO_BASE);
 
-  // quantity_idをキーに、bindingへ結合済みのanalysisを1件引く(段階1のbindingAnalysesByTraceId()
-  // がtrace_id単位で索引化するのに対し、この段階はcomparison mode候補が持つ
-  // requirement_quantity_id/actual_quantity_idから直接analysisを引く必要があるため、
-  // quantity_id単位で別途索引化する)。上流(段階1〜3-3)が既にsidecar内quantity_id重複を
-  // 検査済みのため、ここで重複キーの上書きが起こることは構造的にない。
-  function analysisByQuantityId(sideResult) {
-    const map = new Map();
-    (sideResult?.bindings || []).forEach(binding => {
-      if (binding.status === 'bound' && binding.annotation) {
-        (binding.annotation.analyses || []).forEach(analysis => {
-          if (analysis?.quantity_id) map.set(analysis.quantity_id, analysis);
-        });
-      }
-    });
-    return map;
-  }
-
-  // unit.canonical/unit.dimensionがどちらも非空文字列であり、dimensionが
-  // unitInfo()(quantity_extraction_prototype.js)のフォールバック値'unknown'(=そもそも
-  // 抽出時に単位記号を認識できなかった)ではないことを確認する。JSON Schema自体は
-  // canonical/dimensionを必須の文字列としてしか検証しない(空文字列も型としては許容する)ため、
-  // ここで意味的な使用可否を判定する。
-  function isUsableUnitMetadata(unit) {
+  // unit.canonical/unit.dimensionが非空文字列で、かつKNOWN_CANONICAL_UNITS_BY_DIMENSIONに
+  // 実在する(dimension, canonical)の組であることを確認する。
+  function isKnownUnit(unit) {
     return !!unit && typeof unit.canonical === 'string' && unit.canonical.length > 0
-      && typeof unit.dimension === 'string' && unit.dimension.length > 0 && unit.dimension !== 'unknown';
+      && typeof unit.dimension === 'string' && unit.dimension.length > 0
+      && !!KNOWN_CANONICAL_UNITS_BY_DIMENSION[unit.dimension]
+      && !!KNOWN_CANONICAL_UNITS_BY_DIMENSION[unit.dimension][unit.canonical];
   }
 
-  // 両側のunit({canonical, dimension}を持つオブジェクト、analysis.quantity.unitと同じ形)から、
-  // 単位互換性の分類と(可能なら)変換計画を決定する純粋関数。generateUnitConversionPlans()から
-  // 独立してテストできるよう単体で公開する(CONCEPT_DICTIONARY(B-2.2a)にpressure次元の概念が
-  // 存在しないため、pressure次元の数量はconcept解決でresolvedに至れず、comparison_mode_candidate
-  // まで到達できない。したがってPa/kPa/MPa間の変換計算そのものは、この純粋関数を直接呼ぶ形で
-  // 検証する。generateUnitConversionPlans()自体の配線(fail closedゲート・quantity参照・
-  // 監査フィールド伝播)は、到達可能なpower/kW(canonical単位1種類のみ)経由のend-to-endテストで
-  // 別途検証する)。
   // 戻り値のoutcome: 'plan'(変換計画を生成、`plan`フィールドを持つ)／'unsupported'(推測せず
   // not_analyzedへ送る対象、`reason_code`を持つ)／'inconsistent'(呼び出し側がfail closedすべき
   // 構造的矛盾、`reason_code`を持つ)。
   function classifyUnitConversion(requirementUnit, actualUnit) {
-    if (!isUsableUnitMetadata(requirementUnit) || !isUsableUnitMetadata(actualUnit)) {
+    if (!isKnownUnit(requirementUnit) || !isKnownUnit(actualUnit)) {
       return { outcome:'unsupported', reason_code:'unit_metadata_unsupported',
         requirement_unit_dimension:requirementUnit?.dimension ?? null, actual_unit_dimension:actualUnit?.dimension ?? null,
         requirement_unit_canonical:requirementUnit?.canonical ?? null, actual_unit_canonical:actualUnit?.canonical ?? null };
@@ -1515,6 +1508,24 @@
       source_side:'actual', source_canonical_unit:actualUnit.canonical,
       target_side:'requirement', target_canonical_unit:requirementUnit.canonical,
       dimension:requirementUnit.dimension, factor, offset:0 } };
+  }
+  // ── quantity-annotation/1.0-rc1: 単位互換性判定・変換計画生成ライブラリ(移植)ここまで ──
+
+  // quantity_idをキーに、bindingへ結合済みのanalysisを1件引く(段階1のbindingAnalysesByTraceId()
+  // がtrace_id単位で索引化するのに対し、この段階はcomparison mode候補が持つ
+  // requirement_quantity_id/actual_quantity_idから直接analysisを引く必要があるため、
+  // quantity_id単位で別途索引化する)。上流(段階1〜3-3)が既にsidecar内quantity_id重複を
+  // 検査済みのため、ここで重複キーの上書きが起こることは構造的にない。
+  function analysisByQuantityId(sideResult) {
+    const map = new Map();
+    (sideResult?.bindings || []).forEach(binding => {
+      if (binding.status === 'bound' && binding.annotation) {
+        (binding.annotation.analyses || []).forEach(analysis => {
+          if (analysis?.quantity_id) map.set(analysis.quantity_id, analysis);
+        });
+      }
+    });
+    return map;
   }
 
   function blockedUnitConversionPlanResult(diagnostics, binding, modeResult) {
@@ -1579,17 +1590,18 @@
     if (dimensionInconsistentDiagnostics.length) return blockedUnitConversionPlanResult(dimensionInconsistentDiagnostics, binding, modeResult);
 
     // 段階4: 残りの候補を分類結果どおりnot_analyzed/計画へ振り分ける。
+    // 【レビュー修正、中3】not_analyzedへ送る監査記録は、quantity/trace/matcher参照ID・
+    // concept_id/dimensionだけでなく、candidate(段階3-3のcomparison mode候補)が既に保持している
+    // 両側のcondition status/value/top_confidence/margin/opposing_evidence、
+    // comparison_mode_candidate/comparison_mode_confidence/derived_fromもすべて引き継ぐ
+    // (単位が未対応というだけで、それ以前の段階の判断根拠が失われないようにする。候補配列や
+    // evidenceを丸ごと複製するわけではなく、candidate自体は既に扁平なスカラーオブジェクトの
+    // ため、スプレッドしてもコストは小さい)。
     const notAnalyzed = [];
     const unitConversionPlans = [];
     for (const { candidate, outcome } of classified) {
-      const auditBase = {
-        requirement_quantity_id:candidate.requirement_quantity_id, actual_quantity_id:candidate.actual_quantity_id,
-        concept_id:candidate.concept_id, dimension:candidate.dimension,
-        requirement_trace_id:candidate.requirement_trace_id, actual_trace_id:candidate.actual_trace_id,
-        matcher_a_id:candidate.matcher_a_id ?? null, matcher_b_id:candidate.matcher_b_id ?? null,
-      };
       if (outcome.outcome === 'unsupported') {
-        notAnalyzed.push({ reason_code:outcome.reason_code, ...auditBase,
+        notAnalyzed.push({ reason_code:outcome.reason_code, ...candidate,
           ...(outcome.requirement_unit_dimension !== undefined ? { requirement_unit_dimension:outcome.requirement_unit_dimension, actual_unit_dimension:outcome.actual_unit_dimension } : {}),
           ...(outcome.requirement_unit_canonical !== undefined ? { requirement_unit_canonical:outcome.requirement_unit_canonical, actual_unit_canonical:outcome.actual_unit_canonical } : {}) });
         continue;
@@ -1609,5 +1621,5 @@
     DEFAULT_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT,
     generateComparisonCandidates, generateConditionResolutions, generateConditionAnnotatedComparisonCandidates,
     COMPARISON_MODE_DERIVATION_TABLE, generateComparisonModeCandidates,
-    LINEAR_UNIT_SCALE_TO_BASE, classifyUnitConversion, generateUnitConversionPlans });
+    KNOWN_CANONICAL_UNITS_BY_DIMENSION, LINEAR_UNIT_SCALE_TO_BASE, generateUnitConversionPlans });
 });

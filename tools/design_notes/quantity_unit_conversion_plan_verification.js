@@ -1,6 +1,6 @@
-// Phase B-2.4a（quantity_sidecar_binding_core.jsのgenerateUnitConversionPlans()・
-// classifyUnitConversion()）の回帰テスト。shadow_mode_integration_design.md 3.4節「単位互換性の
-// 確認と変換計画の生成」(段階4の最初の部分)を対象にする。
+// Phase B-2.4a（quantity_sidecar_binding_core.jsのgenerateUnitConversionPlans()）の回帰テスト。
+// shadow_mode_integration_design.md 3.4節「単位互換性の確認と変換計画の生成」(段階4の最初の
+// 部分)を対象にする。
 //
 // generateComparisonModeCandidates()の各候補について、両側のanalysis.quantity.unitを
 // binding内から再参照し、単位互換性を判定して必要な変換方法を「計画」として記録するだけの
@@ -9,20 +9,29 @@
 // (quantity_extraction_prototype.js)は単位一致後に数値比較・充足判定まで一気に進む設計で
 // あり、単位互換性判定だけを切り出したこの段階とは責務が異なるため、呼び出さない。
 //
+// 【レビュー指摘、中1: 信頼境界】単位互換性の分類ロジック(classifyUnitConversion()、
+// KNOWN_CANONICAL_UNITS_BY_DIMENSION、LINEAR_UNIT_SCALE_TO_BASE)は、bindingを経由せず任意の
+// unitオブジェクトを受け取れる純粋関数であるため、quantity_sidecar_binding_core.jsの公開API
+// (「binding経由でのみ計算する」という信頼境界を一貫して守ってきた)からは意図的に外し、
+// unit_conversion_rules_prototype.jsという独立した非公開実装詳細として切り出した
+// (quantity_sidecar_binding_core.js自身はこれを一字一句移植して内部的に使うだけで、
+// 公開APIとしては再exportしない。乖離検出はquantity_annotation_ported_lib_check.jsが行う)。
+//
 // 【CONCEPT_DICTIONARYの制約、テスト設計への影響】B-2.2aのCONCEPT_DICTIONARYはpressure次元の
 // 概念を持たない(temperature/power/voltage/frequency/sound_pressure_level/lengthのみ)。
 // pressure次元の数量は、単位次元一致による+0.4の根拠を得られないため、周辺語+タグが揃っても
 // 最大confidence0.6にとどまり、propertyConfidence(0.7)の閾値へ届かない。したがって
 // pressure次元の数量はconcept解決でresolvedへ至れず、comparison_mode_candidateまで
 // 到達できない(=公開APIの正常経路ではPa/kPa/MPa間の変換をend-to-endで再現できない)。
-// このため、単位変換の数値計算そのもの(Pa/kPa/MPa間の6方向)は、独立して公開されている
-// 純粋関数classifyUnitConversion()を直接呼んで検証する。generateUnitConversionPlans()自体の
-// 配線(fail closedゲート・quantity参照・監査フィールド伝播)は、到達可能なpower/kW
+// このため、単位変換の数値計算そのもの(Pa/kPa/MPa間の6方向、既知単位の検証)は、
+// unit_conversion_rules_prototype.jsを直接requireして検証する。generateUnitConversionPlans()
+// 自体の配線(fail closedゲート・quantity参照・監査フィールド伝播)は、到達可能なpower/kW
 // (canonical単位が1種類のみ、identity経路)を使ったend-to-endテストで別途検証する。
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const core = require('../quantity_sidecar_binding_core.js');
+const unitRules = require('./unit_conversion_rules_prototype.js');
 
 const checks = [];
 function check(name, ok, detail) { checks.push({ name, ok:!!ok, detail }); }
@@ -93,11 +102,13 @@ async function pairBindingPower() {
 }
 
 (async () => {
-  // ══════════════ classifyUnitConversion()の直接検証(純粋関数、pressureの数値計算を含む) ══════════════
+  // ══════════════ unit_conversion_rules_prototype.js(classifyUnitConversion())の直接検証
+  //    (純粋関数、pressureの数値計算を含む。quantity_sidecar_binding_core.jsはこれを一字一句
+  //    移植して内部でのみ使い、公開APIとしては再exportしない) ══════════════
 
   // ── 4. 同一canonicalはidentity計画 ──
   {
-    const r = core.classifyUnitConversion({ canonical:'kW', dimension:'power' }, { canonical:'kW', dimension:'power' });
+    const r = unitRules.classifyUnitConversion({ canonical:'kW', dimension:'power' }, { canonical:'kW', dimension:'power' });
     check('同一canonical(kW)はidentity計画になる(4)', r.outcome === 'plan' && r.plan.conversion_required === false && r.plan.conversion_operation === 'identity'
       && r.plan.factor === 1 && r.plan.offset === 0, r);
   }
@@ -106,7 +117,7 @@ async function pairBindingPower() {
   //    canonicalのみであり、°C→degC・℃→degCの正規化自体はquantity_extraction_prototype.js側の
   //    責務ですでに検証済み) ──
   {
-    const r = core.classifyUnitConversion({ canonical:'degC', dimension:'temperature' }, { canonical:'degC', dimension:'temperature' });
+    const r = unitRules.classifyUnitConversion({ canonical:'degC', dimension:'temperature' }, { canonical:'degC', dimension:'temperature' });
     check('°C/℃どちらも正規化後はcanonical degC同士でidentityになる(5)', r.outcome === 'plan' && r.plan.conversion_operation === 'identity', r);
   }
 
@@ -120,7 +131,7 @@ async function pairBindingPower() {
     { req:'Pa', act:'MPa', expectedFactor:1000000, label:'MPa→Pa(11)' },
   ];
   for (const { req, act, expectedFactor, label } of pressureCases) {
-    const r = core.classifyUnitConversion({ canonical:req, dimension:'pressure' }, { canonical:act, dimension:'pressure' });
+    const r = unitRules.classifyUnitConversion({ canonical:req, dimension:'pressure' }, { canonical:act, dimension:'pressure' });
     check(`pressure ${act}→${req}: factorが正しい(${expectedFactor}、${label})`,
       r.outcome === 'plan' && r.plan.conversion_required === true && r.plan.conversion_operation === 'linear_scale'
       && Math.abs(r.plan.factor - expectedFactor) < expectedFactor * 1e-9 + 1e-15, r);
@@ -131,8 +142,8 @@ async function pairBindingPower() {
 
   // ── 12. 変換方向は常にactual→requirement(reqとactを入れ替えても、source_sideは常に'actual') ──
   {
-    const forward = core.classifyUnitConversion({ canonical:'kPa', dimension:'pressure' }, { canonical:'MPa', dimension:'pressure' });
-    const swapped = core.classifyUnitConversion({ canonical:'MPa', dimension:'pressure' }, { canonical:'kPa', dimension:'pressure' });
+    const forward = unitRules.classifyUnitConversion({ canonical:'kPa', dimension:'pressure' }, { canonical:'MPa', dimension:'pressure' });
+    const swapped = unitRules.classifyUnitConversion({ canonical:'MPa', dimension:'pressure' }, { canonical:'kPa', dimension:'pressure' });
     check('変換方向は常にsource_side:"actual"/target_side:"requirement"(12)',
       forward.plan.source_side === 'actual' && forward.plan.target_side === 'requirement'
       && swapped.plan.source_side === 'actual' && swapped.plan.target_side === 'requirement', { forward, swapped });
@@ -142,57 +153,117 @@ async function pairBindingPower() {
 
   // ── 13. dimensionが異なる場合はinconsistent(呼び出し側がfail closedすべき構造的矛盾) ──
   {
-    const r = core.classifyUnitConversion({ canonical:'kW', dimension:'power' }, { canonical:'V', dimension:'voltage' });
+    const r = unitRules.classifyUnitConversion({ canonical:'kW', dimension:'power' }, { canonical:'V', dimension:'voltage' });
     check('dimensionが異なる場合はoutcome:"inconsistent"になる(13)',
       r.outcome === 'inconsistent' && r.reason_code === 'unit_dimension_inconsistent'
       && r.requirement_unit_dimension === 'power' && r.actual_unit_dimension === 'voltage', r);
   }
 
   // ── 14. dimensionは同じだが変換規則がない場合は推測しない(スキーマ上だけpsiが入力された
-  //    ケースを模擬。pressureにpsiという規則は存在しない) ──
+  //    ケースを模擬)。重大1の既知単位検証を追加した結果、psi自体がKNOWN_CANONICAL_UNITS_BY_DIMENSION
+  //    に登録されていないため、この例はまず`unit_metadata_unsupported`(既知単位チェック)で
+  //    捕捉される。`unit_conversion_unsupported`(dimension一致・両側とも既知単位だが
+  //    LINEAR_UNIT_SCALE_TO_BASEに変換規則が無い)は、KNOWN_CANONICAL_UNITS_BY_DIMENSIONと
+  //    LINEAR_UNIT_SCALE_TO_BASEを意図的に同期させているため(複数canonicalを持つdimensionは
+  //    pressureのみで、その3種類ともLINEAR_UNIT_SCALE_TO_BASE.pressureに規則がある)、現在の
+  //    登録単位だけでは到達できない(将来、複数canonicalを持つ新しいdimensionが追加され、
+  //    その変換規則を追加し忘れた場合にのみ到達する経路)。この分岐自体はコード上健在であることを
+  //    一時的なバグ注入(unit_conversion_rules_prototype.jsの回帰テスト内)で確認する。 ──
   {
-    const r = core.classifyUnitConversion({ canonical:'psi', dimension:'pressure' }, { canonical:'kPa', dimension:'pressure' });
-    check('未対応canonical(psi)は推測変換せずunit_conversion_unsupportedになる(14)',
-      r.outcome === 'unsupported' && r.reason_code === 'unit_conversion_unsupported'
-      && r.requirement_unit_canonical === 'psi' && r.actual_unit_canonical === 'kPa', r);
+    const r = unitRules.classifyUnitConversion({ canonical:'psi', dimension:'pressure' }, { canonical:'kPa', dimension:'pressure' });
+    check('未対応canonical(psiとkPa、dimension一致)は推測変換せずunit_conversion_unsupportedにはならず、既知単位チェックでunit_metadata_unsupportedになる(psi自体が未登録のため、14)',
+      r.outcome === 'unsupported' && r.reason_code === 'unit_metadata_unsupported', r);
   }
 
   // ── 15. dimension:"unknown"は変換しない(unitInfo()のフォールバック値、抽出時に単位記号を
   //    認識できなかったことを示す) ──
   {
-    const r = core.classifyUnitConversion({ canonical:'xyz', dimension:'unknown' }, { canonical:'xyz', dimension:'unknown' });
+    const r = unitRules.classifyUnitConversion({ canonical:'xyz', dimension:'unknown' }, { canonical:'xyz', dimension:'unknown' });
     check('dimension:"unknown"は同一canonicalであっても変換計画を生成しない(15)',
       r.outcome === 'unsupported' && r.reason_code === 'unit_metadata_unsupported', r);
   }
   {
     // canonicalが空文字列・unitオブジェクトが無いケースも同様にunit_metadata_unsupported。
-    const r1 = core.classifyUnitConversion({ canonical:'', dimension:'power' }, { canonical:'kW', dimension:'power' });
+    const r1 = unitRules.classifyUnitConversion({ canonical:'', dimension:'power' }, { canonical:'kW', dimension:'power' });
     check('canonicalが空文字列もunit_metadata_unsupportedになる(15)', r1.outcome === 'unsupported' && r1.reason_code === 'unit_metadata_unsupported', r1);
-    const r2 = core.classifyUnitConversion(null, { canonical:'kW', dimension:'power' });
+    const r2 = unitRules.classifyUnitConversion(null, { canonical:'kW', dimension:'power' });
     check('unitオブジェクト自体が無い(null)場合もunit_metadata_unsupportedになる(15、防御的)', r2.outcome === 'unsupported' && r2.reason_code === 'unit_metadata_unsupported', r2);
   }
 
-  // ── 16〜18. 固定変換表(LINEAR_UNIT_SCALE_TO_BASE)の実行時不変性(B-2.3bと同じ欠陥を
-  //    繰り返さないための必須要件) ──
-  check('LINEAR_UNIT_SCALE_TO_BASE(外側)がObject.isFrozen()でtrue(16)', Object.isFrozen(core.LINEAR_UNIT_SCALE_TO_BASE));
-  check('LINEAR_UNIT_SCALE_TO_BASE.pressure(内側)もObject.isFrozen()でtrue(16)', Object.isFrozen(core.LINEAR_UNIT_SCALE_TO_BASE.pressure));
+  // ── 【レビュー修正、重大1】未登録canonicalは、たとえ両側で同一の文字列であっても
+  //    identityにしない。既知canonicalが誤ったdimensionと組み合わされた場合も同様に拒否する。
+  //    (JSON Schemaはunit.canonical/unit.dimensionを単なる文字列としてしか検証せず、
+  //    canonical-dimension対応そのものは検証しないため、これらは修正前は誤ってidentityに
+  //    なっていた。実際に再現して確認済み)。 ──
   {
-    const originalPa = core.LINEAR_UNIT_SCALE_TO_BASE.pressure.Pa;
-    try { core.LINEAR_UNIT_SCALE_TO_BASE.pressure.Pa = 999999; } catch (_) { /* strictモードでは例外、それも許容 */ }
-    check('凍結済みentryへの係数書き換えは反映されない(17)', core.LINEAR_UNIT_SCALE_TO_BASE.pressure.Pa === originalPa, core.LINEAR_UNIT_SCALE_TO_BASE.pressure);
-    try { core.LINEAR_UNIT_SCALE_TO_BASE.pressure.psi = 6894.76; } catch (_) { /* 同上 */ }
-    check('凍結済みオブジェクトへの新規プロパティ追加は反映されない(17)', !('psi' in core.LINEAR_UNIT_SCALE_TO_BASE.pressure), core.LINEAR_UNIT_SCALE_TO_BASE.pressure);
-
-    const r = core.classifyUnitConversion({ canonical:'kPa', dimension:'pressure' }, { canonical:'MPa', dimension:'pressure' });
-    check('書き換え試行後もkPa/MPa間の変換計画は正しいまま(factor=1000、18)', r.outcome === 'plan' && r.plan.factor === 1000, r);
+    const r = unitRules.classifyUnitConversion({ canonical:'psi', dimension:'pressure' }, { canonical:'psi', dimension:'pressure' });
+    check('未登録単位psi×psi(pressure)はidentityにしない(重大1)', r.outcome === 'unsupported' && r.reason_code === 'unit_metadata_unsupported', r);
   }
+  {
+    const r = unitRules.classifyUnitConversion({ canonical:'kW', dimension:'voltage' }, { canonical:'kW', dimension:'voltage' });
+    check('既知canonical(kW)が誤ったdimension(voltage)と組み合わされている場合、identityにしない(重大1、kWの正しいdimensionはpower)',
+      r.outcome === 'unsupported' && r.reason_code === 'unit_metadata_unsupported', r);
+  }
+  {
+    const r = unitRules.classifyUnitConversion({ canonical:'V', dimension:'power' }, { canonical:'V', dimension:'power' });
+    check('既知canonical(V)が誤ったdimension(power)と組み合わされている場合、identityにしない(重大1、Vの正しいdimensionはvoltage)',
+      r.outcome === 'unsupported' && r.reason_code === 'unit_metadata_unsupported', r);
+  }
+  {
+    const r = unitRules.classifyUnitConversion({ canonical:'   ', dimension:'power' }, { canonical:'kW', dimension:'power' });
+    check('空白だけのcanonicalは既知単位として扱わない(重大1、非空文字列という条件は満たすが登録済み単位ではない)',
+      r.outcome === 'unsupported' && r.reason_code === 'unit_metadata_unsupported', r);
+  }
+  {
+    const r = unitRules.classifyUnitConversion({ canonical:'kW', dimension:'   ' }, { canonical:'kW', dimension:'power' });
+    check('空白だけのdimensionは既知単位として扱わない(重大1)', r.outcome === 'unsupported' && r.reason_code === 'unit_metadata_unsupported', r);
+  }
+
+  // ── KNOWN_CANONICAL_UNITS_BY_DIMENSIONに実在する既知の全(dimension,canonical)組は、
+  //    単独かつ両側一致であればidentityになる(allowlistが既存の正しい単位自体を締め出して
+  //    いないことの確認、B-2.3aのKNOWN_CONDITION_SEMANTICS_VALUESテストと同型)。 ──
+  for (const [dimension, canonical] of Object.entries(unitRules.KNOWN_CANONICAL_UNITS_BY_DIMENSION).flatMap(([d, cs]) => Object.keys(cs).map(c => [d, c]))) {
+    const r = unitRules.classifyUnitConversion({ canonical, dimension }, { canonical, dimension });
+    check(`既知単位(${dimension}:${canonical})はidentityになる(allowlistが既存の正しい単位を締め出していないことの確認)`,
+      r.outcome === 'plan' && r.plan.conversion_operation === 'identity', r);
+  }
+
+  // ── 16〜18. 固定変換表(LINEAR_UNIT_SCALE_TO_BASE)・既知単位表(KNOWN_CANONICAL_UNITS_BY_DIMENSION)
+  //    の実行時不変性(B-2.3bと同じ欠陥を繰り返さないための必須要件)。unitRules(prototype)側で
+  //    検証する: quantity_sidecar_binding_core.jsはこの内容を一字一句移植しており(乖離検出済み)、
+  //    prototype側の凍結・書き換え耐性を検証することは、移植先の非公開実装の凍結・書き換え耐性を
+  //    検証することと同値である。 ──
+  check('unitRules.LINEAR_UNIT_SCALE_TO_BASE(外側)がObject.isFrozen()でtrue(16)', Object.isFrozen(unitRules.LINEAR_UNIT_SCALE_TO_BASE));
+  check('unitRules.LINEAR_UNIT_SCALE_TO_BASE.pressure(内側)もObject.isFrozen()でtrue(16)', Object.isFrozen(unitRules.LINEAR_UNIT_SCALE_TO_BASE.pressure));
+  check('unitRules.KNOWN_CANONICAL_UNITS_BY_DIMENSION(外側)がObject.isFrozen()でtrue(16、重大1)', Object.isFrozen(unitRules.KNOWN_CANONICAL_UNITS_BY_DIMENSION));
+  check('unitRules.KNOWN_CANONICAL_UNITS_BY_DIMENSION.pressure(内側)もObject.isFrozen()でtrue(16、重大1)', Object.isFrozen(unitRules.KNOWN_CANONICAL_UNITS_BY_DIMENSION.pressure));
+  {
+    const originalPa = unitRules.LINEAR_UNIT_SCALE_TO_BASE.pressure.Pa;
+    try { unitRules.LINEAR_UNIT_SCALE_TO_BASE.pressure.Pa = 999999; } catch (_) { /* strictモードでは例外、それも許容 */ }
+    check('凍結済みentryへの係数書き換えは反映されない(17)', unitRules.LINEAR_UNIT_SCALE_TO_BASE.pressure.Pa === originalPa, unitRules.LINEAR_UNIT_SCALE_TO_BASE.pressure);
+    try { unitRules.LINEAR_UNIT_SCALE_TO_BASE.pressure.psi = 6894.76; } catch (_) { /* 同上 */ }
+    check('凍結済みオブジェクトへの新規プロパティ追加は反映されない(17)', !('psi' in unitRules.LINEAR_UNIT_SCALE_TO_BASE.pressure), unitRules.LINEAR_UNIT_SCALE_TO_BASE.pressure);
+    try { unitRules.KNOWN_CANONICAL_UNITS_BY_DIMENSION.pressure.psi = true; } catch (_) { /* 同上 */ }
+    check('既知単位表への新規単位追加試行も反映されない(17、重大1)', !('psi' in unitRules.KNOWN_CANONICAL_UNITS_BY_DIMENSION.pressure), unitRules.KNOWN_CANONICAL_UNITS_BY_DIMENSION.pressure);
+
+    const r = unitRules.classifyUnitConversion({ canonical:'kPa', dimension:'pressure' }, { canonical:'MPa', dimension:'pressure' });
+    check('書き換え試行後もkPa/MPa間の変換計画は正しいまま(factor=1000、18)', r.outcome === 'plan' && r.plan.factor === 1000, r);
+    const rPsi = unitRules.classifyUnitConversion({ canonical:'psi', dimension:'pressure' }, { canonical:'psi', dimension:'pressure' });
+    check('既知単位表への追加試行後もpsiは既知単位として扱われないまま(18、重大1)', rPsi.outcome === 'unsupported' && rPsi.reason_code === 'unit_metadata_unsupported', rPsi);
+  }
+  // production API自身がexportするLINEAR_UNIT_SCALE_TO_BASE(データテーブルとしての公開、
+  // classifyUnitConversion()自体は中1の指摘によりexportしない)も、独立して凍結されている
+  // ことを確認する。
+  check('core.LINEAR_UNIT_SCALE_TO_BASE(公開データテーブル)もObject.isFrozen()でtrue', Object.isFrozen(core.LINEAR_UNIT_SCALE_TO_BASE) && Object.isFrozen(core.LINEAR_UNIT_SCALE_TO_BASE.pressure));
+  check('core.KNOWN_CANONICAL_UNITS_BY_DIMENSION(公開データテーブル)もObject.isFrozen()でtrue', Object.isFrozen(core.KNOWN_CANONICAL_UNITS_BY_DIMENSION) && Object.isFrozen(core.KNOWN_CANONICAL_UNITS_BY_DIMENSION.pressure));
+  check('classifyUnitConversion()はcore(quantity_sidecar_binding_core.js)の公開APIとしてexportされていない(中1)', typeof core.classifyUnitConversion === 'undefined');
 
   // ── 24. 直接テストしたすべての計画でfactor/offsetが有限数である ──
   {
     const allPairs = [['kW','power','kW','power'], ['degC','temperature','degC','temperature'],
       ['Pa','pressure','kPa','pressure'], ['kPa','pressure','MPa','pressure'], ['MPa','pressure','Pa','pressure']];
     const allFinite = allPairs.every(([rc, rd, ac, ad]) => {
-      const r = core.classifyUnitConversion({ canonical:rc, dimension:rd }, { canonical:ac, dimension:ad });
+      const r = unitRules.classifyUnitConversion({ canonical:rc, dimension:rd }, { canonical:ac, dimension:ad });
       return r.outcome !== 'plan' || (Number.isFinite(r.plan.factor) && Number.isFinite(r.plan.offset));
     });
     check('直接テストした全計画でfactor/offsetが有限数である(24)', allFinite);
@@ -235,6 +306,62 @@ async function pairBindingPower() {
     check('生成された計画がidentity(conversion_required:false)である(4統合)',
       sampleResult.unit_conversion_plans.length === 1 && sampleResult.unit_conversion_plans[0]?.unit_conversion_plan?.conversion_operation === 'identity',
       sampleResult.unit_conversion_plans);
+  }
+
+  // ── 【レビュー修正、重大1、必須テスト】不正sidecar(破損・改変されたcanonical/dimension)を
+  //    使ったgenerateUnitConversionPlans()自体のend-to-endテスト。単位以外(周辺語・タグ)は
+  //    performance.cooling_capacity(dimension:'power')・acceptable_region/achieved_pointの
+  //    条件・point_in_regionのcomparison modeまで正しく到達するように整え、単位metadataだけを
+  //    破損させる。 ──
+  {
+    // 未登録canonical(pressure/power等の既知dimensionのいずれでもない架空の単位)を、
+    // 有効なdimension('power')と組み合わせた不正sidecarを模擬する。
+    const reqTrace = traceWithText('req-bad-unit-1', '冷房能力12 kW以上を確保すること。', ['冷房能力']);
+    const actTrace = traceWithText('act-bad-unit-1', '冷房能力12.5 kWを実測した。', ['冷房能力']);
+    const binding = await bind(
+      reqTrace, id => (id === 'req-bad-unit-1' ? [analysis('bu1-r', 'power', 'XYZ', 'source_raw_text', [conditionCandidate('acceptable_region', 0.9), conditionCandidate('unknown', 0.15)])] : []),
+      actTrace, id => (id === 'act-bad-unit-1' ? [analysis('bu1-a', 'power', 'XYZ', 'source_raw_text', [conditionCandidate('achieved_point', 0.6), conditionCandidate('unknown', 0.15)])] : [])
+    );
+    const result = core.generateUnitConversionPlans({ binding, relations:[relation('req-bad-unit-1', 'act-bad-unit-1')] });
+    check('前提確認: 不正sidecar(未登録canonical XYZ)でもconcept解決・comparison mode導出まではready:trueで到達する',
+      result.ready === true, result);
+    check('不正sidecar(未登録canonical XYZ、dimension:power)はgenerateUnitConversionPlans()のend-to-endでも計画を生成しない(重大1、必須テスト)',
+      result.unit_conversion_plans.length === 0
+      && result.not_analyzed.some(n => n.reason_code === 'unit_metadata_unsupported' && n.requirement_unit_canonical === 'XYZ' && n.actual_unit_canonical === 'XYZ'),
+      result);
+    // 【レビュー修正、中3】単位未対応で除外されたnot_analyzedエントリにも、comparison mode・
+    // condition解決の監査情報が失われず引き継がれていることを確認する。
+    const unsupportedEntry = result.not_analyzed.find(n => n.reason_code === 'unit_metadata_unsupported');
+    check('単位未対応のnot_analyzedにcomparison_mode_candidate/comparison_mode_confidence/derived_fromが引き継がれる(中3)',
+      unsupportedEntry?.comparison_mode_candidate === 'point_in_region' && typeof unsupportedEntry?.comparison_mode_confidence === 'number' && !!unsupportedEntry?.derived_from,
+      unsupportedEntry);
+    check('単位未対応のnot_analyzedに両側のcondition status/valueが引き継がれる(中3)',
+      unsupportedEntry?.requirement_condition_status === 'resolved' && unsupportedEntry?.requirement_condition_value === 'acceptable_region'
+      && unsupportedEntry?.actual_condition_status === 'resolved' && unsupportedEntry?.actual_condition_value === 'achieved_point',
+      unsupportedEntry);
+    check('単位未対応のnot_analyzedに両側のtop_confidence/margin/has_opposing_evidenceが引き継がれる(中3)',
+      typeof unsupportedEntry?.requirement_condition_top_confidence === 'number' && typeof unsupportedEntry?.requirement_condition_margin === 'number'
+      && typeof unsupportedEntry?.actual_condition_top_confidence === 'number' && typeof unsupportedEntry?.actual_condition_margin === 'number'
+      && unsupportedEntry?.requirement_condition_has_opposing_evidence === false && unsupportedEntry?.actual_condition_has_opposing_evidence === false,
+      unsupportedEntry);
+  }
+  {
+    // 既知canonical(kW)が誤ったdimension(voltage)と組み合わされた不正sidecarを模擬する。
+    // power_supply.voltage概念(dimension:'voltage'、キーワード「電源電圧」)経由でconcept解決に
+    // 到達させる。
+    const reqTrace = traceWithText('req-bad-unit-2', '電源電圧12 V以上を確保すること。', ['電源電圧']);
+    const actTrace = traceWithText('act-bad-unit-2', '電源電圧12.5 Vを実測した。', ['電源電圧']);
+    const binding = await bind(
+      reqTrace, id => (id === 'req-bad-unit-2' ? [analysis('bu2-r', 'voltage', 'kW', 'source_raw_text', [conditionCandidate('acceptable_region', 0.9), conditionCandidate('unknown', 0.15)])] : []),
+      actTrace, id => (id === 'act-bad-unit-2' ? [analysis('bu2-a', 'voltage', 'kW', 'source_raw_text', [conditionCandidate('achieved_point', 0.6), conditionCandidate('unknown', 0.15)])] : [])
+    );
+    const result = core.generateUnitConversionPlans({ binding, relations:[relation('req-bad-unit-2', 'act-bad-unit-2')] });
+    check('前提確認: 不正sidecar(既知canonical kWだが誤dimension voltage)でもconcept解決・comparison mode導出まではready:trueで到達する',
+      result.ready === true, result);
+    check('不正sidecar(既知canonical kWが誤dimension voltageと組み合わされている)はgenerateUnitConversionPlans()のend-to-endでも計画を生成しない(重大1、必須テスト)',
+      result.unit_conversion_plans.length === 0
+      && result.not_analyzed.some(n => n.reason_code === 'unit_metadata_unsupported' && n.requirement_unit_canonical === 'kW' && n.requirement_unit_dimension === 'voltage'),
+      result);
   }
 
   // ── 19. relations配列の正順・逆順で同じ結果になる(入力順非依存) ──

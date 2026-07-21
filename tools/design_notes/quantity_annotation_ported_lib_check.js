@@ -13,6 +13,7 @@ const path = require('path');
 const REPO_ROOT = path.join(__dirname, '..', '..');
 const QUANTITY_LIB_PATH = path.join(__dirname, 'quantity_extraction_prototype.js');
 const SEMANTICS_LIB_PATH = path.join(__dirname, 'semantic_mapping_prototype.js');
+const UNIT_RULES_LIB_PATH = path.join(__dirname, 'unit_conversion_rules_prototype.js');
 const BINDING_CORE_PATH = path.join(REPO_ROOT, 'tools/quantity_sidecar_binding_core.js');
 
 // ── 移植ブロックの範囲(full_insertion.js作成時に確定した行範囲。移植元が変更された場合は
@@ -23,6 +24,7 @@ const SEMANTICS_LIB_RANGE = [76, 367];   // isTwoSidedRange() 〜 generateInterv
 const PROPERTY_LIB_RANGE_A = [400, 408]; // marginOf() 〜 hasOpposingEvidence()
 const PROPERTY_LIB_RANGE_B = [438, 511]; // CONCEPT_DICTIONARY 〜 generatePropertyCandidates()
 const COMPARISON_MODE_TABLE_RANGE = [368, 374]; // COMPARISON_MODE_DERIVATION_TABLE
+const UNIT_RULES_RANGE = [25, 86]; // KNOWN_CANONICAL_UNITS_BY_DIMENSION 〜 classifyUnitConversion()
 
 const assertions = [];
 function check(name, ok, detail) { assertions.push({ name, ok: !!ok, detail }); }
@@ -112,6 +114,46 @@ function checkPortedComparisonModeTable() {
     actual.trim() === expected.trim() ? undefined : { actualLen: actual.length, expectedLen: expected.length });
 }
 
+// Phase B-2.4a: quantity_sidecar_binding_core.jsへ移植したKNOWN_CANONICAL_UNITS_BY_DIMENSION・
+// LINEAR_UNIT_SCALE_TO_BASE・isKnownUnit()・classifyUnitConversion()の乖離検出。
+function checkPortedUnitConversionRules() {
+  const expected = readLinesFrom(UNIT_RULES_LIB_PATH, UNIT_RULES_RANGE[0], UNIT_RULES_RANGE[1] - UNIT_RULES_RANGE[0] + 1);
+
+  const lines = fs.readFileSync(BINDING_CORE_PATH, 'utf8').split('\n');
+  const startIdx = lines.findIndex(l => l.includes('const KNOWN_CANONICAL_UNITS_BY_DIMENSION = {'));
+  const endMarkerIdx = lines.findIndex(l => l.includes('単位互換性判定・変換計画生成ライブラリ(移植)ここまで'));
+
+  check('[quantity_sidecar_binding_core.js] マーカー(単位互換性判定・変換計画生成ライブラリ開始、const KNOWN_CANONICAL_UNITS_BY_DIMENSION)が見つかる', startIdx !== -1);
+  check('[quantity_sidecar_binding_core.js] マーカーコメント(単位互換性判定・変換計画生成ライブラリの終端)が見つかる', endMarkerIdx !== -1);
+  if (startIdx === -1 || endMarkerIdx === -1) return;
+
+  const actual = stripIndent(lines.slice(startIdx, endMarkerIdx).join('\n').replace(/\n+$/, ''), '  ');
+  check('[quantity_sidecar_binding_core.js] 単位互換性判定・変換計画生成ライブラリが移植元(unit_conversion_rules_prototype.js)と完全一致する(乖離検出)',
+    actual.trim() === expected.trim(),
+    actual.trim() === expected.trim() ? undefined : { actualLen: actual.length, expectedLen: expected.length });
+}
+
+// 【レビュー指摘、重大1】KNOWN_CANONICAL_UNITS_BY_DIMENSION(unit_conversion_rules_prototype.js)は
+// UNIT_DEFS(quantity_extraction_prototype.js)から手動で書き起こしたallowlistであり、
+// バイト単位のporting diffでは対応関係の正しさまでは検証できない(表の形自体が異なるため)。
+// UNIT_DEFSの各エントリが実際に持つ(dimension, canonical)の組と、双方向(不足なし・過剰なし)で
+// 突き合わせる。
+function checkKnownCanonicalUnitsMatchUnitDefs() {
+  const { UNIT_DEFS } = require(QUANTITY_LIB_PATH);
+  const { KNOWN_CANONICAL_UNITS_BY_DIMENSION } = require(UNIT_RULES_LIB_PATH);
+  const expectedPairs = new Set(UNIT_DEFS.map(u => `${u.dimension}:${u.canonical}`));
+  const actualPairs = new Set();
+  for (const [dimension, canonicals] of Object.entries(KNOWN_CANONICAL_UNITS_BY_DIMENSION)) {
+    for (const canonical of Object.keys(canonicals)) actualPairs.add(`${dimension}:${canonical}`);
+  }
+  check('KNOWN_CANONICAL_UNITS_BY_DIMENSIONがUNIT_DEFSの全(dimension,canonical)組を含む(不足なし、重大1の乖離検出)',
+    [...expectedPairs].every(p => actualPairs.has(p)),
+    [...expectedPairs].every(p => actualPairs.has(p)) ? undefined : { missing:[...expectedPairs].filter(p => !actualPairs.has(p)) });
+  check('KNOWN_CANONICAL_UNITS_BY_DIMENSIONにUNIT_DEFSに存在しない組が無い(過剰なし、重大1の乖離検出)',
+    [...actualPairs].every(p => expectedPairs.has(p)),
+    [...actualPairs].every(p => expectedPairs.has(p)) ? undefined : { extra:[...actualPairs].filter(p => !expectedPairs.has(p)) });
+}
+
 if (require.main === module) {
   main();
 }
@@ -121,6 +163,8 @@ function main() {
   checkPortedLibsIn('Excel側', path.join(REPO_ROOT, 'tools/excel_to_json_conversion_tool_v2.0.8.html'), '  ');
   checkPortedPropertyLib();
   checkPortedComparisonModeTable();
+  checkPortedUnitConversionRules();
+  checkKnownCanonicalUnitsMatchUnitDefs();
 
   console.log('\n=== quantity_annotation_ported_lib_check 結果 ===');
   let fail = 0;
