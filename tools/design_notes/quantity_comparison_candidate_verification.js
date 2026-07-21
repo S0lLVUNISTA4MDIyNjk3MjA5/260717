@@ -253,6 +253,117 @@ function relation(requirementTraceId, actualTraceId, matcherA = `A-${requirement
   check('実fixtureのcomparison_candidatesは、要求側・実仕様側で同じconcept_idを持つ',
     realResult.comparison_candidates.every(c => typeof c.concept_id === 'string' && core.CONCEPT_DICTIONARY.some(concept => concept.concept_id === c.concept_id)));
 
+  // ── 11. 【round1レビュー修正、重大3】binding.ready===false時、blockedComparisonResult()が
+  //    bindingを受け取りbinding.diagnostics/not_analyzedを引き継ぐようになった。実際の
+  //    bindInputPair()でpath_mapping_unsupportedを発生させ、side・trace_id付きで残ることを
+  //    直接確認する(以前はbinding_not_readyの早期returnで元診断が消えていた)。 ──
+  const pathReqTrace = traceWithText('req-path', '仕様.能力 12 kWの記載。', ['冷房能力']);
+  pathReqTrace._trace_records[0].source_record_display_unresolved = [
+    { source_field:'仕様.能力', code:'formatted_display_unavailable', reason:'path_mapping_unsupported' },
+  ];
+  const pathReqAnnotation = await sidecarFor(pathReqTrace, 'requirement', id => (id === 'req-path' ? [analysis('path-r', 'power', 'kW')] : []));
+  const pathActTrace = traceWithText('act-path-empty', '', []);
+  const pathActAnnotation = await sidecarFor(pathActTrace, 'actual', () => []);
+  const pathBinding = await core.bindInputPair({
+    requirementTrace:pathReqTrace, requirementAnnotation:pathReqAnnotation,
+    actualTrace:pathActTrace, actualAnnotation:pathActAnnotation,
+  });
+  check('前提確認: path_mapping_unsupportedによりbindInputPair()全体がready:falseになる', pathBinding.ready === false, pathBinding.diagnostics);
+  const pathResult = core.generateComparisonCandidates({ binding:pathBinding, relations:[relation('req-path', 'act-path-empty')] });
+  check('binding.ready===false時もPhase B-1のpath_mapping_unsupported診断がside+trace_id付きで引き継がれる(round1必須修正、重大3)',
+    pathResult.diagnostics.some(d => d.code === 'path_mapping_unsupported' && d.side === 'requirement' && d.trace_id === 'req-path'),
+    pathResult.diagnostics);
+  check('binding_not_readyマーカーも併せて含まれる(元診断を置換ではなく追加する)',
+    pathResult.diagnostics.some(d => d.code === 'binding_not_ready'), pathResult.diagnostics);
+
+  // ── 12. 【round1レビュー修正、中】candidateLimit/totalCandidateLimitが1以上の安全な整数でない
+  //    場合はfail closedする(負数・非整数・NaN・Infinity・文字列・過大値のいずれも安全機構を
+  //    無効化できないことを確認する) ──
+  const invalidLimits = [
+    ['-1', -1], ['0', 0], ['1.5', 1.5], ['NaN', NaN], ['Infinity', Infinity], ['-Infinity', -Infinity],
+    ['文字列"5"', '5'], ['上限超過(100001)', 100001], ['null', null],
+  ];
+  for (const [label, bad] of invalidLimits) {
+    const badResult = core.generateComparisonCandidates({ binding:binding1, relations:[relation('req-1', 'act-1')], candidateLimit:bad });
+    check(`candidateLimitの不正値(${label})はfail closedする(round1必須修正、中)`,
+      badResult.ready === false && badResult.comparison_candidates.length === 0
+      && badResult.diagnostics.some(d => d.code === 'candidate_limit_invalid' && d.severity === 'error'),
+      badResult.diagnostics);
+  }
+  const badTotalResult = core.generateComparisonCandidates({ binding:binding1, relations:[relation('req-1', 'act-1')], totalCandidateLimit:Infinity });
+  check('totalCandidateLimitの不正値(Infinity)もfail closedする(round1必須修正、中)',
+    badTotalResult.ready === false && badTotalResult.diagnostics.some(d => d.code === 'total_candidate_limit_invalid'), badTotalResult.diagnostics);
+
+  // ── 13. 【round1レビュー修正、重大2】per-group上限(candidateLimit)は「1つの(bucket,concept_id)組
+  //    あたり」の上限にすぎない。1つの組だけでcandidateLimitを超えて生成された場合も、
+  //    複数の組にまたがって合計が積み上がった場合も、totalCandidateLimitを超えたら
+  //    comparison_candidates全体をfail closedすることを確認する(恣意的な部分採用をしない)。 ──
+  const singleGroupOverTotal = core.generateComparisonCandidates({
+    binding:bindingMany, relations:[relation('req-many', 'act-many')], candidateLimit:20, totalCandidateLimit:10,
+  });
+  check('単一(bucket,concept)組だけでtotalCandidateLimitを超える場合もfail closedする(round1必須修正、重大2)',
+    singleGroupOverTotal.ready === false && singleGroupOverTotal.comparison_candidates.length === 0,
+    singleGroupOverTotal);
+  check('total_candidate_limit_exceededがerror severityの診断として記録される',
+    singleGroupOverTotal.diagnostics.some(d => d.code === 'total_candidate_limit_exceeded' && d.severity === 'error'),
+    singleGroupOverTotal.diagnostics);
+  check('total_candidate_limit_exceededのnot_analyzedに実際の合計件数と上限が記録される',
+    singleGroupOverTotal.not_analyzed.some(n => n.reason_code === 'total_candidate_limit_exceeded' && n.total_candidate_count === 20 && n.total_candidate_limit === 10),
+    singleGroupOverTotal.not_analyzed);
+  check('個々のバケットのcandidate_limit_exceeded監査記録も併せて残り、超過の内訳を追跡できる',
+    singleGroupOverTotal.diagnostics.some(d => d.code === 'candidate_limit_exceeded'), singleGroupOverTotal.diagnostics);
+
+  const multiBucketReqTrace = { _trace_records:[
+    { trace_id:'mb-req-1', source_raw_text:'冷房能力12 kW以上を確保すること。', tags:['冷房能力'] },
+    { trace_id:'mb-req-2', source_raw_text:'冷房能力12 kW以上を確保すること。', tags:['冷房能力'] },
+    { trace_id:'mb-req-3', source_raw_text:'冷房能力12 kW以上を確保すること。', tags:['冷房能力'] },
+  ] };
+  const multiBucketActTrace = { _trace_records:[
+    { trace_id:'mb-act-1', source_raw_text:'冷房能力12.5 kWを実測した。', tags:['冷房能力'] },
+    { trace_id:'mb-act-2', source_raw_text:'冷房能力12.5 kWを実測した。', tags:['冷房能力'] },
+    { trace_id:'mb-act-3', source_raw_text:'冷房能力12.5 kWを実測した。', tags:['冷房能力'] },
+  ] };
+  const multiBucketAnalyses = id => [analysis(id, 'power', 'kW')];
+  const multiBucketBinding = await bind(multiBucketReqTrace, multiBucketAnalyses, multiBucketActTrace, multiBucketAnalyses);
+  check('前提確認: 複数バケット合成データのbindInputPair自体はready', multiBucketBinding.ready, multiBucketBinding.diagnostics);
+  const multiBucketRelations = [relation('mb-req-1', 'mb-act-1'), relation('mb-req-2', 'mb-act-2'), relation('mb-req-3', 'mb-act-3')];
+  const multiBucketUnderLimit = core.generateComparisonCandidates({ binding:multiBucketBinding, relations:multiBucketRelations });
+  check('前提確認: 3バケットそれぞれ1件ずつ、合計3件のcomparison候補が生成される(いずれもper-group上限内)',
+    multiBucketUnderLimit.ready === true && multiBucketUnderLimit.comparison_candidates.length === 3, multiBucketUnderLimit);
+  const multiBucketOverTotal = core.generateComparisonCandidates({ binding:multiBucketBinding, relations:multiBucketRelations, totalCandidateLimit:2 });
+  check('個々のバケットはper-group上限内でも、複数バケットにまたがる合計がtotalCandidateLimitを超えればfail closedする(round1必須修正、重大2)',
+    multiBucketOverTotal.ready === false && multiBucketOverTotal.comparison_candidates.length === 0
+    && multiBucketOverTotal.not_analyzed.some(n => n.reason_code === 'total_candidate_limit_exceeded' && n.total_candidate_count === 3 && n.total_candidate_limit === 2),
+    multiBucketOverTotal);
+
+  // ── 14. 【round1レビュー修正、重大1、性能面の直接証拠】2000×2000(=400万潜在ペア)でも
+  //    generateComparisonCandidates()自体が短時間で完了すること。全直積を中間配列として
+  //    生成する実装であれば数百万要素のpush()で顕著に時間がかかるはずであり、直接ループで
+  //    上限到達時に打ち切る実装であれば経過時間はcandidateLimitやID数のソートに比例するだけで
+  //    済む(この差を時間で直接検出する)。 ──
+  const bigN = 2000;
+  const bigReqAnalyses = Array.from({ length:bigN }, (_, i) => analysis(`big-r${i}`, 'power', 'kW'));
+  const bigActAnalyses = Array.from({ length:bigN }, (_, i) => analysis(`big-a${i}`, 'power', 'kW'));
+  const bigReqTrace = traceWithText('req-big', '冷房能力12 kW以上を確保すること。', ['冷房能力']);
+  const bigActTrace = traceWithText('act-big', '冷房能力12.5 kWを実測した。', ['冷房能力']);
+  const bigBinding = await bind(
+    bigReqTrace, id => (id === 'req-big' ? bigReqAnalyses : []),
+    bigActTrace, id => (id === 'act-big' ? bigActAnalyses : [])
+  );
+  check('前提確認: 2000×2000合成データのbindInputPair自体はready', bigBinding.ready, bigBinding.diagnostics);
+  const bigStart = Date.now();
+  const bigResult = core.generateComparisonCandidates({
+    binding:bigBinding, relations:[relation('req-big', 'act-big')], candidateLimit:50, totalCandidateLimit:1000,
+  });
+  const bigElapsedMs = Date.now() - bigStart;
+  check(`2000×2000(潜在ペア400万件)でもgenerateComparisonCandidates()が1秒未満で完了する(round1必須修正、重大1の性能的な証拠。経過時間=${bigElapsedMs}ms)`,
+    bigElapsedMs < 1000, { bigElapsedMs });
+  check('2000×2000でもcomparison_candidatesはcandidateLimit(50)ちょうどになる', bigResult.comparison_candidates.length === 50, bigResult.comparison_candidates.length);
+  check('2000×2000の超過分(399万9950件)が個別展開されず1件のcandidate_limit_exceededへ圧縮される',
+    bigResult.not_analyzed.filter(n => n.reason_code === 'candidate_limit_exceeded').length === 1
+    && bigResult.not_analyzed.find(n => n.reason_code === 'candidate_limit_exceeded')?.excluded_pair_count === (bigN * bigN - 50),
+    bigResult.not_analyzed.filter(n => n.reason_code === 'candidate_limit_exceeded'));
+
   console.log('\n=== quantity_comparison_candidate_verification 結果 ===');
   let failed = 0;
   checks.forEach(c => { console.log(`[${c.ok ? 'OK' : 'NG'}] ${c.name}`); if (!c.ok) { failed++; if (c.detail !== undefined) console.log('  ', JSON.stringify(c.detail)); } });

@@ -730,7 +730,27 @@
   // 次元候補回帰テストで確認済み)であるため、段階1と同様に個々のペアを総当たりで評価せず、
   // concept_idごとのグルーピングと候補上限で組み合わせ爆発を避ける。数値比較・comparisonMode
   // 導出・充足判定はまだ行わない(3.4節 段階3以降、未着手のまま)。
+  //
+  // 【round1レビュー修正、重大1: 全直積の中間生成】初回実装は`reqIds.length×actIds.length`の
+  // ペアを配列へ一度すべて生成してからslice()していたため、candidateLimitを超えた分も含めて
+  // O(バケット内数量数の2乗)のメモリ・時間を消費していた(200×200なら40,000件、5,000×5,000なら
+  // 2,500万件を先に作ってから大半を捨てる)。これは段階1が防いだはずの組み合わせ爆発の再発であり、
+  // 「全直積を中間配列として生成しない」という3.4節の契約に反する。修正: 直積を配列化せず、
+  // ソート済みID列を二重ループで走査しながら上限に達した時点で即座に打ち切る(下記
+  // emitConceptGroupCandidates())。
   const DEFAULT_COMPARISON_CANDIDATE_LIMIT = 50;
+  // 【round1レビュー修正、重大2】per-group上限(candidateLimit)だけでは、バケット数・concept数が
+  // 多いケースで合計候補数が際限なく積み上がりうる(candidateLimitは「1つの(bucket,concept_id)組
+  // あたりの上限」であり、全体の上限ではないと指摘された)。3.4節6番の原文「最大候補数(例:
+  // 1レコードあたりN件まで)」はレコード=バケット単位の上限を指しており、per-group自体は
+  // 意図した設計のまま維持するが、全体の合計にも別途上限(totalCandidateLimit)を設け、
+  // 超過時は「どのバケットの分を切るか」という恣意的な判断を避けるためfail closedする
+  // (comparison_candidatesを空にしready:falseにする。個々のバケットの圧縮監査記録は
+  // 診断として残るため、なぜ超過したかは追跡できる)。
+  const DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT = 500;
+  const MAX_SAFE_CANDIDATE_LIMIT = 10000;
+
+  function isSafeLimit(value) { return Number.isSafeInteger(value) && value >= 1 && value <= MAX_SAFE_CANDIDATE_LIMIT; }
 
   function resolutionLookup(propertyResult) {
     const map = new Map();
@@ -754,16 +774,73 @@
     return byConcept;
   }
 
-  function blockedComparisonResult(diagnostics, dimensionResult, propertyResult) {
-    return { ready:false, comparison_candidates:[], candidate_count:0,
-      diagnostics:[...diagnostics, ...(dimensionResult?.diagnostics || []), ...(propertyResult?.diagnostics || [])],
-      not_analyzed:[...(dimensionResult?.not_analyzed || []), ...(propertyResult?.not_analyzed || [])] };
+  // 【round1レビュー修正、重大2の一部】切り詰める場合、quantity_id(内容ハッシュ)の辞書順という
+  // 意味のない基準ではなく、そのconceptでのconfidence降順を優先する(同点はquantity_id昇順で
+  // 決定的にする)。現行実装では1つのbound record内の全analysisがnearbyText/tagsを共有するため、
+  // 同一バケット・同一side・同一conceptの候補間でconfidenceが実際に異なることは構造的に起こらない
+  // (nearbyTextForRecord()がレコード単位でquantitySourceFields全体を一律除外する設計のため)。
+  // それでも、将来nearbyText計算がanalysis単位に細分化された場合に備えた防御的な実装として残す。
+  function sortByConfidenceDesc(ids, side, resolutionByKey) {
+    return [...ids].sort((a, b) => {
+      const confA = resolutionByKey.get(`${side}:${a}`)?.candidates?.[0]?.confidence ?? 0;
+      const confB = resolutionByKey.get(`${side}:${b}`)?.candidates?.[0]?.confidence ?? 0;
+      if (confB !== confA) return confB - confA;
+      return String(a).localeCompare(String(b));
+    });
   }
 
-  function generateComparisonCandidates({ binding, relations, candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT }) {
+  // 直積を配列化せず、confidence降順(同点はquantity_id昇順)のID列を二重ループで走査しながら
+  // 上限に達した時点で打ち切る。戻り値はこのconceptグループで実際に生成した候補数と、
+  // 潜在ペア数(reqIds.length×actIds.length、打ち切り有無に関わらず定数時間で計算可能)。
+  function emitConceptGroupCandidates(reqIds, actIds, conceptId, bucket, candidateLimit, resolutionByKey, comparisonCandidates) {
+    const potentialPairCount = reqIds.length * actIds.length;
+    const sortedReq = sortByConfidenceDesc(reqIds, 'requirement', resolutionByKey);
+    const sortedAct = sortByConfidenceDesc(actIds, 'actual', resolutionByKey);
+    let emitted = 0;
+    outer:
+    for (const reqId of sortedReq) {
+      for (const actId of sortedAct) {
+        if (emitted >= candidateLimit) break outer;
+        comparisonCandidates.push({
+          requirement_quantity_id:reqId, actual_quantity_id:actId, concept_id:conceptId, dimension:bucket.dimension,
+          requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
+          matcher_a_id:bucket.matcher_a_id ?? null, matcher_b_id:bucket.matcher_b_id ?? null,
+        });
+        emitted++;
+      }
+    }
+    return { emitted, potentialPairCount };
+  }
+
+  // 【round1レビュー修正、重大3】binding.diagnostics/not_analyzedを常に引き継ぐ。初回実装は
+  // binding.ready===falseの早期returnでbindingそのものをblockedComparisonResult()へ渡しておらず、
+  // path_mapping_unsupported・source_mismatch・stale_annotation・ruleset_mismatch等、Phase B-1が
+  // side・trace_id付きで検出済みの具体的な診断が消えていた(B-2.2aで一度修正したのと同じ欠陥の
+  // 再発、と指摘された)。修正: bindingを必ず受け取り、dimensionResult/propertyResultが
+  // まだ存在しない段階の早期returnでも、binding.diagnostics/not_analyzedだけは必ず引き継ぐ。
+  function blockedComparisonResult(diagnostics, binding, dimensionResult, propertyResult) {
+    return { ready:false, comparison_candidates:[], candidate_count:0,
+      diagnostics:[...diagnostics, ...(binding?.diagnostics || []), ...(dimensionResult?.diagnostics || []), ...(propertyResult?.diagnostics || [])],
+      not_analyzed:[...(binding?.not_analyzed || []), ...(dimensionResult?.not_analyzed || []), ...(propertyResult?.not_analyzed || [])] };
+  }
+
+  function generateComparisonCandidates({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT }) {
+    // 【round1レビュー修正、中】candidateLimit/totalCandidateLimitを未検証のままslice()・減算へ
+    // 使うと、負数・非整数・NaN・Infinity・文字列等で誤動作しうる(呼び出し側がInfinity等を渡すだけで
+    // 上限機構そのものを無効化できてしまう、と指摘された)。1以上MAX_SAFE_CANDIDATE_LIMIT以下の
+    // 安全な整数であることを検証し、不正ならfail closedする。
+    if (!isSafeLimit(candidateLimit)) {
+      return blockedComparisonResult([{ code:'candidate_limit_invalid', severity:'error',
+        detail:`candidateLimitは1以上${MAX_SAFE_CANDIDATE_LIMIT}以下の安全な整数である必要があります(実際=${JSON.stringify(candidateLimit)})` }], binding, null, null);
+    }
+    if (!isSafeLimit(totalCandidateLimit)) {
+      return blockedComparisonResult([{ code:'total_candidate_limit_invalid', severity:'error',
+        detail:`totalCandidateLimitは1以上${MAX_SAFE_CANDIDATE_LIMIT}以下の安全な整数である必要があります(実際=${JSON.stringify(totalCandidateLimit)})` }], binding, null, null);
+    }
     if (!binding || !binding.ready) {
       return blockedComparisonResult([{ code:'binding_not_ready', severity:'error',
-        detail:'quantity_sidecar_binding_core.bindInputPair()がready:falseのため比較候補を生成できません' }], null, null);
+        detail:'quantity_sidecar_binding_core.bindInputPair()がready:falseのため比較候補を生成できません' }], binding, null, null);
     }
     // dimensionResult/propertyResultを呼び出し側からの別引数として受け取らず、必ずこの関数の
     // 内部で同じbindingから1回ずつ計算する(B-2.2a round1で見つかった、bindingとは別に渡された
@@ -772,12 +849,12 @@
     const dimensionResult = generateDimensionCandidates({ binding, relations });
     if (!dimensionResult.ready) {
       return blockedComparisonResult([{ code:'dimension_candidates_not_ready', severity:'error',
-        detail:'generateDimensionCandidates()がready:falseのため比較候補を生成できません' }], dimensionResult, null);
+        detail:'generateDimensionCandidates()がready:falseのため比較候補を生成できません' }], binding, dimensionResult, null);
     }
     const propertyResult = generatePropertyResolutions({ binding });
     if (!propertyResult.ready) {
       return blockedComparisonResult([{ code:'property_resolutions_not_ready', severity:'error',
-        detail:'generatePropertyResolutions()がready:falseのため比較候補を生成できません' }], dimensionResult, propertyResult);
+        detail:'generatePropertyResolutions()がready:falseのため比較候補を生成できません' }], binding, dimensionResult, propertyResult);
     }
 
     const resolutionByKey = resolutionLookup(propertyResult);
@@ -811,20 +888,10 @@
         const reqIds = reqByConcept.get(conceptId);
         const actIds = actByConcept.get(conceptId);
         if (reqIds && actIds) {
-          const sortedReq = [...reqIds].sort();
-          const sortedAct = [...actIds].sort();
-          const pairs = [];
-          for (const reqId of sortedReq) for (const actId of sortedAct) pairs.push([reqId, actId]);
-          const limited = pairs.slice(0, candidateLimit);
-          limited.forEach(([reqId, actId]) => {
-            comparisonCandidates.push({
-              requirement_quantity_id:reqId, actual_quantity_id:actId, concept_id:conceptId, dimension:bucket.dimension,
-              requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
-              matcher_a_id:bucket.matcher_a_id ?? null, matcher_b_id:bucket.matcher_b_id ?? null,
-            });
-          });
-          if (pairs.length > candidateLimit) {
-            const excludedCount = pairs.length - candidateLimit;
+          const { emitted, potentialPairCount } = emitConceptGroupCandidates(
+            reqIds, actIds, conceptId, bucket, candidateLimit, resolutionByKey, comparisonCandidates);
+          if (potentialPairCount > emitted) {
+            const excludedCount = potentialPairCount - emitted;
             diagnostics.push({ code:'candidate_limit_exceeded', severity:'warning', concept_id:conceptId,
               requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
               detail:`候補上限(${candidateLimit})を超えたため、超過分(${excludedCount}件)を切り詰めました` });
@@ -847,19 +914,32 @@
 
     // dimensionResult/propertyResultが既に保持しているdiagnostics/not_analyzed(dimension_mismatch・
     // dimension_unavailable・missing_annotation等のwarning)も引き継ぐ(generatePropertyResolutions()の
-    // 修正と同じ理由: 元の診断を消して新設のマーカーだけに置き換えない)。readyはこの結合済み
-    // diagnostics全体で判定する(この段階で追加するcandidate_limit_exceededは常にwarningのため
-    // 単独でready:falseにはならないが、将来ここへerror severityの診断を追加した場合にも
-    // 正しくready:falseへ反映されるよう、局所diagnosticsだけでなく結合後の配列で判定する)。
-    const combinedDiagnostics = [...(dimensionResult.diagnostics || []), ...(propertyResult.diagnostics || []), ...diagnostics];
-    return { ready:isReady(combinedDiagnostics), comparison_candidates:comparisonCandidates,
-      candidate_count:comparisonCandidates.length, diagnostics:combinedDiagnostics,
-      not_analyzed:[...(dimensionResult.not_analyzed || []), ...(propertyResult.not_analyzed || []), ...notAnalyzed] };
+    // 修正と同じ理由: 元の診断を消して新設のマーカーだけに置き換えない)。
+    let finalComparisonCandidates = comparisonCandidates;
+    const localDiagnostics = [...diagnostics];
+    const localNotAnalyzed = [...notAnalyzed];
+    // 【round1レビュー修正、重大2】per-group上限は「1つの(bucket,concept_id)組あたり」の上限に
+    // すぎず、バケット・concept数が多いケースでは合計がいくらでも積み上がりうる。合計が
+    // totalCandidateLimitを超えた場合は、どのバケット由来の候補を残すかという恣意的な判断を
+    // 避けるため、comparison_candidates全体をfail closedする(個々のバケットのcandidate_limit_exceeded
+    // 監査記録はdiagnostics/not_analyzedへ残るため、超過の内訳は追跡できる)。
+    if (finalComparisonCandidates.length > totalCandidateLimit) {
+      const totalCount = finalComparisonCandidates.length;
+      localDiagnostics.push({ code:'total_candidate_limit_exceeded', severity:'error',
+        detail:`比較候補の合計件数(${totalCount})がtotalCandidateLimit(${totalCandidateLimit})を超えたため、比較候補生成全体を停止しました` });
+      localNotAnalyzed.push({ reason_code:'total_candidate_limit_exceeded',
+        total_candidate_count:totalCount, total_candidate_limit:totalCandidateLimit });
+      finalComparisonCandidates = [];
+    }
+    const combinedDiagnostics = [...(dimensionResult.diagnostics || []), ...(propertyResult.diagnostics || []), ...localDiagnostics];
+    return { ready:isReady(combinedDiagnostics), comparison_candidates:finalComparisonCandidates,
+      candidate_count:finalComparisonCandidates.length, diagnostics:combinedDiagnostics,
+      not_analyzed:[...(dimensionResult.not_analyzed || []), ...(propertyResult.not_analyzed || []), ...localNotAnalyzed] };
   }
 
   return Object.freeze({ SCHEMA_VERSION, SUPPORTED_RULESETS, validateAnnotationSchema, validateRulesetCompatibility,
     canonicalValue, canonicalJson, normalize, hashParts, computeDatasetSignature, computeRecordContentHash,
     traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates,
     CONCEPT_DICTIONARY, generatePropertyCandidates, generatePropertyResolutions,
-    DEFAULT_COMPARISON_CANDIDATE_LIMIT, generateComparisonCandidates });
+    DEFAULT_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT, generateComparisonCandidates });
 });
