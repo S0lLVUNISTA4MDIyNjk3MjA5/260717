@@ -1555,18 +1555,41 @@
   const MAX_ALTERNATIVE_VALUES_PER_QUANTITY = 64;
 
   // 数量値(kind:'interval'|'alternatives')が、変換の有無によらず後続処理で安全に扱える構造で
-  // あることを検証する(型・有限性・件数上限のみ。値の変換は行わない)。変換対象のactual側だけで
-  // なく、変換をそもそも適用しない(既に要求単位の)requirement側にも同じ検証を適用する
+  // あることを検証する(型・有限性・件数上限・非空性のみ。値の変換は行わない)。変換対象のactual側
+  // だけでなく、変換をそもそも適用しない(既に要求単位の)requirement側にも同じ検証を適用する
   // 【レビュー指摘、重大2】(この段階の出力は後続の数値比較の入力になるため、両側とも比較可能な
   // 数値構造であることをここで確定させる)。
+  // 【レビュー指摘、中1】この関数は独立ライブラリからexportされる純粋関数であり、任意入力を
+  // 受け取りうる。quantityValue自体がnull/undefined/非オブジェクト(配列を含む)の場合に
+  // `quantityValue.kind`へアクセスして例外を投げるのではなく、判別可能な`unsupported`を返す。
   function validateQuantityValueStructure(quantityValue) {
+    if (!quantityValue || typeof quantityValue !== 'object' || Array.isArray(quantityValue)) {
+      return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+    }
     if (quantityValue.kind === 'interval') {
+      if (quantityValue.lower !== null && (typeof quantityValue.lower !== 'object' || Array.isArray(quantityValue.lower))) {
+        return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+      }
+      if (quantityValue.upper !== null && (typeof quantityValue.upper !== 'object' || Array.isArray(quantityValue.upper))) {
+        return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+      }
+      // 【レビュー指摘、重大2(2巡目)】lower/upperの両方がnullの区間は、後続の数値比較に使える
+      // 数値情報を1つも持たない。片側だけがnull(片側無限)であることは正当な区間表現だが、
+      // 両側nullは「値が無い」に等しく、空のalternatives(下記)と同じ扱いとする。
+      if (quantityValue.lower === null && quantityValue.upper === null) {
+        return { outcome:'unsupported', reason_code:'quantity_value_empty' };
+      }
       if (quantityValue.lower && !isFiniteNumber(quantityValue.lower.value)) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
       if (quantityValue.upper && !isFiniteNumber(quantityValue.upper.value)) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
       return { outcome:'ok' };
     }
     if (quantityValue.kind === 'alternatives') {
-      // 件数検査を、要素へ触れるいかなる走査(.every()・.map()等)よりも前に行う(重大3)。
+      if (!Array.isArray(quantityValue.options)) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+      // 【レビュー指摘、重大1(2巡目)】0要素のalternativesは、後続の数値比較に使える選択肢を
+      // 1つも持たない。正常な抽出器が生成する並列値は常に2要素であり、0要素は構造上「値が無い」
+      // に等しいため、上限検査と同じくいかなる要素走査よりも前に(length参照のみで)拒否する。
+      if (quantityValue.options.length === 0) return { outcome:'unsupported', reason_code:'quantity_value_empty' };
+      // 件数上限検査も、要素へ触れるいかなる走査(.every()・.map()等)よりも前に行う(重大3)。
       if (quantityValue.options.length > MAX_ALTERNATIVE_VALUES_PER_QUANTITY) {
         return { outcome:'unsupported', reason_code:'quantity_value_limit_exceeded',
           observed_count:quantityValue.options.length, limit:MAX_ALTERNATIVE_VALUES_PER_QUANTITY };
@@ -1593,12 +1616,14 @@
   // not_analyzedへ送る対象、`reason_code`を持つ)。
   // 【レビュー指摘、中1】この関数は独立ライブラリからexportされる純粋関数であり、coreの正常経路
   // ではclassifyUnitConversion()が返す(常に有限・正の)factorしか渡らないが、`plan`自体は
-  // 呼び出し側から任意に構築できるため、`factor`/`offset`が有限数であること・`factor`が正数で
-  // あることも変換前に確認する(負のfactorはlower/upperの入れ替えが必要になるが現在は未対応の
-  // ため、推測せず拒否する。現在の登録データ(Pa/kPa/MPa)はすべて正のfactorのため、coreの正常
-  // 経路ではこの分岐へは構造的に到達しないはずである)。
+  // 呼び出し側から任意に構築できるため、`plan`自体がnull/undefined/非オブジェクトでないこと・
+  // `factor`/`offset`が有限数であること・`factor`が正数であることも変換前に確認する(負のfactorは
+  // lower/upperの入れ替えが必要になるが現在は未対応のため、推測せず拒否する。現在の登録データ
+  // (Pa/kPa/MPa)はすべて正のfactorのため、coreの正常経路ではこの分岐へは構造的に到達しないはず
+  // である)。
   function applyLinearConversion(quantityValue, plan) {
-    if (!isFiniteNumber(plan.factor) || !isFiniteNumber(plan.offset) || plan.factor <= 0) {
+    if (!plan || typeof plan !== 'object' || Array.isArray(plan)
+      || !isFiniteNumber(plan.factor) || !isFiniteNumber(plan.offset) || plan.factor <= 0) {
       return { outcome:'unsupported', reason_code:'quantity_conversion_plan_invalid' };
     }
     const structureCheck = validateQuantityValueStructure(quantityValue);

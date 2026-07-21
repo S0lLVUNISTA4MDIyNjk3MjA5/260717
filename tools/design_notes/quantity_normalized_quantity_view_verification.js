@@ -173,9 +173,31 @@ async function pairBindingPower(reqQuantityValue, actQuantityValue, label = 'v')
 
   const planKPaToMPa = unitRules.classifyUnitConversion({ canonical:'kPa', dimension:'pressure' }, { canonical:'MPa', dimension:'pressure' }).plan;
 
-  // ── レビュー必須テスト2: alternativesの空配列は構造上有効(0要素) ──
-  check('alternativesの空配列は変換に成功する(必須テスト2)',
-    unitRules.applyLinearConversion({ kind:'alternatives', options:[], selection_semantics:'unknown' }, planKPaToMPa).outcome === 'converted');
+  // ── 【レビュー修正、重大1(2巡目)】0要素のalternativesは、後続の数値比較に使える選択肢を
+  //    1つも持たないため、quantity_value_emptyとして拒否する(必須テスト2の要件が反転) ──
+  check('alternativesの空配列はquantity_value_empty(重大1、2巡目、必須テスト2)',
+    unitRules.applyLinearConversion({ kind:'alternatives', options:[], selection_semantics:'unknown' }, planKPaToMPa).reason_code === 'quantity_value_empty');
+
+  // ── 【レビュー修正、重大2(2巡目)】lower/upper両方nullのintervalも同様に拒否する。
+  //    片側だけnullは正当な区間表現のため引き続き成功することも確認する(回帰防止) ──
+  check('lower/upper両方nullのintervalはquantity_value_empty(重大2、2巡目、必須テスト)',
+    unitRules.applyLinearConversion({ kind:'interval', lower:null, upper:null }, planKPaToMPa).reason_code === 'quantity_value_empty');
+  check('片側だけnull(lower)の区間は引き続き成功する(回帰防止)',
+    unitRules.applyLinearConversion({ kind:'interval', lower:null, upper:{ value:8, inclusive:false } }, planKPaToMPa).outcome === 'converted');
+  check('片側だけnull(upper)の区間は引き続き成功する(回帰防止)',
+    unitRules.applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:null }, planKPaToMPa).outcome === 'converted');
+
+  // ── 【レビュー修正、中1(2巡目)】null/非オブジェクトの入力を例外なく判別可能な結果として返す ──
+  check('quantityValueがnullでも例外を投げずquantity_value_invalidを返す(中1、2巡目)',
+    unitRules.applyLinearConversion(null, planKPaToMPa).reason_code === 'quantity_value_invalid');
+  check('quantityValueが配列でも例外を投げずquantity_value_invalidを返す(中1、2巡目)',
+    unitRules.applyLinearConversion([], planKPaToMPa).reason_code === 'quantity_value_invalid');
+  check('planがnullでも例外を投げずquantity_conversion_plan_invalidを返す(中1、2巡目)',
+    unitRules.applyLinearConversion({ kind:'interval', lower:{ value:5, inclusive:true }, upper:null }, null).reason_code === 'quantity_conversion_plan_invalid');
+  check('alternatives.optionsが配列でない場合はquantity_value_invalid(中1、2巡目)',
+    unitRules.applyLinearConversion({ kind:'alternatives', options:'not-an-array', selection_semantics:'unknown' }, planKPaToMPa).reason_code === 'quantity_value_invalid');
+  check('interval.lowerが非null非オブジェクト(数値そのもの)の場合はquantity_value_invalid(中1、2巡目)',
+    unitRules.applyLinearConversion({ kind:'interval', lower:12, upper:null }, planKPaToMPa).reason_code === 'quantity_value_invalid');
 
   // ── レビュー必須テスト3〜6: JSON Schemaを通過しうる非数値・非有限数のoptions要素 ──
   check('alternativesのnull要素はquantity_value_invalid(必須テスト3)',
@@ -385,6 +407,65 @@ async function pairBindingPower(reqQuantityValue, actQuantityValue, label = 'v')
       && result.not_analyzed.some(n => n.reason_code === 'quantity_value_invalid' && n.side === 'requirement'
         && n.requirement_quantity_id === qid('bad-req-r') && n.actual_quantity_id === qid('bad-req-a')),
       result);
+  }
+
+  // ══════════════ レビュー修正(2巡目)必須テスト: 空のalternatives・両側nullのintervalを
+  //    両側それぞれで公開パイプライン経由でも拒否する ══════════════
+
+  // ── actual側が空のalternativesの場合、正規化ビューを生成せずquantity_value_emptyへ送る ──
+  {
+    const emptyActualValue = { kind:'alternatives', options:[], selection_semantics:'unknown' };
+    const { binding, relations } = await pairBindingPower(undefined, emptyActualValue, 'empty-act');
+    const result = core.generateNormalizedQuantityViews({ binding, relations });
+    check('前提確認: actual側が空のalternativesでもready:trueまで到達する(重大1、2巡目)', result.ready === true, result);
+    check('actual側が空のalternativesは正規化ビューを生成せず、not_analyzedへside:"actual"・quantity_value_emptyとして残る(重大1、2巡目)',
+      result.normalized_quantity_views.length === 0
+      && result.not_analyzed.some(n => n.reason_code === 'quantity_value_empty' && n.side === 'actual'
+        && n.actual_quantity_id === qid('empty-act-a') && n.requirement_quantity_id === qid('empty-act-r')),
+      result);
+  }
+
+  // ── requirement側が空のalternativesの場合、正規化ビューを生成せずquantity_value_emptyへ送る ──
+  {
+    const emptyRequirementValue = { kind:'alternatives', options:[], selection_semantics:'unknown' };
+    const { binding, relations } = await pairBindingPower(emptyRequirementValue, undefined, 'empty-req');
+    const result = core.generateNormalizedQuantityViews({ binding, relations });
+    check('前提確認: requirement側が空のalternativesでもready:trueまで到達する(重大1、2巡目)', result.ready === true, result);
+    check('requirement側が空のalternativesは正規化ビューを生成せず、not_analyzedへside:"requirement"・quantity_value_emptyとして残る(重大1、2巡目)',
+      result.normalized_quantity_views.length === 0
+      && result.not_analyzed.some(n => n.reason_code === 'quantity_value_empty' && n.side === 'requirement'
+        && n.requirement_quantity_id === qid('empty-req-r') && n.actual_quantity_id === qid('empty-req-a')),
+      result);
+  }
+
+  // ── actual側が両側nullのintervalの場合、正規化ビューを生成せずquantity_value_emptyへ送る ──
+  {
+    const emptyIntervalActualValue = { kind:'interval', lower:null, upper:null };
+    const { binding, relations } = await pairBindingPower(undefined, emptyIntervalActualValue, 'empty-interval-act');
+    const result = core.generateNormalizedQuantityViews({ binding, relations });
+    check('前提確認: actual側が両側nullのintervalでもready:trueまで到達する(重大2、2巡目)', result.ready === true, result);
+    check('actual側が両側nullのintervalは正規化ビューを生成せず、not_analyzedへside:"actual"・quantity_value_emptyとして残る(重大2、2巡目)',
+      result.normalized_quantity_views.length === 0
+      && result.not_analyzed.some(n => n.reason_code === 'quantity_value_empty' && n.side === 'actual'
+        && n.actual_quantity_id === qid('empty-interval-act-a') && n.requirement_quantity_id === qid('empty-interval-act-r')),
+      result);
+  }
+
+  // ── requirement側が両側nullのintervalの場合、正規化ビューを生成せずquantity_value_emptyへ送る ──
+  {
+    const emptyIntervalRequirementValue = { kind:'interval', lower:null, upper:null };
+    const { binding, relations } = await pairBindingPower(emptyIntervalRequirementValue, undefined, 'empty-interval-req');
+    const result = core.generateNormalizedQuantityViews({ binding, relations });
+    check('前提確認: requirement側が両側nullのintervalでもready:trueまで到達する(重大2、2巡目)', result.ready === true, result);
+    check('requirement側が両側nullのintervalは正規化ビューを生成せず、not_analyzedへside:"requirement"・quantity_value_emptyとして残る(重大2、2巡目)',
+      result.normalized_quantity_views.length === 0
+      && result.not_analyzed.some(n => n.reason_code === 'quantity_value_empty' && n.side === 'requirement'
+        && n.requirement_quantity_id === qid('empty-interval-req-r') && n.actual_quantity_id === qid('empty-interval-req-a')),
+      result);
+    // 監査情報(comparison mode・condition・unit_conversion_plan)が引き継がれることも確認する。
+    const entry = result.not_analyzed.find(n => n.reason_code === 'quantity_value_empty' && n.side === 'requirement');
+    check('両側null intervalのnot_analyzedにもcomparison_mode_candidate等の監査情報が引き継がれる(重大2、2巡目)',
+      entry?.comparison_mode_candidate === 'point_in_region' && entry?.unit_conversion_plan?.conversion_operation === 'identity', entry);
   }
 
   // ── 必須テスト16: 正常なalternatives(2要素の数値配列)を使った公開パイプラインのend-to-end ──
