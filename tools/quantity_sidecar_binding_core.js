@@ -206,28 +206,32 @@
       if (!sideRecord) {
         diagnostics.push(diagnostic('missing_annotation', expectedSide, '該当するsidecarレコードがありません', record.trace_id, 'warning'));
         notAnalyzed.push({ trace_id:record.trace_id, side:expectedSide, reason_code:'no_annotation', detail:'quantity-annotation側に該当trace_idがありません' });
-        bindings.push({ trace_id:record.trace_id, status:'missing', annotation:null });
+        bindings.push({ trace_id:record.trace_id, status:'missing', annotation:null, record });
         continue;
       }
       let actualHash;
       try { actualHash = await computeRecordContentHash(record); }
       catch (error) {
         diagnostics.push(diagnostic('content_hash_unverifiable', expectedSide, error.message, record.trace_id));
-        bindings.push({ trace_id:record.trace_id, status:'unparsed', annotation:null });
+        bindings.push({ trace_id:record.trace_id, status:'unparsed', annotation:null, record });
         continue;
       }
       if (actualHash !== sideRecord.content_hash) {
         diagnostics.push(diagnostic('stale_annotation', expectedSide, `content_hash不一致 (expected=${actualHash}, actual=${sideRecord.content_hash})`, record.trace_id));
-        bindings.push({ trace_id:record.trace_id, status:'stale_annotation', annotation:null });
+        bindings.push({ trace_id:record.trace_id, status:'stale_annotation', annotation:null, record });
         continue;
       }
       const unsupported = pathMappingIssues(record);
       if (unsupported.length) {
         diagnostics.push(diagnostic('path_mapping_unsupported', expectedSide, `${unsupported.length}件のパス形式列マッピングを解析できません`, record.trace_id));
-        bindings.push({ trace_id:record.trace_id, status:'unparsed', annotation:null });
+        bindings.push({ trace_id:record.trace_id, status:'unparsed', annotation:null, record });
         continue;
       }
-      bindings.push({ trace_id:record.trace_id, status:'bound', annotation:sideRecord });
+      // record(元traceレコードそのもの)をbindingへ埋め込むことで、下流(generatePropertyResolutions()等)が
+      // 別途渡されたtrace引数を信頼する必要をなくす。content_hashは直前でこのrecordから計算済みのため、
+      // ここに埋め込まれるrecordは常にdataset_signature・content_hashの検証を通過した実体そのものである
+      // (レビューで、bindingとは別にtrace引数を渡す設計だとPhase B-1の厳密結合を迂回できると指摘された)。
+      bindings.push({ trace_id:record.trace_id, status:'bound', annotation:sideRecord, record });
     }
     for (const sideRecord of annotation.records) {
       if (!traceById.has(sideRecord.trace_id)) diagnostics.push(diagnostic('missing_trace', expectedSide, 'sidecarのtrace_idに対応する元レコードがありません', sideRecord.trace_id));
@@ -528,17 +532,24 @@
     return /^(No|ID|行番号)$/i.test(k) || /_id$/i.test(k) || /_hash$/i.test(k);
   }
 
-  // PDF側(source_raw_text)はその段落・文自体をnearbyTextとする。Excel側(source_record)は、
-  // 数量が入っている列自体ではなく同じ行の他列(例:「設計項目」列の"冷房能力")が概念の主な
-  // 手がかりになるため、管理列を除いた全列の値を連結する。generateIntervalSemanticsCandidates()
-  // 用のnearbyText(対象セル自身のみに限定。shadow_mode_integration_design.md 2.3節の訂正で、
-  // 列見出し・他列の値をinterval_semantics候補へ混ぜてはいけないと確定した)とは別の用途であり、
-  // この関数はもっぱら概念(property)候補生成専用として意図的に別定義にしている。
-  function nearbyTextForRecord(record) {
+  // PDF側(source_raw_text)はその段落・文自体をnearbyTextとする(数量自身がその文の一部であり、
+  // 除外すべき「他列」という概念が存在しないため、これは意図した設計のまま)。Excel側
+  // (source_record)は、数量が入っている列自体ではなく同じ行の他列(例:「設計項目」列の
+  // "冷房能力")が概念の主な手がかりになるため、管理列に加えて対象数量自身の列
+  // (sourceField、analysis.source_field)も除外して連結する(同じ行に複数の数量が別の列に
+  // 存在する場合、各数量が「自分自身の値」ではなく「他の列」から手がかりを得るようにする。
+  // 対象列を含めたまま全列を連結すると、同じ行の複数数量すべてが同一の(自分自身を含む)
+  // nearbyTextを共有してしまい、generateIntervalSemanticsCandidates()用nearbyTextで
+  // 一度発生した列見出し・他セル漏れ込みと同種の取り違えを起こしうる、とレビューで指摘された)。
+  // generateIntervalSemanticsCandidates()用のnearbyText(対象セル自身のみに限定。
+  // shadow_mode_integration_design.md 2.3節の訂正で、列見出し・他列の値をinterval_semantics
+  // 候補へ混ぜてはいけないと確定した)とは別の用途であり、この関数はもっぱら概念(property)
+  // 候補生成専用として意図的に別定義にしている。
+  function nearbyTextForRecord(record, sourceField) {
     if (typeof record?.source_raw_text === 'string') return record.source_raw_text;
     if (record?.source_record && typeof record.source_record === 'object' && !Array.isArray(record.source_record)) {
       return Object.entries(record.source_record)
-        .filter(([key]) => !isPropertyManagementField(key))
+        .filter(([key]) => key !== sourceField && !isPropertyManagementField(key))
         .map(([, value]) => (typeof value === 'string' || typeof value === 'number') ? String(value) : '')
         .filter(Boolean)
         .join(' / ');
@@ -546,10 +557,16 @@
     return '';
   }
 
-  function recordsByTraceId(trace) {
+  // bindSide()がbindings[]へ埋め込んだ元trace record(content_hash検証済み、bindSide()の
+  // 修正でstatus:'bound'エントリへrecordを直接持たせるようにした)を、trace_idをキーに引く。
+  // 呼び出し側が別途trace引数を渡す必要をなくし、Phase B-1で確定した厳密結合を迂回できない
+  // ようにする(レビューで、bindingとは別のtraceを渡せてしまう=Phase B-1の検証を迂回できる、
+  // 取り違えたtraceを渡せる、trace引数を省略しても静かに空文脈で候補生成が続く、という
+  // 3つの具体的な迂回経路を指摘された)。
+  function boundRecordsByTraceId(sideResult) {
     const map = new Map();
-    (traceRecords(trace) || []).forEach(record => {
-      if (record && typeof record.trace_id === 'string') map.set(record.trace_id, record);
+    (sideResult?.bindings || []).forEach(binding => {
+      if (binding.status === 'bound' && binding.record) map.set(binding.trace_id, binding.record);
     });
     return map;
   }
@@ -571,14 +588,20 @@
     return 'ambiguous';
   }
 
-  function blockedPropertyResult(diagnostics) {
-    return { ready:false, resolutions:[], diagnostics };
+  // binding.diagnostics/binding.not_analyzed(Phase B-1が既に保持しているpath_mapping_unsupported・
+  // stale_annotation・no_annotation等、side・trace_idを含む具体的な診断)を、この関数独自の
+  // binding_not_ready等のマーカーで置き換えず、必ず引き継ぐ(レビューで、ready:false時に元診断が
+  // 消え「なぜ結合できないのか」という具体情報が失われると指摘された)。
+  function blockedPropertyResult(diagnostics, binding) {
+    return { ready:false, resolutions:[],
+      diagnostics:[...diagnostics, ...(binding?.diagnostics || [])],
+      not_analyzed:[...(binding?.not_analyzed || [])] };
   }
 
-  function generatePropertyResolutions({ binding, requirementTrace, actualTrace }) {
+  function generatePropertyResolutions({ binding }) {
     if (!binding || !binding.ready) {
       return blockedPropertyResult([{ code:'binding_not_ready', severity:'error',
-        detail:'quantity_sidecar_binding_core.bindInputPair()がready:falseのためproperty候補を生成できません' }]);
+        detail:'quantity_sidecar_binding_core.bindInputPair()がready:falseのためproperty候補を生成できません' }], binding);
     }
     // 両側とも同じ検証済みrulesetを共有している前提(bindSide()がSUPPORTED_RULESETSとの
     // 完全一致を要求しているため、ready:trueならrequirement/actual双方の閾値は同一のはず)。
@@ -587,20 +610,33 @@
       || binding.actual?.ruleset_version?.auto_applicable_thresholds;
     if (!thresholds) {
       return blockedPropertyResult([{ code:'ruleset_thresholds_unavailable', severity:'error',
-        detail:'auto_applicable_thresholds(margin/propertyConfidence)を解決できません' }]);
+        detail:'auto_applicable_thresholds(margin/propertyConfidence)を解決できません' }], binding);
     }
 
+    // 【必須修正】段階1(generateDimensionCandidates())が既に持つsidecar内quantity_id重複検査を、
+    // B-2.2a単独でも独立して実行する。generatePropertyResolutions()は公開関数として単独で
+    // 呼び出せるため、「段階1が先に呼ばれて止まるから安全」という前提に依存してはいけない、
+    // とレビューで指摘された。
     const reqAnalysesByTrace = bindingAnalysesByTraceId(binding.requirement);
     const actAnalysesByTrace = bindingAnalysesByTraceId(binding.actual);
-    const reqRecordsByTrace = recordsByTraceId(requirementTrace);
-    const actRecordsByTrace = recordsByTraceId(actualTrace);
+    const reqDuplicateIds = duplicateQuantityIds(reqAnalysesByTrace);
+    const actDuplicateIds = duplicateQuantityIds(actAnalysesByTrace);
+    if (reqDuplicateIds.length || actDuplicateIds.length) {
+      return blockedPropertyResult([
+        ...reqDuplicateIds.map(id => ({ code:'duplicate_quantity_id', severity:'error', side:'requirement', quantity_id:id, detail:'要求側sidecar内でquantity_idが重複しています' })),
+        ...actDuplicateIds.map(id => ({ code:'duplicate_quantity_id', severity:'error', side:'actual', quantity_id:id, detail:'実仕様側sidecar内でquantity_idが重複しています' })),
+      ], binding);
+    }
+
+    const reqRecordsByTrace = boundRecordsByTraceId(binding.requirement);
+    const actRecordsByTrace = boundRecordsByTraceId(binding.actual);
 
     const resolutions = [];
     const process = (analysesByTrace, recordsByTrace, side) => {
       for (const [traceId, analyses] of [...analysesByTrace.entries()].sort(([a], [b]) => String(a).localeCompare(String(b)))) {
         const record = recordsByTrace.get(traceId);
-        const ctx = { nearbyText:nearbyTextForRecord(record), tags:record?.tags || [] };
         for (const analysis of [...analyses].sort((a, b) => String(a?.quantity_id || '').localeCompare(String(b?.quantity_id || '')))) {
+          const ctx = { nearbyText:nearbyTextForRecord(record, analysis.source_field), tags:record?.tags || [] };
           const candidates = generatePropertyCandidates(analysis.quantity, ctx);
           const status = resolvePropertyStatus(candidates, thresholds);
           resolutions.push({

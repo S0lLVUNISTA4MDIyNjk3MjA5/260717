@@ -17,6 +17,7 @@
 > - 本改訂→Phase B-2実装（`00acf39`レビュー、2026-07-20）：3.4節「全組み合わせ生成の絞り込み」の段階1（canonical dimension一致）を`quantity_sidecar_binding_core.js`の`generateDimensionCandidates()`として実装した。当初の設計（本節が例示する`not_analyzed`個別ペアリスト）は、次元不一致のような「大きな塊で起こる除外」にまで個別ペア粒度を適用すると組み合わせ爆発を起こす欠陥があり（20要求×20実仕様の異次元合成データで実際に400件生成されることを確認）、次元段階だけはバケット単位の圧縮監査記録へ訂正した。詳細・訂正の経緯は`shadow_mode_integration_design.md` 3.4節を参照。段階2以降（設計特性候補の一致・条件候補の整合・comparisonMode導出）は当初の個別ペア粒度のまま未実装。
 > - `77f440f`レビュー（2026-07-20）：異次元の監査記録だけでなく、同一次元候補も数量ID全直積へ展開しない契約へ訂正した。段階1の出力は`candidate_buckets[]`（両数量ID集合、dimension、潜在ペア数、4参照ID）とし、段階2以降が逐次走査して個別ペアを絞り込む。照合行複合キーの区切り文字衝突、複数関係時の`dimension_unavailable`重複、手動関係変更後のUI表示陳腐化も同時に修正した。
 > - `9c06125`→本改訂（Phase B-2.2a実装、2026-07-20）：3.4節 段階2の最初の単位として、数量ごとのproperty候補生成・解決状態の正規化を`generatePropertyResolutions()`として実装した。`semantic_mapping_prototype.js`の`marginOf()`・`CONCEPT_DICTIONARY`・`generatePropertyCandidates()`を一字一句移植し、独自の別ロジックは作らなかった。7節の`mapping.status`を`resolved`／`unavailable`／`ambiguous`の3状態へ訂正した経緯は7節を参照。この段階ではconcept間の結合・除外バケット化・数値比較・comparisonMode導出・充足判定は実装していない（段階2b、未着手）。
+> - `92bfa9a`レビュー（2026-07-20）：初回のB-2.2a実装に重大3件・中1件の欠陥が見つかった。(1) `generatePropertyResolutions()`がbindingとは別にtrace引数を受け取り、渡されたtraceを再検証せずPhase B-1の厳密結合を迂回できた、(2) B-2.2a単独ではsidecar内`quantity_id`重複を検出しなかった、(3) `ready:false`時にPhase B-1の元診断(`path_mapping_unsupported`等)が新設のマーカーに置き換わり消えていた、(4) Excel側`nearbyText`が対象数量自身の列を除外できておらず「他列」という契約と実装が一致していなかった。修正の詳細は`shadow_mode_integration_design.md` 7節の訂正を参照。
 
 ## 1. 設計原則
 
