@@ -277,6 +277,82 @@ async function pairBinding(reqValueCandidates, actValueCandidates) {
     !core.COMPARISON_MODE_DERIVATION_TABLE.some(e => e.requirement === 'unknown' || e.actual === 'unknown'),
     core.COMPARISON_MODE_DERIVATION_TABLE);
 
+  // ── 【レビュー修正、重大1】固定導出表の実行時不変性。COMPARISON_MODE_DERIVATION_TABLEは
+  //    公開APIとしてexportされているが、その配列・各entryオブジェクトも凍結されており、
+  //    呼び出し側からpush()・entry書き換えのいずれでも変更できない(=安全側の理由で除外した
+  //    required_capability_domain×achieved_pointを実行時に復活させられない)ことを確認する。 ──
+  check('COMPARISON_MODE_DERIVATION_TABLE配列自体がObject.isFrozen()でtrue(レビュー修正、重大1)', Object.isFrozen(core.COMPARISON_MODE_DERIVATION_TABLE));
+  check('COMPARISON_MODE_DERIVATION_TABLEの全entryもObject.isFrozen()でtrue(レビュー修正、重大1)', core.COMPARISON_MODE_DERIVATION_TABLE.every(e => Object.isFrozen(e)));
+  {
+    const beforeLength = core.COMPARISON_MODE_DERIVATION_TABLE.length;
+    try { core.COMPARISON_MODE_DERIVATION_TABLE.push({ requirement:'required_capability_domain', actual:'achieved_point', mode:'point_in_region' }); }
+    catch (_) { /* strictモードでは例外、それも許容 */ }
+    check('凍結済み配列へのpush()は反映されない(組数が変化しない、レビュー修正、重大1)', core.COMPARISON_MODE_DERIVATION_TABLE.length === beforeLength, core.COMPARISON_MODE_DERIVATION_TABLE);
+    check('push()試行後もrequired_capability_domain×achieved_pointの組は表に存在しない(レビュー修正、重大1)',
+      !core.COMPARISON_MODE_DERIVATION_TABLE.some(e => e.requirement === 'required_capability_domain' && e.actual === 'achieved_point'),
+      core.COMPARISON_MODE_DERIVATION_TABLE);
+
+    const originalMode = core.COMPARISON_MODE_DERIVATION_TABLE[0].mode;
+    try { core.COMPARISON_MODE_DERIVATION_TABLE[0].mode = 'unsafe_mode'; }
+    catch (_) { /* strictモードでは例外、それも許容 */ }
+    check('凍結済みentryの直接書き換えは反映されない(レビュー修正、重大1)', core.COMPARISON_MODE_DERIVATION_TABLE[0].mode === originalMode, core.COMPARISON_MODE_DERIVATION_TABLE[0]);
+  }
+  {
+    // 実際にpush()・entry書き換えを試みた後でも、generateComparisonModeCandidates()自体が
+    // required_capability_domain×achieved_pointを引き続き拒否することを直接確認する
+    // (防御が「表を読み取り専用に見せる」だけでなく、実際の導出結果にも効いていることの確認)。
+    const beforeLength2 = core.COMPARISON_MODE_DERIVATION_TABLE.length;
+    try { core.COMPARISON_MODE_DERIVATION_TABLE.push({ requirement:'required_capability_domain', actual:'achieved_point', mode:'point_in_region' }); } catch (_) { /* 同上 */ }
+    const { binding, relations } = await pairBinding(
+      [conditionCandidate('required_capability_domain', 0.9), conditionCandidate('unknown', 0.15)],
+      [conditionCandidate('achieved_point', 0.6), conditionCandidate('unknown', 0.15)]
+    );
+    const resultAfterMutationAttempt = core.generateComparisonModeCandidates({ binding, relations });
+    check('表の変更試行後もrequired_capability_domain×achieved_pointはcomparison mode候補を生成しない(レビュー修正、重大1)',
+      resultAfterMutationAttempt.ready === true && resultAfterMutationAttempt.comparison_mode_candidates.length === 0
+      && core.COMPARISON_MODE_DERIVATION_TABLE.length === beforeLength2,
+      resultAfterMutationAttempt);
+  }
+
+  // ── 【レビュー修正、中1】not_analyzedへ送られたcondition_unresolved/comparison_mode_unavailableに
+  //    両側のtop_confidence/marginが保持され、除外理由(confidence不足かmargin不足か)を
+  //    B-2.3bの監査出力単体から判別できる。 ──
+  {
+    // requirement側ambiguous(margin不足、confidence0.5・0.45で僅差)、actual側resolved。
+    const { binding, relations } = await pairBinding(
+      [conditionCandidate('acceptable_region', 0.5), conditionCandidate('achieved_point', 0.45)],
+      [conditionCandidate('achieved_point', 0.6), conditionCandidate('unknown', 0.15)]
+    );
+    const result = core.generateComparisonModeCandidates({ binding, relations });
+    const entry = result.not_analyzed.find(n => n.reason_code === 'condition_unresolved');
+    check('requirement側ambiguous時、condition_unresolvedへtop_confidence/marginが保持される(レビュー修正、中1)',
+      entry?.requirement_condition_top_confidence === 0.5 && Math.abs(entry?.requirement_condition_margin - 0.05) < 1e-9
+      && entry?.actual_condition_top_confidence === 0.6 && Math.abs(entry?.actual_condition_margin - 0.45) < 1e-9,
+      entry);
+  }
+  {
+    // requirement側unavailable(候補0件)、actual側resolved。
+    const { binding, relations } = await pairBinding([], [conditionCandidate('achieved_point', 0.6), conditionCandidate('unknown', 0.15)]);
+    const result = core.generateComparisonModeCandidates({ binding, relations });
+    const entry = result.not_analyzed.find(n => n.reason_code === 'condition_unresolved');
+    check('requirement側unavailable時、top_confidence:null・margin:0がcondition_unresolvedへ保持される(レビュー修正、中1)',
+      entry?.requirement_condition_top_confidence === null && entry?.requirement_condition_margin === 0, entry);
+  }
+  {
+    // 両側resolvedかつ対応表に無い組み合わせ(comparison_mode_unavailable)にも両側の
+    // confidence/marginが保持される。
+    const { binding, relations } = await pairBinding(
+      [conditionCandidate('acceptable_region', 0.9), conditionCandidate('unknown', 0.15)],
+      [conditionCandidate('capability_domain', 0.6), conditionCandidate('unknown', 0.15)]
+    );
+    const result = core.generateComparisonModeCandidates({ binding, relations });
+    const entry = result.not_analyzed.find(n => n.reason_code === 'comparison_mode_unavailable');
+    check('comparison_mode_unavailableにも両側のtop_confidence/marginが保持される(レビュー修正、中1)',
+      entry?.requirement_condition_top_confidence === 0.9 && Math.abs(entry?.requirement_condition_margin - 0.75) < 1e-9
+      && entry?.actual_condition_top_confidence === 0.6 && Math.abs(entry?.actual_condition_margin - 0.45) < 1e-9,
+      entry);
+  }
+
   // ── 実fixtureでend-to-end確認 ──
   {
     const pdfFixture = readJson('runtime_fixtures/quantity_annotation_pdf_verified.json');

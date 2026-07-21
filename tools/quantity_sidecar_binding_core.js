@@ -1341,6 +1341,18 @@
     { requirement: 'acceptable_region', actual: 'guaranteed_maximum', mode: 'requirement_covers_actual' },
   ];
   // ── quantity-annotation/1.0-rc1: comparisonMode導出ライブラリ(移植)ここまで ──
+  // 【レビュー修正、重大1】上記の移植ブロックは乖離検出(移植元とのバイト一致)のため素の配列の
+  // ままにしているが、そのままではObject.freeze({...})によるAPI全体の凍結(このファイル末尾)は
+  // 戻り値オブジェクト自身だけを凍結する浅い凍結であり、その配列・各entryオブジェクトまでは
+  // 凍結されない。呼び出し側がexportされたCOMPARISON_MODE_DERIVATION_TABLEへ直接push()・
+  // 要素の再代入を行うと、generateComparisonModeCandidates()は同じ配列をfind()で参照している
+  // ため、実行時にその変更がそのまま反映されてしまう——具体的には、安全側の理由で意図的に
+  // 除外したrequired_capability_domain×achieved_pointを呼び出し側が実行時に復活させられる、
+  // と指摘された。修正: 移植ブロック自体(乖離検出対象)は改変せず、ポート直後にこの配列と
+  // 各entryを凍結する(bindSide()のdeepFreeze()と同じ「一度作った不変ツリーを外部から
+  // 書き換えさせない」原則をここでも適用する)。
+  COMPARISON_MODE_DERIVATION_TABLE.forEach(Object.freeze);
+  Object.freeze(COMPARISON_MODE_DERIVATION_TABLE);
 
   function blockedComparisonModeResult(diagnostics, binding, conditionAnnotatedResult) {
     return { ready:false, comparison_mode_candidates:[], candidate_count:0, result_complete:false,
@@ -1363,10 +1375,19 @@
     const notAnalyzed = [];
     const comparisonModeCandidates = [];
     for (const candidate of conditionAnnotatedResult.comparison_candidates) {
+      // 【レビュー修正、中1】status/value/opposing_evidence/参照IDだけでは、not_analyzedへ
+      // 送られた理由が「confidence不足」なのか「次点候補とのmargin不足」なのかをこの結果だけ
+      // からは判別できない(B-2.3a側で別途generateConditionResolutions()を再実行すれば分かるが、
+      // B-2.3bの監査出力単体で追跡できるべき、と指摘された)。B-2.3aが既にcondition annotated
+      // candidateへ保持しているtop_confidence/marginをそのまま引き継ぐ(新たな計算は発生しない)。
       const auditBase = {
         requirement_quantity_id:candidate.requirement_quantity_id, actual_quantity_id:candidate.actual_quantity_id,
         requirement_condition_status:candidate.requirement_condition_status, actual_condition_status:candidate.actual_condition_status,
         requirement_condition_value:candidate.requirement_condition_value, actual_condition_value:candidate.actual_condition_value,
+        requirement_condition_top_confidence:candidate.requirement_condition_top_confidence,
+        requirement_condition_margin:candidate.requirement_condition_margin,
+        actual_condition_top_confidence:candidate.actual_condition_top_confidence,
+        actual_condition_margin:candidate.actual_condition_margin,
         requirement_condition_has_opposing_evidence:candidate.requirement_condition_has_opposing_evidence,
         actual_condition_has_opposing_evidence:candidate.actual_condition_has_opposing_evidence,
         concept_id:candidate.concept_id, dimension:candidate.dimension,
