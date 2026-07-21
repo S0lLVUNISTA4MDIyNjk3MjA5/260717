@@ -1050,10 +1050,185 @@
       not_analyzed:[...(dimensionResult.not_analyzed || []), ...(propertyResult.not_analyzed || []), ...notAnalyzed] };
   }
 
+  // ── Phase B-2.3a 段階1: 数量ごとのinterval_semantics_candidates解決。この候補配列自体は
+  // Phase A抽出時に既に計算されbindSide()が埋め込んだ不変ツリーの一部として届いており
+  // (quantity_annotation_schema_v1.json 2.3節、analysis.interval_semantics_candidates)、
+  // ここで再生成はしない(generatePropertyResolutions()がconcept候補をgeneratePropertyCandidates()
+  // で毎回再計算するのとは対照的。区間意味候補は既存の語彙・スコアリング規則に基づき
+  // Phase Aで既に確定しているため、比較段階が担うのは既存候補の閾値判定による正規化だけである)。
+  // comparisonMode導出(deriveComparisonModeCandidate())・数値比較・区間比較・充足判定は
+  // 本段階では一切行わない(3.4節 段階3以降、未着手のまま)。 ──
+
+  // resolvePropertyStatus()と同型だが、閾値はpropertyConfidenceではなくmodeConfidenceを使う
+  // (AUTO_APPLICABLE_THRESHOLDSはproperty候補とinterval_semantics候補とで確信度閾値を
+  // 別々に持ち、margin閾値だけを共有する設計になっている。semantic_mapping_prototype.js
+  // evaluateAutoApplicable()参照)。resolved: 最上位候補のconfidenceがmodeConfidence以上、
+  // かつmarginOf()がmargin以上。unavailable: 候補が0件(スキーマ上は空配列も許容されるため
+  // 防御的に扱うが、generateIntervalSemanticsCandidates()は常にunknownの受け皿候補を含める
+  // ため実運用では起こらない見込み)。ambiguous: それ以外。新しい閾値は発明しない。
+  function resolveConditionStatus(candidates, thresholds) {
+    if (!candidates.length) return 'unavailable';
+    const top = candidates[0];
+    const margin = marginOf(candidates);
+    if (top.confidence >= thresholds.modeConfidence && margin >= thresholds.margin) return 'resolved';
+    return 'ambiguous';
+  }
+
+  // interval_semantics_candidatesはPhase Aのscoresemantics()がconfidence降順で生成する契約だが
+  // (semantic_mapping_prototype.js scoreSemantics()末尾の.sort())、JSON Schemaはこの順序を
+  // 強制していない。resolveConditionStatus()の正しさは「先頭要素が最上位候補である」ことに
+  // 依存するため、外部データの順序をそのまま信頼せず、ここで確信度降順に並べ直してから使う
+  // (元の配列は不変スナップショットの一部のため複製してからソートする)。
+  function sortedByConfidenceDesc(candidates) {
+    return [...candidates].sort((a, b) => b.confidence - a.confidence);
+  }
+
+  function blockedConditionResult(diagnostics, binding) {
+    return { ready:false, resolutions:[],
+      diagnostics:[...diagnostics, ...(binding?.diagnostics || [])],
+      not_analyzed:[...(binding?.not_analyzed || [])] };
+  }
+
+  function generateConditionResolutions({ binding }) {
+    if (!binding || !binding.ready) {
+      return blockedConditionResult([{ code:'binding_not_ready', severity:'error',
+        detail:'quantity_sidecar_binding_core.bindInputPair()がready:falseのため条件候補を解決できません' }], binding);
+    }
+    const thresholds = binding.requirement?.ruleset_version?.auto_applicable_thresholds
+      || binding.actual?.ruleset_version?.auto_applicable_thresholds;
+    if (!thresholds) {
+      return blockedConditionResult([{ code:'ruleset_thresholds_unavailable', severity:'error',
+        detail:'auto_applicable_thresholds(modeConfidence/margin)を解決できません' }], binding);
+    }
+
+    // 段階1(generateDimensionCandidates())・B-2.2a(generatePropertyResolutions())と同じく、
+    // sidecar内quantity_id重複検査をこの関数単独でも独立して実行する(公開関数として単独で
+    // 呼び出せるため、「他の関数が先に呼ばれて止まるから安全」という前提に依存しない)。
+    const reqAnalysesByTrace = bindingAnalysesByTraceId(binding.requirement);
+    const actAnalysesByTrace = bindingAnalysesByTraceId(binding.actual);
+    const reqDuplicateIds = duplicateQuantityIds(reqAnalysesByTrace);
+    const actDuplicateIds = duplicateQuantityIds(actAnalysesByTrace);
+    if (reqDuplicateIds.length || actDuplicateIds.length) {
+      return blockedConditionResult([
+        ...reqDuplicateIds.map(id => ({ code:'duplicate_quantity_id', severity:'error', side:'requirement', quantity_id:id, detail:'要求側sidecar内でquantity_idが重複しています' })),
+        ...actDuplicateIds.map(id => ({ code:'duplicate_quantity_id', severity:'error', side:'actual', quantity_id:id, detail:'実仕様側sidecar内でquantity_idが重複しています' })),
+      ], binding);
+    }
+
+    const resolutions = [];
+    const process = (analysesByTrace, side) => {
+      for (const [traceId, analyses] of [...analysesByTrace.entries()].sort(([a], [b]) => String(a).localeCompare(String(b)))) {
+        for (const analysis of [...analyses].sort((a, b) => String(a?.quantity_id || '').localeCompare(String(b?.quantity_id || '')))) {
+          const candidates = sortedByConfidenceDesc(analysis.interval_semantics_candidates || []);
+          const status = resolveConditionStatus(candidates, thresholds);
+          resolutions.push({
+            side, trace_id:traceId, quantity_id:analysis.quantity_id, status,
+            value: status === 'resolved' ? candidates[0].value : null,
+            candidates,
+          });
+        }
+      }
+    };
+    process(reqAnalysesByTrace, 'requirement');
+    process(actAnalysesByTrace, 'actual');
+
+    // B-2.2a generatePropertyResolutions()と同じく、binding.diagnostics/not_analyzed
+    // (path_mapping_unsupported・stale_annotation・no_annotation等)を正常終了時も引き継ぐ。
+    return { ready:true, resolutions,
+      diagnostics:[...(binding.diagnostics || [])], not_analyzed:[...(binding.not_analyzed || [])] };
+  }
+
+  // ── Phase B-2.3a 段階2: B-2.2b比較候補へ両側(requirement/actual)の条件解決結果を付加する。
+  // comparisonResult/conditionResultは呼び出し側から別引数として受け取らず、必ずこの関数の
+  // 内部で同じbindingから計算する(B-2.2a round1・B-2.2b全体で確立した「検証済み結果を
+  // 呼び出し側から別途受け取らない」設計をここでも踏襲する。呼び出し側が実際のbindingとは
+  // 食い違うcomparisonResultを渡せてしまう迂回経路を最初から塞ぐ)。
+  //
+  // レビューで明示された必須要件: comparisonResult.ready !== trueまたは
+  // comparisonResult.result_complete !== trueの場合は必ずfail closedする(B-2.2b承認時に
+  // 「段階3以降の関数はresult_complete===trueを要求し、これを段階3の最初の回帰テストとして
+  // 固定すべき」と指摘された契約を、この最初の段階3関数で実装する)。
+  //
+  // comparisonMode導出・単位変換・数値比較・区間比較・充足判定はまだ行わない。 ──
+
+  function conditionResolutionLookup(conditionResult) {
+    const map = new Map();
+    (conditionResult?.resolutions || []).forEach(r => map.set(`${r.side}:${r.quantity_id}`, r));
+    return map;
+  }
+
+  // comparisonResult.diagnostics/not_analyzedとconditionResult.diagnostics/not_analyzedは、
+  // どちらも内部でbinding.diagnostics/not_analyzedを引き継いでいる(前者はgeneratePropertyResolutions()
+  // 経由、後者はgenerateConditionResolutions()自身)。単純に連結すると同じbinding由来の診断が
+  // 二重に現れるため、内容一致(canonicalJson)で重複除去してから返す。
+  function dedupeByCanonicalJson(items) {
+    const seen = new Set();
+    const result = [];
+    for (const item of items) {
+      const key = canonicalJson(item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(item);
+    }
+    return result;
+  }
+
+  function blockedConditionAnnotatedResult(diagnostics, binding, comparisonResult, conditionResult) {
+    return { ready:false, comparison_candidates:[], candidate_count:0, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(binding?.diagnostics || []), ...(comparisonResult?.diagnostics || []), ...(conditionResult?.diagnostics || [])]),
+      not_analyzed:dedupeByCanonicalJson([...(binding?.not_analyzed || []), ...(comparisonResult?.not_analyzed || []), ...(conditionResult?.not_analyzed || [])]) };
+  }
+
+  function generateConditionAnnotatedComparisonCandidates({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    const comparisonResult = generateComparisonCandidates({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (comparisonResult.ready !== true || comparisonResult.result_complete !== true) {
+      return blockedConditionAnnotatedResult([{ code:'comparison_candidates_not_ready_or_incomplete', severity:'error',
+        detail:`generateComparisonCandidates()がready=${JSON.stringify(comparisonResult.ready)}、result_complete=${JSON.stringify(comparisonResult.result_complete)}のため条件付き比較候補を生成できません(段階3以降はready===trueかつresult_complete===trueを要求してfail closedする契約)` }],
+        binding, comparisonResult, null);
+    }
+
+    const conditionResult = generateConditionResolutions({ binding });
+    if (conditionResult.ready !== true) {
+      return blockedConditionAnnotatedResult([{ code:'condition_resolutions_not_ready', severity:'error',
+        detail:'generateConditionResolutions()がready:falseのため条件付き比較候補を生成できません' }],
+        binding, comparisonResult, conditionResult);
+    }
+
+    const conditionByKey = conditionResolutionLookup(conditionResult);
+    // 段階1はbindingに結合済みの全数量を漏れなく処理するため、comparisonResult.comparison_candidates
+    // が参照するquantity_idは構造上すべて段階1の結果に存在するはずである。それでも「渡された
+    // データを無条件に信頼しない」という原則により、対応する条件解決結果が見つからない場合は
+    // 静かに既定値へフォールバックせず、fail closedする(generatePropertyResolutions()の
+    // bound_record_missing検査と同じ防御パターン)。
+    const missingConditionDiagnostics = [];
+    const annotated = comparisonResult.comparison_candidates.map(candidate => {
+      const reqCondition = conditionByKey.get(`requirement:${candidate.requirement_quantity_id}`);
+      const actCondition = conditionByKey.get(`actual:${candidate.actual_quantity_id}`);
+      if (!reqCondition || !actCondition) {
+        missingConditionDiagnostics.push({ code:'condition_resolution_missing', severity:'error',
+          requirement_quantity_id:candidate.requirement_quantity_id, actual_quantity_id:candidate.actual_quantity_id,
+          detail:'比較候補のquantity_idに対応する条件解決結果が見つかりません' });
+        return null;
+      }
+      return { ...candidate,
+        requirement_condition_status:reqCondition.status, requirement_condition_value:reqCondition.value,
+        actual_condition_status:actCondition.status, actual_condition_value:actCondition.value };
+    });
+    if (missingConditionDiagnostics.length) {
+      return blockedConditionAnnotatedResult(missingConditionDiagnostics, binding, comparisonResult, conditionResult);
+    }
+
+    return { ready:true, comparison_candidates:annotated, candidate_count:annotated.length, result_complete:true,
+      diagnostics:dedupeByCanonicalJson([...comparisonResult.diagnostics, ...conditionResult.diagnostics]),
+      not_analyzed:dedupeByCanonicalJson([...comparisonResult.not_analyzed, ...conditionResult.not_analyzed]) };
+  }
+
   return Object.freeze({ SCHEMA_VERSION, SUPPORTED_RULESETS, validateAnnotationSchema, validateRulesetCompatibility,
     canonicalValue, canonicalJson, normalize, hashParts, computeDatasetSignature, computeRecordContentHash,
     traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates,
     CONCEPT_DICTIONARY, generatePropertyCandidates, generatePropertyResolutions,
     DEFAULT_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT,
-    generateComparisonCandidates });
+    generateComparisonCandidates, generateConditionResolutions, generateConditionAnnotatedComparisonCandidates });
 });
