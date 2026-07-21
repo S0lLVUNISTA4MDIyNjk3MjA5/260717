@@ -724,8 +724,142 @@
       diagnostics:[...(binding.diagnostics || [])], not_analyzed:[...(binding.not_analyzed || [])] };
   }
 
+  // ── Phase B-2.2b: 段階1(次元一致バケット)と段階2a(数量ごとのproperty解決)の結果を突き合わせ、
+  // concept_idが一致する数量ペアだけをcomparison候補として生成する(3.4節 段階2)。1つの
+  // candidate_bucketsバケット内であっても数量ID数は無制限(200×200のような合成データも既存の
+  // 次元候補回帰テストで確認済み)であるため、段階1と同様に個々のペアを総当たりで評価せず、
+  // concept_idごとのグルーピングと候補上限で組み合わせ爆発を避ける。数値比較・comparisonMode
+  // 導出・充足判定はまだ行わない(3.4節 段階3以降、未着手のまま)。
+  const DEFAULT_COMPARISON_CANDIDATE_LIMIT = 50;
+
+  function resolutionLookup(propertyResult) {
+    const map = new Map();
+    (propertyResult?.resolutions || []).forEach(r => map.set(`${r.side}:${r.quantity_id}`, r));
+    return map;
+  }
+
+  // quantityIds(1バケット・1side分)を、B-2.2aの解決結果に基づき「resolved」はconcept_idごとの
+  // Mapへ、それ以外(ambiguous/unavailable、および対応する解決結果自体が見つからない防御的ケース)は
+  // unresolvedへ振り分ける。generatePropertyCandidates()自体はここでは一切呼び出さない
+  // (呼び出し側が1回だけ計算したgeneratePropertyResolutions()の結果をMap参照するだけ)。
+  function groupResolvedByConcept(quantityIds, side, resolutionByKey, unresolved) {
+    const byConcept = new Map();
+    for (const id of quantityIds) {
+      const resolution = resolutionByKey.get(`${side}:${id}`);
+      if (!resolution) { unresolved.push({ quantity_id:id, status:'missing_resolution' }); continue; }
+      if (resolution.status !== 'resolved') { unresolved.push({ quantity_id:id, status:resolution.status }); continue; }
+      if (!byConcept.has(resolution.concept_id)) byConcept.set(resolution.concept_id, []);
+      byConcept.get(resolution.concept_id).push(id);
+    }
+    return byConcept;
+  }
+
+  function blockedComparisonResult(diagnostics, dimensionResult, propertyResult) {
+    return { ready:false, comparison_candidates:[], candidate_count:0,
+      diagnostics:[...diagnostics, ...(dimensionResult?.diagnostics || []), ...(propertyResult?.diagnostics || [])],
+      not_analyzed:[...(dimensionResult?.not_analyzed || []), ...(propertyResult?.not_analyzed || [])] };
+  }
+
+  function generateComparisonCandidates({ binding, relations, candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT }) {
+    if (!binding || !binding.ready) {
+      return blockedComparisonResult([{ code:'binding_not_ready', severity:'error',
+        detail:'quantity_sidecar_binding_core.bindInputPair()がready:falseのため比較候補を生成できません' }], null, null);
+    }
+    // dimensionResult/propertyResultを呼び出し側からの別引数として受け取らず、必ずこの関数の
+    // 内部で同じbindingから1回ずつ計算する(B-2.2a round1で見つかった、bindingとは別に渡された
+    // 検証済みデータが実際のbindingと食い違いうる、という欠陥クラスをここで再発させないための
+    // 意図的な設計判断。詳細はshadow_mode_integration_design.md 3.4節の訂正を参照)。
+    const dimensionResult = generateDimensionCandidates({ binding, relations });
+    if (!dimensionResult.ready) {
+      return blockedComparisonResult([{ code:'dimension_candidates_not_ready', severity:'error',
+        detail:'generateDimensionCandidates()がready:falseのため比較候補を生成できません' }], dimensionResult, null);
+    }
+    const propertyResult = generatePropertyResolutions({ binding });
+    if (!propertyResult.ready) {
+      return blockedComparisonResult([{ code:'property_resolutions_not_ready', severity:'error',
+        detail:'generatePropertyResolutions()がready:falseのため比較候補を生成できません' }], dimensionResult, propertyResult);
+    }
+
+    const resolutionByKey = resolutionLookup(propertyResult);
+    const comparisonCandidates = [];
+    const notAnalyzed = [];
+    const diagnostics = [];
+
+    for (const bucket of dimensionResult.candidate_buckets) {
+      const reqUnresolved = [];
+      const actUnresolved = [];
+      const reqByConcept = groupResolvedByConcept(bucket.requirement_quantity_ids, 'requirement', resolutionByKey, reqUnresolved);
+      const actByConcept = groupResolvedByConcept(bucket.actual_quantity_ids, 'actual', resolutionByKey, actUnresolved);
+
+      const emitUnresolved = (list, side) => {
+        const byStatus = new Map();
+        list.forEach(({ quantity_id, status }) => {
+          if (!byStatus.has(status)) byStatus.set(status, []);
+          byStatus.get(status).push(quantity_id);
+        });
+        for (const [status, ids] of byStatus) {
+          notAnalyzed.push({ reason_code:'property_unresolved', side, status, quantity_ids:[...ids].sort(),
+            requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
+            matcher_a_id:bucket.matcher_a_id ?? null, matcher_b_id:bucket.matcher_b_id ?? null });
+        }
+      };
+      emitUnresolved(reqUnresolved, 'requirement');
+      emitUnresolved(actUnresolved, 'actual');
+
+      const allConceptIds = [...new Set([...reqByConcept.keys(), ...actByConcept.keys()])].sort();
+      for (const conceptId of allConceptIds) {
+        const reqIds = reqByConcept.get(conceptId);
+        const actIds = actByConcept.get(conceptId);
+        if (reqIds && actIds) {
+          const sortedReq = [...reqIds].sort();
+          const sortedAct = [...actIds].sort();
+          const pairs = [];
+          for (const reqId of sortedReq) for (const actId of sortedAct) pairs.push([reqId, actId]);
+          const limited = pairs.slice(0, candidateLimit);
+          limited.forEach(([reqId, actId]) => {
+            comparisonCandidates.push({
+              requirement_quantity_id:reqId, actual_quantity_id:actId, concept_id:conceptId, dimension:bucket.dimension,
+              requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
+              matcher_a_id:bucket.matcher_a_id ?? null, matcher_b_id:bucket.matcher_b_id ?? null,
+            });
+          });
+          if (pairs.length > candidateLimit) {
+            const excludedCount = pairs.length - candidateLimit;
+            diagnostics.push({ code:'candidate_limit_exceeded', severity:'warning', concept_id:conceptId,
+              requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
+              detail:`候補上限(${candidateLimit})を超えたため、超過分(${excludedCount}件)を切り詰めました` });
+            notAnalyzed.push({ reason_code:'candidate_limit_exceeded', concept_id:conceptId,
+              requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
+              matcher_a_id:bucket.matcher_a_id ?? null, matcher_b_id:bucket.matcher_b_id ?? null,
+              excluded_pair_count:excludedCount });
+          }
+        } else if (reqIds) {
+          notAnalyzed.push({ reason_code:'concept_mismatch', side:'requirement', concept_id:conceptId, quantity_ids:[...reqIds].sort(),
+            requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
+            matcher_a_id:bucket.matcher_a_id ?? null, matcher_b_id:bucket.matcher_b_id ?? null });
+        } else if (actIds) {
+          notAnalyzed.push({ reason_code:'concept_mismatch', side:'actual', concept_id:conceptId, quantity_ids:[...actIds].sort(),
+            requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
+            matcher_a_id:bucket.matcher_a_id ?? null, matcher_b_id:bucket.matcher_b_id ?? null });
+        }
+      }
+    }
+
+    // dimensionResult/propertyResultが既に保持しているdiagnostics/not_analyzed(dimension_mismatch・
+    // dimension_unavailable・missing_annotation等のwarning)も引き継ぐ(generatePropertyResolutions()の
+    // 修正と同じ理由: 元の診断を消して新設のマーカーだけに置き換えない)。readyはこの結合済み
+    // diagnostics全体で判定する(この段階で追加するcandidate_limit_exceededは常にwarningのため
+    // 単独でready:falseにはならないが、将来ここへerror severityの診断を追加した場合にも
+    // 正しくready:falseへ反映されるよう、局所diagnosticsだけでなく結合後の配列で判定する)。
+    const combinedDiagnostics = [...(dimensionResult.diagnostics || []), ...(propertyResult.diagnostics || []), ...diagnostics];
+    return { ready:isReady(combinedDiagnostics), comparison_candidates:comparisonCandidates,
+      candidate_count:comparisonCandidates.length, diagnostics:combinedDiagnostics,
+      not_analyzed:[...(dimensionResult.not_analyzed || []), ...(propertyResult.not_analyzed || []), ...notAnalyzed] };
+  }
+
   return Object.freeze({ SCHEMA_VERSION, SUPPORTED_RULESETS, validateAnnotationSchema, validateRulesetCompatibility,
     canonicalValue, canonicalJson, normalize, hashParts, computeDatasetSignature, computeRecordContentHash,
     traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates,
-    CONCEPT_DICTIONARY, generatePropertyCandidates, generatePropertyResolutions });
+    CONCEPT_DICTIONARY, generatePropertyCandidates, generatePropertyResolutions,
+    DEFAULT_COMPARISON_CANDIDATE_LIMIT, generateComparisonCandidates });
 });
