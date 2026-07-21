@@ -161,7 +161,11 @@ function resolutionKey(r) { return `${r.side}:${r.quantity_id}`; }
     && !selfLeakResult.resolutions[0]?.candidates[0].evidence.some(e => e.startsWith('周辺語')),
     selfLeakResult.resolutions[0]);
 
-  // ── 8. 同じ行に複数の数量があっても、各数量は自分の列を除いた他列だけを見る(取り違え防止) ──
+  // ── 8. 【必須修正3、訂正】同じ行に複数の数量がある場合、各数量は「その行の全数量所在列」を
+  //    除外する(対象数量自身の列だけでなく、他の数量の列も同様に数量所在列として除外する)。
+  //    以前の実装・テストは対象数量自身の列だけを除外しており、別の数量自身の列に含まれる
+  //    キーワード("検討結果B"列内の"冷房能力")が周辺語として混入することを「正しい挙動」として
+  //    許容してしまっていた。これは数量間の文脈漏れ込みであり誤りだった、とレビューで指摘された。 ──
   const actTraceMulti = actTraceWithRow('act-multi-q', { '検討結果A':'12 kW', '検討結果B':'冷房能力の参考記載' }, []);
   const bindingMulti = await bind(
     reqTraceWithText('req-empty4', '', []), () => [],
@@ -172,10 +176,47 @@ function resolutionKey(r) { return `${r.side}:${r.quantity_id}`; }
   const multiResult = core.generatePropertyResolutions({ binding:bindingMulti });
   const mq1 = multiResult.resolutions.find(r => r.quantity_id === qid('mq1'));
   const mq2 = multiResult.resolutions.find(r => r.quantity_id === qid('mq2'));
-  check('数量1(検討結果A由来)は他列(検討結果B)の"冷房能力"キーワードを拾って解決できる(次元0.4+周辺語0.35=0.75)',
-    mq1?.status === 'resolved' && mq1?.concept_id === 'performance.cooling_capacity', mq1);
-  check('数量2(検討結果B由来)は自分自身の列は除外され、他列(検討結果A、"12 kW"で概念キーワードなし)しか見えない',
+  check('数量1(検討結果A由来)は別の数量の列(検討結果Bの"冷房能力")を拾わない(必須修正3、次元一致0.4のみでambiguous)',
+    mq1?.status === 'ambiguous' && mq1?.candidates.length === 1 && mq1?.candidates[0].confidence === 0.4
+    && !mq1?.candidates[0].evidence.some(e => e.startsWith('周辺語')),
+    mq1);
+  check('数量2(検討結果B由来)も自分自身の列に加え他の数量の列(検討結果A)もすべて除外され、候補なしでunavailableになる(必須修正3)',
     mq2?.status === 'unavailable', mq2);
+
+  // ── 8b. 純粋な手がかり列(それ自体は数量を持たない列、例:設計項目)は、数量所在列ではないため
+  //    除外されず、同じ行の全数量へ等しく寄与する(必須修正3が過剰除外していないことの確認)。 ──
+  const actTraceHint = actTraceWithRow('act-hint-multi', { '設計項目':'冷房能力', '検討結果A':'12 kW', '検討結果B':'20 kW' }, []);
+  const bindingHint = await bind(
+    reqTraceWithText('req-empty4b', '', []), () => [],
+    actTraceHint, id => (id === 'act-hint-multi'
+      ? [analysis('hA', 'power', 'kW', '検討結果A'), analysis('hB', 'power', 'kW', '検討結果B')]
+      : [])
+  );
+  const hintResult = core.generatePropertyResolutions({ binding:bindingHint });
+  const hA = hintResult.resolutions.find(r => r.quantity_id === qid('hA'));
+  const hB = hintResult.resolutions.find(r => r.quantity_id === qid('hB'));
+  check('純粋な手がかり列(設計項目、数量所在列ではない)は同じ行の全数量に等しく寄与し、過剰除外していない',
+    hA?.status === 'resolved' && hA?.concept_id === 'performance.cooling_capacity'
+    && hB?.status === 'resolved' && hB?.concept_id === 'performance.cooling_capacity',
+    { hA, hB });
+
+  // ── 8c. 【必須修正3の必要テスト】同一行に異なるconceptの数量が複数あるケースでも、
+  //    各数量は自分自身のdimensionによって正しい概念へ解決され、互いを取り違えない。 ──
+  const actTraceDiffConcepts = actTraceWithRow('act-diff-concepts',
+    { '設計項目1':'冷房能力', '検討結果A':'12 kW', '設計項目2':'周囲温度', '検討結果B':'50 °C' }, []);
+  const bindingDiffConcepts = await bind(
+    reqTraceWithText('req-empty4c', '', []), () => [],
+    actTraceDiffConcepts, id => (id === 'act-diff-concepts'
+      ? [analysis('dcA', 'power', 'kW', '検討結果A'), analysis('dcB', 'temperature', '°C', '検討結果B')]
+      : [])
+  );
+  const diffConceptsResult = core.generatePropertyResolutions({ binding:bindingDiffConcepts });
+  const dcA = diffConceptsResult.resolutions.find(r => r.quantity_id === qid('dcA'));
+  const dcB = diffConceptsResult.resolutions.find(r => r.quantity_id === qid('dcB'));
+  check('同一行の異なるconceptの数量(A=冷房能力)は、両方の手がかりが周辺語に含まれても自身のdimensionで正しく解決する',
+    dcA?.status === 'resolved' && dcA?.concept_id === 'performance.cooling_capacity', dcA);
+  check('同一行の異なるconceptの数量(B=周囲温度)も、自身のdimensionで正しく解決し、Aと取り違えない',
+    dcB?.status === 'resolved' && dcB?.concept_id === 'environment.ambient_operating_temperature', dcB);
 
   // ── 9. 【必須修正】Phase B-1不整合(ready:false)ではB-2.2a処理を走らせない ──
   const notReadyBinding = { ready:false, requirement:{ bindings:[] }, actual:{ bindings:[] } };
@@ -239,6 +280,91 @@ function resolutionKey(r) { return `${r.side}:${r.quantity_id}`; }
   check('generatePropertyResolutions()は(誤って渡された)trace引数を無視し、binding埋め込みのrecordだけを使う(必須修正1)',
     ignoredParamsResult.resolutions[0]?.status === 'resolved' && ignoredParamsResult.resolutions[0]?.concept_id === 'performance.cooling_capacity',
     ignoredParamsResult.resolutions[0]);
+
+  // ── 12b. 【必須修正1、不変スナップショット化】bind後に元traceの本文・タグを書き換えても、
+  //    binding内へ埋め込まれたrecordは不変スナップショットのため一切影響を受けない。
+  //    以前は参照のまま埋め込んでいたため、bind後の変更がbinding経由でそのまま見えてしまっていた。 ──
+  const mutTrace = reqTraceWithText('req-mut', '冷房能力12 kW。', ['冷房能力']);
+  const mutBinding = await bind(
+    mutTrace, id => (id === 'req-mut' ? [analysis('mut1', 'power', 'kW')] : []),
+    reqTraceWithText('act-empty-mut', '', []), () => []
+  );
+  const beforeMutationResult = core.generatePropertyResolutions({ binding:mutBinding });
+  mutTrace._trace_records[0].source_raw_text = '全く無関係な文章。';
+  mutTrace._trace_records[0].tags = ['無関係タグ'];
+  const afterMutationResult = core.generatePropertyResolutions({ binding:mutBinding });
+  check('bind後に元traceの本文・タグを書き換えても、生成される解決結果は不変(必須修正1)',
+    JSON.stringify(beforeMutationResult.resolutions) === JSON.stringify(afterMutationResult.resolutions),
+    { before:beforeMutationResult.resolutions, after:afterMutationResult.resolutions });
+  check('bindingへ埋め込まれたrecordがfreeze済みで、直接の書き換えが反映されない(必須修正1)', (() => {
+    const record = mutBinding.requirement.bindings.find(b => b.status === 'bound')?.record;
+    if (!record) return false;
+    const originalText = record.source_raw_text;
+    try { record.source_raw_text = 'tampered'; } catch (_) { /* strictモードでは例外になる場合もある、それも許容 */ }
+    return record.source_raw_text === originalText;
+  })());
+
+  // ── 12c. 【必須修正1】bind後にsidecar(annotation)側のanalysesを書き換えても、
+  //    binding内へ埋め込まれたannotationスナップショットは不変。 ──
+  const annotMutTrace = reqTraceWithText('req-annot-mut', '冷房能力12 kW。', ['冷房能力']);
+  const annotMutAnnotation = await sidecarFor(annotMutTrace, 'requirement', id => (id === 'req-annot-mut' ? [analysis('am1', 'power', 'kW')] : []));
+  const annotMutActTrace = reqTraceWithText('act-empty-am', '', []);
+  const annotMutActAnnotation = await sidecarFor(annotMutActTrace, 'actual', () => []);
+  const annotMutBinding = await core.bindInputPair({
+    requirementTrace:annotMutTrace, requirementAnnotation:annotMutAnnotation,
+    actualTrace:annotMutActTrace, actualAnnotation:annotMutActAnnotation,
+  });
+  const beforeAnnotMutation = core.generatePropertyResolutions({ binding:annotMutBinding });
+  annotMutAnnotation.records[0].analyses[0].quantity.unit.dimension = 'temperature';
+  const afterAnnotMutation = core.generatePropertyResolutions({ binding:annotMutBinding });
+  check('bind後にsidecar(annotation)のanalysesを書き換えても、生成される解決結果は不変(必須修正1)',
+    JSON.stringify(beforeAnnotMutation.resolutions) === JSON.stringify(afterAnnotMutation.resolutions),
+    { before:beforeAnnotMutation.resolutions, after:afterAnnotMutation.resolutions });
+
+  // ── 12d. 【必須修正2】missing_annotation(warning)などがあってもbindInputPair()全体は
+  //    ready:trueのままになりうる。この場合もPhase B-1のdiagnostics・not_analyzedが
+  //    generatePropertyResolutions()の成功時出力へ伝播することを確認する
+  //    (以前はready:true時、diagnostics:[]で固定されており、warningやnot_analyzedが消えていた)。 ──
+  const warnReqTrace = { _trace_records:[
+    { trace_id:'req-warn-bound', source_raw_text:'冷房能力12 kW。', tags:['冷房能力'] },
+    { trace_id:'req-warn-missing', source_raw_text:'無関係の記述。', tags:[] },
+  ] };
+  const warnAnnotationFull = await sidecarFor(warnReqTrace, 'requirement', id => (id === 'req-warn-bound' ? [analysis('warnq1', 'power', 'kW')] : []));
+  const warnAnnotation = { ...warnAnnotationFull, records:warnAnnotationFull.records.filter(r => r.trace_id !== 'req-warn-missing') };
+  const warnActTrace = reqTraceWithText('act-empty-warn', '', []);
+  const warnActAnnotation = await sidecarFor(warnActTrace, 'actual', () => []);
+  const warnBinding = await core.bindInputPair({
+    requirementTrace:warnReqTrace, requirementAnnotation:warnAnnotation,
+    actualTrace:warnActTrace, actualAnnotation:warnActAnnotation,
+  });
+  check('missing_annotationのみ(warning)ならbindInputPair()全体はready:trueのまま(前提確認)', warnBinding.ready === true, warnBinding.diagnostics);
+  check('missing_annotationがwarning severityとして存在する(前提確認)',
+    warnBinding.diagnostics.some(d => d.code === 'missing_annotation' && d.severity === 'warning'), warnBinding.diagnostics);
+  const warnPropertyResult = core.generatePropertyResolutions({ binding:warnBinding });
+  check('ready:true時もmissing_annotation(warning)がdiagnosticsとして伝播する(必須修正2)',
+    warnPropertyResult.ready === true && warnPropertyResult.diagnostics.some(d => d.code === 'missing_annotation' && d.severity === 'warning'),
+    warnPropertyResult.diagnostics);
+  check('ready:true時もnot_analyzed(no_annotation)が伝播する(必須修正2)',
+    warnPropertyResult.not_analyzed.some(n => n.reason_code === 'no_annotation' && n.trace_id === 'req-warn-missing'),
+    warnPropertyResult.not_analyzed);
+  check('warning付きready:trueでも、bound済みの他レコード(req-warn-bound)は正常に解決される',
+    warnPropertyResult.resolutions.some(r => r.trace_id === 'req-warn-bound' && r.status === 'resolved'),
+    warnPropertyResult.resolutions);
+
+  // ── 12e. 【防御的】bound状態のtrace_idに対応するrecordがbinding内に見つからない
+  //    (手動構築したbinding等のデータ不整合)場合、空文脈へ静かにフォールバックせずfail closedする。 ──
+  const rulesetForMalformed = { quantity_extraction:'v2.14', semantics_rules:'v2.19', auto_applicable_thresholds:{ modeConfidence:0.4, margin:0.2, propertyConfidence:0.7 } };
+  const malformedBinding = {
+    ready:true,
+    requirement:{ bindings:[{ trace_id:'malformed-1', status:'bound', annotation:{ trace_id:'malformed-1', content_hash:'x'.repeat(64), analyses:[analysis('malformed', 'power', 'kW')] }, record:null }],
+      ruleset_version:rulesetForMalformed },
+    actual:{ bindings:[], ruleset_version:rulesetForMalformed },
+  };
+  const malformedResult = core.generatePropertyResolutions({ binding:malformedBinding });
+  check('bound状態なのにrecordがbinding内に見つからない場合はfail closedする(防御的)',
+    malformedResult.ready === false && malformedResult.resolutions.length === 0
+    && malformedResult.diagnostics.some(d => d.code === 'bound_record_missing' && d.side === 'requirement' && d.trace_id === 'malformed-1'),
+    malformedResult.diagnostics);
 
   // ── 13. 同じquantityにつき1回だけ解決する ──
   const dupCheckTrace = reqTraceWithText('req-dup-check', '冷房能力12 kW。', ['冷房能力']);

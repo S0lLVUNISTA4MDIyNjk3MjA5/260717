@@ -18,6 +18,7 @@
 > - `77f440f`レビュー（2026-07-20）：異次元の監査記録だけでなく、同一次元候補も数量ID全直積へ展開しない契約へ訂正した。段階1の出力は`candidate_buckets[]`（両数量ID集合、dimension、潜在ペア数、4参照ID）とし、段階2以降が逐次走査して個別ペアを絞り込む。照合行複合キーの区切り文字衝突、複数関係時の`dimension_unavailable`重複、手動関係変更後のUI表示陳腐化も同時に修正した。
 > - `9c06125`→本改訂（Phase B-2.2a実装、2026-07-20）：3.4節 段階2の最初の単位として、数量ごとのproperty候補生成・解決状態の正規化を`generatePropertyResolutions()`として実装した。`semantic_mapping_prototype.js`の`marginOf()`・`CONCEPT_DICTIONARY`・`generatePropertyCandidates()`を一字一句移植し、独自の別ロジックは作らなかった。7節の`mapping.status`を`resolved`／`unavailable`／`ambiguous`の3状態へ訂正した経緯は7節を参照。この段階ではconcept間の結合・除外バケット化・数値比較・comparisonMode導出・充足判定は実装していない（段階2b、未着手）。
 > - `92bfa9a`レビュー（2026-07-20）：初回のB-2.2a実装に重大3件・中1件の欠陥が見つかった。(1) `generatePropertyResolutions()`がbindingとは別にtrace引数を受け取り、渡されたtraceを再検証せずPhase B-1の厳密結合を迂回できた、(2) B-2.2a単独ではsidecar内`quantity_id`重複を検出しなかった、(3) `ready:false`時にPhase B-1の元診断(`path_mapping_unsupported`等)が新設のマーカーに置き換わり消えていた、(4) Excel側`nearbyText`が対象数量自身の列を除外できておらず「他列」という契約と実装が一致していなかった。修正の詳細は`shadow_mode_integration_design.md` 7節の訂正を参照。
+> - `e9edc97`レビュー（2026-07-20）：上記の修正だけでは不十分で、さらに重大3件が見つかった。(1) `record`/`annotation`を参照のまま埋め込んでおり、bind後に元オブジェクトを変更すると連動して変わってしまう、(2) `ready:true`時も`diagnostics`が常に空配列でwarning・`not_analyzed`が消えていた、(3) Excel側`nearbyText`の除外対象が対象数量自身の列に留まっており、同じ行の別の数量の列は除外されないまま（追加した回帰テスト自身がこれを「成功条件」にしてしまっていた）。修正: `snapshotValue()`(structuredClone+再帰的freeze)による不変スナップショット化、`ready:true`時のdiagnostics/not_analyzed伝播、行単位の全数量所在列除外、をそれぞれ実装した。詳細は`shadow_mode_integration_design.md` 7節の訂正を参照。
 
 ## 1. 設計原則
 
