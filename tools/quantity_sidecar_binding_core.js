@@ -754,14 +754,30 @@
   // 比較するようにした(詳細はgenerateComparisonCandidates()本体のコメントを参照)。既定値も
   // 「実現候補数の上限」から「潜在ペア数合計の上限」へ意味が変わったことに合わせて500→2000へ
   // 引き上げた。
+  // 【round3レビュー修正、重大1: 上限を2種類に分離】round2の`totalCandidateLimit`は「切り詰め前の
+  // 潜在ペア数合計」を判定材料にしたが、上限値自体をMAX_SAFE_TOTAL_CANDIDATE_LIMIT=10,000,000まで
+  // 許容していたため、たとえば1,000グループ×各グループの潜在1万件・candidateLimit=10,000・
+  // totalCandidateLimit=10,000,000のような設定では、潜在合計チェックは通過するがPass 2で
+  // 実際に1,000万件のcomparison candidateオブジェクトを実体化できてしまう、と指摘された。
+  // 「探索空間(潜在ペア数)の大きさ」と「実際にメモリへ載せる候補オブジェクト数」は別の量であり、
+  // 別々の上限で守る必要がある。修正:
+  // - `totalCandidateLimit`: 実体化見込み件数(Σ min(potentialPairCount_i, candidateLimit)、
+  //   =Pass 2が実際に生成するオブジェクト数の上限)の上限。実際にメモリへ載る量を直接制限するため、
+  //   上限値自体も1レコードあたりの上限(candidateLimit)と同程度の桁に抑える
+  //   (MAX_SAFE_TOTAL_CANDIDATE_LIMIT、後述)。
+  // - `totalPotentialPairLimit`(新設): 切り詰め前の潜在ペア数合計の上限。Pass 1の集計自体は
+  //   バケット数×concept数に比例するだけの軽い加算処理であり、この上限を大きくしても
+  //   組み合わせ爆発には繋がらないため、大きめの値を許容する。
   const DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT = 2000;
+  const DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT = 2000000;
   const MAX_SAFE_CANDIDATE_LIMIT = 10000;
-  // totalCandidateLimitは「文書全体の潜在ペア数合計」を表すようになったため、1レコードあたりの
-  // 上限(candidateLimit、MAX_SAFE_CANDIDATE_LIMIT=10,000)と同じ上限を共有すると、バケット数の多い
-  // 実文書で正当な合計値すら設定できなくなる。Pass 1の集計自体はバケット数×concept数に比例する
-  // だけの軽い加算処理であり、この上限を大きくしても組み合わせ爆発には繋がらないため、
-  // totalCandidateLimit専用に別の(大きい)上限を設ける。
-  const MAX_SAFE_TOTAL_CANDIDATE_LIMIT = 10000000;
+  // totalCandidateLimitは実際にメモリへ載る候補オブジェクト数を直接制限するため、
+  // candidateLimitと同程度の桁の上限にとどめる(候補1件はごく小さいオブジェクトだが、
+  // 際限なく大きな値を許容すると重大1の穴が再発する)。
+  const MAX_SAFE_TOTAL_CANDIDATE_LIMIT = 100000;
+  // totalPotentialPairLimitはPass 1の軽い集計(乗算・加算のみ、オブジェクト生成なし)にしか
+  // 使われないため、totalCandidateLimitより大幅に大きい上限を許容してよい。
+  const MAX_SAFE_TOTAL_POTENTIAL_PAIR_LIMIT = 1000000000;
 
   function isSafeLimit(value, max = MAX_SAFE_CANDIDATE_LIMIT) { return Number.isSafeInteger(value) && value >= 1 && value <= max; }
 
@@ -838,11 +854,12 @@
   }
 
   function generateComparisonCandidates({ binding, relations,
-    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT }) {
-    // 【round1レビュー修正、中】candidateLimit/totalCandidateLimitを未検証のままslice()・減算へ
-    // 使うと、負数・非整数・NaN・Infinity・文字列等で誤動作しうる(呼び出し側がInfinity等を渡すだけで
-    // 上限機構そのものを無効化できてしまう、と指摘された)。1以上MAX_SAFE_CANDIDATE_LIMIT以下の
-    // 安全な整数であることを検証し、不正ならfail closedする。
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    // 【round1レビュー修正、中】candidateLimit/totalCandidateLimit/totalPotentialPairLimitを
+    // 未検証のまま算術・比較へ使うと、負数・非整数・NaN・Infinity・文字列等で誤動作しうる
+    // (呼び出し側がInfinity等を渡すだけで上限機構そのものを無効化できてしまう、と指摘された)。
+    // それぞれ1以上・各自の安全な整数上限以下であることを検証し、不正ならfail closedする。
     if (!isSafeLimit(candidateLimit)) {
       return blockedComparisonResult([{ code:'candidate_limit_invalid', severity:'error',
         detail:`candidateLimitは1以上${MAX_SAFE_CANDIDATE_LIMIT}以下の安全な整数である必要があります(実際=${JSON.stringify(candidateLimit)})` }], binding, null, null);
@@ -850,6 +867,10 @@
     if (!isSafeLimit(totalCandidateLimit, MAX_SAFE_TOTAL_CANDIDATE_LIMIT)) {
       return blockedComparisonResult([{ code:'total_candidate_limit_invalid', severity:'error',
         detail:`totalCandidateLimitは1以上${MAX_SAFE_TOTAL_CANDIDATE_LIMIT}以下の安全な整数である必要があります(実際=${JSON.stringify(totalCandidateLimit)})` }], binding, null, null);
+    }
+    if (!isSafeLimit(totalPotentialPairLimit, MAX_SAFE_TOTAL_POTENTIAL_PAIR_LIMIT)) {
+      return blockedComparisonResult([{ code:'total_potential_pair_limit_invalid', severity:'error',
+        detail:`totalPotentialPairLimitは1以上${MAX_SAFE_TOTAL_POTENTIAL_PAIR_LIMIT}以下の安全な整数である必要があります(実際=${JSON.stringify(totalPotentialPairLimit)})` }], binding, null, null);
     }
     if (!binding || !binding.ready) {
       return blockedComparisonResult([{ code:'binding_not_ready', severity:'error',
@@ -874,17 +895,24 @@
     const notAnalyzed = [];
     const diagnostics = [];
 
-    // ── 【round2レビュー修正、重大1・重大3】Pass 1: 候補オブジェクトを1件も生成せず、
-    // concept一致するグループの記述子(reqIds/actIds/potentialPairCount)だけを集める。
+    // ── 【round2/round3レビュー修正、重大1・重大2・重大3】Pass 1: 候補オブジェクトを1件も
+    // 生成せず、concept一致するグループの記述子(reqIds/actIds/potentialPairCount)だけを集める。
     // potentialPairCountはreqIds.length×actIds.lengthの乗算のみで、直積そのものは走査・生成
     // しないため、この段階の計算量はO(バケット数×concept数)にとどまる(バケット内の数量数が
-    // どれだけ大きくても定数時間)。round1の実装は「各グループをcandidateLimitで切り詰めた後」の
-    // 合計を見てからfail closedしており、切り詰め後もなお大量の候補オブジェクトを生成してから
-    // 破棄する経路や、多数の小グループの合計が実際の潜在規模を過小評価する経路が残っていた、と
-    // round2レビューで指摘された。ここではその判定材料となる潜在ペア数合計を、候補を1件も
-    // 作らずに先に確定させる。 ──
+    // どれだけ大きくても定数時間)。
+    // 【round3レビュー修正、重大2】さらに、潜在ペア数合計(totalPotentialPairCount)・実体化見込み
+    // 件数合計(totalMaterializedUpperBound、=Σ min(potentialPairCount_i, candidateLimit)、
+    // Pass 2が実際に生成するオブジェクト数の上限)のいずれかが対応する上限を超えた時点で、
+    // バケットの走査そのものを即座に打ち切る(labeled break)。round2の実装は全バケットを
+    // 走査し終えてからまとめて判定していたため、上限超過が確定した後も残りすべてのバケットに
+    // ついて数量ID再走査・conceptグルーピング・記述子の蓄積・not_analyzed生成を続けており、
+    // 無駄な走査が残っていた、と指摘された。 ──
     const groupDescriptors = [];
     let totalPotentialPairCount = 0;
+    let totalMaterializedUpperBound = 0;
+    let limitExceededKind = null; // 'potential' | 'materialized' | null(未超過)
+
+    bucketScan:
     for (const bucket of dimensionResult.candidate_buckets) {
       const reqUnresolved = [];
       const actUnresolved = [];
@@ -912,8 +940,12 @@
         const actIds = actByConcept.get(conceptId);
         if (reqIds && actIds) {
           const potentialPairCount = reqIds.length * actIds.length;
+          const materializedUpperBound = Math.min(potentialPairCount, candidateLimit);
           totalPotentialPairCount += potentialPairCount;
+          totalMaterializedUpperBound += materializedUpperBound;
           groupDescriptors.push({ reqIds, actIds, conceptId, bucket, potentialPairCount });
+          if (totalMaterializedUpperBound > totalCandidateLimit) { limitExceededKind = 'materialized'; break bucketScan; }
+          if (totalPotentialPairCount > totalPotentialPairLimit) { limitExceededKind = 'potential'; break bucketScan; }
         } else if (reqIds) {
           notAnalyzed.push({ reason_code:'concept_mismatch', side:'requirement', concept_id:conceptId, quantity_ids:[...reqIds].sort(),
             requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
@@ -926,27 +958,36 @@
       }
     }
 
-    // ── 潜在ペア数の合計がtotalCandidateLimitを超える場合は、候補オブジェクトを1件も生成せず
-    // fail closedする(どのグループ由来の候補を残すかという恣意的な判断を避けるため)。
-    // 各グループがper-group上限(candidateLimit)を超えるかどうかは、potentialPairCountだけで
-    // (実際に候補を生成しなくても)判定できるため、fail closedする場合でも監査記録は残す。 ──
-    if (totalPotentialPairCount > totalCandidateLimit) {
+    // ── いずれかの上限を超えた場合、候補オブジェクトを1件も生成せずfail closedする(どのグループ
+    // 由来の候補を残すかという恣意的な判断を避けるため)。バケット走査自体を打ち切っているため、
+    // groupDescriptorsには走査済みのバケット分しか含まれない(=以後のバケットの潜在ペア数は
+    // 合計に反映されていないが、既に上限超過が確定しているため計算する必要がない)。
+    // 【round3レビュー修正、中1】この経路では実際には1件も候補を生成していないため、
+    // 「切り詰めました」「超過分を除外しました」という(部分的に成功したかのような)表現は
+    // 事実と一致しない、と指摘された。修正: 走査済みの各グループのうち、per-group上限を
+    // 超えていた(=生成していれば切り詰められていたはずの)ものは、`candidate_limit_exceeded`
+    // (実際に切り詰めが起きた場合専用のreason_code)ではなく`candidate_limit_would_exceed`
+    // (実体化していれば超過していたはずという仮定の監査記録)として、`materialized_pair_count:0`
+    // を明示して記録する。diagnostics配列への個別warning追加は行わない(全体のerror診断1件で
+    // 十分であり、実体化していないのに「切り詰めた」というwarningを積み増すと事実と食い違うため)。 ──
+    if (limitExceededKind) {
       groupDescriptors.forEach(({ conceptId, bucket, potentialPairCount }) => {
         if (potentialPairCount > candidateLimit) {
-          const excludedCount = potentialPairCount - candidateLimit;
-          diagnostics.push({ code:'candidate_limit_exceeded', severity:'warning', concept_id:conceptId,
-            requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
-            detail:`候補上限(${candidateLimit})を超えたため、超過分(${excludedCount}件)を切り詰めました` });
-          notAnalyzed.push({ reason_code:'candidate_limit_exceeded', concept_id:conceptId,
+          notAnalyzed.push({ reason_code:'candidate_limit_would_exceed', concept_id:conceptId,
             requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
             matcher_a_id:bucket.matcher_a_id ?? null, matcher_b_id:bucket.matcher_b_id ?? null,
-            excluded_pair_count:excludedCount });
+            potential_pair_count:potentialPairCount, candidate_limit:candidateLimit, materialized_pair_count:0 });
         }
       });
+      const limitName = limitExceededKind === 'materialized' ? 'totalCandidateLimit' : 'totalPotentialPairLimit';
+      const limitValue = limitExceededKind === 'materialized' ? totalCandidateLimit : totalPotentialPairLimit;
+      const observedLabel = limitExceededKind === 'materialized' ? '実体化見込み件数の累計' : '潜在ペア数の累計';
+      const observedValue = limitExceededKind === 'materialized' ? totalMaterializedUpperBound : totalPotentialPairCount;
       diagnostics.push({ code:'total_candidate_limit_exceeded', severity:'error',
-        detail:`比較候補の潜在合計件数(${totalPotentialPairCount})がtotalCandidateLimit(${totalCandidateLimit})を超えたため、候補を1件も生成せず停止しました` });
-      notAnalyzed.push({ reason_code:'total_candidate_limit_exceeded',
-        total_potential_pair_count:totalPotentialPairCount, total_candidate_limit:totalCandidateLimit });
+        detail:`比較候補の${observedLabel}(${observedValue}、バケット走査を打ち切った時点の値)が${limitName}(${limitValue})を超えたため、候補を1件も生成せず停止しました` });
+      notAnalyzed.push({ reason_code:'total_candidate_limit_exceeded', limit_kind:limitExceededKind,
+        total_potential_pair_count:totalPotentialPairCount, total_materialized_upper_bound:totalMaterializedUpperBound,
+        total_candidate_limit:totalCandidateLimit, total_potential_pair_limit:totalPotentialPairLimit });
       const combinedDiagnostics = [...(dimensionResult.diagnostics || []), ...(propertyResult.diagnostics || []), ...diagnostics];
       return { ready:isReady(combinedDiagnostics), comparison_candidates:[], candidate_count:0, result_complete:false,
         diagnostics:combinedDiagnostics,
@@ -991,5 +1032,6 @@
     canonicalValue, canonicalJson, normalize, hashParts, computeDatasetSignature, computeRecordContentHash,
     traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates,
     CONCEPT_DICTIONARY, generatePropertyCandidates, generatePropertyResolutions,
-    DEFAULT_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT, generateComparisonCandidates });
+    DEFAULT_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT,
+    generateComparisonCandidates });
 });
