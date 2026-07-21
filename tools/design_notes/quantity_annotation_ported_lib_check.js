@@ -14,6 +14,7 @@ const REPO_ROOT = path.join(__dirname, '..', '..');
 const QUANTITY_LIB_PATH = path.join(__dirname, 'quantity_extraction_prototype.js');
 const SEMANTICS_LIB_PATH = path.join(__dirname, 'semantic_mapping_prototype.js');
 const UNIT_RULES_LIB_PATH = path.join(__dirname, 'unit_conversion_rules_prototype.js');
+const NUMERIC_RULES_LIB_PATH = path.join(__dirname, 'numeric_comparison_rules_prototype.js');
 const BINDING_CORE_PATH = path.join(REPO_ROOT, 'tools/quantity_sidecar_binding_core.js');
 
 // ── 移植ブロックの範囲(full_insertion.js作成時に確定した行範囲。移植元が変更された場合は
@@ -25,6 +26,8 @@ const PROPERTY_LIB_RANGE_A = [400, 408]; // marginOf() 〜 hasOpposingEvidence()
 const PROPERTY_LIB_RANGE_B = [438, 511]; // CONCEPT_DICTIONARY 〜 generatePropertyCandidates()
 const COMPARISON_MODE_TABLE_RANGE = [368, 374]; // COMPARISON_MODE_DERIVATION_TABLE
 const UNIT_RULES_RANGE = [25, 271]; // KNOWN_CANONICAL_UNITS_BY_DIMENSION 〜 applyLinearConversion()(B-2.4bレビュー修正で拡張、6巡目)
+const QUANTITY_LIB_RANGE_C = [467, 492]; // isGenuinePoint() 〜 coversUpper()(B-2.5でnumeric_comparison_rules_prototype.jsへ移植)
+const NUMERIC_RULES_RANGE = [24, 100]; // isGenuinePoint() 〜 compareIntervalCoverage()
 
 const assertions = [];
 function check(name, ok, detail) { assertions.push({ name, ok: !!ok, detail }); }
@@ -154,6 +157,37 @@ function checkKnownCanonicalUnitsMatchUnitDefs() {
     [...actualPairs].every(p => expectedPairs.has(p)) ? undefined : { extra:[...actualPairs].filter(p => !expectedPairs.has(p)) });
 }
 
+// Phase B-2.5: numeric_comparison_rules_prototype.jsのisGenuinePoint()/coversLower()/
+// coversUpper()が、移植元(quantity_extraction_prototype.js 467-492行目)と一字一句一致するかを
+// 検証する(このファイル自身がquantity_extraction_prototype.jsとは独立にrequireされるため、
+// 二段階の移植チェーン(源流→numeric_comparison_rules_prototype.js→core)を両方確認する)。
+function checkPortedGeometricPrimitives() {
+  const expected = readLinesFrom(QUANTITY_LIB_PATH, QUANTITY_LIB_RANGE_C[0], QUANTITY_LIB_RANGE_C[1] - QUANTITY_LIB_RANGE_C[0] + 1);
+  const actual = readLinesFrom(NUMERIC_RULES_LIB_PATH, QUANTITY_LIB_RANGE_C[0] - (467 - 24), QUANTITY_LIB_RANGE_C[1] - QUANTITY_LIB_RANGE_C[0] + 1);
+  check('[numeric_comparison_rules_prototype.js] isGenuinePoint()/coversLower()/coversUpper()が移植元(quantity_extraction_prototype.js)と完全一致する(乖離検出)',
+    actual.trim() === expected.trim(),
+    actual.trim() === expected.trim() ? undefined : { actualLen: actual.length, expectedLen: expected.length });
+}
+
+// numeric_comparison_rules_prototype.js(isGenuinePoint()〜compareIntervalCoverage())が
+// quantity_sidecar_binding_core.jsへ一字一句移植されているかを検証する。
+function checkPortedNumericComparisonRules() {
+  const expected = readLinesFrom(NUMERIC_RULES_LIB_PATH, NUMERIC_RULES_RANGE[0], NUMERIC_RULES_RANGE[1] - NUMERIC_RULES_RANGE[0] + 1);
+
+  const lines = fs.readFileSync(BINDING_CORE_PATH, 'utf8').split('\n');
+  const startIdx = lines.findIndex(l => l.includes('numeric-comparison-rules/1.0: 幾何学的関係判定ライブラリ(移植)ここから'));
+  const endMarkerIdx = lines.findIndex(l => l.includes('numeric-comparison-rules/1.0: 幾何学的関係判定ライブラリ(移植)ここまで'));
+
+  check('[quantity_sidecar_binding_core.js] マーカー(幾何学的関係判定ライブラリ開始)が見つかる', startIdx !== -1);
+  check('[quantity_sidecar_binding_core.js] マーカーコメント(幾何学的関係判定ライブラリの終端)が見つかる', endMarkerIdx !== -1);
+  if (startIdx === -1 || endMarkerIdx === -1) return;
+
+  const actual = stripIndent(lines.slice(startIdx + 3, endMarkerIdx).join('\n').replace(/\n+$/, ''), '  ');
+  check('[quantity_sidecar_binding_core.js] 幾何学的関係判定ライブラリが移植元(numeric_comparison_rules_prototype.js)と完全一致する(乖離検出)',
+    actual.trim() === expected.trim(),
+    actual.trim() === expected.trim() ? undefined : { actualLen: actual.length, expectedLen: expected.length });
+}
+
 if (require.main === module) {
   main();
 }
@@ -165,6 +199,8 @@ function main() {
   checkPortedComparisonModeTable();
   checkPortedUnitConversionRules();
   checkKnownCanonicalUnitsMatchUnitDefs();
+  checkPortedGeometricPrimitives();
+  checkPortedNumericComparisonRules();
 
   console.log('\n=== quantity_annotation_ported_lib_check 結果 ===');
   let fail = 0;

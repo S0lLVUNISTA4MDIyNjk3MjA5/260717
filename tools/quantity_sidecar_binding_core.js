@@ -1880,6 +1880,205 @@
       not_analyzed: [...planResult.not_analyzed, ...notAnalyzed] };
   }
 
+  // ── numeric-comparison-rules/1.0: 幾何学的関係判定ライブラリ(移植)ここから ──
+  // numeric_comparison_rules_prototype.jsから一字一句移植。改変禁止、移植元を直接編集してから
+  // 再度移植すること。
+  function isGenuinePoint(q) {
+    return !!(q.lower && q.upper && q.lower.value === q.upper.value && q.lower.inclusive && q.upper.inclusive);
+  }
+
+  // outer側の区間がinner側の区間を覆っているか(inner ⊆ outer)を判定する共通ロジック。
+  // actual_covers_requirement(outer=actual, inner=requirement)にも
+  // requirement_covers_actual(outer=requirement, inner=actual)にも同じ形で使う。
+  function coversLower(outer, inner) {
+    // inner.lowerがnull(下限なし=負の無限大まで広がる)場合、outerがそれを覆うには
+    // outer.lowerもnullでなければならない(外部レビュー指摘。v2.6は無条件でtrueを返しており、
+    // 要求[12,+∞)を実仕様[0,20]が誤って充足していると判定していた)。
+    if (!inner.lower) return !outer.lower;
+    if (!outer.lower) return true;
+    if (outer.lower.value < inner.lower.value) return true;
+    if (outer.lower.value > inner.lower.value) return false;
+    return outer.lower.inclusive || !inner.lower.inclusive;
+  }
+  function coversUpper(outer, inner) {
+    // 上限側も同様。inner.upperがnull(上限なし=正の無限大まで広がる)場合、
+    // outerがそれを覆うにはouter.upperもnullでなければならない。
+    if (!inner.upper) return !outer.upper;
+    if (!outer.upper) return true;
+    if (outer.upper.value > inner.upper.value) return true;
+    if (outer.upper.value < inner.upper.value) return false;
+    return outer.upper.inclusive || !inner.upper.inclusive;
+  }
+  // ── quantity_extraction_prototype.js(467-492行目)からの移植ここまで ──
+
+  // requirementInterval(要求範囲)に対し、actualPointInterval(kind:'interval'で表現された
+  // 実仕様側の点、B-2.4bの単位正規化済み)が真の点であるかを確認したうえで、requirementInterval
+  // の範囲内にあるかを判定する。actualPointIntervalが真の点でない場合は幾何比較そのものが
+  // 無意味なため、outcome:'unsupported'を返す(呼び出し側でnot_analyzedへ回す想定)。
+  function comparePointInRegion(requirementInterval, actualPointInterval) {
+    if (!isGenuinePoint(actualPointInterval)) {
+      return { outcome:'unsupported', reason_code:'point_in_region_actual_not_point' };
+    }
+    const v = actualPointInterval.lower.value;
+    const lowerHolds = !requirementInterval.lower || v > requirementInterval.lower.value
+      || (v === requirementInterval.lower.value && requirementInterval.lower.inclusive);
+    const upperHolds = !requirementInterval.upper || v < requirementInterval.upper.value
+      || (v === requirementInterval.upper.value && requirementInterval.upper.inclusive);
+    const lowerBoundaryMismatch = !!(requirementInterval.lower && v === requirementInterval.lower.value && !requirementInterval.lower.inclusive);
+    const upperBoundaryMismatch = !!(requirementInterval.upper && v === requirementInterval.upper.value && !requirementInterval.upper.inclusive);
+    return {
+      outcome:'compared',
+      result: {
+        relation_type: 'point_in_region',
+        outer_side: null,
+        inner_side: null,
+        geometric_relation_holds: lowerHolds && upperHolds,
+        lower_check: { holds:lowerHolds, boundary_mismatch:lowerBoundaryMismatch },
+        upper_check: { holds:upperHolds, boundary_mismatch:upperBoundaryMismatch },
+      },
+    };
+  }
+
+  // outerInterval(actual_covers_requirementならactual、requirement_covers_actualならrequirement)
+  // がinnerInterval(逆側)を覆っているか(inner ⊆ outer)を判定する。どちらがouter/innerかは
+  // この関数の外側(呼び出し側、comparison_mode_candidateに応じたrequirement/actualの割り当て)で
+  // 決定する——この関数自体はrequirement/actualの意味を一切知らない、純粋な幾何判定。
+  function compareIntervalCoverage(outerInterval, innerInterval) {
+    const lowerHolds = coversLower(outerInterval, innerInterval);
+    const upperHolds = coversUpper(outerInterval, innerInterval);
+    const lowerBoundaryMismatch = !!(innerInterval.lower && outerInterval.lower
+      && innerInterval.lower.value === outerInterval.lower.value && innerInterval.lower.inclusive && !outerInterval.lower.inclusive);
+    const upperBoundaryMismatch = !!(innerInterval.upper && outerInterval.upper
+      && innerInterval.upper.value === outerInterval.upper.value && innerInterval.upper.inclusive && !outerInterval.upper.inclusive);
+    return {
+      outcome:'compared',
+      result: {
+        relation_type: 'outer_covers_inner',
+        geometric_relation_holds: lowerHolds && upperHolds,
+        lower_check: { holds:lowerHolds, boundary_mismatch:lowerBoundaryMismatch },
+        upper_check: { holds:upperHolds, boundary_mismatch:upperBoundaryMismatch },
+      },
+    };
+  }
+  // ── numeric-comparison-rules/1.0: 幾何学的関係判定ライブラリ(移植)ここまで ──
+
+  const KNOWN_COMPARISON_MODES = ['point_in_region', 'actual_covers_requirement', 'requirement_covers_actual'];
+
+  function blockedNumericComparisonResult(diagnostics, viewResult) {
+    return { ready:false, numeric_comparison_results:[], candidate_count:0, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(viewResult?.diagnostics || [])]),
+      not_analyzed:dedupeByCanonicalJson(viewResult?.not_analyzed || []) };
+  }
+
+  // Phase B-2.5: 段階4の最後の部分として、正規化ビュー(B-2.4b)の各要素について、
+  // comparison_mode_candidate(段階3-3で確定済み)を前提とした幾何学的関係だけを計算する。
+  // 自動適用可否・confidenceによるゲーティング・最終的な充足判定はこの段階では行わない
+  // (`satisfied`という名前のフィールドは一切出力しない)。viewResultは呼び出し側から別引数
+  // として受け取らず、必ずこの関数の内部で同じbinding/relationsから計算する
+  // (B-2.2a round1以来一貫した設計方針)。
+  function generateNumericComparisonResults({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    const viewResult = generateNormalizedQuantityViews({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (viewResult.ready !== true || viewResult.result_complete !== true) {
+      return blockedNumericComparisonResult([{ code:'normalized_quantity_views_not_ready_or_incomplete', severity:'error',
+        detail:`generateNormalizedQuantityViews()がready=${JSON.stringify(viewResult.ready)}、result_complete=${JSON.stringify(viewResult.result_complete)}のため数値比較を実行できません(段階3以降と同じくready===trueかつresult_complete===trueを要求してfail closedする契約)` }],
+        viewResult);
+    }
+
+    // 段階1: comparison_mode_candidateが既知の3値(段階3-3のCOMPARISON_MODE_DERIVATION_TABLEが
+    // 生成しうる値)以外の場合、個々の候補を静かに除外するのではなく呼び出し全体をfail closed
+    // する(上流結果とこの段階の契約が矛盾しているという構造的異常を意味するため、
+    // unit_dimension_inconsistentと同じ位置づけ)。
+    const modeDiagnostics = [];
+    for (const view of viewResult.normalized_quantity_views) {
+      if (!KNOWN_COMPARISON_MODES.includes(view.comparison_mode_candidate)) {
+        modeDiagnostics.push({ code:'numeric_comparison_mode_unsupported', severity:'error',
+          requirement_quantity_id:view.requirement_quantity_id, actual_quantity_id:view.actual_quantity_id,
+          comparison_mode_candidate:view.comparison_mode_candidate,
+          detail:'comparison_mode_candidateが既知の3値(point_in_region/actual_covers_requirement/requirement_covers_actual)のいずれでもありません' });
+      }
+    }
+    if (modeDiagnostics.length) return blockedNumericComparisonResult(modeDiagnostics, viewResult);
+
+    // 段階2(防御的): requirement_quantity_value/actual_quantity_value_normalizedは
+    // generateNormalizedQuantityViews()が既に構造検証・精度損失検査を済ませているため、
+    // ここへ到達する時点で常にkind:'interval'なら整形済みのはずである(kind:'alternatives'は
+    // 下記の段階3で別途扱う)。intervalかつlower/upperの両方がnull、または存在するのに
+    // valueが非有限、といった不整合は構造的に起こらないはずだが、万一に備えて検査する。
+    const invariantDiagnostics = [];
+    for (const view of viewResult.normalized_quantity_views) {
+      for (const [label, qv] of [['requirement', view.requirement_quantity_value], ['actual', view.actual_quantity_value_normalized]]) {
+        if (qv.kind !== 'interval') continue;
+        const boundsOk = [qv.lower, qv.upper].every(b => b === null || (b && isFiniteNumber(b.value) && typeof b.inclusive === 'boolean'));
+        if (!boundsOk || (qv.lower === null && qv.upper === null)) {
+          invariantDiagnostics.push({ code:'numeric_comparison_input_invariant_violation', severity:'error',
+            requirement_quantity_id:view.requirement_quantity_id, actual_quantity_id:view.actual_quantity_id, side:label,
+            detail:'正規化ビューのinterval数量値が構造検証済みであるという前提が崩れています' });
+        }
+      }
+    }
+    if (invariantDiagnostics.length) return blockedNumericComparisonResult(invariantDiagnostics, viewResult);
+
+    // 段階3: kind:'alternatives'は選択意味論(selection_semantics)の解釈が未設計のため、
+    // 比較不能としてnot_analyzedへ送る(推測しない、coverageGap()と同じ保守的な扱い)。
+    // 段階4: point_in_regionはactualが真の点であることを要求する。真の点でなければ
+    // not_analyzedへ送る(推測しない)。
+    // 段階5: 幾何比較を実行し、requirement/actual基準のsigned deltaを付加する。
+    const notAnalyzed = [];
+    const numericComparisonResults = [];
+    for (const view of viewResult.normalized_quantity_views) {
+      const reqQv = view.requirement_quantity_value;
+      const actQv = view.actual_quantity_value_normalized;
+      if (reqQv.kind !== 'interval' || actQv.kind !== 'interval') {
+        notAnalyzed.push({ reason_code:'quantity_comparison_kind_unsupported', ...view,
+          requirement_quantity_kind:reqQv.kind, actual_quantity_kind:actQv.kind });
+        continue;
+      }
+
+      const mode = view.comparison_mode_candidate;
+      let comparison;
+      let outerSide = null;
+      let innerSide = null;
+      if (mode === 'point_in_region') {
+        comparison = comparePointInRegion(reqQv, actQv);
+      } else if (mode === 'actual_covers_requirement') {
+        comparison = compareIntervalCoverage(actQv, reqQv);
+        outerSide = 'actual'; innerSide = 'requirement';
+      } else {
+        comparison = compareIntervalCoverage(reqQv, actQv);
+        outerSide = 'requirement'; innerSide = 'actual';
+      }
+      if (comparison.outcome !== 'compared') {
+        notAnalyzed.push({ reason_code:comparison.reason_code, ...view });
+        continue;
+      }
+
+      // signed_boundary_deltasは、outer/innerに関わらず常にrequirement/actualの実値から
+      // 直接計算する固定式(3モードとも同一。point_in_regionではactual.lower===actual.upper===
+      // 点の値のため、この式が自然にpointInRegionResult()相当の距離計算と一致する)。
+      const signedBoundaryDeltas = {
+        lower_actual_minus_requirement: (reqQv.lower && actQv.lower) ? actQv.lower.value - reqQv.lower.value : null,
+        upper_requirement_minus_actual: (reqQv.upper && actQv.upper) ? reqQv.upper.value - actQv.upper.value : null,
+      };
+      numericComparisonResults.push({ ...view,
+        numeric_comparison: {
+          comparison_mode: mode,
+          relation_type: comparison.result.relation_type,
+          outer_side: outerSide,
+          inner_side: innerSide,
+          geometric_relation_holds: comparison.result.geometric_relation_holds,
+          lower_check: comparison.result.lower_check,
+          upper_check: comparison.result.upper_check,
+          signed_boundary_deltas: signedBoundaryDeltas,
+        } });
+    }
+
+    return { ready:true, numeric_comparison_results:numericComparisonResults, candidate_count:numericComparisonResults.length, result_complete:true,
+      diagnostics: viewResult.diagnostics,
+      not_analyzed: [...viewResult.not_analyzed, ...notAnalyzed] };
+  }
+
   return Object.freeze({ SCHEMA_VERSION, SUPPORTED_RULESETS, validateAnnotationSchema, validateRulesetCompatibility,
     canonicalValue, canonicalJson, normalize, hashParts, computeDatasetSignature, computeRecordContentHash,
     traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates,
@@ -1888,5 +2087,5 @@
     generateComparisonCandidates, generateConditionResolutions, generateConditionAnnotatedComparisonCandidates,
     COMPARISON_MODE_DERIVATION_TABLE, generateComparisonModeCandidates,
     KNOWN_CANONICAL_UNITS_BY_DIMENSION, LINEAR_UNIT_SCALE_TO_BASE, generateUnitConversionPlans,
-    generateNormalizedQuantityViews });
+    generateNormalizedQuantityViews, generateNumericComparisonResults });
 });
