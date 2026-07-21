@@ -427,6 +427,104 @@ function resolutionKey(r) { return `${r.side}:${r.quantity_id}`; }
     realBinding.requirement.bindings.filter(b => b.status === 'bound').every(b => b.record && b.record.trace_id === b.trace_id)
     && realBinding.actual.bindings.filter(b => b.status === 'bound').every(b => b.record && b.record.trace_id === b.trace_id));
 
+  // ── 17. 【round3レビュー修正、重大1: TOCTOU】bindSide()は、trace/annotationを最初のawaitより前に
+  //    同期的にスナップショット化するようになった。これを実際に検証するには、content_hashの
+  //    計算対象に含まれない(=hash不一致で弾かれない)フィールドを使う必要がある。
+  //    source_record_display_unresolved(pathMappingIssues()の判定対象)はcomputeRecordContentHash()の
+  //    入力に含まれないフィールドであり、bindInputPair()呼び出し直後(結果をawaitする前。つまり
+  //    JS的には呼び出し側の同期的な処理が、関数内部の最初のawaitより先には絶対に進めないタイミング)に
+  //    同期的にこのフィールドへpath_mapping_unsupported問題を注入しても、スナップショットが呼び出し
+  //    時点(=最初のawaitより前)で確定していれば、binding結果には一切反映されないはずである。
+  //    旧実装(record/annotationをbindings.push()の直前でだけsnapshotValue()する)であれば、
+  //    for-loop自体がまだ実行されていない(computeDatasetSignature()のawaitでブロックされている)ため、
+  //    この同期的な注入はfor-loopが実際にpathMappingIssues(record)を呼ぶ時点で反映されてしまう。 ──
+  const raceReqTrace = reqTraceWithText('req-race', '冷房能力12 kW。', ['冷房能力']);
+  const raceActTrace = reqTraceWithText('act-race-empty', '', []);
+  const raceReqAnnotation = await sidecarFor(raceReqTrace, 'requirement', id => (id === 'req-race' ? [analysis('race1', 'power', 'kW')] : []));
+  const raceActAnnotation = await sidecarFor(raceActTrace, 'actual', () => []);
+  const racePromise = core.bindInputPair({
+    requirementTrace:raceReqTrace, requirementAnnotation:raceReqAnnotation,
+    actualTrace:raceActTrace, actualAnnotation:raceActAnnotation,
+  });
+  raceReqTrace._trace_records[0].source_record_display_unresolved = [
+    { source_field:'仕様.能力', code:'formatted_display_unavailable', reason:'path_mapping_unsupported' },
+  ];
+  const raceBinding = await racePromise;
+  check('bindInputPair()呼び出し直後の同期的な注入(content_hash対象外フィールド)はbindingへ反映されない(round3必須修正、重大1: TOCTOU)',
+    raceBinding.ready === true && raceBinding.requirement.bindings[0]?.status === 'bound'
+    && !raceBinding.diagnostics.some(d => d.code === 'path_mapping_unsupported'),
+    raceBinding);
+
+  // ── 17b. 同様の注入をactual側に対して行い、requirement側処理中にactual側入力が書き換わっても
+  //    影響しないことを確認する(旧実装の逐次await(先にrequirement側を完全処理してからactual側を
+  //    開始する)では、actual側の処理自体がまだ全く始まっていないため、この種の注入はさらに広い
+  //    時間窓で反映されてしまっていた。修正後は両side分のbindSide()呼び出しをPromise.allの前に
+  //    同期的に開始するため、bindInputPair()呼び出し直後の時点で両side既にスナップショット済み)。 ──
+  const raceReqTrace2 = reqTraceWithText('req-race2-empty', '', []);
+  const raceActTrace2 = actTraceWithRow('act-race2', { '仕様.能力':'12 kW' }, []);
+  const raceReqAnnotation2 = await sidecarFor(raceReqTrace2, 'requirement', () => []);
+  const raceActAnnotation2 = await sidecarFor(raceActTrace2, 'actual', id => (id === 'act-race2' ? [analysis('race2', 'power', 'kW', '仕様.能力')] : []));
+  const racePromise2 = core.bindInputPair({
+    requirementTrace:raceReqTrace2, requirementAnnotation:raceReqAnnotation2,
+    actualTrace:raceActTrace2, actualAnnotation:raceActAnnotation2,
+  });
+  raceActTrace2._trace_records[0].source_record_display_unresolved = [
+    { source_field:'仕様.能力', code:'formatted_display_unavailable', reason:'path_mapping_unsupported' },
+  ];
+  const raceBinding2 = await racePromise2;
+  check('actual側への同様の同期的注入も反映されない(round3必須修正、bindInputPair()の並列開始)',
+    raceBinding2.ready === true && raceBinding2.actual.bindings[0]?.status === 'bound'
+    && !raceBinding2.diagnostics.some(d => d.code === 'path_mapping_unsupported'),
+    raceBinding2);
+
+  // ── 17c. 【round3レビュー修正、重大2】戻り値全体がdeepFreeze()されるようになったため、
+  //    binding.readyや各binding要素のstatus/trace_id/record/annotation、bindings配列自体を
+  //    直接書き換えようとしても(strictモードでは例外、非strictでは無視のいずれか)反映されない。 ──
+  const wrapperBinding = await bind(
+    reqTraceWithText('req-wrapper', '冷房能力12 kW。', ['冷房能力']), id => (id === 'req-wrapper' ? [analysis('wrap1', 'power', 'kW')] : []),
+    reqTraceWithText('act-wrapper-empty', '', []), () => []
+  );
+  const wrapperEntry = wrapperBinding.requirement.bindings[0];
+  const originalReady = wrapperBinding.ready;
+  const originalStatus = wrapperEntry.status;
+  const originalTraceId = wrapperEntry.trace_id;
+  const originalRecord = wrapperEntry.record;
+  const originalAnnotation = wrapperEntry.annotation;
+  try { wrapperBinding.ready = false; } catch (_) { /* strictモードでは例外、それも許容 */ }
+  try { wrapperEntry.status = 'tampered'; } catch (_) { /* 同上 */ }
+  try { wrapperEntry.trace_id = 'tampered'; } catch (_) { /* 同上 */ }
+  try { wrapperEntry.record = { fake:true }; } catch (_) { /* 同上 */ }
+  try { wrapperEntry.annotation = { fake:true }; } catch (_) { /* 同上 */ }
+  check('binding.readyへの直接書き換えは反映されない(round3必須修正、重大2)', wrapperBinding.ready === originalReady);
+  check('binding要素のstatusへの直接書き換えは反映されない(round3必須修正、重大2)', wrapperEntry.status === originalStatus);
+  check('binding要素のtrace_idへの直接書き換えは反映されない(round3必須修正、重大2)', wrapperEntry.trace_id === originalTraceId);
+  check('binding要素のrecordの直接差し替えは反映されない(round3必須修正、重大2)', wrapperEntry.record === originalRecord);
+  check('binding要素のannotationの直接差し替えは反映されない(round3必須修正、重大2)', wrapperEntry.annotation === originalAnnotation);
+  check('bindings配列自体もfreezeされておりpush()等の変更操作は例外になるか無視される(round3必須修正、重大2)', (() => {
+    const before = wrapperBinding.requirement.bindings.length;
+    try { wrapperBinding.requirement.bindings.push({ trace_id:'injected', status:'bound', annotation:null, record:null }); } catch (_) { /* strictモードでは例外、それも許容 */ }
+    return wrapperBinding.requirement.bindings.length === before;
+  })());
+
+  // ── 17d. ruleset_versionもスナップショット化・freeze済みのため、bind後にthresholds
+  //    (margin/propertyConfidence)を直接書き換えても(例えばpropertyConfidenceを0にして
+  //    弱い候補を強制的にresolvedへ昇格させる攻撃)、generatePropertyResolutions()の判定には
+  //    一切影響しない。 ──
+  const rulesetTamperTrace = reqTraceWithText('req-ruleset-tamper', '周波数の参考記載。', []);
+  const rulesetTamperBinding = await bind(
+    rulesetTamperTrace, id => (id === 'req-ruleset-tamper' ? [analysis('rst', 'flow_rate', 'm3/h')] : []),
+    reqTraceWithText('act-ruleset-tamper-empty', '', []), () => []
+  );
+  const beforeTamperResult = core.generatePropertyResolutions({ binding:rulesetTamperBinding });
+  check('tamper前提: 弱い単独候補はambiguous(前提確認)', beforeTamperResult.resolutions[0]?.status === 'ambiguous', beforeTamperResult.resolutions[0]);
+  try { rulesetTamperBinding.requirement.ruleset_version.auto_applicable_thresholds.propertyConfidence = 0; } catch (_) { /* strictモードでは例外、それも許容 */ }
+  try { rulesetTamperBinding.requirement.ruleset_version.auto_applicable_thresholds.margin = 0; } catch (_) { /* 同上 */ }
+  const afterTamperResult = core.generatePropertyResolutions({ binding:rulesetTamperBinding });
+  check('bind後にruleset_version.auto_applicable_thresholdsを直接書き換えても判定に影響せず、弱い候補がresolvedへ昇格しない(round3必須修正、重大2)',
+    afterTamperResult.resolutions[0]?.status === 'ambiguous'
+    && JSON.stringify(beforeTamperResult.resolutions) === JSON.stringify(afterTamperResult.resolutions),
+    { before:beforeTamperResult.resolutions, after:afterTamperResult.resolutions });
+
   console.log('\n=== quantity_property_candidate_verification 結果 ===');
   let failed = 0;
   checks.forEach(c => { console.log(`[${c.ok ? 'OK' : 'NG'}] ${c.name}`); if (!c.ok) { failed++; if (c.detail !== undefined) console.log('  ', JSON.stringify(c.detail)); } });

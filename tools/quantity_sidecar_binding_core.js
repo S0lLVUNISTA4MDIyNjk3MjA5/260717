@@ -193,85 +193,108 @@
     return deepFreeze(structuredClone(value));
   }
 
+  // 【round3レビュー修正、重大1: TOCTOU】旧実装はcomputeDatasetSignature()/computeRecordContentHash()
+  // というawaitを挟む非同期検証を先に行い、その後(bindings.push()の直前)になって初めて
+  // snapshotValue()でrecord/annotationを複製していた。awaitで一度制御を手放している間に
+  // 呼び出し側が元のtrace/annotationオブジェクトを書き換えれば、「検証に使ったデータ」と
+  // 「bindingへ埋め込まれるデータ」が食い違いうる(検証はhash計算時点の内容に対して行われるが、
+  // 埋め込みはその後の――場合によっては書き換え後の――内容になる)、とレビューで指摘された。
+  // 修正: trace/annotationを、最初のawaitより前に同期的にスナップショット化し、以後は
+  // 一切元のtrace/annotationへ触れず、このスナップショットだけを検証・埋め込み双方に使う。
+  // これにより「schema検証・signature計算・content hash計算・binding生成」はすべて同一の
+  // 不変な複製に対して行われることになり、以前のように後段でrecordごとsnapshotValue()する
+  // 必要もなくなる(スナップショット済みツリーの部分木は既に不変なため)。
   async function bindSide(trace, annotation, expectedSide) {
     const diagnostics = [], notAnalyzed = [];
     const records = traceRecords(trace);
     if (!records) return blocked(expectedSide, [diagnostic('missing_trace_records', expectedSide, '_trace_records配列がありません')]);
     if (!annotation) return blocked(expectedSide, [diagnostic('missing_sidecar', expectedSide, '数量注釈sidecarが選択されていません')]);
-    const schema = validateAnnotationSchema(annotation);
-    if (!schema.valid) return blocked(expectedSide, schema.errors.map(error => diagnostic('schema_invalid', expectedSide, error)));
-    if (annotation.side !== expectedSide) return blocked(expectedSide, [diagnostic('source_mismatch', expectedSide, `side=${annotation.side}、期待値=${expectedSide}`)]);
 
-    const ruleset = validateRulesetCompatibility(annotation.ruleset_version);
+    const snapTrace = snapshotValue(trace);
+    const snapAnnotation = snapshotValue(annotation);
+    const snapRecords = traceRecords(snapTrace);
+
+    const schema = validateAnnotationSchema(snapAnnotation);
+    if (!schema.valid) return blocked(expectedSide, schema.errors.map(error => diagnostic('schema_invalid', expectedSide, error)));
+    if (snapAnnotation.side !== expectedSide) return blocked(expectedSide, [diagnostic('source_mismatch', expectedSide, `side=${snapAnnotation.side}、期待値=${expectedSide}`)]);
+
+    const ruleset = validateRulesetCompatibility(snapAnnotation.ruleset_version);
     if (!ruleset.supported) {
-      return blocked(expectedSide, [diagnostic('ruleset_mismatch', expectedSide, `非対応ruleset: ${canonicalJson(annotation.ruleset_version)} / 対応: ${canonicalJson(SUPPORTED_RULESETS)}`)]);
+      return blocked(expectedSide, [diagnostic('ruleset_mismatch', expectedSide, `非対応ruleset: ${canonicalJson(snapAnnotation.ruleset_version)} / 対応: ${canonicalJson(SUPPORTED_RULESETS)}`)]);
     }
 
-    const traceDuplicates = duplicateIds(records);
-    const annotationDuplicates = duplicateIds(annotation.records);
+    const traceDuplicates = duplicateIds(snapRecords);
+    const annotationDuplicates = duplicateIds(snapAnnotation.records);
     traceDuplicates.forEach(id => diagnostics.push(diagnostic('duplicate_trace_id', expectedSide, `元trace内で重複: ${id}`, id)));
     annotationDuplicates.forEach(id => diagnostics.push(diagnostic('duplicate_annotation_id', expectedSide, `sidecar内で重複: ${id}`, id)));
     if (diagnostics.length) return blocked(expectedSide, diagnostics);
 
-    const signature = await computeDatasetSignature(records);
-    if (signature !== annotation.dataset_signature) return blocked(expectedSide, [diagnostic('source_mismatch', expectedSide, `dataset_signature不一致 (expected=${signature}, actual=${annotation.dataset_signature})`)], signature);
+    const signature = await computeDatasetSignature(snapRecords);
+    if (signature !== snapAnnotation.dataset_signature) return blocked(expectedSide, [diagnostic('source_mismatch', expectedSide, `dataset_signature不一致 (expected=${signature}, actual=${snapAnnotation.dataset_signature})`)], signature);
 
-    const annotationById = new Map(annotation.records.map(record => [record.trace_id, record]));
-    const traceById = new Map(records.map(record => [record.trace_id, record]));
+    const annotationById = new Map(snapAnnotation.records.map(record => [record.trace_id, record]));
+    const traceById = new Map(snapRecords.map(record => [record.trace_id, record]));
     const bindings = [];
-    for (const record of records) {
+    for (const record of snapRecords) {
       const sideRecord = annotationById.get(record.trace_id);
       if (!sideRecord) {
         diagnostics.push(diagnostic('missing_annotation', expectedSide, '該当するsidecarレコードがありません', record.trace_id, 'warning'));
         notAnalyzed.push({ trace_id:record.trace_id, side:expectedSide, reason_code:'no_annotation', detail:'quantity-annotation側に該当trace_idがありません' });
-        bindings.push({ trace_id:record.trace_id, status:'missing', annotation:null, record:snapshotValue(record) });
+        bindings.push({ trace_id:record.trace_id, status:'missing', annotation:null, record });
         continue;
       }
       let actualHash;
       try { actualHash = await computeRecordContentHash(record); }
       catch (error) {
         diagnostics.push(diagnostic('content_hash_unverifiable', expectedSide, error.message, record.trace_id));
-        bindings.push({ trace_id:record.trace_id, status:'unparsed', annotation:null, record:snapshotValue(record) });
+        bindings.push({ trace_id:record.trace_id, status:'unparsed', annotation:null, record });
         continue;
       }
       if (actualHash !== sideRecord.content_hash) {
         diagnostics.push(diagnostic('stale_annotation', expectedSide, `content_hash不一致 (expected=${actualHash}, actual=${sideRecord.content_hash})`, record.trace_id));
-        bindings.push({ trace_id:record.trace_id, status:'stale_annotation', annotation:null, record:snapshotValue(record) });
+        bindings.push({ trace_id:record.trace_id, status:'stale_annotation', annotation:null, record });
         continue;
       }
       const unsupported = pathMappingIssues(record);
       if (unsupported.length) {
         diagnostics.push(diagnostic('path_mapping_unsupported', expectedSide, `${unsupported.length}件のパス形式列マッピングを解析できません`, record.trace_id));
-        bindings.push({ trace_id:record.trace_id, status:'unparsed', annotation:null, record:snapshotValue(record) });
+        bindings.push({ trace_id:record.trace_id, status:'unparsed', annotation:null, record });
         continue;
       }
-      // record(元traceレコードそのもの)・annotation(sidecarレコードそのもの)をどちらも
-      // 不変スナップショットとしてbindingへ埋め込むことで、下流(generatePropertyResolutions()等)が
-      // 別途渡されたtrace引数を信頼する必要をなくすだけでなく、bind()呼び出し後に呼び出し側が
-      // 元のtrace/annotationオブジェクトを変更しても、binding内の値には一切影響しないようにする
-      // (レビューで、参照のまま埋め込むとbind後の変更がbindingへ伝播してしまうと指摘された)。
-      // content_hashは直前でこのrecordから計算済みのため、ここに埋め込まれるrecordは常に
-      // dataset_signature・content_hashの検証を通過した実体のスナップショットである。
-      bindings.push({ trace_id:record.trace_id, status:'bound', annotation:snapshotValue(sideRecord), record:snapshotValue(record) });
+      // record・annotationはどちらも、関数冒頭で作った不変スナップショット(snapTrace/snapAnnotation)の
+      // 部分木であり、既にdeepFreeze済みである。個別に再度snapshotValue()する必要はない。
+      bindings.push({ trace_id:record.trace_id, status:'bound', annotation:sideRecord, record });
     }
-    for (const sideRecord of annotation.records) {
+    for (const sideRecord of snapAnnotation.records) {
       if (!traceById.has(sideRecord.trace_id)) diagnostics.push(diagnostic('missing_trace', expectedSide, 'sidecarのtrace_idに対応する元レコードがありません', sideRecord.trace_id));
     }
-    return { side:expectedSide, ready:isReady(diagnostics), dataset_signature:signature, ruleset_version:annotation.ruleset_version,
-      bindings, diagnostics, not_analyzed:notAnalyzed, candidate_records:[], satisfaction_judgements:[] };
+    // 【round3レビュー修正、重大2】戻り値全体(ruleset_version・bindings配列・各binding要素・
+    // diagnostics・not_analyzedを含む)をdeepFreeze()する。旧実装はrecord/annotationという
+    // 末端の値だけをsnapshotValue()していたが、それを包むbinding要素自体・bindings配列・
+    // ruleset_version(以前はannotationへの生参照のままだった)・戻り値オブジェクト自体は
+    // 可変のままだったため、呼び出し後に外側から書き換え可能だった、と指摘された。
+    return deepFreeze({ side:expectedSide, ready:isReady(diagnostics), dataset_signature:signature, ruleset_version:snapAnnotation.ruleset_version,
+      bindings, diagnostics, not_analyzed:notAnalyzed, candidate_records:[], satisfaction_judgements:[] });
   }
 
   function blocked(side, diagnostics, signature) {
-    return { side, ready:false, dataset_signature:signature || null, ruleset_version:null, bindings:[], diagnostics,
-      not_analyzed:[], candidate_records:[], satisfaction_judgements:[] };
+    return deepFreeze({ side, ready:false, dataset_signature:signature || null, ruleset_version:null, bindings:[], diagnostics,
+      not_analyzed:[], candidate_records:[], satisfaction_judgements:[] });
   }
 
+  // 【round3レビュー修正、重大1】requirement側をawaitし終えてからactual側のbindSide()を
+  // 開始する旧実装は、requirement側の非同期処理が続いている間、actual側の入力がまだ
+  // スナップショット化されておらず、その間に呼び出し側がactual側の元データを書き換える
+  // 余地があった、と指摘された。bindSide()は今や引数を最初のawaitより前に同期的に
+  // スナップショット化するため、両方のPromiseを個別にawaitせず同時に発生させ、
+  // Promise.all()でまとめて待つだけで、双方とも呼び出し直後の状態が確定するようになる。
   async function bindInputPair({ requirementTrace, requirementAnnotation, actualTrace, actualAnnotation }) {
-    const requirement = await bindSide(requirementTrace, requirementAnnotation, 'requirement');
-    const actual = await bindSide(actualTrace, actualAnnotation, 'actual');
-    return { schema_version:'quantity-binding/phase-b1', ready:requirement.ready && actual.ready, requirement, actual,
+    const requirementPromise = bindSide(requirementTrace, requirementAnnotation, 'requirement');
+    const actualPromise = bindSide(actualTrace, actualAnnotation, 'actual');
+    const [requirement, actual] = await Promise.all([requirementPromise, actualPromise]);
+    return deepFreeze({ schema_version:'quantity-binding/phase-b1', ready:requirement.ready && actual.ready, requirement, actual,
       diagnostics:[...requirement.diagnostics, ...actual.diagnostics], not_analyzed:[...requirement.not_analyzed, ...actual.not_analyzed],
-      comparison_candidates:[], satisfaction_judgements:[] };
+      comparison_candidates:[], satisfaction_judgements:[] });
   }
 
   function relationRefs(row) {
