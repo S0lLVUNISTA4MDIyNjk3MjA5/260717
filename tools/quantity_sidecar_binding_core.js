@@ -474,12 +474,17 @@
   }
 
   // quantity-annotation/1.0-rc1: 概念候補生成ライブラリ(移植、semantic_mapping_prototype.jsの
-  // marginOf()・CONCEPT_DICTIONARY・generatePropertyCandidates()から一字一句移植。乖離検出は
-  // quantity_annotation_ported_lib_check.jsで行う。改変禁止、移植元を直接編集してから再度移植すること)
+  // marginOf()・hasOpposingEvidence()・CONCEPT_DICTIONARY・generatePropertyCandidates()から
+  // 一字一句移植。乖離検出はquantity_annotation_ported_lib_check.jsで行う。改変禁止、
+  // 移植元を直接編集してから再度移植すること)
   function marginOf(candidates) {
     if (!candidates || candidates.length === 0) return 0;
     if (candidates.length === 1) return candidates[0].confidence;
     return candidates[0].confidence - candidates[1].confidence;
+  }
+  function hasOpposingEvidence(candidates) {
+    const top = candidates?.[0];
+    return !!(top && top.evidence.some(e => e.effect === 'opposes'));
   }
 
   const CONCEPT_DICTIONARY = [
@@ -1059,16 +1064,39 @@
   // comparisonMode導出(deriveComparisonModeCandidate())・数値比較・区間比較・充足判定は
   // 本段階では一切行わない(3.4節 段階3以降、未着手のまま)。 ──
 
+  // 【レビュー修正、中1】interval_semantics_candidatesの`value`はJSON Schema上は任意の非空文字列
+  // であり(quantity_annotation_schema_v1.json、enum制約なし)、resolveConditionStatus()が
+  // confidence/marginだけで判定すると、ruleset v2.19が実際には生成し得ない未知の文字列や、
+  // 「候補が弱い場合の受け皿」でしかない'unknown'自体が、たまたま高いconfidenceを持つ形で
+  // 格納された場合にresolvedへ昇格してしまう(COMPARISON_MODE_DERIVATION_TABLE・
+  // deriveComparisonModeCandidate()は'unknown'を明示的に導出対象から除外する契約であり、
+  // 「resolvedかつvalue:'unknown'」は下流の契約と矛盾する)。ruleset v2.19の
+  // REQUIREMENT_SEMANTICS_RULES・ACTUAL_SEMANTICS_RULES・CONDITION_SEMANTICS_RULES
+  // (semantic_mapping_prototype.js 83-213行目)が実際に生成しうるvalueの全体をallowlist化し、
+  // 'unknown'(常設の受け皿、実際の意味区分ではない)を含め、この集合に無い値は最上位候補で
+  // あってもresolvedにしない(曖昧候補を推測で一意化しないのと同じ理由で、未知語を推測で
+  // 「使える値」と扱わない)。ルール自体を変更した場合はこの集合も追随して更新すること
+  // (quantity_condition_candidate_verification.jsに、既知の全語彙がresolved可能であることを
+  // 確認する回帰テストがある)。
+  const KNOWN_CONDITION_SEMANTICS_VALUES = new Set([
+    'required_capability_domain', 'acceptable_region', 'achieved_point', 'capability_domain',
+    'outcome_range', 'guaranteed_minimum', 'guaranteed_maximum', 'aggregated_representative_value',
+    'test_condition',
+  ]);
+
   // resolvePropertyStatus()と同型だが、閾値はpropertyConfidenceではなくmodeConfidenceを使う
   // (AUTO_APPLICABLE_THRESHOLDSはproperty候補とinterval_semantics候補とで確信度閾値を
   // 別々に持ち、margin閾値だけを共有する設計になっている。semantic_mapping_prototype.js
-  // evaluateAutoApplicable()参照)。resolved: 最上位候補のconfidenceがmodeConfidence以上、
-  // かつmarginOf()がmargin以上。unavailable: 候補が0件(スキーマ上は空配列も許容されるため
-  // 防御的に扱うが、generateIntervalSemanticsCandidates()は常にunknownの受け皿候補を含める
-  // ため実運用では起こらない見込み)。ambiguous: それ以外。新しい閾値は発明しない。
+  // evaluateAutoApplicable()参照)。resolved: 最上位候補がKNOWN_CONDITION_SEMANTICS_VALUES
+  // に含まれる既知の値であり、かつconfidenceがmodeConfidence以上、かつmarginOf()がmargin以上。
+  // unavailable: 候補が0件(スキーマ上は空配列も許容されるため防御的に扱うが、
+  // generateIntervalSemanticsCandidates()は常にunknownの受け皿候補を含めるため実運用では
+  // 起こらない見込み)。ambiguous: それ以外(confidence/margin不足、または最上位候補が
+  // 'unknown'・未知語のいずれか)。新しい閾値は発明しない。
   function resolveConditionStatus(candidates, thresholds) {
     if (!candidates.length) return 'unavailable';
     const top = candidates[0];
+    if (!KNOWN_CONDITION_SEMANTICS_VALUES.has(top.value)) return 'ambiguous';
     const margin = marginOf(candidates);
     if (top.confidence >= thresholds.modeConfidence && margin >= thresholds.margin) return 'resolved';
     return 'ambiguous';
@@ -1079,8 +1107,53 @@
   // 強制していない。resolveConditionStatus()の正しさは「先頭要素が最上位候補である」ことに
   // 依存するため、外部データの順序をそのまま信頼せず、ここで確信度降順に並べ直してから使う
   // (元の配列は不変スナップショットの一部のため複製してからソートする)。
+  // 【レビュー修正、中2】confidenceが同点の候補同士は、単純な.sort()では入力配列内の元の順序
+  // (=sidecar生成側の実装依存、呼び出し側からは非決定的に見える)がそのまま保たれてしまう
+  // (Array.prototype.sortは安定ソートのため)。判定結果(status/value)自体はconfidenceの値だけで
+  // 決まり同点候補の順序には依存しないが、resolutions[].candidatesという監査用の出力配列の
+  // 順序が入力順に依存すると、スナップショット比較等での再現性を損なう。value昇順を
+  // 決定的なtie-breakとして追加する。
   function sortedByConfidenceDesc(candidates) {
-    return [...candidates].sort((a, b) => b.confidence - a.confidence);
+    return [...candidates].sort((a, b) => (b.confidence - a.confidence) || String(a.value).localeCompare(String(b.value)));
+  }
+
+  // 【レビュー修正、重大1】interval_semantics_candidatesはJSON Schema上、配列サイズに上限がない
+  // (maxItems未設定)。既知語彙(KNOWN_CONDITION_SEMANTICS_VALUES、9種)+unknownの受け皿を
+  // 前提にすれば実際に生成される候補数はせいぜい10件程度だが、スキーマはこれを保証しないため、
+  // スキーマ上有効なsidecarへ1数量あたり極端に大きな候補配列を格納できてしまう。この検査を
+  // 経ないままsortedByConfidenceDesc()で複製・全件ソートすると、B-2.2bが直積生成に対して
+  // 行った組み合わせ爆発対策と同種の、未対策な計算コストが生じる。上限検査は複製・ソートより
+  // 前に行い、超過時はready:falseで即座に停止する(1件の異常な数量のために結合全体の信頼性が
+  // 疑わしくなるため、B-2.2bのcandidateLimitのような部分的切り詰めではなく、
+  // duplicate_quantity_id等と同じ「構造的な入力異常」として扱う)。
+  const MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY = 64;
+
+  // 【レビュー修正、修正順3】interval_semantics_candidates内で同じvalueが複数回現れることは、
+  // 正しい生成元(semantic_mapping_prototype.jsのscoreSemantics()、valueごとにMapで集約するため
+  // 構造的に重複しない)では起こらない契約になっている。それでもスキーマ自体はこれを禁止して
+  // いないため、値の重複自体を「本来ありえない=信頼できない入力」の兆候として検査し、
+  // 上限検査と同じ理由でfail closedする(件数・重複のいずれも、複製・ソート前の軽い1回走査で
+  // 検査できるため、性能への影響はない)。
+  function validateIntervalSemanticsCandidates(analysesByTrace, side, diagnostics) {
+    for (const [traceId, analyses] of analysesByTrace) {
+      for (const analysis of analyses) {
+        const candidates = analysis.interval_semantics_candidates || [];
+        if (candidates.length > MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY) {
+          diagnostics.push({ code:'condition_candidate_limit_exceeded', severity:'error', side, trace_id:traceId, quantity_id:analysis.quantity_id,
+            observed_count:candidates.length, limit:MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY,
+            detail:`interval_semantics_candidatesの件数(${candidates.length})が上限(${MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY})を超えています` });
+          continue; // 上限超過が確定した配列を、重複検査のためだけにさらに全走査しない
+        }
+        const seen = new Set();
+        for (const candidate of candidates) {
+          if (seen.has(candidate.value)) {
+            diagnostics.push({ code:'condition_candidate_duplicate_value', severity:'error', side, trace_id:traceId, quantity_id:analysis.quantity_id,
+              value:candidate.value, detail:`interval_semantics_candidates内でvalue"${candidate.value}"が重複しています` });
+          }
+          seen.add(candidate.value);
+        }
+      }
+    }
   }
 
   function blockedConditionResult(diagnostics, binding) {
@@ -1115,15 +1188,32 @@
       ], binding);
     }
 
+    // 【レビュー修正、重大1・修正順3】複製・ソートより前に、件数上限・value重複を検査する。
+    const validationDiagnostics = [];
+    validateIntervalSemanticsCandidates(reqAnalysesByTrace, 'requirement', validationDiagnostics);
+    validateIntervalSemanticsCandidates(actAnalysesByTrace, 'actual', validationDiagnostics);
+    if (validationDiagnostics.length) return blockedConditionResult(validationDiagnostics, binding);
+
     const resolutions = [];
     const process = (analysesByTrace, side) => {
       for (const [traceId, analyses] of [...analysesByTrace.entries()].sort(([a], [b]) => String(a).localeCompare(String(b)))) {
         for (const analysis of [...analyses].sort((a, b) => String(a?.quantity_id || '').localeCompare(String(b?.quantity_id || '')))) {
           const candidates = sortedByConfidenceDesc(analysis.interval_semantics_candidates || []);
           const status = resolveConditionStatus(candidates, thresholds);
+          // 【レビュー修正、重大2】status/valueの2フィールドだけでは、下流(将来のcomparisonMode
+          // 自動適用判定、semantic_mapping_prototype.js evaluateAutoApplicable()参照)が安全性
+          // 判断に使うmargin・否定根拠の有無が失われる。resolutionは既にcandidates(evidence込み)
+          // を保持しているため導出は可能だが、都度導出させず、evaluateAutoApplicable()が
+          // 実際に必要とする形のまま明示フィールドとして保持する
+          // (evaluateAutoApplicable()自体が使うextractionWarningsCountは、interval_semantics
+          // 候補とは無関係なanalysis.quantity.extraction.warnings由来のため、この関数の関心事
+          // ではなく含めない。下流はbinding経由で直接参照できる)。
           resolutions.push({
             side, trace_id:traceId, quantity_id:analysis.quantity_id, status,
             value: status === 'resolved' ? candidates[0].value : null,
+            top_confidence: candidates.length ? candidates[0].confidence : null,
+            margin: marginOf(candidates),
+            has_opposing_evidence: hasOpposingEvidence(candidates),
             candidates,
           });
         }
@@ -1212,9 +1302,18 @@
           detail:'比較候補のquantity_idに対応する条件解決結果が見つかりません' });
         return null;
       }
+      // 【レビュー修正、重大2】status/valueの2フィールドだけを付加すると、後段の安全判定
+      // (margin・否定根拠の有無)に必要な情報が失われる(generateConditionResolutions()の
+      // コメント参照)。候補・evidence配列を丸ごとペア数分複製すると重くなるため、
+      // evaluateAutoApplicable()が実際に必要とするスカラー値(top_confidence・margin・
+      // has_opposing_evidence)だけを既存のstatus/valueと同じ扁平フィールドとして付加する。
       return { ...candidate,
         requirement_condition_status:reqCondition.status, requirement_condition_value:reqCondition.value,
-        actual_condition_status:actCondition.status, actual_condition_value:actCondition.value };
+        requirement_condition_top_confidence:reqCondition.top_confidence, requirement_condition_margin:reqCondition.margin,
+        requirement_condition_has_opposing_evidence:reqCondition.has_opposing_evidence,
+        actual_condition_status:actCondition.status, actual_condition_value:actCondition.value,
+        actual_condition_top_confidence:actCondition.top_confidence, actual_condition_margin:actCondition.margin,
+        actual_condition_has_opposing_evidence:actCondition.has_opposing_evidence };
     });
     if (missingConditionDiagnostics.length) {
       return blockedConditionAnnotatedResult(missingConditionDiagnostics, binding, comparisonResult, conditionResult);

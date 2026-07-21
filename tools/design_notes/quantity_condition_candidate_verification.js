@@ -152,6 +152,135 @@ function resolutionKey(r) { return `${r.side}:${r.quantity_id}`; }
     unsortedResult.resolutions[0]?.candidates[0]?.value === 'acceptable_region' && unsortedResult.resolutions[0]?.candidates[1]?.value === 'unknown',
     unsortedResult.resolutions[0]?.candidates);
 
+  // ── 5b. 【レビュー修正、中1】'unknown'が単独候補として高confidenceを持っていても(スキーマは
+  //    これを禁止しない)、resolvedへ昇格しない。'unknown'は「候補が弱い場合の受け皿」であり
+  //    実際の意味区分ではないため、常にambiguous(または候補自体が無ければunavailable)。 ──
+  const reqTraceUnknownHigh = traceWithText('req-cond-unknown-high', '記述。', []);
+  const bindingUnknownHigh = await bind(
+    reqTraceUnknownHigh, id => (id === 'req-cond-unknown-high'
+      ? [analysis('cuh', 'power', 'kW', 'source_raw_text', [conditionCandidate('unknown', 0.9)])]
+      : []),
+    traceWithText('act-cond-empty5b', '', []), () => []
+  );
+  const unknownHighResult = core.generateConditionResolutions({ binding:bindingUnknownHigh });
+  check('高confidence(0.9)の単独unknown候補もresolvedにしない(レビュー修正、中1)',
+    unknownHighResult.resolutions[0]?.status === 'ambiguous' && unknownHighResult.resolutions[0]?.value === null,
+    unknownHighResult.resolutions[0]);
+
+  // ── 5c. 【レビュー修正、中1】ruleset v2.19の既存語彙(9種)に含まれない未知の文字列も、
+  //    高confidenceで単独候補であってもresolvedへ昇格しない(未知語を推測で「使える値」と
+  //    扱わない)。 ──
+  const reqTraceUnsupported = traceWithText('req-cond-unsupported', '記述。', []);
+  const bindingUnsupported = await bind(
+    reqTraceUnsupported, id => (id === 'req-cond-unsupported'
+      ? [analysis('cus', 'power', 'kW', 'source_raw_text', [conditionCandidate('totally_unsupported_value', 0.9), conditionCandidate('unknown', 0.15)])]
+      : []),
+    traceWithText('act-cond-empty5c', '', []), () => []
+  );
+  const unsupportedResult = core.generateConditionResolutions({ binding:bindingUnsupported });
+  check('既存語彙に含まれない未知のvalue(高confidence)もresolvedにしない(レビュー修正、中1)',
+    unsupportedResult.resolutions[0]?.status === 'ambiguous' && unsupportedResult.resolutions[0]?.value === null,
+    unsupportedResult.resolutions[0]);
+
+  // ── 5d. ruleset v2.19の既存語彙(REQUIREMENT_SEMANTICS_RULES・ACTUAL_SEMANTICS_RULES・
+  //    CONDITION_SEMANTICS_RULES、semantic_mapping_prototype.js 83-213行目)が実際に生成しうる
+  //    全ての値は、単独かつ十分なconfidenceであればresolvedになる(allowlistが既存語彙自体を
+  //    誤って締め出していないことの確認)。 ──
+  const knownConditionValues = [
+    'required_capability_domain', 'acceptable_region', 'achieved_point', 'capability_domain',
+    'outcome_range', 'guaranteed_minimum', 'guaranteed_maximum', 'aggregated_representative_value',
+    'test_condition',
+  ];
+  for (const value of knownConditionValues) {
+    const reqTraceKnown = traceWithText(`req-cond-known-${value}`, '記述。', []);
+    const bindingKnown = await bind(
+      reqTraceKnown, id => (id === `req-cond-known-${value}`
+        ? [analysis(`ck-${value}`, 'power', 'kW', 'source_raw_text', [conditionCandidate(value, 0.9), conditionCandidate('unknown', 0.15)])]
+        : []),
+      traceWithText(`act-cond-known-empty-${value}`, '', []), () => []
+    );
+    const knownResult = core.generateConditionResolutions({ binding:bindingKnown });
+    check(`既存語彙の値"${value}"は単独十分confidenceでresolvedになる(allowlistが既存語彙を締め出していないことの確認)`,
+      knownResult.resolutions[0]?.status === 'resolved' && knownResult.resolutions[0]?.value === value,
+      knownResult.resolutions[0]);
+  }
+
+  // ── 5e. 【レビュー修正、重大1】1数量あたりのinterval_semantics_candidates件数に上限がある。
+  //    上限(64件)を1件超える65件の候補配列を持つ数量があると、複製・ソートより前に検出し、
+  //    生成呼び出し全体をfail closedする。 ──
+  const oversizedCandidates = Array.from({ length: 65 }, (_, i) => conditionCandidate(`synthetic_value_${i}`, 0.01 + i * 0.001));
+  const reqTraceOversized = traceWithText('req-cond-oversized', '記述。', []);
+  const bindingOversized = await bind(
+    reqTraceOversized, id => (id === 'req-cond-oversized' ? [analysis('cov', 'power', 'kW', 'source_raw_text', oversizedCandidates)] : []),
+    traceWithText('act-cond-empty5e', '', []), () => []
+  );
+  const oversizedResult = core.generateConditionResolutions({ binding:bindingOversized });
+  check('interval_semantics_candidatesが上限(64件)を超える数量があると呼び出し全体がready:falseになる(レビュー修正、重大1)',
+    oversizedResult.ready === false && oversizedResult.resolutions.length === 0, oversizedResult);
+  check('上限超過の理由がcondition_candidate_limit_exceededとしてside/trace_id/quantity_id/observed_count/limitを伴って記録される(レビュー修正、重大1)',
+    oversizedResult.diagnostics.some(d => d.code === 'condition_candidate_limit_exceeded' && d.severity === 'error'
+      && d.side === 'requirement' && d.trace_id === 'req-cond-oversized' && d.quantity_id === qid('cov')
+      && d.observed_count === 65 && d.limit === 64),
+    oversizedResult.diagnostics);
+
+  // ── 5f. 【レビュー修正、修正順3】同一数量のinterval_semantics_candidates内でvalueが重複すると
+  //    (正しい生成元では起こらないが、スキーマは禁止しない)、呼び出し全体をfail closedする。 ──
+  const reqTraceDupValue = traceWithText('req-cond-dupvalue', '記述。', []);
+  const bindingDupValue = await bind(
+    reqTraceDupValue, id => (id === 'req-cond-dupvalue'
+      ? [analysis('cdv', 'power', 'kW', 'source_raw_text', [conditionCandidate('acceptable_region', 0.6), conditionCandidate('acceptable_region', 0.5), conditionCandidate('unknown', 0.15)])]
+      : []),
+    traceWithText('act-cond-empty5f', '', []), () => []
+  );
+  const dupValueResult = core.generateConditionResolutions({ binding:bindingDupValue });
+  check('同一数量内でvalueが重複するとready:falseになる(レビュー修正、修正順3)',
+    dupValueResult.ready === false && dupValueResult.resolutions.length === 0, dupValueResult);
+  check('value重複の理由がcondition_candidate_duplicate_valueとしてside/trace_id/quantity_id/valueを伴って記録される(レビュー修正、修正順3)',
+    dupValueResult.diagnostics.some(d => d.code === 'condition_candidate_duplicate_value' && d.severity === 'error'
+      && d.side === 'requirement' && d.trace_id === 'req-cond-dupvalue' && d.quantity_id === qid('cdv') && d.value === 'acceptable_region'),
+    dupValueResult.diagnostics);
+
+  // ── 5g. 【レビュー修正、中2】同点confidence候補の出力順は、入力配列の並び順に関わらず
+  //    決定的(confidence降順、同点はvalue昇順)になる。 ──
+  const tiedForward = [conditionCandidate('guaranteed_maximum', 0.5), conditionCandidate('acceptable_region', 0.5), conditionCandidate('unknown', 0.15)];
+  const tiedReversed = [...tiedForward].reverse();
+  const reqTraceTieForward = traceWithText('req-cond-tie-order-a', '記述。', []);
+  const bindingTieForward = await bind(
+    reqTraceTieForward, id => (id === 'req-cond-tie-order-a' ? [analysis('cto-a', 'power', 'kW', 'source_raw_text', tiedForward)] : []),
+    traceWithText('act-cond-empty5g-a', '', []), () => []
+  );
+  const reqTraceTieReversed = traceWithText('req-cond-tie-order-b', '記述。', []);
+  const bindingTieReversed = await bind(
+    reqTraceTieReversed, id => (id === 'req-cond-tie-order-b' ? [analysis('cto-b', 'power', 'kW', 'source_raw_text', tiedReversed)] : []),
+    traceWithText('act-cond-empty5g-b', '', []), () => []
+  );
+  const tieForwardResult = core.generateConditionResolutions({ binding:bindingTieForward });
+  const tieReversedResult = core.generateConditionResolutions({ binding:bindingTieReversed });
+  const tieForwardOrder = tieForwardResult.resolutions[0]?.candidates.map(c => c.value);
+  const tieReversedOrder = tieReversedResult.resolutions[0]?.candidates.map(c => c.value);
+  check('同点confidence候補の出力順が入力配列の並び順(正順)に関わらず決定的(value昇順のtie-break、レビュー修正、中2)',
+    JSON.stringify(tieForwardOrder) === JSON.stringify(['acceptable_region', 'guaranteed_maximum', 'unknown']), tieForwardOrder);
+  check('同点confidence候補の出力順が入力配列の並び順(逆順)でも同じ結果になる(レビュー修正、中2)',
+    JSON.stringify(tieForwardOrder) === JSON.stringify(tieReversedOrder), { forward:tieForwardOrder, reversed:tieReversedOrder });
+
+  // ── 5h. 【レビュー修正、重大2】resolutionはtop_confidence・margin・has_opposing_evidenceを
+  //    保持する(下流のevaluateAutoApplicable()相当の安全判定に必要な情報を、status/valueへの
+  //    縮約で失わない)。 ──
+  check('resolved時、top_confidence/marginが正しい値を持つ(前提: 5節の明確なケース、confidence0.6・margin0.45)',
+    resolvedResult.resolutions[0]?.top_confidence === 0.6 && Math.abs(resolvedResult.resolutions[0]?.margin - 0.45) < 1e-9,
+    resolvedResult.resolutions[0]);
+  check('unavailable時(候補0件)、top_confidenceはnull・marginは0', emptyResult.resolutions[0]?.top_confidence === null && emptyResult.resolutions[0]?.margin === 0, emptyResult.resolutions[0]);
+  const opposingCandidate = { value:'achieved_point', confidence:0.6, evidence:[{ type:'negative_keyword', value:'achieved_point', source_text:'(test)', effect:'opposes', weight:-0.4 }, { type:'keyword', value:'achieved_point', source_text:'(test)', effect:'supports', weight:1.0 }] };
+  const reqTraceOpposing = traceWithText('req-cond-opposing', '記述。', []);
+  const bindingOpposing = await bind(
+    reqTraceOpposing, id => (id === 'req-cond-opposing' ? [analysis('cop', 'power', 'kW', 'source_raw_text', [opposingCandidate, conditionCandidate('unknown', 0.15)])] : []),
+    traceWithText('act-cond-empty5h', '', []), () => []
+  );
+  const opposingResult = core.generateConditionResolutions({ binding:bindingOpposing });
+  check('最上位候補のevidenceにeffect:"opposes"があるとhas_opposing_evidence:trueになる(レビュー修正、重大2)',
+    opposingResult.resolutions[0]?.has_opposing_evidence === true, opposingResult.resolutions[0]);
+  check('否定根拠のないケース(前提: 5節)ではhas_opposing_evidence:false', resolvedResult.resolutions[0]?.has_opposing_evidence === false, resolvedResult.resolutions[0]);
+
   // ── 6. 【必須修正】Phase B-1不整合(ready:false)ではB-2.3a処理を走らせない ──
   const notReadyBinding = { ready:false, requirement:{ bindings:[] }, actual:{ bindings:[] } };
   const notReadyResult = core.generateConditionResolutions({ binding:notReadyBinding });
@@ -278,6 +407,20 @@ function resolutionKey(r) { return `${r.side}:${r.quantity_id}`; }
   check('付加されたactual側の条件status/valueが正しい',
     annotatedResult.comparison_candidates[0]?.actual_condition_status === 'resolved' && annotatedResult.comparison_candidates[0]?.actual_condition_value === 'achieved_point',
     annotatedResult.comparison_candidates[0]);
+  // ── 【レビュー修正、重大2】status/valueだけでなく、margin・top_confidence・
+  //    has_opposing_evidenceも両側それぞれ正しく付加される。 ──
+  check('付加されたrequirement側のtop_confidence/marginが正しい(候補: acceptable_region0.6・unknown0.15)',
+    annotatedResult.comparison_candidates[0]?.requirement_condition_top_confidence === 0.6
+    && Math.abs(annotatedResult.comparison_candidates[0]?.requirement_condition_margin - 0.45) < 1e-9,
+    annotatedResult.comparison_candidates[0]);
+  check('付加されたactual側のtop_confidence/marginが正しい(候補: achieved_point0.55・unknown0.15)',
+    annotatedResult.comparison_candidates[0]?.actual_condition_top_confidence === 0.55
+    && Math.abs(annotatedResult.comparison_candidates[0]?.actual_condition_margin - 0.4) < 1e-9,
+    annotatedResult.comparison_candidates[0]);
+  check('付加された両側のhas_opposing_evidenceがfalse(否定根拠のないケース)',
+    annotatedResult.comparison_candidates[0]?.requirement_condition_has_opposing_evidence === false
+    && annotatedResult.comparison_candidates[0]?.actual_condition_has_opposing_evidence === false,
+    annotatedResult.comparison_candidates[0]);
   check('元のcomparison候補フィールド(concept_id等)もそのまま保持される',
     annotatedResult.comparison_candidates[0]?.concept_id === 'performance.cooling_capacity'
     && annotatedResult.comparison_candidates[0]?.requirement_quantity_id === qid('ann-r')
@@ -339,9 +482,35 @@ function resolutionKey(r) { return `${r.side}:${r.quantity_id}`; }
     annotatedResult.comparison_candidates.every(c => !('comparison_mode' in c) && !('satisfied' in c) && !('numeric_comparison' in c)),
     annotatedResult.comparison_candidates);
 
-  // ── 18. 実fixtureでend-to-end確認(段階2) ──
-  const realAnnotated = core.generateConditionAnnotatedComparisonCandidates({ binding:realBinding, relations:[] });
-  check('実fixture(relations空)でも段階2は例外なく完了する', realAnnotated.ready === true || realAnnotated.ready === false, realAnnotated.diagnostics);
+  // ── 18. 【レビュー修正、中3】実fixtureでend-to-end確認(段階2)。修正前は`ready === true ||
+  //    ready === false`というbooleanなら必ず真になる空虚な検証で、実質的に何も確認していな
+  //    かった、と指摘された。実在するrelation(要求側×実仕様側の全trace_id組、B-2.2b自身の
+  //    実fixtureテストと同じ構築方法)を渡し、実際に比較候補が1件以上生成されること、両側の
+  //    quantity_idが実在すること、両側の条件解決参照が必ず存在すること、statusが許可値である
+  //    こと、resolvedならvalueが存在しambiguous/unavailableならvalueがnullであることを検証する。 ──
+  const realReqTraceIds = core.traceRecords(pdfFixture.sample_trace).map(r => r.trace_id);
+  const realActTraceIds = core.traceRecords(excelFixture.sample_trace).map(r => r.trace_id);
+  const realRelationsForCondition = [];
+  realReqTraceIds.forEach(reqId => realActTraceIds.forEach(actId => realRelationsForCondition.push(relation(reqId, actId))));
+  const realAnnotated = core.generateConditionAnnotatedComparisonCandidates({ binding:realBinding, relations:realRelationsForCondition });
+  check('実fixtureでも段階2はready:trueで完了する', realAnnotated.ready === true, realAnnotated.diagnostics);
+  check('実fixtureで比較候補が1件以上生成される(HVAC実データなのでconcept一致するペアが実在する、前提: B-2.2b自身の実fixtureテストで確認済み)',
+    realAnnotated.comparison_candidates.length >= 1, realAnnotated.candidate_count);
+  const realReqQuantityIds = new Set(realBinding.requirement.bindings.filter(b => b.status === 'bound').flatMap(b => (b.annotation.analyses || []).map(a => a.quantity_id)));
+  const realActQuantityIds = new Set(realBinding.actual.bindings.filter(b => b.status === 'bound').flatMap(b => (b.annotation.analyses || []).map(a => a.quantity_id)));
+  check('実fixtureのcomparison_candidatesが、要求側・実仕様側とも実在するquantity_idだけで構成される',
+    realAnnotated.comparison_candidates.every(c => realReqQuantityIds.has(c.requirement_quantity_id) && realActQuantityIds.has(c.actual_quantity_id)));
+  check('実fixtureの全候補で両側の条件status(許可値resolved/ambiguous/unavailable)が付加されている',
+    realAnnotated.comparison_candidates.every(c => ['resolved', 'ambiguous', 'unavailable'].includes(c.requirement_condition_status) && ['resolved', 'ambiguous', 'unavailable'].includes(c.actual_condition_status)),
+    realAnnotated.comparison_candidates.map(c => ({ req:c.requirement_condition_status, act:c.actual_condition_status })));
+  check('実fixtureの全候補で、resolvedならvalueが非null、それ以外(ambiguous/unavailable)ならvalueがnull(要求側)',
+    realAnnotated.comparison_candidates.every(c => (c.requirement_condition_status === 'resolved') === (c.requirement_condition_value !== null)),
+    realAnnotated.comparison_candidates.map(c => ({ status:c.requirement_condition_status, value:c.requirement_condition_value })));
+  check('実fixtureの全候補で、resolvedならvalueが非null、それ以外(ambiguous/unavailable)ならvalueがnull(実仕様側)',
+    realAnnotated.comparison_candidates.every(c => (c.actual_condition_status === 'resolved') === (c.actual_condition_value !== null)),
+    realAnnotated.comparison_candidates.map(c => ({ status:c.actual_condition_status, value:c.actual_condition_value })));
+  check('実fixtureの全候補にcomparisonMode・数値比較系フィールドが混入しない',
+    realAnnotated.comparison_candidates.every(c => !('comparison_mode' in c) && !('satisfied' in c) && !('numeric_comparison' in c)));
 
   console.log('\n=== quantity_condition_candidate_verification 結果 ===');
   let failed = 0;

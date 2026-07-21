@@ -20,7 +20,7 @@ const BINDING_CORE_PATH = path.join(REPO_ROOT, 'tools/quantity_sidecar_binding_c
 const QUANTITY_LIB_RANGE_A = [112, 452]; // UNIT_DEFS 〜 extractQuantities()
 const QUANTITY_LIB_RANGE_B = [458, 469]; // isEmptyInterval() 〜 isGenuinePoint()
 const SEMANTICS_LIB_RANGE = [76, 367];   // isTwoSidedRange() 〜 generateIntervalSemanticsCandidates()
-const PROPERTY_LIB_RANGE_A = [400, 404]; // marginOf()
+const PROPERTY_LIB_RANGE_A = [400, 408]; // marginOf() 〜 hasOpposingEvidence()
 const PROPERTY_LIB_RANGE_B = [438, 511]; // CONCEPT_DICTIONARY 〜 generatePropertyCandidates()
 
 const assertions = [];
