@@ -771,10 +771,11 @@
   const DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT = 2000;
   const DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT = 2000000;
   const MAX_SAFE_CANDIDATE_LIMIT = 10000;
-  // totalCandidateLimitは実際にメモリへ載る候補オブジェクト数を直接制限するため、
-  // candidateLimitと同程度の桁の上限にとどめる(候補1件はごく小さいオブジェクトだが、
-  // 際限なく大きな値を許容すると重大1の穴が再発する)。
-  const MAX_SAFE_TOTAL_CANDIDATE_LIMIT = 100000;
+  // 【round4レビュー修正、中3】totalCandidateLimitの検証上限は実際にメモリへ載り、UIへ表示
+  // されうる候補オブジェクト数を直接制限する。ブラウザでの実測(ヒープ・テーブル描画等)による
+  // 検証がまだできていないため、round3で設定した100,000は根拠なく大きすぎると指摘された。
+  // Playwright等での実測が済むまでは、より保守的な10,000を上限とする。
+  const MAX_SAFE_TOTAL_CANDIDATE_LIMIT = 10000;
   // totalPotentialPairLimitはPass 1の軽い集計(乗算・加算のみ、オブジェクト生成なし)にしか
   // 使われないため、totalCandidateLimitより大幅に大きい上限を許容してよい。
   const MAX_SAFE_TOTAL_POTENTIAL_PAIR_LIMIT = 1000000000;
@@ -803,32 +804,26 @@
     return byConcept;
   }
 
-  // 【round1レビュー修正、重大2の一部】切り詰める場合、quantity_id(内容ハッシュ)の辞書順という
-  // 意味のない基準ではなく、そのconceptでのconfidence降順を優先する(同点はquantity_id昇順で
-  // 決定的にする)。現行実装では1つのbound record内の全analysisがnearbyText/tagsを共有するため、
-  // 同一バケット・同一side・同一conceptの候補間でconfidenceが実際に異なることは構造的に起こらない
-  // (nearbyTextForRecord()がレコード単位でquantitySourceFields全体を一律除外する設計のため)。
-  // それでも、将来nearbyText計算がanalysis単位に細分化された場合に備えた防御的な実装として残す。
-  function sortByConfidenceDesc(ids, side, resolutionByKey) {
-    return [...ids].sort((a, b) => {
-      const confA = resolutionByKey.get(`${side}:${a}`)?.candidates?.[0]?.confidence ?? 0;
-      const confB = resolutionByKey.get(`${side}:${b}`)?.candidates?.[0]?.confidence ?? 0;
-      if (confB !== confA) return confB - confA;
-      return String(a).localeCompare(String(b));
-    });
-  }
-
-  // 直積を配列化せず、confidence降順(同点はquantity_id昇順)のID列を二重ループで走査しながら
-  // candidateLimitに達した時点で打ち切り、生成した候補をcomparisonCandidatesへ積む。
-  // potentialPairCount(切り詰め前の本来のペア数)は呼び出し側が(Pass 1で)既に計算済みのため、
-  // ここでは受け取らず・再計算しない。戻り値は実際に生成した候補数のみ。
-  function emitConceptGroupCandidates(reqIds, actIds, conceptId, bucket, candidateLimit, resolutionByKey, comparisonCandidates) {
-    const sortedReq = sortByConfidenceDesc(reqIds, 'requirement', resolutionByKey);
-    const sortedAct = sortByConfidenceDesc(actIds, 'actual', resolutionByKey);
+  // 【round4レビュー修正、重大1: confidence降順ソートを撤廃】旧実装は切り詰め時の順序基準として
+  // reqIds/actIds全体をconfidence降順(同点はquantity_id昇順)へ複製・ソートしていた。しかし
+  // (a) 1つのbound record内の全analysisがnearbyText/tagsを共有するため、同一バケット・同一side・
+  // 同一conceptの候補間でconfidenceが実際に異なることは構造的に起こらず(常にconfidence同点)、
+  // このソートは実質的にquantity_id昇順ソートと同じ結果しか生まないこと、(b) それにもかかわらず
+  // candidateLimitの大きさに関わらずreqIds/actIds全体(たとえば片側50万件)を毎回複製・O(N log N)
+  // ソートしており、totalCandidateLimit(実体化見込み件数の上限)がこの複製・ソート自体のコストを
+  // 一切制限できていなかった、と指摘された(candidateLimit=50に抑えても、その前に50万要素の
+  // 配列を複製・全件ソートしてしまう)。さらに、stage 1(generateDimensionCandidates()の
+  // dimensionSideIndex())が既にanalysesをquantity_id昇順でソート済みであり、bucket.
+  // requirement_quantity_ids/actual_quantity_idsはその順序を保ったまま届く。つまりreqIds/actIds
+  // は呼び出し時点で既にquantity_id昇順ソート済みであり、独自にソートし直す必要が最初からなかった。
+  // 修正: ソートを撤廃し、reqIds/actIdsをそのまま(既にソート済みの状態のまま)二重ループで
+  // 走査し、candidateLimitに達した時点で即座に打ち切る。これによりこの関数の計算量は
+  // O(candidateLimit)にとどまり、reqIds/actIdsの実際の長さに一切依存しなくなる。
+  function emitConceptGroupCandidates(reqIds, actIds, conceptId, bucket, candidateLimit, comparisonCandidates) {
     let emitted = 0;
     outer:
-    for (const reqId of sortedReq) {
-      for (const actId of sortedAct) {
+    for (const reqId of reqIds) {
+      for (const actId of actIds) {
         if (emitted >= candidateLimit) break outer;
         comparisonCandidates.push({
           requirement_quantity_id:reqId, actual_quantity_id:actId, concept_id:conceptId, dimension:bucket.dimension,
@@ -907,13 +902,30 @@
     // 走査し終えてからまとめて判定していたため、上限超過が確定した後も残りすべてのバケットに
     // ついて数量ID再走査・conceptグルーピング・記述子の蓄積・not_analyzed生成を続けており、
     // 無駄な走査が残っていた、と指摘された。 ──
+    // 【round4レビュー修正、重大2】バケットの走査順がdimensionResult.candidate_buckets(=relations
+    // 引数の配列順をそのまま引き継ぐ)に依存していたため、同じrelations集合でも配列順を変えるだけで
+    // 「どのグループまで走査したか」「打ち切り時点の観測値」「打ち切りに巻き込まれたグループ」が
+    // 変わってしまっていた、と指摘された。修正: Pass 1へ入る前に、requirement_trace_id→
+    // actual_trace_id→dimensionの安定キーでバケットを並べ替える。これにより、同じrelations集合
+    // であれば入力順に関わらず常に同じバケットが先に走査され、早期打ち切りの結果(打ち切り時点の
+    // 観測値・巻き込まれたグループ)が再現可能になる。
+    const sortedBuckets = [...dimensionResult.candidate_buckets].sort((a, b) => {
+      const byReq = String(a.requirement_trace_id).localeCompare(String(b.requirement_trace_id));
+      if (byReq !== 0) return byReq;
+      const byAct = String(a.actual_trace_id).localeCompare(String(b.actual_trace_id));
+      if (byAct !== 0) return byAct;
+      return String(a.dimension).localeCompare(String(b.dimension));
+    });
+
     const groupDescriptors = [];
     let totalPotentialPairCount = 0;
     let totalMaterializedUpperBound = 0;
-    let limitExceededKind = null; // 'potential' | 'materialized' | null(未超過)
+    let limitExceededKinds = null; // ['materialized'] / ['potential'] / ['materialized','potential'] / null(未超過)
+    let processedBucketCount = 0;
 
     bucketScan:
-    for (const bucket of dimensionResult.candidate_buckets) {
+    for (const bucket of sortedBuckets) {
+      processedBucketCount++;
       const reqUnresolved = [];
       const actUnresolved = [];
       const reqByConcept = groupResolvedByConcept(bucket.requirement_quantity_ids, 'requirement', resolutionByKey, reqUnresolved);
@@ -944,8 +956,13 @@
           totalPotentialPairCount += potentialPairCount;
           totalMaterializedUpperBound += materializedUpperBound;
           groupDescriptors.push({ reqIds, actIds, conceptId, bucket, potentialPairCount });
-          if (totalMaterializedUpperBound > totalCandidateLimit) { limitExceededKind = 'materialized'; break bucketScan; }
-          if (totalPotentialPairCount > totalPotentialPairLimit) { limitExceededKind = 'potential'; break bucketScan; }
+          // 【round4レビュー修正、中1】両方の上限を同じ加算後にそれぞれ独立して評価し、
+          // 同時に超過した場合は両方のkindを記録する(片方だけ記録すると診断が不完全になる、
+          // と指摘された)。
+          const exceededKinds = [];
+          if (totalMaterializedUpperBound > totalCandidateLimit) exceededKinds.push('materialized');
+          if (totalPotentialPairCount > totalPotentialPairLimit) exceededKinds.push('potential');
+          if (exceededKinds.length) { limitExceededKinds = exceededKinds; break bucketScan; }
         } else if (reqIds) {
           notAnalyzed.push({ reason_code:'concept_mismatch', side:'requirement', concept_id:conceptId, quantity_ids:[...reqIds].sort(),
             requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
@@ -970,7 +987,7 @@
     // (実体化していれば超過していたはずという仮定の監査記録)として、`materialized_pair_count:0`
     // を明示して記録する。diagnostics配列への個別warning追加は行わない(全体のerror診断1件で
     // 十分であり、実体化していないのに「切り詰めた」というwarningを積み増すと事実と食い違うため)。 ──
-    if (limitExceededKind) {
+    if (limitExceededKinds) {
       groupDescriptors.forEach(({ conceptId, bucket, potentialPairCount }) => {
         if (potentialPairCount > candidateLimit) {
           notAnalyzed.push({ reason_code:'candidate_limit_would_exceed', concept_id:conceptId,
@@ -979,15 +996,20 @@
             potential_pair_count:potentialPairCount, candidate_limit:candidateLimit, materialized_pair_count:0 });
         }
       });
-      const limitName = limitExceededKind === 'materialized' ? 'totalCandidateLimit' : 'totalPotentialPairLimit';
-      const limitValue = limitExceededKind === 'materialized' ? totalCandidateLimit : totalPotentialPairLimit;
-      const observedLabel = limitExceededKind === 'materialized' ? '実体化見込み件数の累計' : '潜在ペア数の累計';
-      const observedValue = limitExceededKind === 'materialized' ? totalMaterializedUpperBound : totalPotentialPairCount;
+      // 【round4レビュー修正、重大2】observed_*_at_stopという名前で、これが「入力全体の合計」では
+      // なく「バケット走査を打ち切った時点までの部分集計」であることをフィールド名自体で明示する
+      // (旧`total_potential_pair_count`等の名前は、あたかも入力全体の総計であるかのように誤解
+      // されうる、と指摘された)。unscanned_bucket_countが0でない限り、これらは部分集計である。
+      const limitNames = limitExceededKinds.map(kind => kind === 'materialized' ? 'totalCandidateLimit' : 'totalPotentialPairLimit');
+      const unscannedBucketCount = sortedBuckets.length - processedBucketCount;
       diagnostics.push({ code:'total_candidate_limit_exceeded', severity:'error',
-        detail:`比較候補の${observedLabel}(${observedValue}、バケット走査を打ち切った時点の値)が${limitName}(${limitValue})を超えたため、候補を1件も生成せず停止しました` });
-      notAnalyzed.push({ reason_code:'total_candidate_limit_exceeded', limit_kind:limitExceededKind,
-        total_potential_pair_count:totalPotentialPairCount, total_materialized_upper_bound:totalMaterializedUpperBound,
-        total_candidate_limit:totalCandidateLimit, total_potential_pair_limit:totalPotentialPairLimit });
+        detail:`比較候補の累計(バケット走査を打ち切った時点の値。実体化見込み=${totalMaterializedUpperBound}、潜在=${totalPotentialPairCount})が${limitNames.join('・')}を超えたため、候補を1件も生成せず停止しました(走査済み${processedBucketCount}/${sortedBuckets.length}バケット、未走査${unscannedBucketCount}バケット)` });
+      notAnalyzed.push({ reason_code:'total_candidate_limit_exceeded', limit_kinds:limitExceededKinds,
+        observed_potential_pair_count_at_stop:totalPotentialPairCount,
+        observed_materialized_upper_bound_at_stop:totalMaterializedUpperBound,
+        total_candidate_limit:totalCandidateLimit, total_potential_pair_limit:totalPotentialPairLimit,
+        processed_bucket_count:processedBucketCount, total_bucket_count:sortedBuckets.length,
+        unscanned_bucket_count:unscannedBucketCount });
       const combinedDiagnostics = [...(dimensionResult.diagnostics || []), ...(propertyResult.diagnostics || []), ...diagnostics];
       return { ready:isReady(combinedDiagnostics), comparison_candidates:[], candidate_count:0, result_complete:false,
         diagnostics:combinedDiagnostics,
@@ -999,7 +1021,7 @@
     const comparisonCandidates = [];
     let anyGroupTruncated = false;
     for (const { reqIds, actIds, conceptId, bucket, potentialPairCount } of groupDescriptors) {
-      const emitted = emitConceptGroupCandidates(reqIds, actIds, conceptId, bucket, candidateLimit, resolutionByKey, comparisonCandidates);
+      const emitted = emitConceptGroupCandidates(reqIds, actIds, conceptId, bucket, candidateLimit, comparisonCandidates);
       if (potentialPairCount > emitted) {
         anyGroupTruncated = true;
         const excludedCount = potentialPairCount - emitted;
