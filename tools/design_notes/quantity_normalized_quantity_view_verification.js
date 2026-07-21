@@ -468,6 +468,31 @@ async function pairBindingPower(reqQuantityValue, actQuantityValue, label = 'v')
       entry?.comparison_mode_candidate === 'point_in_region' && entry?.unit_conversion_plan?.conversion_operation === 'identity', entry);
   }
 
+  // ── 【レビュー修正、重大1(3巡目)】lower>upperの数学的に空な区間を、requirement/actual
+  //    両側で公開パイプライン経由でも拒否する ──
+  {
+    const invertedActualValue = { kind:'interval', lower:{ value:10, inclusive:true }, upper:{ value:5, inclusive:true } };
+    const { binding, relations } = await pairBindingPower(undefined, invertedActualValue, 'inverted-act');
+    const result = core.generateNormalizedQuantityViews({ binding, relations });
+    check('前提確認: actual側がlower>upperの区間でもready:trueまで到達する(重大1、3巡目)', result.ready === true, result);
+    check('actual側がlower>upperの区間は正規化ビューを生成せず、not_analyzedへside:"actual"・quantity_value_emptyとして残る(重大1、3巡目)',
+      result.normalized_quantity_views.length === 0
+      && result.not_analyzed.some(n => n.reason_code === 'quantity_value_empty' && n.side === 'actual'
+        && n.actual_quantity_id === qid('inverted-act-a')),
+      result);
+  }
+  {
+    const invertedRequirementValue = { kind:'interval', lower:{ value:5, inclusive:true }, upper:{ value:5, inclusive:false } };
+    const { binding, relations } = await pairBindingPower(invertedRequirementValue, undefined, 'inverted-req');
+    const result = core.generateNormalizedQuantityViews({ binding, relations });
+    check('前提確認: requirement側が[5,5)の区間でもready:trueまで到達する(重大1、3巡目)', result.ready === true, result);
+    check('requirement側が[5,5)の区間は正規化ビューを生成せず、not_analyzedへside:"requirement"・quantity_value_emptyとして残る(重大1、3巡目)',
+      result.normalized_quantity_views.length === 0
+      && result.not_analyzed.some(n => n.reason_code === 'quantity_value_empty' && n.side === 'requirement'
+        && n.requirement_quantity_id === qid('inverted-req-r')),
+      result);
+  }
+
   // ── 必須テスト16: 正常なalternatives(2要素の数値配列)を使った公開パイプラインのend-to-end ──
   {
     const validAlternatives = { kind:'alternatives', options:[12, 15], selection_semantics:'unknown' };

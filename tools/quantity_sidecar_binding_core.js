@@ -1546,6 +1546,16 @@
     return typeof value === 'number' && Number.isFinite(value);
   }
 
+  // 【レビュー指摘、中1(3巡目)】interval境界の`inclusive`がbooleanかは未検証だった(`value`の
+  // 有限性しか見ていなかった)。`{value:5}`(inclusive欠落)や`inclusive:'false'`(文字列)も
+  // 通過し、変換結果へそのまま複製されることを確認した。後続の点判定・境界包含判定はinclusiveが
+  // booleanである前提のため、own propertyとしての存在とboolean型を確認する。
+  function isValidBound(bound) {
+    return bound !== null && typeof bound === 'object' && !Array.isArray(bound)
+      && Object.prototype.hasOwnProperty.call(bound, 'value') && Object.prototype.hasOwnProperty.call(bound, 'inclusive')
+      && isFiniteNumber(bound.value) && typeof bound.inclusive === 'boolean';
+  }
+
   // 【レビュー指摘、重大3】`alternatives.options`はJSON Schema上サイズ上限(maxItems)が無い。
   // 正常な抽出器(quantity_extraction_prototype.js 297行目)が生成する並列値は常に2要素だが、
   // スキーマ自体はこれを保証しない。件数検査より前に`.map()`で全件複製すると、
@@ -1567,34 +1577,44 @@
       return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
     }
     if (quantityValue.kind === 'interval') {
-      if (quantityValue.lower !== null && (typeof quantityValue.lower !== 'object' || Array.isArray(quantityValue.lower))) {
-        return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
-      }
-      if (quantityValue.upper !== null && (typeof quantityValue.upper !== 'object' || Array.isArray(quantityValue.upper))) {
-        return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
-      }
-      // 【レビュー指摘、重大2(2巡目)】lower/upperの両方がnullの区間は、後続の数値比較に使える
-      // 数値情報を1つも持たない。片側だけがnull(片側無限)であることは正当な区間表現だが、
-      // 両側nullは「値が無い」に等しく、空のalternatives(下記)と同じ扱いとする。
+      if (quantityValue.lower !== null && !isValidBound(quantityValue.lower)) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+      if (quantityValue.upper !== null && !isValidBound(quantityValue.upper)) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+      // 両側nullは値情報が無い(空のalternativesと同じ扱い、下記参照)。
       if (quantityValue.lower === null && quantityValue.upper === null) {
         return { outcome:'unsupported', reason_code:'quantity_value_empty' };
       }
-      if (quantityValue.lower && !isFiniteNumber(quantityValue.lower.value)) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
-      if (quantityValue.upper && !isFiniteNumber(quantityValue.upper.value)) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+      // 【レビュー指摘、重大1(3巡目)】lower>upper、またはlower===upperかつ片側でも排他的境界は
+      // 数学的に空集合であり、既存の比較正本(quantity_extraction_prototype.jsのisEmptyInterval()、
+      // 458-463行目)と同じ判定基準をここでも適用する。JSON Schemaは各境界のvalueの型しか検証せず
+      // lower/upperの大小関係は保証しないため、実際に[10,5]・[5,5)がoutcome:'ok'を通過することを
+      // 確認した上で修正した。
+      if (quantityValue.lower && quantityValue.upper) {
+        if (quantityValue.lower.value > quantityValue.upper.value) return { outcome:'unsupported', reason_code:'quantity_value_empty' };
+        if (quantityValue.lower.value === quantityValue.upper.value && !(quantityValue.lower.inclusive && quantityValue.upper.inclusive)) {
+          return { outcome:'unsupported', reason_code:'quantity_value_empty' };
+        }
+      }
       return { outcome:'ok' };
     }
     if (quantityValue.kind === 'alternatives') {
       if (!Array.isArray(quantityValue.options)) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
-      // 【レビュー指摘、重大1(2巡目)】0要素のalternativesは、後続の数値比較に使える選択肢を
-      // 1つも持たない。正常な抽出器が生成する並列値は常に2要素であり、0要素は構造上「値が無い」
-      // に等しいため、上限検査と同じくいかなる要素走査よりも前に(length参照のみで)拒否する。
       if (quantityValue.options.length === 0) return { outcome:'unsupported', reason_code:'quantity_value_empty' };
-      // 件数上限検査も、要素へ触れるいかなる走査(.every()・.map()等)よりも前に行う(重大3)。
+      // 件数上限検査を、要素へ触れるいかなる走査よりも前に行う(重大3)。
       if (quantityValue.options.length > MAX_ALTERNATIVE_VALUES_PER_QUANTITY) {
         return { outcome:'unsupported', reason_code:'quantity_value_limit_exceeded',
           observed_count:quantityValue.options.length, limit:MAX_ALTERNATIVE_VALUES_PER_QUANTITY };
       }
-      if (!quantityValue.options.every(isFiniteNumber)) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+      // 【レビュー指摘、中3(3巡目)】プログラム的に構築された配列は`.every()`/`.map()`自体を
+      // 上書きされている可能性があり(`Array.isArray()`はtrueのまま)、その場合メソッド呼び出しが
+      // 例外を投げることを実際に確認した。件数上限(64)が小さいため、添字ループで検証する。
+      for (let i = 0; i < quantityValue.options.length; i++) {
+        if (!isFiniteNumber(quantityValue.options[i])) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+      }
+      // 【レビュー指摘、中2(3巡目)】selection_semanticsもJSON Schema契約(非空文字列)どおりに
+      // 検証する。数値変換自体には影響しないが、正規化ビューを元Schemaより弱い構造にしないため。
+      if (typeof quantityValue.selection_semantics !== 'string' || quantityValue.selection_semantics.length === 0) {
+        return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+      }
       return { outcome:'ok' };
     }
     // kindが'interval'/'alternatives'のいずれでもない場合(防御的分岐。quantity-annotationの
@@ -1640,9 +1660,14 @@
       }
       return { outcome:'converted', value:{ kind:'interval', lower, upper } };
     }
-    // kind === 'alternatives'(validateQuantityValueStructure()が既に件数・入力の有限性を確認済み)
-    const options = quantityValue.options.map(convert);
-    if (!options.every(isFiniteNumber)) return { outcome:'unsupported', reason_code:'quantity_conversion_non_finite' };
+    // kind === 'alternatives'(validateQuantityValueStructure()が既に件数・入力の有限性を確認済み)。
+    // 添字ループで新しい配列へ格納する(中3、上書きされた.map()/.every()に依存しない)。
+    const options = [];
+    for (let i = 0; i < quantityValue.options.length; i++) {
+      const converted = convert(quantityValue.options[i]);
+      if (!isFiniteNumber(converted)) return { outcome:'unsupported', reason_code:'quantity_conversion_non_finite' };
+      options.push(converted);
+    }
     return { outcome:'converted', value:{ kind:'alternatives', options, selection_semantics:quantityValue.selection_semantics } };
   }
   // ── quantity-annotation/1.0-rc1: 単位互換性判定・変換計画生成ライブラリ(移植)ここまで ──
