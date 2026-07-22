@@ -243,14 +243,65 @@ function withPatchedAnalysis(binding, side, traceId, patchFn) {
       result.auto_applicability_policy);
   }
 
-  // ══════════════ 10. requirement/actual側ruleset不一致でfail closed(実際に到達可能) ══════════════
+  // ══════════════ 10. requirement/actual側ruleset不一致・非対応でfail closed(実際に到達可能) ══════════════
+  // 【レビュー修正、重大】SUPPORTED_RULESETSは現在1タプルのみのため、両側が個別にSUPPORTED_RULESETSと
+  // 一致する(=validateRulesetCompatibility().supported===true)なら、両側は互いに同一にしかなり
+  // 得ない。したがって「両側は一致するが、その一致した値自体が非対応」という経路
+  // (auto_applicability_ruleset_unsupported)が、片側だけ変えた不一致より実際に到達しやすい。
   {
+    // 片側だけ既知タプルから外れる(数値だが未登録の値) → 個別のvalidateRulesetCompatibility()で
+    // 非対応と判定され、auto_applicability_ruleset_unsupportedでfail closedする。
     const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'ruleset-mismatch');
     const mismatchedBinding = { ...binding, actual:{ ...binding.actual,
       ruleset_version:{ ...binding.actual.ruleset_version, auto_applicable_thresholds:{ ...binding.actual.ruleset_version.auto_applicable_thresholds, margin:0.99 } } } };
     const result = core.generateAutoApplicabilityResults({ binding:mismatchedBinding, relations });
-    check('requirement側とactual側のruleset_versionが不一致ならfail closedする(10)',
-      result.ready === false && result.diagnostics.some(d => d.code === 'auto_applicability_ruleset_inconsistent'), result);
+    check('requirement側とactual側のruleset_versionが不一致(片側のみ数値が既知タプルから外れる)ならfail closedする(10)',
+      result.ready === false && result.diagnostics.some(d => d.code === 'auto_applicability_ruleset_unsupported'), result);
+  }
+  {
+    // 両側とも同じ文字列閾値 → sameRuleset()の===比較は通過するが、SUPPORTED_RULESETSとの
+    // 個別照合で非対応と判定されfail closedする(暗黙の数値変換によるすり抜けを防ぐ)。
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'ruleset-both-string');
+    const stringThresholds = { modeConfidence:'0.4', margin:'0.2', propertyConfidence:'0.7' };
+    const bothStringBinding = { ...binding,
+      requirement:{ ...binding.requirement, ruleset_version:{ ...binding.requirement.ruleset_version, auto_applicable_thresholds:stringThresholds } },
+      actual:{ ...binding.actual, ruleset_version:{ ...binding.actual.ruleset_version, auto_applicable_thresholds:stringThresholds } } };
+    const result = core.generateAutoApplicabilityResults({ binding:bothStringBinding, relations });
+    check('requirement/actual側とも同じ文字列閾値ならfail closedする(10)',
+      result.ready === false && result.diagnostics.some(d => d.code === 'auto_applicability_ruleset_unsupported'), result);
+  }
+  {
+    // 両側とも同じ負の閾値 → 全候補が閾値を満たした扱いになる事故を防ぐ。
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'ruleset-both-negative');
+    const negativeThresholds = { modeConfidence:-1, margin:-1, propertyConfidence:-1 };
+    const bothNegativeBinding = { ...binding,
+      requirement:{ ...binding.requirement, ruleset_version:{ ...binding.requirement.ruleset_version, auto_applicable_thresholds:negativeThresholds } },
+      actual:{ ...binding.actual, ruleset_version:{ ...binding.actual.ruleset_version, auto_applicable_thresholds:negativeThresholds } } };
+    const result = core.generateAutoApplicabilityResults({ binding:bothNegativeBinding, relations });
+    check('requirement/actual側とも同じ負の閾値ならfail closedする(10)',
+      result.ready === false && result.diagnostics.some(d => d.code === 'auto_applicability_ruleset_unsupported'), result);
+  }
+  {
+    // 両側とも同じ未知ruleset version(quantity_extraction文字列自体が既知タプルに無い)。
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'ruleset-both-unknown-version');
+    const unknownRuleset = { quantity_extraction:'v99.0', semantics_rules:'v99.0', auto_applicable_thresholds:{ modeConfidence:0.4, margin:0.2, propertyConfidence:0.7 } };
+    const bothUnknownBinding = { ...binding,
+      requirement:{ ...binding.requirement, ruleset_version:unknownRuleset },
+      actual:{ ...binding.actual, ruleset_version:unknownRuleset } };
+    const result = core.generateAutoApplicabilityResults({ binding:bothUnknownBinding, relations });
+    check('requirement/actual側とも同じ未知ruleset versionならfail closedする(10)',
+      result.ready === false && result.diagnostics.some(d => d.code === 'auto_applicability_ruleset_unsupported'), result);
+  }
+  check('正式な対応rulesetでは引き続き成功する(happy pathが既にready:trueであることの再確認、10)',
+    happyPathEntry !== undefined, happyPathEntry);
+  {
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'policy-thresholds-finite');
+    const result = core.generateAutoApplicabilityResults({ binding, relations });
+    const th = result.auto_applicability_policy?.thresholds;
+    check('成功時、auto_applicability_policy.thresholdsの3値はすべて有限なnumber型である(10)',
+      typeof th?.modeConfidence === 'number' && Number.isFinite(th.modeConfidence)
+      && typeof th?.margin === 'number' && Number.isFinite(th.margin)
+      && typeof th?.propertyConfidence === 'number' && Number.isFinite(th.propertyConfidence), th);
   }
 
   // ══════════════ 11. extraction.warningsが非配列/欠落ならfail closed(実際に到達可能、
@@ -275,9 +326,10 @@ function withPatchedAnalysis(binding, side, traceId, patchFn) {
   // ══════════════ 12. requirement/actual側condition top_confidence自体の数値・値域検査
   //    (Math.min()は文字列を暗黙的に数値変換するため、派生式の一致だけでは検出できない、
   //    レビュー指摘の重大修正) ══════════════
-  // interval_semantics_candidates[0].confidenceを直接差し替えることで、bindInputPair()の
-  // schema検証(confidenceは0-1の数値)を経由しつつ、resolveConditionStatus()の`>=`判定
-  // (下限だけを見る)をすり抜けて下流まで到達できる値(文字列・上限超過・Infinity)を作る。
+  // bindInputPair()で生成したbinding(schema検証済み)を、withPatchedAnalysis()で公開関数の
+  // 防御検証用に意図的に再構築し、interval_semantics_candidates[0].confidenceへschema検証を
+  // 経由しない不正値を注入する。resolveConditionStatus()の`>=`判定(下限だけを見る)をすり抜けて
+  // 下流まで到達できる値(文字列・上限超過・Infinity)を作る。
   // NaN・負値は`top.confidence >= thresholds.modeConfidence`がfalseになりresolveConditionStatus()
   // が'ambiguous'にするため、この方法では下流へ到達できない(comparison_mode_confidence等と
   // 同じ「既に上流でゲートされている」構造。バグ注入でのみ検証する)。

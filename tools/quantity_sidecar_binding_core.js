@@ -2148,11 +2148,25 @@
     // 互いに同じタプルであることまでは検証しない。異なるタプル同士がrequirement側の閾値だけで
     // 判定される事故を防ぐため、ここで両側の完全一致を要求する(sameRuleset()を、
     // SUPPORTED_RULESETSとの照合ではなく両側同士の照合に転用する)。
+    // 【レビュー修正、重大】sameRuleset()は両側の値を===で突き合わせるだけで、値自体の型・値域は
+    // 検証しない。両側を同じ不正値(文字列閾値・負の閾値等)へ揃えると、一致検査は通過したまま
+    // 後続の閾値比較(`<`/`>=`)が暗黙の数値変換で成立してしまう(condition top confidenceで
+    // 修正した文字列問題と同種の欠陥)。validateRulesetCompatibility()はSUPPORTED_RULESETSとの
+    // 完全一致(数値として定義された既知タプル)を要求するため、まず両側それぞれを既知の対応
+    // タプルとして検証してから、両側の一致を確認する。
     const reqRuleset = binding.requirement?.ruleset_version;
     const actRuleset = binding.actual?.ruleset_version;
-    if (!reqRuleset || !actRuleset || !sameRuleset(reqRuleset, actRuleset)) {
+    const reqCompatibility = validateRulesetCompatibility(reqRuleset);
+    const actCompatibility = validateRulesetCompatibility(actRuleset);
+    if (reqCompatibility.supported !== true || actCompatibility.supported !== true) {
+      return blockedAutoApplicabilityResult([{ code:'auto_applicability_ruleset_unsupported', severity:'error',
+        requirement_ruleset_version: reqRuleset ?? null, actual_ruleset_version: actRuleset ?? null,
+        detail:'requirement側またはactual側のruleset_versionが対応済み完全タプルではありません' }],
+        numericResult);
+    }
+    if (!sameRuleset(reqRuleset, actRuleset)) {
       return blockedAutoApplicabilityResult([{ code:'auto_applicability_ruleset_inconsistent', severity:'error',
-        requirement_ruleset_version: reqRuleset || null, actual_ruleset_version: actRuleset || null,
+        requirement_ruleset_version: reqRuleset, actual_ruleset_version: actRuleset,
         detail:'requirement側とactual側のruleset_version(auto_applicable_thresholds含む)が一致しません' }],
         numericResult);
     }
