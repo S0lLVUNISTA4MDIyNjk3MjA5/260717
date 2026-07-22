@@ -2178,13 +2178,27 @@
       const refIds = { requirement_quantity_id:entry.requirement_quantity_id, actual_quantity_id:entry.actual_quantity_id };
 
       // --- comparison_mode_confidence: 値域・requirement/actual top_confidenceからの導出式・閾値 ---
+      // 【レビュー修正、重大】Math.min()は文字列を暗黙的に数値変換するため
+      // (Math.min('0.9','0.9') === 0.9)、requirement_condition_top_confidence/
+      // actual_condition_top_confidence自体を個別に検証しないまま導出式の一致だけを見ると、
+      // 両側が文字列"0.9"でもcomparison_mode_confidence(数値0.9)と一致してしまい、
+      // このinvariant検査をすり抜ける。派生式を計算する前に、2つの入力自体を個別に検証する。
+      const requirementTopConfidence = entry.requirement_condition_top_confidence;
+      const actualTopConfidence = entry.actual_condition_top_confidence;
+      if (!isFiniteNumber(requirementTopConfidence)) failedInvariants.push('requirement_condition_top_confidence_not_finite_number');
+      else if (requirementTopConfidence < 0 || requirementTopConfidence > 1) failedInvariants.push('requirement_condition_top_confidence_out_of_range');
+      if (!isFiniteNumber(actualTopConfidence)) failedInvariants.push('actual_condition_top_confidence_not_finite_number');
+      else if (actualTopConfidence < 0 || actualTopConfidence > 1) failedInvariants.push('actual_condition_top_confidence_out_of_range');
+
       const modeConfidence = entry.comparison_mode_confidence;
       if (!inRange01(modeConfidence)) {
         failedInvariants.push('comparison_mode_confidence_out_of_range');
-      } else if (modeConfidence !== Math.min(entry.requirement_condition_top_confidence, entry.actual_condition_top_confidence)) {
-        failedInvariants.push('comparison_mode_confidence_derivation_mismatch');
-      } else if (modeConfidence < thresholds.modeConfidence) {
-        failedInvariants.push('comparison_mode_confidence_below_threshold');
+      } else if (inRange01(requirementTopConfidence) && inRange01(actualTopConfidence)) {
+        if (modeConfidence !== Math.min(requirementTopConfidence, actualTopConfidence)) {
+          failedInvariants.push('comparison_mode_confidence_derivation_mismatch');
+        } else if (modeConfidence < thresholds.modeConfidence) {
+          failedInvariants.push('comparison_mode_confidence_below_threshold');
+        }
       }
 
       // --- requirement/actual側condition margin: 値域・閾値 ---

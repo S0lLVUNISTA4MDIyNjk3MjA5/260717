@@ -120,10 +120,12 @@ function withPatchedAnalysis(binding, side, traceId, patchFn) {
 
   // ══════════════ 2. 正常系: 全条件充足 → auto_applicable:true ══════════════
   let happyPathEntry;
+  let happyPathResultLength;
   {
     const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'happy');
     const result = core.generateAutoApplicabilityResults({ binding, relations });
     check('前提確認: ready:true・result_complete:trueに到達する(2)', result.ready === true && result.result_complete === true, result);
+    happyPathResultLength = result.auto_applicability_results.length;
     happyPathEntry = result.auto_applicability_results[0];
     const aa = happyPathEntry?.auto_applicability;
     check('全基準充足時はauto_applicable:true(2)', aa?.auto_applicable === true, aa);
@@ -270,7 +272,64 @@ function withPatchedAnalysis(binding, side, traceId, patchFn) {
       result.ready === false && result.diagnostics.some(d => d.code === 'auto_applicability_extraction_input_invariant_violation'), result);
   }
 
-  // ══════════════ 実fixtureでend-to-end確認 ══════════════
+  // ══════════════ 12. requirement/actual側condition top_confidence自体の数値・値域検査
+  //    (Math.min()は文字列を暗黙的に数値変換するため、派生式の一致だけでは検出できない、
+  //    レビュー指摘の重大修正) ══════════════
+  // interval_semantics_candidates[0].confidenceを直接差し替えることで、bindInputPair()の
+  // schema検証(confidenceは0-1の数値)を経由しつつ、resolveConditionStatus()の`>=`判定
+  // (下限だけを見る)をすり抜けて下流まで到達できる値(文字列・上限超過・Infinity)を作る。
+  // NaN・負値は`top.confidence >= thresholds.modeConfidence`がfalseになりresolveConditionStatus()
+  // が'ambiguous'にするため、この方法では下流へ到達できない(comparison_mode_confidence等と
+  // 同じ「既に上流でゲートされている」構造。バグ注入でのみ検証する)。
+  {
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'topconf-string-req');
+    const patched = withPatchedAnalysis(binding, 'requirement', 'req-topconf-string-req',
+      a => ({ ...a, interval_semantics_candidates: a.interval_semantics_candidates.map((c, i) => i === 0 ? { ...c, confidence:'0.9' } : c) }));
+    const result = core.generateAutoApplicabilityResults({ binding:patched, relations });
+    check('requirement側top_confidenceが文字列"0.9"なら全体fail closedする(12)',
+      result.ready === false && result.diagnostics.some(d => d.failed_invariants?.includes('requirement_condition_top_confidence_not_finite_number')), result);
+  }
+  {
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'topconf-string-act');
+    const patched = withPatchedAnalysis(binding, 'actual', 'act-topconf-string-act',
+      a => ({ ...a, interval_semantics_candidates: a.interval_semantics_candidates.map((c, i) => i === 0 ? { ...c, confidence:'0.9' } : c) }));
+    const result = core.generateAutoApplicabilityResults({ binding:patched, relations });
+    check('actual側top_confidenceが文字列"0.9"なら全体fail closedする(12)',
+      result.ready === false && result.diagnostics.some(d => d.failed_invariants?.includes('actual_condition_top_confidence_not_finite_number')), result);
+  }
+  {
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'topconf-infinity');
+    const patched = withPatchedAnalysis(binding, 'requirement', 'req-topconf-infinity',
+      a => ({ ...a, interval_semantics_candidates: a.interval_semantics_candidates.map((c, i) => i === 0 ? { ...c, confidence:Infinity } : c) }));
+    const result = core.generateAutoApplicabilityResults({ binding:patched, relations });
+    check('requirement側top_confidenceがInfinityなら全体fail closedする(12)',
+      result.ready === false && result.diagnostics.some(d => d.failed_invariants?.includes('requirement_condition_top_confidence_not_finite_number')), result);
+  }
+  {
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'topconf-over-one');
+    const patched = withPatchedAnalysis(binding, 'requirement', 'req-topconf-over-one',
+      a => ({ ...a, interval_semantics_candidates: a.interval_semantics_candidates.map((c, i) => i === 0 ? { ...c, confidence:1.5 } : c) }));
+    const result = core.generateAutoApplicabilityResults({ binding:patched, relations });
+    check('requirement側top_confidenceが1超過(1.5)なら全体fail closedする(12)',
+      result.ready === false && result.diagnostics.some(d => d.failed_invariants?.includes('requirement_condition_top_confidence_out_of_range')), result);
+  }
+  check('正常な数値(前提確認の happy path)では派生式検査を引き続き通過しauto_applicable判定へ進む(12)',
+    happyPathEntry?.auto_applicability?.auto_applicable === true, happyPathEntry);
+
+  // ══════════════ 12b. 実fixtureで少なくとも1件の非空結果と具体的なbasis値を固定する
+  //    (レビュー指摘: 空配列でも真になる.every()だけでは検証にならない) ══════════════
+  // PDF/Excelサンプルの実キャプチャfixture(runtime_fixtures/quantity_annotation_*_verified.json)は
+  // dimension不一致・property未解決・concept不一致・condition未解決により、この2fixture間では
+  // 1件もnumeric_comparison_resultsへ到達しない(B-2.5でも同じ、下のブロックでnot_analyzedの
+  // 内訳を固定して確認する)。そのため「実fixtureで非空の結果」を確認するには、pairBinding()
+  // (bindInputPair()を経由する実パイプライン、power/kW・cooling_capacityで確実に到達可能な
+  // シナリオ)を使う。happyPathEntry(検査2で生成済み)がまさにこれであり、auto_applicable:true・
+  // basisの各値が具体的な数値で固定されていることは検査2で既に確認済みなので、ここでは
+  // 「非空であること」自体を明示的に再確認する。
+  check('pairBinding()経由の実パイプラインでauto_applicability_resultsが非空(length > 0)になる(12b)',
+    happyPathResultLength > 0, happyPathResultLength);
+
+  // ══════════════ 実fixtureでend-to-end確認(キャプチャ済みPDF/Excelサンプル) ══════════════
   {
     const pdfFixture = readJson('runtime_fixtures/quantity_annotation_pdf_verified.json');
     const excelFixture = readJson('runtime_fixtures/quantity_annotation_excel_xlsx_verified.json');
@@ -284,8 +343,17 @@ function withPatchedAnalysis(binding, side, traceId, patchFn) {
     realReqTraceIds.forEach(reqId => realActTraceIds.forEach(actId => realRelations.push(relation(reqId, actId))));
     const realResult = core.generateAutoApplicabilityResults({ binding:realBinding, relations:realRelations });
     check('実fixtureでもgenerateAutoApplicabilityResults()はready:trueで完了する', realResult.ready === true, realResult.diagnostics);
-    check('実fixtureの全結果でauto_applicableがboolean値である',
-      realResult.auto_applicability_results.every(r => typeof r.auto_applicability.auto_applicable === 'boolean'), realResult.auto_applicability_results);
+    // このPDF/Excelサンプルfixtureの組では、22件全候補がB-2.5到達前にnot_analyzedへ振り分けられ、
+    // auto_applicability_resultsは0件になる(データの性質上の既知の制約。上記の理由を参照)。
+    // .every()は空配列でも真になり検証にならないため、代わりに既知の内訳を固定し、
+    // このfixtureペアの挙動が将来変わった場合に検知できるようにする。
+    const reasonCounts = {};
+    realResult.not_analyzed.forEach(n => { reasonCounts[n.reason_code] = (reasonCounts[n.reason_code] || 0) + 1; });
+    check('実fixtureはauto_applicability_results 0件・not_analyzed 22件(dimension_mismatch:9/property_unresolved:7/concept_mismatch:3/condition_unresolved:3)という既知の内訳と一致する(12b)',
+      realResult.auto_applicability_results.length === 0 && realResult.not_analyzed.length === 22
+      && reasonCounts.dimension_mismatch === 9 && reasonCounts.property_unresolved === 7
+      && reasonCounts.concept_mismatch === 3 && reasonCounts.condition_unresolved === 3,
+      reasonCounts);
   }
 
   console.log('\n=== quantity_auto_applicability_result_verification 結果 ===');
