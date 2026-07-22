@@ -145,6 +145,17 @@ function checkIntervalSemanticsResolution(rawCandidates, resolution, sideLabel, 
     errors.push(`${recordPath}.${sideLabel}_analysis.interval_semantics_candidates: 非空配列ではありません`);
     return;
   }
+  // 【レビュー修正、中(6巡目)】producer(generateConditionResolutions()内のvalidateIntervalSemanticsCandidates())
+  // は1数量あたりのinterval_semantics_candidatesをMAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY(64)件に
+  // 制限し、超過時は解決処理へ進まずfail closedする(件数上限は複製・全件ソートより前に検査する
+  // 契約)。上位候補を変えず65件目以降を追加しただけのartifactは、非空性・value重複検査だけでは
+  // 検出できない。producerと同じ定数(quantity_sidecar_binding_core.jsからexport、magic numberの
+  // 複製を避ける)で独立に再検証する。preflightのMAX_ARRAY_ITEMS(20000)は一般的な計算量防御であり、
+  // このproducer固有の64件契約とは別物のため代替にならない。
+  if (rawCandidates.length > core.MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY) {
+    errors.push(`${recordPath}.${sideLabel}_analysis.interval_semantics_candidates: 件数が上限(${core.MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY})を超えています(実際${rawCandidates.length}件)`);
+    return;
+  }
   const seen = new Set();
   for (const candidate of rawCandidates) {
     if (seen.has(candidate?.value)) {
@@ -186,6 +197,27 @@ function checkNumericComparisonRecomputation(record, errors, recordPath) {
   const nc = record.numeric_comparison || {};
   const requirementUnit = record.requirement_analysis?.quantity?.unit;
   const actualUnit = record.actual_analysis?.quantity?.unit;
+
+  // 【レビュー修正、重大2(6巡目)】producerは幾何比較の再計算前にrequirement/actual双方の数量値へ
+  // validateQuantityValueStructure()を適用し(generateNumericComparisonResults()のinvariant検査、
+  // generateNormalizedQuantityViews()内のrequirement側検証)、空区間・両側null・lower>upper・
+  // 同値排他的境界の数量は比較対象へ到達させない。以前の再計算検査はactual originalを
+  // applyLinearConversion()へ通すため(同関数の内部でvalidateQuantityValueStructure()を呼ぶ)actual側は
+  // 間接的に検証されていたが、requirement_quantity_valueはcomparePointInRegion()/
+  // compareIntervalCoverage()へそのまま渡していた。これらの幾何関数自体は区間の大小関係や空集合を
+  // 検証しないため、producerでは生成不能なはずの構造不正なrequirement区間(例: lower>upper)を、
+  // 幾何結果・判定さえ再計算値へ整合させれば通過させてしまっていた。producerと同じ構造検査関数
+  // (validateQuantityValueStructure())を3つの数量値すべてへ独立に適用する。
+  for (const [label, quantityValue] of [
+    ['requirement_quantity_value', ci.requirement_quantity_value],
+    ['actual_quantity_value_original', ci.actual_quantity_value_original],
+    ['actual_quantity_value_normalized', ci.actual_quantity_value_normalized],
+  ]) {
+    const structureCheck = core.validateQuantityValueStructure(quantityValue);
+    if (structureCheck.outcome !== 'ok') {
+      errors.push(`${recordPath}.comparison_input.${label}: producerの数量構造契約(validateQuantityValueStructure())に違反しています(${structureCheck.reason_code})`);
+    }
+  }
 
   const classified = core.classifyUnitConversion(requirementUnit, actualUnit);
   if (classified.outcome !== 'plan' || core.canonicalJson(classified.plan) !== core.canonicalJson(ci.unit_conversion_plan)) {
@@ -312,6 +344,24 @@ function checkComparisonRecord(record, thresholds, errors, recordPath) {
   }
   if (ci.comparison_mode?.derived_from?.actual_condition_value !== isr.actual?.value) {
     errors.push(`${recordPath}.comparison_input.comparison_mode.derived_from.actual_condition_value: interval_semantics_resolution.actual.valueと一致しません`);
+  }
+
+  // --- 【レビュー修正、重大1(6巡目)】derived_fromの2値がresolutionのvalueと一致することしか
+  //     検査していなかったため、両側のinterval semantics候補・resolution・derived_fromをまとめて
+  //     別の意味ペアへ変更しつつcomparison_input.comparison_mode.value自体は元のまま残す
+  //     (producerでは固定対応表COMPARISON_MODE_DERIVATION_TABLEに無い組み合わせのはずが、
+  //     validatorは幾何計算を指定されたmodeでそのまま再実行するだけなので、数量形が
+  //     整合していれば内部無矛盾な結果を作れてしまう)artifactを見逃していた。
+  //     COMPARISON_MODE_DERIVATION_TABLE(quantity_sidecar_binding_core.js、産出に使う表と同一)を
+  //     再利用し、interval semanticsの組み合わせからmodeを独立に再導出して照合する
+  //     (required_capability_domain × achieved_pointのような安全側で意図的に除外された組み合わせも
+  //     この表自体に含まれないため、自動的に拒否される)。 ---
+  const modeEntry = core.COMPARISON_MODE_DERIVATION_TABLE.find(
+    entry => entry.requirement === isr.requirement?.value && entry.actual === isr.actual?.value);
+  if (!modeEntry) {
+    errors.push(`${recordPath}.comparison_input.comparison_mode: interval semanticsの組み合わせ(${JSON.stringify(isr.requirement?.value)}×${JSON.stringify(isr.actual?.value)})が固定対応表(COMPARISON_MODE_DERIVATION_TABLE)に存在しません`);
+  } else if (ci.comparison_mode?.value !== modeEntry.mode) {
+    errors.push(`${recordPath}.comparison_input.comparison_mode.value: 固定対応表の導出結果(${modeEntry.mode})と一致しません(実際${JSON.stringify(ci.comparison_mode?.value)})`);
   }
 
   // --- numeric_comparison.comparison_mode ⇔ comparison_input.comparison_mode.value ---
@@ -535,6 +585,19 @@ function validateSemantics(recordSet) {
   }
 
   const thresholds = recordSet.provenance?.ruleset_version?.auto_applicable_thresholds || {};
+
+  // 【レビュー修正、重大3(6巡目)】producerは両side(requirement/actual)のrulesetを個別に
+  // SUPPORTED_RULESETSへ照合し(validateRulesetCompatibility()、auto_applicability_ruleset_unsupported
+  // でfail closed)、B-2.6aでも両側の対応可否を確認してから一致を検査する。artifact validatorは
+  // provenance.ruleset_version(結合済みの単一値)から閾値を読み出して後続の閾値比較に使うだけで、
+  // その値自体がSUPPORTED_RULESETSの既知タプルであるかは検査していなかった。閾値をそのまま残せば
+  // 後続のsemantic計算に影響しないため、quantity_extraction/semantics_rulesだけを未対応値へ
+  // 差し替えたSchema上有効なartifactを見逃していた。producerと同じ関数(validateRulesetCompatibility())
+  // を再利用して独立に照合する。
+  const rulesetCompatibility = core.validateRulesetCompatibility(recordSet.provenance?.ruleset_version);
+  if (rulesetCompatibility.supported !== true) {
+    errors.push('$.provenance.ruleset_version: 対応済みruleset完全タプル(SUPPORTED_RULESETS)ではありません');
+  }
 
   const comparisons = Array.isArray(recordSet.comparisons) ? recordSet.comparisons : [];
   const seenComparisonIds = new Set();

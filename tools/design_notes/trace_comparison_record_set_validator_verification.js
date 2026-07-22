@@ -460,6 +460,191 @@ const iv = (lo, loInc, hi, hiInc) => ({ kind: 'interval', lower: lo === null ? n
       !result.valid && result.semantic_errors.some(e => e.includes('interval_semantics_candidates') && e.includes('非空配列')), result.semantic_errors);
   }
 
+  // ══════════════ 14p〜14s. comparison_modeを固定対応表(COMPARISON_MODE_DERIVATION_TABLE)から
+  //     再導出して照合する(重大1、6巡目) ══════════════
+  {
+    // (a) 表に存在する別ペア(acceptable_region×outcome_range→requirement_covers_actual)へ
+    //     意味候補・resolution・derived_fromをまとめて変更しつつ、comparison_mode.value自体は
+    //     元のpoint_in_regionのまま残す。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    rec.actual_analysis.interval_semantics_candidates[0].value = 'outcome_range';
+    rec.comparison_input.interval_semantics_resolution.actual.value = 'outcome_range';
+    rec.comparison_input.comparison_mode.derived_from.actual_condition_value = 'outcome_range';
+    const result = validateTraceComparisonRecordSet(rs);
+    check('interval semanticsが別の表エントリ(acceptable_region×outcome_range→requirement_covers_actual)を指しているのにcomparison_mode.valueが元のpoint_in_regionのままなら拒否する(重大1a)',
+      !result.valid && result.semantic_errors.some(e => e.includes('comparison_input.comparison_mode.value') && e.includes('固定対応表')), result.semantic_errors);
+  }
+  {
+    // (b) 表に存在しない既知語彙ペア(acceptable_region×aggregated_representative_value、
+    //     両側とも既知の値だが組み合わせが表に無い)。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    rec.actual_analysis.interval_semantics_candidates[0].value = 'aggregated_representative_value';
+    rec.comparison_input.interval_semantics_resolution.actual.value = 'aggregated_representative_value';
+    rec.comparison_input.comparison_mode.derived_from.actual_condition_value = 'aggregated_representative_value';
+    const result = validateTraceComparisonRecordSet(rs);
+    check('acceptable_region×aggregated_representative_valueは固定対応表に存在しないため拒否する(重大1b)',
+      !result.valid && result.semantic_errors.some(e => e.includes('固定対応表') && e.includes('存在しません')), result.semantic_errors);
+  }
+  {
+    // (c) 意図的に対応表から除外されたrequired_capability_domain×achieved_point
+    //     (単一の達成点は要求された能力領域全体をカバーした証明にならないため、v2.10で除外)。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    rec.requirement_analysis.interval_semantics_candidates[0].value = 'required_capability_domain';
+    rec.comparison_input.interval_semantics_resolution.requirement.value = 'required_capability_domain';
+    rec.comparison_input.comparison_mode.derived_from.requirement_condition_value = 'required_capability_domain';
+    const result = validateTraceComparisonRecordSet(rs);
+    check('required_capability_domain×achieved_pointは安全側の理由で意図的に対応表から除外されているため拒否する(重大1c)',
+      !result.valid && result.semantic_errors.some(e => e.includes('固定対応表') && e.includes('存在しません')), result.semantic_errors);
+  }
+  {
+    // (d) 未知語(KNOWN_CONDITION_SEMANTICS_VALUESに無い値)を候補・resolution・derived_fromへ
+    //     整合して注入する。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    rec.requirement_analysis.interval_semantics_candidates[0].value = 'totally_unknown_condition_value';
+    rec.comparison_input.interval_semantics_resolution.requirement.value = 'totally_unknown_condition_value';
+    rec.comparison_input.comparison_mode.derived_from.requirement_condition_value = 'totally_unknown_condition_value';
+    const result = validateTraceComparisonRecordSet(rs);
+    check('未知語を候補・resolution・derived_fromへ整合して注入しても固定対応表に無ければ拒否する(重大1d)',
+      !result.valid && result.semantic_errors.some(e => e.includes('固定対応表') && e.includes('存在しません')), result.semantic_errors);
+  }
+
+  // ══════════════ 14t〜14w. requirement/actual数量値へproducer同等の構造検査
+  //     (validateQuantityValueStructure())を適用する(重大2、6巡目) ══════════════
+  {
+    // (a) requirement側でlower>upper。幾何結果・判定を再計算値へ整合させても、構造検査自体が
+    //     独立に拒否することを確認する。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    const badReqQuantity = { kind: 'interval', lower: { value: 10, inclusive: true }, upper: { value: 5, inclusive: true } };
+    rec.requirement_analysis.quantity.quantity = clone(badReqQuantity);
+    rec.comparison_input.requirement_quantity_value = clone(badReqQuantity);
+    const comparison = core.comparePointInRegion(badReqQuantity, rec.comparison_input.actual_quantity_value_normalized);
+    check('前提: comparePointInRegion()は区間の大小関係を検証せずcompareを返す(幾何関数自体は構造不正を検出しないことの確認)', comparison.outcome === 'compared', comparison);
+    rec.numeric_comparison.relation_type = comparison.result.relation_type;
+    rec.numeric_comparison.geometric_relation_holds = comparison.result.geometric_relation_holds;
+    rec.numeric_comparison.lower_check = comparison.result.lower_check;
+    rec.numeric_comparison.upper_check = comparison.result.upper_check;
+    rec.automatic_judgement.state = comparison.result.geometric_relation_holds ? 'satisfied' : 'not_satisfied';
+    rec.automatic_judgement.satisfied = comparison.result.geometric_relation_holds;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('requirement_quantity_valueがlower>upperの構造不正でも、幾何結果・判定を整合させれば拒否する(重大2a)',
+      !result.valid && result.semantic_errors.some(e => e.includes('requirement_quantity_value') && e.includes('数量構造契約')), result.semantic_errors);
+  }
+  {
+    // (b) requirement側でlower===upperかつ片側exclusive(数学的に空集合)。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    const badReqQuantity = { kind: 'interval', lower: { value: 10, inclusive: true }, upper: { value: 10, inclusive: false } };
+    rec.requirement_analysis.quantity.quantity = clone(badReqQuantity);
+    rec.comparison_input.requirement_quantity_value = clone(badReqQuantity);
+    const result = validateTraceComparisonRecordSet(rs);
+    check('requirement_quantity_valueがlower===upperかつ片側exclusive(空集合)なら拒否する(重大2b)',
+      !result.valid && result.semantic_errors.some(e => e.includes('requirement_quantity_value') && e.includes('数量構造契約')), result.semantic_errors);
+  }
+  {
+    // (c) requirement側でlower/upperが両方null(値情報が無い)。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    const badReqQuantity = { kind: 'interval', lower: null, upper: null };
+    rec.requirement_analysis.quantity.quantity = clone(badReqQuantity);
+    rec.comparison_input.requirement_quantity_value = clone(badReqQuantity);
+    const result = validateTraceComparisonRecordSet(rs);
+    check('requirement_quantity_valueがlower/upper両方nullなら拒否する(重大2c)',
+      !result.valid && result.semantic_errors.some(e => e.includes('requirement_quantity_value') && e.includes('数量構造契約')), result.semantic_errors);
+  }
+  {
+    // (d) actual_quantity_value_original側でlower>upper。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    const badActQuantity = { kind: 'interval', lower: { value: 30, inclusive: true }, upper: { value: 20, inclusive: true } };
+    rec.actual_analysis.quantity.quantity = clone(badActQuantity);
+    rec.comparison_input.actual_quantity_value_original = clone(badActQuantity);
+    const result = validateTraceComparisonRecordSet(rs);
+    check('actual_quantity_value_originalがlower>upperの構造不正なら拒否する(重大2d)',
+      !result.valid && result.semantic_errors.some(e => e.includes('actual_quantity_value_original') && e.includes('数量構造契約')), result.semantic_errors);
+  }
+  {
+    // (e) actual_quantity_value_normalized側でlower>upper(originalは正当なまま、normalizedだけ破壊)。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    rec.comparison_input.actual_quantity_value_normalized = { kind: 'interval', lower: { value: 30, inclusive: true }, upper: { value: 20, inclusive: true } };
+    const result = validateTraceComparisonRecordSet(rs);
+    check('actual_quantity_value_normalizedがlower>upperの構造不正なら拒否する(重大2e)',
+      !result.valid && result.semantic_errors.some(e => e.includes('actual_quantity_value_normalized') && e.includes('数量構造契約')), result.semantic_errors);
+  }
+
+  // ══════════════ 14x. provenance.ruleset_versionがSUPPORTED_RULESETSの既知完全タプルであることを
+  //     再検証する(重大3、6巡目) ══════════════
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.provenance.ruleset_version.quantity_extraction = 'unknown-extractor/999';
+    const result = validateTraceComparisonRecordSet(rs);
+    check('quantity_extractionだけ未知値なら拒否する(重大3a)',
+      !result.valid && result.semantic_errors.some(e => e.includes('provenance.ruleset_version')), result.semantic_errors);
+  }
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.provenance.ruleset_version.semantics_rules = 'unknown-semantics/999';
+    const result = validateTraceComparisonRecordSet(rs);
+    check('semantics_rulesだけ未知値なら拒否する(重大3b)',
+      !result.valid && result.semantic_errors.some(e => e.includes('provenance.ruleset_version')), result.semantic_errors);
+  }
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.provenance.ruleset_version.auto_applicable_thresholds.modeConfidence = 0.5;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('閾値だけ別値なら拒否する(重大3c)',
+      !result.valid && result.semantic_errors.some(e => e.includes('provenance.ruleset_version')), result.semantic_errors);
+  }
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.provenance.ruleset_version.quantity_extraction = 'unknown-extractor/999';
+    rs.provenance.ruleset_version.semantics_rules = 'unknown-semantics/999';
+    rs.provenance.ruleset_version.auto_applicable_thresholds.modeConfidence = 0.5;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('3項目すべて同時変更でも拒否する(重大3d)',
+      !result.valid && result.semantic_errors.some(e => e.includes('provenance.ruleset_version')), result.semantic_errors);
+  }
+  {
+    const result = validateTraceComparisonRecordSet(BASE_RECORD_SET);
+    check('現行のSUPPORTED_RULESETSに一致する実生成物のrulesetは合格する(重大3e)', result.valid, result);
+  }
+
+  // ══════════════ 14y〜14z. interval_semantics_candidatesのproducer上限(64件)を再検証する(中、6巡目) ══════════════
+  {
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    check('前提: MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITYは64', core.MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY === 64);
+    const extra = [];
+    for (let i = 0; i < core.MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY; i++) {
+      extra.push({ value: `filler_${i}`, confidence: 0.01, evidence: [{ type: 'keyword', value: `filler_${i}`, source_text: '(test)', effect: 'supports', weight: 0.01 }] });
+    }
+    rec.requirement_analysis.interval_semantics_candidates = [...rec.requirement_analysis.interval_semantics_candidates, ...extra];
+    const result = validateTraceComparisonRecordSet(rs);
+    check('interval_semantics_candidatesがproducer上限(64件)を超えれば、上位候補を変えていなくても拒否する(中a)',
+      !result.valid && result.semantic_errors.some(e => e.includes('interval_semantics_candidates') && e.includes('上限')), result.semantic_errors);
+  }
+  {
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    // このfixtureのrequirement_analysis.interval_semantics_candidatesは元々2件(先頭候補+'unknown'
+    // の受け皿)を持つため、ちょうど上限(64件)になるよう62件だけ追加する。
+    const extra = [];
+    for (let i = 0; i < core.MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY - rec.requirement_analysis.interval_semantics_candidates.length; i++) {
+      extra.push({ value: `filler_${i}`, confidence: 0.01, evidence: [{ type: 'keyword', value: `filler_${i}`, source_text: '(test)', effect: 'supports', weight: 0.01 }] });
+    }
+    rec.requirement_analysis.interval_semantics_candidates = [...rec.requirement_analysis.interval_semantics_candidates, ...extra];
+    check('前提: このテストのrequirement_analysis.interval_semantics_candidatesはちょうど上限(64件)になっている',
+      rec.requirement_analysis.interval_semantics_candidates.length === core.MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY);
+    const result = validateTraceComparisonRecordSet(rs);
+    check('interval_semantics_candidatesが上限ちょうど(64件)なら件数だけでは拒否しない(前提、上限は超過のみ拒否)',
+      !result.semantic_errors.some(e => e.includes('interval_semantics_candidates') && e.includes('上限')), result.semantic_errors);
+  }
+
   // ══════════════ 15. interval_semantics_resolution ⇔ comparison_mode.derived_from不一致 ══════════════
   {
     const rs = clone(BASE_RECORD_SET);

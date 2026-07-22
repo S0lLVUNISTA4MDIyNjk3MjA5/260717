@@ -2855,5 +2855,11 @@
     // 【レビュー指摘、重大1(B-3cレビュー5巡目)】trace_comparison_record_set_validator.jsのsemantic
     // validatorが、record内の監査値をraw analysisの入力から独立に再計算して照合するために必要な
     // 純粋関数。別実装を複製せず、生成に使ったのと同じ関数をそのまま検証にも再利用する。
-    classifyUnitConversion, applyLinearConversion, comparePointInRegion, compareIntervalCoverage });
+    classifyUnitConversion, applyLinearConversion, comparePointInRegion, compareIntervalCoverage,
+    // 【レビュー指摘、重大2(B-3cレビュー6巡目)】validateQuantityValueStructure()も同じ理由(semantic
+    // validatorが幾何比較の再計算前にrequirement/actual双方の数量構造をproducerと同じ基準で検証する
+    // 必要がある)でexportする。MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY(中、6巡目)は
+    // interval_semantics_candidatesの件数上限をvalidator側でも同じ値で再検証するための定数export
+    // (magic numberの複製を避ける)。
+    validateQuantityValueStructure, MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY });
 });
