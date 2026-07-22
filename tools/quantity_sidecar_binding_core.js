@@ -2312,6 +2312,84 @@
       not_analyzed: numericResult.not_analyzed };
   }
 
+  function blockedAutomaticJudgementResult(diagnostics, autoResult) {
+    return { ready:false, automatic_judgement_results:[], candidate_count:0, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(autoResult?.diagnostics || [])]),
+      not_analyzed:dedupeByCanonicalJson(autoResult?.not_analyzed || []) };
+  }
+
+  // Phase B-2.6b: 3.4節 段階4の最後の部分として、B-2.6aが分析した各候補(auto_applicable済み)を
+  // 'satisfied'/'not_satisfied'/'needs_confirmation'の3状態へ排他的に分類する、パイプラインに
+  // よる自動判定(人間による確定ではない)。
+  //
+  // 【設計方針、レビュー確定】この段階が生成する判定は「最終」ではなく「自動」であり、
+  // 人間確認済みと混同されてはならない(原型設計はconfirmedとauto_applicableを明確に分離して
+  // おり、自動適用されてもconfirmedにはならない)。出力配列名を`automatic_judgement_results`とし、
+  // 各要素の`automatic_judgement`に`judgement_source:'automatic_pipeline'`・`human_confirmed:false`を
+  // 明示する。将来人間確認機能を追加する場合も、この自動判定結果を書き換えず、別フィールドまたは
+  // 別段階で確認結果を追加できる構造にする。
+  //
+  // 【設計方針、レビュー確定】`not_analyzed`は候補単位とは限らない別の監査ストリームである
+  // (例: dimension_mismatchはバケット単位に圧縮され`excluded_pair_count`で複数候補を表す)。
+  // そのため「表示されうる候補は4状態のうちちょうど1つ」という契約は成立しない。正しくは、
+  // B-2.6aが分析した候補(auto_applicability_results)だけを3状態へ排他的に分類し、
+  // `not_analyzed`はB-2.5/B-2.6aから一切変更せずそのまま引き継ぐ、別ストリームとして扱う。
+  //
+  // 判定式(auto_applicable:falseは幾何結果の真偽に関わらず必ずneeds_confirmation):
+  //   !auto_applicable            → needs_confirmation / satisfied:null
+  //   auto_applicable && holds    → satisfied           / satisfied:true
+  //   auto_applicable && !holds   → not_satisfied        / satisfied:false
+  function generateAutomaticJudgementResults({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    const autoResult = generateAutoApplicabilityResults({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (autoResult.ready !== true || autoResult.result_complete !== true) {
+      return blockedAutomaticJudgementResult([{ code:'automatic_judgement_source_not_ready_or_incomplete', severity:'error',
+        detail:`generateAutoApplicabilityResults()がready=${JSON.stringify(autoResult.ready)}、result_complete=${JSON.stringify(autoResult.result_complete)}のため自動判定を生成できません(段階3以降と同じくready===trueかつresult_complete===trueを要求してfail closedする契約)` }],
+        autoResult);
+    }
+
+    // 段階1(防御的): auto_applicable/geometric_relation_holdsが構造上期待される位置にboolean値として
+    // 存在することを検証する。同一binding/relationsを同期的に再計算するだけの構造上、通常到達
+    // 不能なはずだが、B-2.5/B-2.6aと同じ慣行として、個々の候補ではなく呼び出し全体をfail closedする。
+    const invariantDiagnostics = [];
+    for (const entry of autoResult.auto_applicability_results) {
+      const failedInvariants = [];
+      if (!entry || typeof entry !== 'object' || !entry.auto_applicability || typeof entry.auto_applicability !== 'object'
+        || typeof entry.auto_applicability.auto_applicable !== 'boolean') {
+        failedInvariants.push('auto_applicable_not_boolean');
+      }
+      if (!entry || typeof entry !== 'object' || !entry.numeric_comparison || typeof entry.numeric_comparison !== 'object'
+        || typeof entry.numeric_comparison.geometric_relation_holds !== 'boolean') {
+        failedInvariants.push('geometric_relation_holds_not_boolean');
+      }
+      if (failedInvariants.length) {
+        invariantDiagnostics.push({ code:'final_judgement_input_invariant_violation', severity:'error',
+          failed_invariants:failedInvariants,
+          requirement_quantity_id: entry?.requirement_quantity_id, actual_quantity_id: entry?.actual_quantity_id });
+      }
+    }
+    if (invariantDiagnostics.length) return blockedAutomaticJudgementResult(invariantDiagnostics, autoResult);
+
+    // 段階2: 3状態への排他的分類。
+    const automaticJudgementResults = autoResult.auto_applicability_results.map(entry => {
+      const autoApplicable = entry.auto_applicability.auto_applicable;
+      const geometricRelationHolds = entry.numeric_comparison.geometric_relation_holds;
+      let state;
+      let satisfied;
+      if (!autoApplicable) { state = 'needs_confirmation'; satisfied = null; }
+      else if (geometricRelationHolds) { state = 'satisfied'; satisfied = true; }
+      else { state = 'not_satisfied'; satisfied = false; }
+      return { ...entry,
+        automatic_judgement: { state, satisfied, judgement_source:'automatic_pipeline', human_confirmed:false } };
+    });
+
+    return { ready:true, automatic_judgement_results:automaticJudgementResults, candidate_count:automaticJudgementResults.length, result_complete:true,
+      auto_applicability_policy: autoResult.auto_applicability_policy,
+      diagnostics: autoResult.diagnostics,
+      not_analyzed: autoResult.not_analyzed };
+  }
+
   return Object.freeze({ SCHEMA_VERSION, SUPPORTED_RULESETS, validateAnnotationSchema, validateRulesetCompatibility,
     canonicalValue, canonicalJson, normalize, hashParts, computeDatasetSignature, computeRecordContentHash,
     traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates,
@@ -2320,5 +2398,6 @@
     generateComparisonCandidates, generateConditionResolutions, generateConditionAnnotatedComparisonCandidates,
     COMPARISON_MODE_DERIVATION_TABLE, generateComparisonModeCandidates,
     KNOWN_CANONICAL_UNITS_BY_DIMENSION, LINEAR_UNIT_SCALE_TO_BASE, generateUnitConversionPlans,
-    generateNormalizedQuantityViews, generateNumericComparisonResults, generateAutoApplicabilityResults });
+    generateNormalizedQuantityViews, generateNumericComparisonResults, generateAutoApplicabilityResults,
+    generateAutomaticJudgementResults });
 });
