@@ -57,6 +57,9 @@
   <script src="https://unpkg.com/tiny-segmenter@0.2.0/dist/tiny-segmenter-0.2.0.js" onerror="window.__tsLoadFailed=true"></script>
   <script src="./generated/quantity_annotation_schema_v1.browser.js"></script>
   <script src="./quantity_sidecar_binding_core.js"></script>
+  <script src="./generated/trace_comparison_schema_v2.browser.js"></script>
+  <script src="./design_notes/json_schema_minivalidator.js"></script>
+  <script src="./design_notes/trace_comparison_record_set_validator.js"></script>
   <style>
     :root {
       --primary: #2563eb;
@@ -549,6 +552,13 @@
           <button id="downloadExcelBtn" class="success" disabled>照合結果一覧Excel出力</button>
           <button id="downloadJsonBtn" class="secondary" disabled>JSON DL</button>
         </div>
+      </div>
+      <div class="output-group">
+        <div class="output-group-title">trace-comparison成果物（opt-in）</div>
+        <div class="workflow-actions" style="margin-top:0;">
+          <button id="traceComparisonDownloadBtn" class="success" type="button">trace-comparison JSONを生成・検証して保存</button>
+        </div>
+        <div id="traceComparisonDownloadStatus" class="field-hint" role="status">ボタンを押すまで生成・検証・保存しません。</div>
       </div>
       <div class="output-group">
         <div class="output-group-title">モデルテキスト出力</div>
@@ -1592,6 +1602,9 @@
   ═══════════════════════════════════════════ */
   let plmData = null, sysData = null, mergedResult = null, cy = null;
   let quantityBindingState = null;
+  let traceComparisonInputStale = true;
+  let traceComparisonReadyRunId = 0;
+  let traceComparisonDownloadBusy = false;
   let editData = [];          // 表形式編集用データ（sysListのコピー）
   let editHeaders = [];
   let isEditMode = false;
@@ -1623,6 +1636,8 @@
   const jsonldBtn     = $('jsonldBtn');
   const downloadJsonBtn   = $('downloadJsonBtn');
   const downloadExcelBtn  = $('downloadExcelBtn');
+  const traceComparisonDownloadBtn = $('traceComparisonDownloadBtn');
+  const traceComparisonDownloadStatus = $('traceComparisonDownloadStatus');
   const dlDetailExcelBtn  = $('dlDetailExcelBtn');
   const statusEl      = $('status');
   const outputArea    = $('outputArea');
@@ -1774,9 +1789,9 @@
     summary:() => quantityBindingSummary(),
     dimensionState:() => { const s = currentQuantityDimensionState(); return s ? JSON.parse(JSON.stringify(s)) : null; },
     dimensionSummary:() => quantityDimensionSummary(),
-    relationRows:() => (traceMatrixRows || []).map(row => globalThis.QuantitySidecarBinding?.relationRefs(row) || ({
-      requirement_trace_id:row?.requirement_trace_id || null, actual_trace_id:row?.actual_trace_id || null,
-      matcher_a_id:row?.matcher_a_id || row?.['A_ID'] || null, matcher_b_id:row?.matcher_b_id || row?.['B_ID'] || null
+    relationRows:() => (traceMatrixRows || []).filter(row => row?.requirement_trace_id && row?.actual_trace_id && row?.matcher_a_id && row?.matcher_b_id).map(row => ({
+      ...globalThis.QuantitySidecarBinding.relationRefs(row),
+      ...(traceComparisonRelationship(row) || {})
     }))
   });
   function normalizeText(v) {
@@ -1790,6 +1805,76 @@
     a.href = URL.createObjectURL(new Blob([text],{type:mime}));
     a.download = filename; document.body.appendChild(a); a.click(); a.remove();
   }
+
+  function traceComparisonDiagnosticSummary(envelope, validation) {
+    const diagnostics = Array.isArray(envelope?.diagnostics) ? envelope.diagnostics : [];
+    const schemaErrors = Array.isArray(validation?.schema_errors) ? validation.schema_errors : [];
+    const semanticErrors = Array.isArray(validation?.semantic_errors) ? validation.semantic_errors : [];
+    const codes = diagnostics.map(item => normalizeText(item?.code || item?.reason_code)).filter(Boolean);
+    const semanticCodes = semanticErrors.map(item => normalizeText(item).split(':')[0]).filter(Boolean);
+    const majorCodes = [...new Set([...codes, ...semanticCodes])].slice(0, 5);
+    return `diagnostics ${diagnostics.length}件 / schema_errors ${schemaErrors.length}件 / semantic_errors ${semanticErrors.length}件` +
+      (majorCodes.length ? ` / 主なコード: ${majorCodes.join(', ')}` : '');
+  }
+
+  async function downloadTraceComparisonRecordSet() {
+    if (traceComparisonDownloadBusy) return;
+    traceComparisonDownloadBusy = true;
+    if (traceComparisonDownloadBtn) traceComparisonDownloadBtn.disabled = true;
+    if (traceComparisonDownloadStatus) traceComparisonDownloadStatus.textContent = '生成・検証中です。';
+    let envelope = null;
+    let validation = null;
+    try {
+      if (activeMatchingJob) {
+        throw new Error('照合または成果物処理の実行中です。完了後に再実行してください。');
+      }
+      const core = globalThis.QuantitySidecarBinding;
+      const validator = globalThis.TraceComparisonRecordSetValidator;
+      if (!core || typeof core.generateTraceComparisonRecordSet !== 'function'
+          || !globalThis.TraceComparisonSchemaV2 || !globalThis.JsonSchemaMinivalidator
+          || !validator || typeof validator.validateTraceComparisonRecordSet !== 'function') {
+        throw new Error('browser依存globalが不足しています。');
+      }
+      if (traceComparisonInputStale || traceComparisonReadyRunId !== matchRunSeq || traceMatrixStale === true
+          || mergedResult?.metadata?.matchStatus !== 'matched') {
+        throw new Error('現在の入力に対する照合が未完了、または照合結果が陳腐化しています。');
+      }
+      if (!quantityBindingState) throw new Error('数量注釈bindingがありません。');
+      if (quantityBindingState.ready !== true) throw new Error('数量注釈bindingがreadyではありません。');
+      const relationAccessor = globalThis.__quantityBindingDiagnostics?.relationRows;
+      if (typeof relationAccessor !== 'function') throw new Error('正式なrelation accessorがありません。');
+      const generatedAt = new Date().toISOString();
+      envelope = core.generateTraceComparisonRecordSet({
+        binding:quantityBindingState,
+        relations:relationAccessor(),
+        generatedAt,
+        generator:{ tool:'json_ab_trace_matching_tool_v12.1.15.html', version:'12.1.15' },
+        displayContext:{ matching_dataset_signature:globalThis.__currentDatasetSignature() }
+      });
+      if (envelope?.ready !== true || envelope?.result_complete !== true || envelope?.record_set === null || envelope?.record_set === undefined) {
+        throw new Error('producerが完全なrecord_setを生成しませんでした。');
+      }
+      validation = validator.validateTraceComparisonRecordSet(envelope.record_set);
+      if (!validation || validation.valid !== true) throw new Error('browser validatorがrecord_setを拒否しました。');
+      let json;
+      try { json = JSON.stringify(envelope.record_set, null, 2) + '\n'; }
+      catch (_) { throw new Error('record_setのJSON直列化に失敗しました。'); }
+      const filename = `${safeFileName(graphNameOrDefault())}_trace_comparison_rc2.json`;
+      downloadText(filename, json, 'application/json;charset=utf-8');
+      if (traceComparisonDownloadStatus) traceComparisonDownloadStatus.textContent = `検証済みrecord_setを保存しました: ${filename}`;
+    } catch (error) {
+      const detail = traceComparisonDiagnosticSummary(envelope, validation);
+      if (traceComparisonDownloadStatus) traceComparisonDownloadStatus.textContent = `保存を中止しました: ${error?.message || '不明なエラー'}（${detail}）`;
+    } finally {
+      traceComparisonDownloadBusy = false;
+      if (traceComparisonDownloadBtn) traceComparisonDownloadBtn.disabled = false;
+    }
+  }
+
+  [sysFile, plmFile, sysQuantityFile, plmQuantityFile].filter(Boolean).forEach(input => {
+    input.addEventListener('change', () => { traceComparisonInputStale = true; });
+  });
+  traceComparisonDownloadBtn?.addEventListener('click', downloadTraceComparisonRecordSet);
   function escapeHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
                     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -2868,6 +2953,28 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   function setHiddenRowProp(row, key, value) {
     if (!row || typeof row !== 'object') return;
     Object.defineProperty(row, key, { value, writable:true, configurable:true, enumerable:false });
+  }
+
+  function setTraceComparisonRelationship(row, relationship) {
+    if (!row || typeof row !== 'object' || !relationship) return row;
+    setHiddenRowProp(row, '_traceComparisonRelationship', Object.freeze({
+      source:relationship.source ?? null,
+      match_method:relationship.match_method ?? null,
+      match_confidence:relationship.match_confidence ?? null,
+      review_category:relationship.review_category ?? null,
+      linked_at:relationship.linked_at ?? null
+    }));
+    return row;
+  }
+
+  function traceComparisonRelationship(row) {
+    const relationship = row?._traceComparisonRelationship;
+    return relationship && typeof relationship === 'object' ? relationship : null;
+  }
+
+  function copyTraceComparisonRelationship(source, target) {
+    const relationship = traceComparisonRelationship(source);
+    return relationship ? setTraceComparisonRelationship(target, relationship) : target;
   }
 
   function annotateGranularity(rows, schemaName) {
@@ -6454,11 +6561,13 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     if (!confirmChunkWorkIfNeeded(mergedResult.sysList)) { statusEl.textContent = '文チャンク再照合をキャンセルしました。'; return; }
     const runId = ++matchRunSeq;
     const job = beginMatchingJob('再照合中');
+    traceComparisonInputStale = true;
+    traceComparisonReadyRunId = 0;
     try {
       const sysList = mergedResult.sysList;
       const plmList = mergedResult.plmList;
       await runAsyncMatchPipeline(sysList, plmList, job, '再照合中');
-      if (runId !== matchRunSeq) throw new MatchingCancelledError('古い照合結果を破棄しました。');
+      if (runId !== matchRunSeq || activeMatchingJob !== job) throw new MatchingCancelledError('古い照合結果を破棄しました。');
       mergedResult.created_at = new Date().toISOString();
       mergedResult.metadata = { ...(mergedResult.metadata || {}), matchStatus:'matched', traceProfile:activeTraceProfile().label, traceProfileId:matchLogic.traceProfile || 'generic' };
       mergedResult.nodes = [];
@@ -6469,6 +6578,10 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       dlDetailExcelBtn.disabled = false;
       [downloadBtn, downloadJsonBtn, downloadExcelBtn, saveGraphBtn, saveSvgBtn, dlDetailExcelBtn, reqifBtn, jsonldBtn].forEach(b => { if (b) b.disabled=false; });
       await ensureLazyTabRenderedAsync(currentTabId());
+      assertMatchingNotCancelled(job);
+      if (runId !== matchRunSeq || activeMatchingJob !== job) throw new MatchingCancelledError('古い照合結果を破棄しました。');
+      traceComparisonReadyRunId = runId;
+      traceComparisonInputStale = false;
       const completedStatus = '再照合が完了しました。グラフ・照合結果一覧・モデルテキストは各タブを開いた時に生成します。' + (formatMatchPerformance() ? ` ${formatMatchPerformance()}` : '');
       finishMatchingJob(job, '再照合完了');
       statusEl.textContent = completedStatus;
@@ -7150,7 +7263,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       let diff = '変化なし';
       if (!prev) diff = '新規';
       else if (String(prev['分類'] || '') !== String(r['分類'] || '') || String(prev['方式'] || '') !== String(r['方式'] || '') || String(prev['信頼度'] || '') !== String(r['信頼度'] || '')) diff = '変更';
-      return { ...r, '差分': diff };
+      return copyTraceComparisonRelationship(r, { ...r, '差分': diff });
     });
     Object.entries(traceBaselineSnapshot.pairs).forEach(([key, prev]) => {
       if (seen.has(key)) return;
@@ -7852,7 +7965,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         const category = matchHasGate(m) ? '要確認' : traceJudgement(m.matchMethod, m.confidence);
         const reviewKey = traceReviewKeyFromValues(aId, bId, category);
         const review = traceReviewFor(reviewKey);
-        rows.push({
+        const row = {
           '_reviewKey': reviewKey,
           ...aHidden,
           '_bParentKey': bMeta.parentKey,
@@ -7879,7 +7992,12 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
           '根拠': traceEvidenceForMatch(m),
           'レビュー判定': review.label || '',
           'レビューコメント': review.comment || ''
-        });
+        };
+        rows.push(setTraceComparisonRelationship(row, {
+          source:'matching_engine', match_method:m.matchMethod,
+          match_confidence:Number((m.confidence || 0).toFixed(2)), review_category:category,
+          linked_at:null
+        }));
       });
     });
     plmList.forEach((plm, idx) => {
@@ -9014,6 +9132,8 @@ ${h.name}`, type:'requirement', detail:srcA };
   loadBtn.addEventListener('click', async () => {
     const runId = ++matchRunSeq;
     const job = beginMatchingJob('読み込み中');
+    traceComparisonInputStale = true;
+    traceComparisonReadyRunId = 0;
     try {
       updateMatchingProgress(job, { phase:'読み込み中', current:0, total:5, detail:'JSONファイルを解析中' });
       resetRuntimeCaches();
@@ -9070,7 +9190,7 @@ ${h.name}`, type:'requirement', detail:srcA };
 
       const autoRun = shouldAutoRunAfterLoad(sysList, plmList);
       if (!autoRun) {
-        if (runId !== matchRunSeq) throw new MatchingCancelledError('古い読み込み結果を破棄しました。');
+        if (runId !== matchRunSeq || activeMatchingJob !== job) throw new MatchingCancelledError('古い読み込み結果を破棄しました。');
         markLazyRenderDirty('loaded-only');
         await ensureLazyTabRenderedAsync(currentTabId());
         const adapterNote = [preparedSys.adapter?.used ? `A側:${preparedSys.adapter.kind}` : '', preparedPlm.adapter?.used ? `B側:${preparedPlm.adapter.kind}` : ''].filter(Boolean).join(' / ');
@@ -9087,7 +9207,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       updateMatchingProgress(job, { phase:'照合中', current:3, total:5, detail:'候補を評価中' });
       await runAsyncMatchPipeline(sysList, plmList, job, '照合中');
       assertMatchingNotCancelled(job);
-      if (runId !== matchRunSeq) throw new MatchingCancelledError('古い照合結果を破棄しました。');
+      if (runId !== matchRunSeq || activeMatchingJob !== job) throw new MatchingCancelledError('古い照合結果を破棄しました。');
 
       mergedResult.metadata.matchStatus = 'matched';
       mergedResult.nodes = [];
@@ -9106,6 +9226,10 @@ ${h.name}`, type:'requirement', detail:srcA };
       const adapterNote = [preparedSys.adapter?.used ? `A側:${preparedSys.adapter.kind}` : '', preparedPlm.adapter?.used ? `B側:${preparedPlm.adapter.kind}` : ''].filter(Boolean).join(' / ');
       const fastNote = genericFastLoadNote(sysList, plmList);
       updateMatchingProgress(job, { phase:'完了', current:5, total:5, detail:'完了' });
+      assertMatchingNotCancelled(job);
+      if (runId !== matchRunSeq || activeMatchingJob !== job) throw new MatchingCancelledError('古い照合結果を破棄しました。');
+      traceComparisonReadyRunId = runId;
+      traceComparisonInputStale = false;
       const completedStatus = '読み込み・照合が完了しました。グラフ・照合結果一覧・モデルテキストは各タブを開いた時に生成します。' + (keyPairReconcileNotice ? ` ${keyPairReconcileNotice}` : '') + (formatMatchPerformance() ? ` ${formatMatchPerformance()}` : '') + (adapterNote ? ` 文書JSON正規化: ${adapterNote}` : '') + (fastNote ? ` ${fastNote}` : '');
       finishMatchingJob(job, '読み込み・照合完了');
       statusEl.textContent = completedStatus;
@@ -9510,7 +9634,14 @@ ${h.name}`, type:'requirement', detail:srcA };
       'レビューコメント': normalizeReviewRecord(review).comment || ''
     };
     if (base['差分']) row['差分'] = base['差分'];
-    return row;
+    const originalRelationship = traceComparisonRelationship(base) || traceComparisonRelationship(overrides);
+    return setTraceComparisonRelationship(row, {
+      source:originalRelationship?.source || (effective.source === 'manual' ? 'manual' : 'matching_engine'),
+      match_method:originalRelationship?.match_method ?? (auto.method || (effective.source === 'manual' ? 'manual' : null)),
+      match_confidence:originalRelationship?.match_confidence ?? (effective.source === 'manual' ? null : auto.confidence),
+      review_category:originalRelationship?.review_category || effective.judgement,
+      linked_at:originalRelationship?.linked_at ?? null
+    });
   }
 
   function currentSourceMaps(sysList, plmList) {
@@ -9539,8 +9670,8 @@ ${h.name}`, type:'requirement', detail:srcA };
       const review = traceReviewFor(key);
       const manual = activeManualRelation(key);
       const effective = resolveEffectiveRelation(autoRelationFromRow(autoRow), review, manual);
-      pairRows.push(orderedEffectiveRow({ ...autoRow, _reviewKey:key }, review, effective, {
-        relationSource:manual ? 'manual' : 'auto', manualRelation:manual, replacementId:manual?.replacementId || ''
+      pairRows.push(orderedEffectiveRow(autoRow, review, effective, {
+        _reviewKey:key, relationSource:manual ? 'manual' : 'auto', manualRelation:manual, replacementId:manual?.replacementId || ''
       }));
       seen.add(key);
     });
@@ -9564,6 +9695,7 @@ ${h.name}`, type:'requirement', detail:srcA };
         'B_ID':manual.bId, 'B_表示名':plmDisplayName(bEntry.row, bEntry.idx), 'B_照合値':plmModelText(bEntry.row),
         '信頼度':'', '方式':'manual', '根拠':manual.comment ? `手動追加: ${manual.comment}` : '人が追加した関係'
       };
+      setTraceComparisonRelationship(synthetic, { source:'manual', match_method:'manual', match_confidence:null, review_category:manual.judgement, linked_at:null });
       const review = traceReviewFor(key);
       const effective = resolveEffectiveRelation({ exists:false, active:false, judgement:'候補なし', confidence:null, method:'manual', evidence:synthetic['根拠'] }, review, manual);
       pairRows.push(orderedEffectiveRow(synthetic, review, effective, { autoJudgement:'候補なし', relationSource:'manual', manualRelation:manual, replacementId:manual.replacementId || '' }));
@@ -9644,7 +9776,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       const review = traceReviewFor(key);
       const auto = autoRelationFromRow(row);
       const effective = resolveEffectiveRelation(auto, review, null);
-      return orderedEffectiveRow({ ...row, _reviewKey:key }, review, effective);
+      return orderedEffectiveRow(row, review, effective, { _reviewKey:key });
     });
   }
 
@@ -10625,6 +10757,7 @@ ${h.name}`, type:'requirement', detail:srcA };
     const base = [matchLogic.traceProfile || 'generic', activeKeyPairsKey(), aIds.join('\u001f'), bIds.join('\u001f')].join('\u001e');
     return `DS:${simpleHash(base)}:A${aIds.length}:B${bIds.length}`;
   }
+  globalThis.__currentDatasetSignature = currentDatasetSignature;
 
   function parseTrainingPairKey(key) {
     const parts = String(key || '').split('||');
