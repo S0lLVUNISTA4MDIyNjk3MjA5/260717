@@ -286,6 +286,180 @@ const iv = (lo, loInc, hi, hiInc) => ({ kind: 'interval', lower: lo === null ? n
       !result.valid && result.semantic_errors.some(e => e.includes('geometric_relation_holds')), result.semantic_errors);
   }
 
+  // ══════════════ 14e〜14k. 数値比較の監査値(単位変換・normalized・幾何比較・signed delta)を
+  //     入力から再計算して照合する(重大1、5巡目) ══════════════
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.comparisons[0].comparison_input.actual_quantity_value_normalized.lower.value += 1;
+    rs.comparisons[0].comparison_input.actual_quantity_value_normalized.upper.value += 1;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('actual_quantity_value_normalizedのlower/upperを改変すればapplyLinearConversion()の再計算と不一致で拒否する(重大1a)',
+      !result.valid && result.semantic_errors.some(e => e.includes('actual_quantity_value_normalized')), result.semantic_errors);
+  }
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.comparisons[0].comparison_input.unit_conversion_plan.source_unit = 'MPa';
+    const result = validateTraceComparisonRecordSet(rs);
+    check('unit_conversion_plan.source_unitを改変すればclassifyUnitConversion()の再計算と不一致で拒否する(重大1c)',
+      !result.valid && result.semantic_errors.some(e => e.includes('unit_conversion_plan')), result.semantic_errors);
+  }
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.comparisons[0].numeric_comparison.lower_check.boundary_mismatch = !rs.comparisons[0].numeric_comparison.lower_check.boundary_mismatch;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('lower_check.boundary_mismatchだけを反転しても幾何比較の再計算結果と不一致で拒否する(重大1d)',
+      !result.valid && result.semantic_errors.some(e => e.includes('lower_check')), result.semantic_errors);
+  }
+  {
+    // holdsとgeometric_relation_holdsを内部整合したまま(既存の重大3検査をすり抜ける形で)改変する。
+    // auto_applicable×geometric_relation_holds→state/satisfied相関(既存検査)も道連れですり抜けない
+    // よう、automatic_judgementも合わせて改変後の値と整合させる(この検査だけで拒否されると、
+    // 新設の幾何再計算検査自体の効果を証明できないため)。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    rec.numeric_comparison.lower_check.holds = false;
+    rec.numeric_comparison.geometric_relation_holds = false;
+    rec.automatic_judgement.state = 'not_satisfied';
+    rec.automatic_judgement.satisfied = false;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('holdsとgeometric_relation_holdsを内部整合したまま改変しても幾何比較の再計算結果と不一致で拒否する(重大1e)',
+      !result.valid && result.semantic_errors.some(e => e.includes('geometric_relation_holds') || e.includes('lower_check')), result.semantic_errors);
+  }
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.comparisons[0].numeric_comparison.signed_boundary_deltas.lower_actual_minus_requirement = 999999;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('signed_boundary_deltasを改変すれば固定式の再計算と不一致で拒否する(重大1f)',
+      !result.valid && result.semantic_errors.some(e => e.includes('signed_boundary_deltas')), result.semantic_errors);
+  }
+  {
+    // 前提: このfixtureはunit_conversion_plan.conversion_operation==='identity'(requirement/actualが
+    // 同一canonical単位kW同士のため)。identity計画のもとではnormalized===originalのはずである。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    check('前提: このfixtureのunit_conversion_planはidentityである', rec.comparison_input.unit_conversion_plan.conversion_operation === 'identity');
+    rec.comparison_input.actual_quantity_value_normalized = clone(rec.comparison_input.actual_quantity_value_original);
+    rec.comparison_input.actual_quantity_value_normalized.lower.value += 5;
+    rec.comparison_input.actual_quantity_value_normalized.upper.value += 5;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('identity計画なのにactual_quantity_value_normalizedがoriginalと異なれば拒否する(重大1g)',
+      !result.valid && result.semantic_errors.some(e => e.includes('actual_quantity_value_normalized')), result.semantic_errors);
+  }
+  // linear_scale計画(pressure、kPa⇔Pa)のシナリオ。CONCEPT_DICTIONARYにpressure次元の概念が
+  // 存在しないため実generator経由では到達できず、生成に使う関数(classifyUnitConversion()/
+  // applyLinearConversion())自体を使って自己無矛盾な正当レコードを直接組み立てる
+  // (schema層のfactor:{const:1}制約はidentity分岐限定のため、linear_scale分岐でのfactor改変は
+  // semantic層単独の再計算検査を確実に経由させられる)。
+  const buildLinearScaleRecordSet = () => {
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    const reqUnit = { source: 'kPa', canonical: 'kPa', dimension: 'pressure' };
+    const actUnit = { source: 'Pa', canonical: 'Pa', dimension: 'pressure' };
+    const reqQuantity = { kind: 'interval', lower: { value: 0, inclusive: true }, upper: { value: 100, inclusive: true } };
+    const actQuantityOriginal = { kind: 'interval', lower: { value: 50000, inclusive: true }, upper: { value: 50000, inclusive: true } };
+    rec.requirement_analysis.quantity.unit = reqUnit;
+    rec.actual_analysis.quantity.unit = actUnit;
+    rec.requirement_analysis.quantity.quantity = reqQuantity;
+    rec.actual_analysis.quantity.quantity = actQuantityOriginal;
+    rec.comparison_input.requirement_quantity_value = clone(reqQuantity);
+    rec.comparison_input.actual_quantity_value_original = clone(actQuantityOriginal);
+    const classified = core.classifyUnitConversion(reqUnit, actUnit);
+    if (classified.outcome !== 'plan' || classified.plan.conversion_operation !== 'linear_scale') {
+      throw new Error('前提: kPa(requirement)⇔Pa(actual)はlinear_scale計画を生成しませんでした');
+    }
+    rec.comparison_input.unit_conversion_plan = classified.plan;
+    const converted = core.applyLinearConversion(actQuantityOriginal, classified.plan);
+    if (converted.outcome !== 'converted') throw new Error('前提: applyLinearConversion()が変換に失敗しました');
+    rec.comparison_input.actual_quantity_value_normalized = converted.value;
+    const comparison = core.comparePointInRegion(reqQuantity, converted.value);
+    if (comparison.outcome !== 'compared') throw new Error('前提: comparePointInRegion()が比較に失敗しました');
+    rec.numeric_comparison.relation_type = comparison.result.relation_type;
+    rec.numeric_comparison.geometric_relation_holds = comparison.result.geometric_relation_holds;
+    rec.numeric_comparison.lower_check = comparison.result.lower_check;
+    rec.numeric_comparison.upper_check = comparison.result.upper_check;
+    const lowerDelta = converted.value.lower.value - reqQuantity.lower.value;
+    const upperDelta = reqQuantity.upper.value - converted.value.upper.value;
+    rec.numeric_comparison.signed_boundary_deltas = { lower_actual_minus_requirement: lowerDelta, upper_requirement_minus_actual: upperDelta };
+    return rs;
+  };
+  {
+    const rs = buildLinearScaleRecordSet();
+    const baselineResult = validateTraceComparisonRecordSet(rs);
+    check('前提: 自己無矛盾に組み立てたlinear_scaleレコードはvalid:trueになる', baselineResult.valid, baselineResult);
+  }
+  {
+    const rs = buildLinearScaleRecordSet();
+    rs.comparisons[0].comparison_input.unit_conversion_plan.factor *= 2;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('linear_scale計画のfactorを改変すればclassifyUnitConversion()の再計算と不一致で拒否する(Schema層のconst制約が及ばないlinear_scale分岐、重大1b)',
+      !result.valid && result.semantic_errors.some(e => e.includes('unit_conversion_plan')), result.semantic_errors);
+  }
+  {
+    const rs = buildLinearScaleRecordSet();
+    rs.comparisons[0].comparison_input.actual_quantity_value_normalized.lower.value += 1;
+    rs.comparisons[0].comparison_input.actual_quantity_value_normalized.upper.value += 1;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('linear_scale計画の変換値(actual_quantity_value_normalized)が1点だけ異なれば拒否する(重大1h)',
+      !result.valid && result.semantic_errors.some(e => e.includes('actual_quantity_value_normalized')), result.semantic_errors);
+  }
+
+  // ══════════════ 14m〜14o. interval_semantics_resolutionをraw candidatesへ結合検査する(重大2、5巡目) ══════════════
+  {
+    // 【注意】メッセージの部分一致だけで判定すると、basisの伝播検査(既存)が生成する
+    // 「...interval_semantics_resolution.requirement.top_confidenceと一致しません」のような
+    // 参照文言に偶然マッチし、新設検査自体の効果を証明できなくなる。新設検査(checkIntervalSemanticsResolution())
+    // が自分自身のpathとして生成する接頭辞"comparison_input.interval_semantics_resolution.<side>.<field>:"
+    // で厳密に照合する。
+    const rs = clone(BASE_RECORD_SET);
+    rs.comparisons[0].comparison_input.interval_semantics_resolution.requirement.top_confidence = 0.5;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('interval_semantics_resolution.requirement.top_confidenceがrequirement_analysis.interval_semantics_candidatesの先頭候補と不一致なら拒否する(重大2a)',
+      !result.valid && result.semantic_errors.some(e => e.includes('comparison_input.interval_semantics_resolution.requirement.top_confidence:')), result.semantic_errors);
+  }
+  {
+    // basis.actual_condition_marginへの伝播検査(既存)が別途拾わないよう、basis側も改変後の値と
+    // 整合させておく(新設のcandidates結合検査だけを単独で経由させるため)。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    rec.comparison_input.interval_semantics_resolution.actual.margin = 0.99;
+    rec.auto_applicability.basis.actual_condition_margin = 0.99;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('interval_semantics_resolution.actual.marginがmarginOf()契約と不一致なら拒否する(重大2b)',
+      !result.valid && result.semantic_errors.some(e => e.includes('comparison_input.interval_semantics_resolution.actual.margin:')), result.semantic_errors);
+  }
+  {
+    // basis.requirement_condition_has_opposing_evidenceへの伝播検査(既存)が別途拾わないよう、
+    // basis側も改変後の値と整合させる。ただしbasis.opposing_evidence_absentはcomparisons[]へ到達
+    // した候補では常にtrueのはず、という別の不変条件(重大1、以前のレビュー修正)があるため、
+    // has_opposing_evidence:trueへ改変するとそちらの検査が別途反応してしまう。この検査だけを
+    // 単独で経由させるため、basis側は改変前の値(false)のまま保つ代わりに、has_opposing_evidence
+    // 自体をfalse→true以外の「値の不一致」(値としては同じboolean型だが元の値と異なる)には
+    // できないため、ここでは素直にbasis側も追随させたうえで、重大1由来のエラーも許容する
+    // (新設検査のメッセージが含まれていることだけを厳密に確認する)。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    rec.comparison_input.interval_semantics_resolution.requirement.has_opposing_evidence = true;
+    rec.auto_applicability.basis.requirement_condition_has_opposing_evidence = true;
+    rec.auto_applicability.basis.opposing_evidence_absent = false;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('interval_semantics_resolution.requirement.has_opposing_evidenceがhasOpposingEvidence()契約と不一致なら拒否する(重大2c)',
+      !result.valid && result.semantic_errors.some(e => e.includes('comparison_input.interval_semantics_resolution.requirement.has_opposing_evidence:')), result.semantic_errors);
+  }
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.comparisons[0].requirement_analysis.interval_semantics_candidates.push(clone(rs.comparisons[0].requirement_analysis.interval_semantics_candidates[0]));
+    const result = validateTraceComparisonRecordSet(rs);
+    check('interval_semantics_candidates内でvalueが重複していれば拒否する(重大2d)',
+      !result.valid && result.semantic_errors.some(e => e.includes('interval_semantics_candidates') && e.includes('重複')), result.semantic_errors);
+  }
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.comparisons[0].actual_analysis.interval_semantics_candidates = [];
+    const result = validateTraceComparisonRecordSet(rs);
+    check('interval_semantics_candidatesが空配列なら拒否する(重大2e)',
+      !result.valid && result.semantic_errors.some(e => e.includes('interval_semantics_candidates') && e.includes('非空配列')), result.semantic_errors);
+  }
+
   // ══════════════ 15. interval_semantics_resolution ⇔ comparison_mode.derived_from不一致 ══════════════
   {
     const rs = clone(BASE_RECORD_SET);

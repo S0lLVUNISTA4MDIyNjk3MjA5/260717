@@ -271,12 +271,27 @@ async function pairBindingPower() {
     const rPsi = unitRules.classifyUnitConversion({ canonical:'psi', dimension:'pressure' }, { canonical:'psi', dimension:'pressure' });
     check('既知単位表への追加試行後もpsiは既知単位として扱われないまま(18、重大1)', rPsi.outcome === 'unsupported' && rPsi.reason_code === 'unit_metadata_unsupported', rPsi);
   }
-  // production API自身がexportするLINEAR_UNIT_SCALE_TO_BASE(データテーブルとしての公開、
-  // classifyUnitConversion()自体は中1の指摘によりexportしない)も、独立して凍結されている
-  // ことを確認する。
+  // production API自身がexportするLINEAR_UNIT_SCALE_TO_BASE(データテーブルとしての公開)も、
+  // 独立して凍結されていることを確認する。
   check('core.LINEAR_UNIT_SCALE_TO_BASE(公開データテーブル)もObject.isFrozen()でtrue', Object.isFrozen(core.LINEAR_UNIT_SCALE_TO_BASE) && Object.isFrozen(core.LINEAR_UNIT_SCALE_TO_BASE.pressure));
   check('core.KNOWN_CANONICAL_UNITS_BY_DIMENSION(公開データテーブル)もObject.isFrozen()でtrue', Object.isFrozen(core.KNOWN_CANONICAL_UNITS_BY_DIMENSION) && Object.isFrozen(core.KNOWN_CANONICAL_UNITS_BY_DIMENSION.pressure));
-  check('classifyUnitConversion()はcore(quantity_sidecar_binding_core.js)の公開APIとしてexportされていない(中1)', typeof core.classifyUnitConversion === 'undefined');
+  // 【レビュー修正、重大1(B-3cレビュー5巡目)】classifyUnitConversion()は当初「公開APIはbinding
+  // 経由のみ」という信頼境界を守るためexportしない方針だったが、
+  // trace_comparison_record_set_validator.jsのsemantic validatorがrecord内の監査値をraw analysis
+  // の入力から独立に再計算して照合するために、この関数(および同じ理由でexportした
+  // applyLinearConversion/comparePointInRegion/compareIntervalCoverage)を再実装せず再利用する
+  // 必要があり、方針を変更してexportした(詳細はquantity_sidecar_binding_core.jsのコメント参照)。
+  // exportされたcore.classifyUnitConversion()が、非公開のunitRules.classifyUnitConversion()と
+  // 同じ結果を返すことを確認する(二重実装ではなく同一関数であることの確認)。
+  check('classifyUnitConversion()はcore(quantity_sidecar_binding_core.js)の公開APIとしてexportされている(重大1、5巡目で方針変更)', typeof core.classifyUnitConversion === 'function');
+  {
+    const a = core.classifyUnitConversion({ canonical:'kPa', dimension:'pressure' }, { canonical:'MPa', dimension:'pressure' });
+    const b = unitRules.classifyUnitConversion({ canonical:'kPa', dimension:'pressure' }, { canonical:'MPa', dimension:'pressure' });
+    check('core.classifyUnitConversion()はunitRules(非公開実装)と同じ結果を返す(kPa/MPa)', JSON.stringify(a) === JSON.stringify(b), { a, b });
+  }
+  check('applyLinearConversion()もcore(quantity_sidecar_binding_core.js)の公開APIとしてexportされている(重大1、5巡目で方針変更)', typeof core.applyLinearConversion === 'function');
+  check('comparePointInRegion()もcore(quantity_sidecar_binding_core.js)の公開APIとしてexportされている(重大1、5巡目で方針変更)', typeof core.comparePointInRegion === 'function');
+  check('compareIntervalCoverage()もcore(quantity_sidecar_binding_core.js)の公開APIとしてexportされている(重大1、5巡目で方針変更)', typeof core.compareIntervalCoverage === 'function');
 
   // ── 24. 直接テストしたすべての計画でfactor/offsetが有限数である ──
   {

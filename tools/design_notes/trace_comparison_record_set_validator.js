@@ -117,6 +117,128 @@ function checkPropertyResolution(resolution, sideLabel, selectedConceptId, error
   if (resolution.margin !== expected) errors.push(`${recordPath}.mapping.${sideLabel}_resolution: marginがmarginOf()契約(${expected})と一致しません(実際${resolution.margin})`);
 }
 
+// 【レビュー修正、重大2(5巡目)】sortedByConfidenceDesc()(quantity_sidecar_binding_core.js、
+// 非公開・移植元1箇所のみ)の契約を独立に再検証する。別実装として複製せず、その並べ替え契約
+// (confidence降順、同点はvalue昇順のString比較)だけをここでも固定する(expectedMargin()と同じ方針)。
+// interval_semantics_candidatesはJSON Schema上、生成順で保存されている保証がない(resolveConditionStatus()
+// 自身も生入力の順序を信頼せずソートし直してから使う)ため、ここでも生配列をそのまま先頭候補として
+// 扱わず、この並べ替えを経てから照合する。
+function sortedByConfidenceDesc(candidates) {
+  return [...candidates].sort((a, b) => (b.confidence - a.confidence) || String(a.value).localeCompare(String(b.value)));
+}
+
+// hasOpposingEvidence()(quantity_sidecar_binding_core.js、非公開)の契約を独立に再検証する。
+function expectedHasOpposingEvidence(sortedCandidates) {
+  const top = sortedCandidates?.[0];
+  return !!(top && Array.isArray(top.evidence) && top.evidence.some(e => e?.effect === 'opposes'));
+}
+
+// 【レビュー修正、重大2(5巡目)】comparison_input.interval_semantics_resolution.{side}は、
+// requirement_analysis/actual_analysisの生interval_semantics_candidatesへ結び付ける検査を
+// 一切行っていなかった(comparison_mode.derived_from・auto_applicability.basisへの伝播だけを
+// 検査しており、その伝播元であるresolution自体が生candidatesの正しい導出結果であることは
+// 未検証だった)。generateConditionResolutions()の導出式(先頭candidate・confidence降順+value昇順
+// ソート・marginOf()・hasOpposingEvidence())をそのまま再検証する。mapping側のcheckPropertyResolution()
+// と同じ監査水準を、interval semantics側にも適用する。
+function checkIntervalSemanticsResolution(rawCandidates, resolution, sideLabel, errors, recordPath) {
+  if (!Array.isArray(rawCandidates) || rawCandidates.length === 0) {
+    errors.push(`${recordPath}.${sideLabel}_analysis.interval_semantics_candidates: 非空配列ではありません`);
+    return;
+  }
+  const seen = new Set();
+  for (const candidate of rawCandidates) {
+    if (seen.has(candidate?.value)) {
+      errors.push(`${recordPath}.${sideLabel}_analysis.interval_semantics_candidates: valueが重複しています("${candidate?.value}")`);
+    }
+    seen.add(candidate?.value);
+  }
+  const sorted = sortedByConfidenceDesc(rawCandidates);
+  if (resolution?.value !== sorted[0].value) {
+    errors.push(`${recordPath}.comparison_input.interval_semantics_resolution.${sideLabel}.value: ${sideLabel}_analysis.interval_semantics_candidates(confidence降順+value昇順で並べ替え)の先頭候補と一致しません`);
+  }
+  if (resolution?.top_confidence !== sorted[0].confidence) {
+    errors.push(`${recordPath}.comparison_input.interval_semantics_resolution.${sideLabel}.top_confidence: 先頭候補のconfidenceと一致しません`);
+  }
+  const expected = expectedMargin(sorted);
+  if (resolution?.margin !== expected) {
+    errors.push(`${recordPath}.comparison_input.interval_semantics_resolution.${sideLabel}.margin: marginOf()契約(${expected})と一致しません(実際${resolution?.margin})`);
+  }
+  const expectedOpposing = expectedHasOpposingEvidence(sorted);
+  if (resolution?.has_opposing_evidence !== expectedOpposing) {
+    errors.push(`${recordPath}.comparison_input.interval_semantics_resolution.${sideLabel}.has_opposing_evidence: hasOpposingEvidence()契約(${expectedOpposing})と一致しません`);
+  }
+}
+
+// 【レビュー修正、重大1(5巡目)】従来のsemantic検証は、requirement input＝requirement raw analysis・
+// actual original＝actual raw analysisの結合しか確認しておらず、そこから先の
+// unit_conversion_plan・actual_quantity_value_normalized・幾何比較結果(relation_type/
+// geometric_relation_holds/lower_check/upper_check)・signed_boundary_deltasは一切再計算せず
+// 受理していた。これらはすべて純粋関数として独立に再実行可能なため、producerと同じ関数
+// (classifyUnitConversion()/applyLinearConversion()/comparePointInRegion()/
+// compareIntervalCoverage()、いずれもquantity_sidecar_binding_core.jsから今回export)を
+// そのまま再利用し、raw analysisのunit・comparison_input.actual_quantity_value_original・
+// requirement_quantity_valueから独立に再計算した結果とdeep-equalであることを確認する
+// (別実装を複製せず、生成に使ったのと同じ関数を検証にも使う)。前段(unit_conversion_plan)が
+// 不一致の場合、後段の再計算はその不正な計画に依存してしまい無意味なエラーが積み上がるだけ
+// のため、各段階の不一致検出後は以降の再計算を打ち切る。
+function checkNumericComparisonRecomputation(record, errors, recordPath) {
+  const ci = record.comparison_input || {};
+  const nc = record.numeric_comparison || {};
+  const requirementUnit = record.requirement_analysis?.quantity?.unit;
+  const actualUnit = record.actual_analysis?.quantity?.unit;
+
+  const classified = core.classifyUnitConversion(requirementUnit, actualUnit);
+  if (classified.outcome !== 'plan' || core.canonicalJson(classified.plan) !== core.canonicalJson(ci.unit_conversion_plan)) {
+    errors.push(`${recordPath}.comparison_input.unit_conversion_plan: requirement_analysis/actual_analysisのunitから再計算したclassifyUnitConversion()の結果と一致しません`);
+    return;
+  }
+
+  const converted = core.applyLinearConversion(ci.actual_quantity_value_original, ci.unit_conversion_plan);
+  if (converted.outcome !== 'converted' || core.canonicalJson(converted.value) !== core.canonicalJson(ci.actual_quantity_value_normalized)) {
+    errors.push(`${recordPath}.comparison_input.actual_quantity_value_normalized: applyLinearConversion(actual_quantity_value_original, unit_conversion_plan)の再計算結果と一致しません`);
+    return;
+  }
+
+  const mode = nc.comparison_mode;
+  let comparison;
+  if (mode === 'point_in_region') {
+    comparison = core.comparePointInRegion(ci.requirement_quantity_value, ci.actual_quantity_value_normalized);
+  } else if (mode === 'actual_covers_requirement') {
+    comparison = core.compareIntervalCoverage(ci.actual_quantity_value_normalized, ci.requirement_quantity_value);
+  } else if (mode === 'requirement_covers_actual') {
+    comparison = core.compareIntervalCoverage(ci.requirement_quantity_value, ci.actual_quantity_value_normalized);
+  } else {
+    return; // 既存の「既知の3値のいずれでもありません」検査が別途エラーを出す
+  }
+  if (comparison.outcome !== 'compared') {
+    errors.push(`${recordPath}.numeric_comparison: requirement_quantity_value/actual_quantity_value_normalizedからの幾何比較の再計算が失敗しました(${comparison.reason_code})`);
+    return;
+  }
+  if (nc.relation_type !== comparison.result.relation_type) {
+    errors.push(`${recordPath}.numeric_comparison.relation_type: 幾何比較の再計算結果と一致しません`);
+  }
+  if (nc.geometric_relation_holds !== comparison.result.geometric_relation_holds) {
+    errors.push(`${recordPath}.numeric_comparison.geometric_relation_holds: 幾何比較の再計算結果と一致しません`);
+  }
+  if (core.canonicalJson(nc.lower_check) !== core.canonicalJson(comparison.result.lower_check)) {
+    errors.push(`${recordPath}.numeric_comparison.lower_check: 幾何比較の再計算結果と一致しません`);
+  }
+  if (core.canonicalJson(nc.upper_check) !== core.canonicalJson(comparison.result.upper_check)) {
+    errors.push(`${recordPath}.numeric_comparison.upper_check: 幾何比較の再計算結果と一致しません`);
+  }
+
+  // signed_boundary_deltasは、generateNumericComparisonResults()と同じ固定式(3モードとも同一)
+  // でrequirement_quantity_value/actual_quantity_value_normalizedの実値から直接計算する。
+  const reqQv = ci.requirement_quantity_value;
+  const actQv = ci.actual_quantity_value_normalized;
+  const lowerDelta = (reqQv?.lower && actQv?.lower) ? actQv.lower.value - reqQv.lower.value : null;
+  const upperDelta = (reqQv?.upper && actQv?.upper) ? reqQv.upper.value - actQv.upper.value : null;
+  const expectedDeltas = { lower_actual_minus_requirement: lowerDelta, upper_requirement_minus_actual: upperDelta };
+  if (core.canonicalJson(nc.signed_boundary_deltas) !== core.canonicalJson(expectedDeltas)) {
+    errors.push(`${recordPath}.numeric_comparison.signed_boundary_deltas: requirement/actual側の正規化済み境界値から再計算した固定式と一致しません`);
+  }
+}
+
 const COMPARISON_MODE_SIDES = {
   point_in_region: { relation_type: 'point_in_region', outer_side: null, inner_side: null },
   actual_covers_requirement: { relation_type: 'outer_covers_inner', outer_side: 'actual', inner_side: 'requirement' },
@@ -160,6 +282,10 @@ function checkComparisonRecord(record, thresholds, errors, recordPath) {
     errors.push(`${recordPath}.comparison_input.actual_quantity_value_original: actual_analysis.quantity.quantityと一致しません`);
   }
 
+  // --- 【レビュー修正、重大1(5巡目)】単位変換・normalized quantity・幾何比較・signed deltaを
+  //     raw analysisの入力から完全再計算し、record内の監査値と照合する。 ---
+  checkNumericComparisonRecomputation(record, errors, recordPath);
+
   // --- relationship.linked_at(非null時のみ実在暦日時) ---
   if (record.relationship?.linked_at !== null && record.relationship?.linked_at !== undefined
     && !isRealCanonicalTimestamp(record.relationship.linked_at)) {
@@ -174,6 +300,11 @@ function checkComparisonRecord(record, thresholds, errors, recordPath) {
   const ci = record.comparison_input || {};
   const isr = ci.interval_semantics_resolution || {};
   const basis = record.auto_applicability?.basis || {};
+
+  // --- 【レビュー修正、重大2(5巡目)】interval_semantics_resolutionをrequirement_analysis/
+  //     actual_analysisの生interval_semantics_candidatesへ結合検査する。 ---
+  checkIntervalSemanticsResolution(record.requirement_analysis?.interval_semantics_candidates, isr.requirement, 'requirement', errors, recordPath);
+  checkIntervalSemanticsResolution(record.actual_analysis?.interval_semantics_candidates, isr.actual, 'actual', errors, recordPath);
 
   // --- interval_semantics_resolution ⇔ comparison_mode.derived_from ---
   if (ci.comparison_mode?.derived_from?.requirement_condition_value !== isr.requirement?.value) {

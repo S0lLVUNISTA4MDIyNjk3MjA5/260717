@@ -1452,10 +1452,16 @@
   // quantity-annotation/1.0-rc1: 単位互換性判定・変換計画生成ライブラリ(移植、
   // unit_conversion_rules_prototype.jsから一字一句移植。乖離検出はquantity_annotation_ported_lib_check.js
   // で行う。改変禁止、移植元を直接編集してから再度移植すること。【レビュー指摘、中1】
-  // classifyUnitConversion()はbindingを経由せず任意のunitオブジェクトを受け取れる純粋関数で
-  // あり、quantity_sidecar_binding_core.jsの公開APIに直接置くと「公開APIはbinding経由のみ」
-  // という信頼境界の外側から呼べる入口を増やしてしまうため、独立ライブラリとして切り出し、
-  // ここでは非公開の実装詳細としてのみ使う。Pa/kPa/MPa間の変換計算・重大1の既知単位検証は
+  // classifyUnitConversion()はbindingを経由せず任意のunitオブジェクトを受け取れる純粋関数であり、
+  // 当初は「公開APIはbinding経由のみ」という信頼境界を守るため非公開の実装詳細としてのみ使う
+  // 方針だった。【レビュー指摘、重大1(B-3cレビュー5巡目)】trace_comparison_record_set_validator.js
+  // のsemantic validatorが、record内の監査値(unit_conversion_plan/正規化済み数量値/幾何比較結果/
+  // signed delta)をraw analysisの入力から独立に再計算して照合する必要があり、この関数(および
+  // 後述のapplyLinearConversion/comparePointInRegion/compareIntervalCoverage)を再実装せず再利用
+  // する以外に方法がないため、ファイル末尾の公開APIへ追加した(binding経由のみという制約は
+  // production生成フロー(generateTraceComparisonRecordSet()等)の入口を増やさないためのものであり、
+  // 生成済みartifactを検証するだけのvalidatorがこれらの純粋関数を直接呼ぶことは、production
+  // フロー自体の信頼境界を広げない)。Pa/kPa/MPa間の変換計算・重大1の既知単位検証は
   // unit_conversion_rules_prototype.js自身の回帰テストで検証し、generateUnitConversionPlans()
   // 自体の配線(fail closedゲート・quantity参照・監査フィールド伝播)は、
   // quantity_unit_conversion_plan_verification.jsが到達可能なpower/kW(canonical単位1種類のみ)
@@ -2845,5 +2851,9 @@
     COMPARISON_MODE_DERIVATION_TABLE, generateComparisonModeCandidates,
     KNOWN_CANONICAL_UNITS_BY_DIMENSION, LINEAR_UNIT_SCALE_TO_BASE, generateUnitConversionPlans,
     generateNormalizedQuantityViews, generateNumericComparisonResults, generateAutoApplicabilityResults,
-    generateAutomaticJudgementResults, generateTraceComparisonRecordSet, compareComparisonRecords });
+    generateAutomaticJudgementResults, generateTraceComparisonRecordSet, compareComparisonRecords,
+    // 【レビュー指摘、重大1(B-3cレビュー5巡目)】trace_comparison_record_set_validator.jsのsemantic
+    // validatorが、record内の監査値をraw analysisの入力から独立に再計算して照合するために必要な
+    // 純粋関数。別実装を複製せず、生成に使ったのと同じ関数をそのまま検証にも再利用する。
+    classifyUnitConversion, applyLinearConversion, comparePointInRegion, compareIntervalCoverage });
 });
