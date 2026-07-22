@@ -135,7 +135,10 @@ function mutateInput(base, kind, injectedCore) {
     if (compared.outcome !== 'compared') throw new Error('非有限delta fixtureの幾何比較に失敗しました');
     Object.assign(record.numeric_comparison, compared.result);
     record.numeric_comparison.comparison_mode = 'point_in_region';
-    record.numeric_comparison.signed_boundary_deltas = { lower: null, upper: 0 };
+    record.numeric_comparison.signed_boundary_deltas = {
+      lower_actual_minus_requirement: null,
+      upper_requirement_minus_actual: 0,
+    };
     return recordSet;
   }
   if (kind === 'candidates_64' || kind === 'candidates_65') {
@@ -198,6 +201,12 @@ const CASES = [
   const browser = await chromium.launch();
   const page = await browser.newPage();
   for (const scriptPath of SCRIPT_PATHS) await page.addScriptTag({ path: scriptPath });
+  const browserGlobalSchema = await page.evaluate(() => globalThis.TraceComparisonSchemaV2);
+  check('実ChromiumのTraceComparisonSchemaV2は正本JSONとdeep-equal',
+    (() => {
+      try { assert.deepStrictEqual(browserGlobalSchema, canonicalSchema); return true; }
+      catch (error) { return false; }
+    })(), { browserGlobalSchema, canonicalSchema });
   const globals = await page.evaluate(() => ({
     core: typeof globalThis.QuantitySidecarBinding === 'object',
     schema: globalThis.TraceComparisonSchemaV2?.$id,
@@ -223,6 +232,13 @@ const CASES = [
       JSON.stringify(nodeResult) === JSON.stringify(browserResult), { nodeResult, browserResult });
     check(`${label}: 期待したvalid=${expectedValid}になる`,
       nodeResult.valid === expectedValid && browserResult.valid === expectedValid, { nodeResult, browserResult });
+    if (kind === 'nonfinite_delta_null_disguise') {
+      check(`${label}: Schema層を通過して専用semantic防御へ到達する`,
+        nodeResult.schema_errors.length === 0
+          && nodeResult.semantic_errors.some(error =>
+            error.includes('signed_boundary_deltas') && error.includes('非有限数')),
+        { nodeResult, browserResult });
+    }
   }
 
   const isolatedPage = await browser.newPage();
