@@ -333,6 +333,43 @@ const iv = (lo, loInc, hi, hiInc) => ({ kind: 'interval', lower: lo === null ? n
       !result.valid && result.semantic_errors.some(e => e.includes('signed_boundary_deltas')), result.semantic_errors);
   }
   {
+    // 【レビュー修正、重大1(7巡目)】オーバーフローするdeltaをnullへ偽装する回帰テスト。
+    // JSON.stringify(Infinity)==='null'という仕様上、canonicalJson()での比較だけでは実際に
+    // 計算されたInfinityと、artifact側に(不正に)保存されたnullが同じ"null"として一致してしまう。
+    // requirement=[-1e308,1e308]・actual(正規化後)=1e308の点、という数量構造自体は正当
+    // (境界値は有限数、lower<upper)なので、validateQuantityValueStructure()もpreflightも拒否
+    // しないが、lower_actual_minus_requirement=1e308-(-1e308)はJSの倍精度浮動小数点で
+    // オーバーフローしInfinityになる(producerが実際にnumeric_comparison_delta_non_finiteとして
+    // not_analyzedへ送り、comparisons[]へ到達させないケース)。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    const badReqQuantity = { kind: 'interval', lower: { value: -1e308, inclusive: true }, upper: { value: 1e308, inclusive: true } };
+    const badActQuantity = { kind: 'interval', lower: { value: 1e308, inclusive: true }, upper: { value: 1e308, inclusive: true } };
+    rec.requirement_analysis.quantity.quantity = clone(badReqQuantity);
+    rec.actual_analysis.quantity.quantity = clone(badActQuantity);
+    rec.comparison_input.requirement_quantity_value = clone(badReqQuantity);
+    rec.comparison_input.actual_quantity_value_original = clone(badActQuantity);
+    // このfixtureはidentity計画(kW=kW)のため、normalized===originalのはずである。
+    rec.comparison_input.actual_quantity_value_normalized = clone(badActQuantity);
+    check('前提: 実際に計算されるlower deltaはInfinityへオーバーフローする(canonicalJson()経由ではnullに潰れる)',
+      (badActQuantity.lower.value - badReqQuantity.lower.value) === Infinity);
+    const comparison = core.comparePointInRegion(badReqQuantity, badActQuantity);
+    check('前提: comparePointInRegion()はこの入力(actualが真の点)で比較に成功する', comparison.outcome === 'compared', comparison);
+    rec.numeric_comparison.relation_type = comparison.result.relation_type;
+    rec.numeric_comparison.geometric_relation_holds = comparison.result.geometric_relation_holds;
+    rec.numeric_comparison.lower_check = comparison.result.lower_check;
+    rec.numeric_comparison.upper_check = comparison.result.upper_check;
+    rec.automatic_judgement.state = comparison.result.geometric_relation_holds ? 'satisfied' : 'not_satisfied';
+    rec.automatic_judgement.satisfied = comparison.result.geometric_relation_holds;
+    // 実際に計算されるlower delta(Infinity)をnullへ偽装し、upper側は有限のまま(0)にする。
+    // 他のすべてのフィールド(数量構造・単位変換計画・幾何結果・判定)は整合させてあるため、
+    // このnull偽装だけを理由に拒否されることを確認する。
+    rec.numeric_comparison.signed_boundary_deltas = { lower_actual_minus_requirement: null, upper_requirement_minus_actual: 0 };
+    const result = validateTraceComparisonRecordSet(rs);
+    check('非有限なsigned boundary deltaをnullへ偽装しても、canonicalJson()比較の前の非有限判定で拒否する(重大1、7巡目)',
+      !result.valid && result.semantic_errors.some(e => e.includes('signed_boundary_deltas') && e.includes('非有限数')), result.semantic_errors);
+  }
+  {
     // 前提: このfixtureはunit_conversion_plan.conversion_operation==='identity'(requirement/actualが
     // 同一canonical単位kW同士のため)。identity計画のもとではnormalized===originalのはずである。
     const rs = clone(BASE_RECORD_SET);
@@ -576,6 +613,49 @@ const iv = (lo, loInc, hi, hiInc) => ({ kind: 'interval', lower: lo === null ? n
     check('actual_quantity_value_normalizedがlower>upperの構造不正なら拒否する(重大2e)',
       !result.valid && result.semantic_errors.some(e => e.includes('actual_quantity_value_normalized') && e.includes('数量構造契約')), result.semantic_errors);
   }
+  // 【レビュー修正、中2(7巡目)】3種類の構造不正(lower>upper・同値かつ片側exclusive・両側null)を
+  // requirement/actual original/actual normalizedの3位置すべてで検証する回帰マトリクスを完成させる
+  // (前回はrequirement側のみ3種類を検査し、actual側はlower>upperしか検査していなかった)。
+  {
+    // (f) actual_quantity_value_original側でlower===upperかつ片側exclusive(空集合)。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    const badActQuantity = { kind: 'interval', lower: { value: 25, inclusive: true }, upper: { value: 25, inclusive: false } };
+    rec.actual_analysis.quantity.quantity = clone(badActQuantity);
+    rec.comparison_input.actual_quantity_value_original = clone(badActQuantity);
+    const result = validateTraceComparisonRecordSet(rs);
+    check('actual_quantity_value_originalがlower===upperかつ片側exclusive(空集合)なら拒否する(重大2f)',
+      !result.valid && result.semantic_errors.some(e => e.includes('actual_quantity_value_original') && e.includes('数量構造契約')), result.semantic_errors);
+  }
+  {
+    // (g) actual_quantity_value_original側でlower/upperが両方null。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    const badActQuantity = { kind: 'interval', lower: null, upper: null };
+    rec.actual_analysis.quantity.quantity = clone(badActQuantity);
+    rec.comparison_input.actual_quantity_value_original = clone(badActQuantity);
+    const result = validateTraceComparisonRecordSet(rs);
+    check('actual_quantity_value_originalがlower/upper両方nullなら拒否する(重大2g)',
+      !result.valid && result.semantic_errors.some(e => e.includes('actual_quantity_value_original') && e.includes('数量構造契約')), result.semantic_errors);
+  }
+  {
+    // (h) actual_quantity_value_normalized側でlower===upperかつ片側exclusive(空集合)。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    rec.comparison_input.actual_quantity_value_normalized = { kind: 'interval', lower: { value: 25, inclusive: true }, upper: { value: 25, inclusive: false } };
+    const result = validateTraceComparisonRecordSet(rs);
+    check('actual_quantity_value_normalizedがlower===upperかつ片側exclusive(空集合)なら拒否する(重大2h)',
+      !result.valid && result.semantic_errors.some(e => e.includes('actual_quantity_value_normalized') && e.includes('数量構造契約')), result.semantic_errors);
+  }
+  {
+    // (i) actual_quantity_value_normalized側でlower/upperが両方null。
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    rec.comparison_input.actual_quantity_value_normalized = { kind: 'interval', lower: null, upper: null };
+    const result = validateTraceComparisonRecordSet(rs);
+    check('actual_quantity_value_normalizedがlower/upper両方nullなら拒否する(重大2i)',
+      !result.valid && result.semantic_errors.some(e => e.includes('actual_quantity_value_normalized') && e.includes('数量構造契約')), result.semantic_errors);
+  }
 
   // ══════════════ 14x. provenance.ruleset_versionがSUPPORTED_RULESETSの既知完全タプルであることを
   //     再検証する(重大3、6巡目) ══════════════
@@ -641,8 +721,11 @@ const iv = (lo, loInc, hi, hiInc) => ({ kind: 'interval', lower: lo === null ? n
     check('前提: このテストのrequirement_analysis.interval_semantics_candidatesはちょうど上限(64件)になっている',
       rec.requirement_analysis.interval_semantics_candidates.length === core.MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY);
     const result = validateTraceComparisonRecordSet(rs);
-    check('interval_semantics_candidatesが上限ちょうど(64件)なら件数だけでは拒否しない(前提、上限は超過のみ拒否)',
-      !result.semantic_errors.some(e => e.includes('interval_semantics_candidates') && e.includes('上限')), result.semantic_errors);
+    // 【レビュー修正、中3(7巡目)】件数上限メッセージが無いことだけでは「64件が許可される」ことを
+    // 証明できない(別の理由で拒否されていても成立してしまう)。record set全体がvalid:trueに
+    // なることまで厳密に確認する。
+    check('interval_semantics_candidatesが上限ちょうど(64件)ならrecord set全体がvalid:trueになる(上限は超過のみ拒否)',
+      result.valid === true && result.schema_errors.length === 0 && result.semantic_errors.length === 0, result);
   }
 
   // ══════════════ 15. interval_semantics_resolution ⇔ comparison_mode.derived_from不一致 ══════════════

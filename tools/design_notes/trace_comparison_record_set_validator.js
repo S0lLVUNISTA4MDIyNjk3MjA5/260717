@@ -208,6 +208,11 @@ function checkNumericComparisonRecomputation(record, errors, recordPath) {
   // 検証しないため、producerでは生成不能なはずの構造不正なrequirement区間(例: lower>upper)を、
   // 幾何結果・判定さえ再計算値へ整合させれば通過させてしまっていた。producerと同じ構造検査関数
   // (validateQuantityValueStructure())を3つの数量値すべてへ独立に適用する。
+  // 【レビュー修正、中1(7巡目)】構造違反を検出してもreturnせず後続の単位変換・幾何再計算まで
+  // 進んでいた。「不正時に後続の幾何再計算を打ち切る」というfail-closed境界を満たしていなかった
+  // (この後段の各再計算は、それぞれ独立にunit_conversion_plan等の不一致を検出できるため実害は
+  // 小さいが、構造不正データを後段関数へそのまま渡さないという契約自体を明示的に守る)。
+  let quantityStructureInvalid = false;
   for (const [label, quantityValue] of [
     ['requirement_quantity_value', ci.requirement_quantity_value],
     ['actual_quantity_value_original', ci.actual_quantity_value_original],
@@ -216,8 +221,10 @@ function checkNumericComparisonRecomputation(record, errors, recordPath) {
     const structureCheck = core.validateQuantityValueStructure(quantityValue);
     if (structureCheck.outcome !== 'ok') {
       errors.push(`${recordPath}.comparison_input.${label}: producerの数量構造契約(validateQuantityValueStructure())に違反しています(${structureCheck.reason_code})`);
+      quantityStructureInvalid = true;
     }
   }
+  if (quantityStructureInvalid) return;
 
   const classified = core.classifyUnitConversion(requirementUnit, actualUnit);
   if (classified.outcome !== 'plan' || core.canonicalJson(classified.plan) !== core.canonicalJson(ci.unit_conversion_plan)) {
@@ -265,6 +272,19 @@ function checkNumericComparisonRecomputation(record, errors, recordPath) {
   const actQv = ci.actual_quantity_value_normalized;
   const lowerDelta = (reqQv?.lower && actQv?.lower) ? actQv.lower.value - reqQv.lower.value : null;
   const upperDelta = (reqQv?.upper && actQv?.upper) ? reqQv.upper.value - actQv.upper.value : null;
+  // 【レビュー修正、重大1(7巡目)】canonicalJson()はJSON.stringify()を経由するため、
+  // JSON.stringify(Infinity) === 'null'という仕様上、非有限なInfinity/-Infinityも
+  // "null"というcanonical文字列に潰れてしまう。境界値自体は有限でも、大きさの異なる区間同士の
+  // 減算結果(例: 1e308 - (-1e308) === Infinity)は非有限になりうる(producerが
+  // numeric_comparison_delta_non_finiteとしてnot_analyzedへ送りcomparisons[]へ到達させない
+  // ケース)。これをcanonicalJson()での比較より前に検出しないと、実際に計算されたInfinityと、
+  // artifact側に(不正に)保存されたnullが、canonicalJson()上は同じ"null"として一致してしまい、
+  // producerでは生成不能なはずのartifactを見逃す。producerと同じ非有限判定をcanonicalJson()より
+  // 前に行う。
+  if ((lowerDelta !== null && !Number.isFinite(lowerDelta)) || (upperDelta !== null && !Number.isFinite(upperDelta))) {
+    errors.push(`${recordPath}.numeric_comparison.signed_boundary_deltas: requirement/actual側の正規化済み境界値からの再計算が非有限数(Infinity)になりました(producerではnumeric_comparison_delta_non_finiteとしてcomparisons[]へ到達しないはずの入力です)`);
+    return;
+  }
   const expectedDeltas = { lower_actual_minus_requirement: lowerDelta, upper_requirement_minus_actual: upperDelta };
   if (core.canonicalJson(nc.signed_boundary_deltas) !== core.canonicalJson(expectedDeltas)) {
     errors.push(`${recordPath}.numeric_comparison.signed_boundary_deltas: requirement/actual側の正規化済み境界値から再計算した固定式と一致しません`);
