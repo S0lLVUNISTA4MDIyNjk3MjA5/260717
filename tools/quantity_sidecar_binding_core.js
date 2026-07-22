@@ -2426,14 +2426,37 @@
 
   // relations行から関係性metadata(4参照IDとは別経路で後から組み合わせない、同じrowから
   // 原子的に取得する)。既存relationRefs()と対になるヘルパー。
+  // 【レビュー修正、重大2】以前はmatch_confidenceがnumber型でなければ無条件にnullへ変換して
+  // いた(不正入力の黙示的な補正、文字列'invalid'等がエラーにならずnullへ潰れていた)。
+  // ここでは一切型変換・値検証をせず、null/undefinedだけをnullへそろえて生の値を保持する
+  // (undefined/nullは「値なし」で同じ意味だが、それ以外の値は変換せずvalidateRelationshipMetadata()
+  // で検証する)。
   function relationshipRefs(row) {
     return {
       source: row?.source ?? null,
       match_method: row?.match_method ?? null,
-      match_confidence: typeof row?.match_confidence === 'number' ? row.match_confidence : null,
+      match_confidence: row?.match_confidence ?? null,
       review_category: row?.review_category ?? null,
       linked_at: row?.linked_at ?? null,
     };
+  }
+
+  // relationship metadataの値域・型を検証する。source両方に共通の型検査(null許容)と、
+  // source==='matching_engine'の場合だけ追加で必須項目を要求する(reviewer確定方針)。
+  function validateRelationshipMetadata(relationship) {
+    const issues = [];
+    if (relationship.source !== 'matching_engine' && relationship.source !== 'manual') issues.push('source_invalid');
+    if (relationship.match_method !== null && !isNonEmptyString(relationship.match_method)) issues.push('match_method_invalid');
+    if (relationship.match_confidence !== null
+      && !(isFiniteNumber(relationship.match_confidence) && relationship.match_confidence >= 0 && relationship.match_confidence <= 1)) issues.push('match_confidence_invalid');
+    if (relationship.review_category !== null && !isNonEmptyString(relationship.review_category)) issues.push('review_category_invalid');
+    if (relationship.linked_at !== null && !isCanonicalTimestamp(relationship.linked_at)) issues.push('linked_at_invalid');
+    if (relationship.source === 'matching_engine') {
+      if (relationship.match_method === null) issues.push('match_method_missing');
+      if (relationship.match_confidence === null) issues.push('match_confidence_missing');
+      if (relationship.review_category === null) issues.push('review_category_missing');
+    }
+    return issues;
   }
 
   function blockedTraceComparisonResult(diagnostics, judgementResult) {
@@ -2487,19 +2510,36 @@
   // relations行を1回走査し、4参照ID(relationRefs())とrelationship metadata(relationshipRefs())を
   // 同じ行から原子的に取得してrelation_keyで索引化する。同一keyが複数行ある場合、metadataが
   // canonical JSON上同一ならduplicate、異なればconflictとして区別し、いずれか一方だけを
-  // 全体fail closedの理由コードとして記録する(両方を同時に生成しない)。4参照IDのいずれかが
-  // 非空文字列でない行は索引化せず読み飛ばす(該当する候補があれば後段でrelationship_metadata_missingに
-  // より捕捉される)。
+  // 全体fail closedの理由コードとして記録する(両方を同時に生成しない)。
+  // 【レビュー修正、重大3】以前は4参照IDが非空文字列でない行を診断なしで読み飛ばしており、
+  // 該当する候補が1件もない場合(dimension_mismatch等でnot_analyzedへ回った場合)、不正な
+  // relation行が一切検出されずready:trueのまま通過していた(「必須4参照ID欠落は全体fail closed」
+  // という契約に反する)。すべてのrelation行を、対応する候補の有無に関わらずこの索引構築時点で
+  // 検証する(4参照IDの型・relationship metadataの値域とも)。
   function relationContextByKey(relations) {
     const map = new Map();
     const diagnostics = [];
     (relations || []).forEach(row => {
       const refs = relationRefs(row);
       if (!isNonEmptyString(refs.requirement_trace_id) || !isNonEmptyString(refs.actual_trace_id)
-        || !isNonEmptyString(refs.matcher_a_id) || !isNonEmptyString(refs.matcher_b_id)) return;
+        || !isNonEmptyString(refs.matcher_a_id) || !isNonEmptyString(refs.matcher_b_id)) {
+        diagnostics.push({ code:'trace_comparison_input_invariant_violation', severity:'error',
+          failed_invariants:['relation_reference_id_invalid'],
+          requirement_trace_id:refs.requirement_trace_id, actual_trace_id:refs.actual_trace_id,
+          matcher_a_id:refs.matcher_a_id, matcher_b_id:refs.matcher_b_id });
+        return;
+      }
+      const relationship = relationshipRefs(row);
+      const relationshipIssues = validateRelationshipMetadata(relationship);
+      if (relationshipIssues.length) {
+        diagnostics.push({ code:'trace_comparison_relationship_metadata_invalid', severity:'error',
+          failed_invariants:relationshipIssues,
+          requirement_trace_id:refs.requirement_trace_id, actual_trace_id:refs.actual_trace_id,
+          matcher_a_id:refs.matcher_a_id, matcher_b_id:refs.matcher_b_id });
+        return;
+      }
       const key = encodeUtf8Netstring(refs.requirement_trace_id) + encodeUtf8Netstring(refs.actual_trace_id)
         + encodeUtf8Netstring(refs.matcher_a_id) + encodeUtf8Netstring(refs.matcher_b_id);
-      const relationship = relationshipRefs(row);
       if (map.has(key)) {
         const sameContent = canonicalJson(map.get(key).relationship) === canonicalJson(relationship);
         diagnostics.push({ code: sameContent ? 'trace_comparison_relationship_duplicate' : 'trace_comparison_relationship_conflict',
@@ -2662,22 +2702,12 @@
       // --- relationship ---
       const relationKey = encodeUtf8Netstring(entry.requirement_trace_id) + encodeUtf8Netstring(entry.actual_trace_id)
         + encodeUtf8Netstring(entry.matcher_a_id) + encodeUtf8Netstring(entry.matcher_b_id);
+      // relationByKey.map内のエントリは、relationContextByKey()の索引構築時点で既に
+      // 4参照IDの型・relationship metadataの値域を検証済み(重大2・重大3修正)であるため、
+      // ここでは対応するrelation行が見つかるかどうかだけを確認すればよい。
       const relationContext = relationByKey.map.get(relationKey);
       if (!relationContext) {
         entryDiagnostics.push({ code:'trace_comparison_relationship_metadata_missing', severity:'error', ...refIds });
-        continue;
-      }
-      const relationship = relationContext.relationship;
-      const relationshipIssues = [];
-      if (relationship.source !== 'matching_engine' && relationship.source !== 'manual') {
-        relationshipIssues.push('source_invalid');
-      } else if (relationship.source === 'matching_engine') {
-        if (!isNonEmptyString(relationship.match_method)) relationshipIssues.push('match_method_missing');
-        if (!isFiniteNumber(relationship.match_confidence) || relationship.match_confidence < 0 || relationship.match_confidence > 1) relationshipIssues.push('match_confidence_invalid');
-        if (!isNonEmptyString(relationship.review_category)) relationshipIssues.push('review_category_missing');
-      }
-      if (relationshipIssues.length) {
-        entryDiagnostics.push({ code:'trace_comparison_relationship_metadata_missing', severity:'error', failed_invariants:relationshipIssues, ...refIds });
         continue;
       }
 
@@ -2697,8 +2727,8 @@
         actual_ref: { trace_id:entry.actual_trace_id, matcher_id:entry.matcher_b_id, quantity_id:entry.actual_quantity_id,
           ...(actAnalysisContext.source_row !== null ? { source_row:actAnalysisContext.source_row } : {}) },
         relationship: relationContext.relationship,
-        requirement_analysis: reqAnalysisContext.analysis,
-        actual_analysis: actAnalysisContext.analysis,
+        requirement_analysis: { ...reqAnalysisContext.analysis, content_hash:reqAnalysisContext.content_hash },
+        actual_analysis: { ...actAnalysisContext.analysis, content_hash:actAnalysisContext.content_hash },
         mapping: {
           status: 'resolved', selected_concept_id: entry.concept_id, dimension: entry.dimension,
           requirement_resolution: { status:'resolved', concept_id:reqResolution.concept_id,

@@ -164,15 +164,47 @@ function generate(binding, relations, overrides) {
       || mapping?.requirement_resolution?.candidates.length > 1, mapping?.requirement_resolution);
   }
 
+  // ══════════════ 8b. 候補2件以上の場合、marginは1位-2位のconfidence差と完全一致する ══════════════
+  {
+    const reqTrace = { _trace_records:[{ trace_id:'req-multi', source_raw_text:'周囲温度50度Cにおいて冷房能力12 kW以上を確保すること。', tags:['冷房能力', '周囲温度'] }] };
+    const actTrace = { _trace_records:[{ trace_id:'act-multi', source_raw_text:'冷房能力12.5 kWを実測した。', tags:['冷房能力'] }] };
+    const binding = await bind(reqTrace,
+      id => (id === 'req-multi' ? [analysis('multi-r', 'power', 'kW', 'acceptable_region', iv(0, true, 50, true))] : []),
+      actTrace,
+      id => (id === 'act-multi' ? [analysis('multi-a', 'power', 'kW', 'achieved_point', pt(25))] : []));
+    const relations = [relationRow('req-multi', 'act-multi', 'A', 'B')];
+    const result = generate(binding, relations);
+    const reqResolution = result.record_set?.comparisons[0]?.mapping?.requirement_resolution;
+    check('前提確認: requirement側で候補2件以上になる(8b)', reqResolution?.candidates.length >= 2, reqResolution);
+    check('候補2件以上のmarginは1位confidence - 2位confidenceと完全一致する(8b)',
+      reqResolution.margin === reqResolution.candidates[0].confidence - reqResolution.candidates[1].confidence, reqResolution);
+  }
+
   // ══════════════ 9. requirement_analysis/actual_analysisへrecord単位content_hashが付く ══════════════
   // (content_hashはrecord単位で別途binding.<side>.bindings[].annotation.content_hashに保持されており、
-  //  正式レコードのrequirement_analysis/actual_analysisは生analysisをそのまま保持する。content_hashの
-  //  整合性自体はanalysisContextByQuantityId()の検証で保証されるため、fail closedしないことで
-  //  間接的に確認する)
+  //  正式レコードのrequirement_analysis/actual_analysisへ明示的に転記する契約)
   {
     const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'contenthash');
     const result = generate(binding, relations);
     check('content_hash検証を通過しready:trueになる(9)', result.ready === true, result);
+    const record = result.record_set.comparisons[0];
+    const expectedReqHash = binding.requirement.bindings.find(b => b.trace_id === 'req-contenthash').annotation.content_hash;
+    const expectedActHash = binding.actual.bindings.find(b => b.trace_id === 'act-contenthash').annotation.content_hash;
+    check('requirement_analysis.content_hashが存在し64桁小文字16進である(9)',
+      typeof record.requirement_analysis?.content_hash === 'string' && /^[0-9a-f]{64}$/.test(record.requirement_analysis.content_hash),
+      record.requirement_analysis?.content_hash);
+    check('actual_analysis.content_hashが存在し64桁小文字16進である(9)',
+      typeof record.actual_analysis?.content_hash === 'string' && /^[0-9a-f]{64}$/.test(record.actual_analysis.content_hash),
+      record.actual_analysis?.content_hash);
+    check('requirement_analysis.content_hashが対応するbinding annotationのcontent_hashと完全一致する(9)',
+      record.requirement_analysis.content_hash === expectedReqHash, { actual:record.requirement_analysis.content_hash, expected:expectedReqHash });
+    check('actual_analysis.content_hashが対応するbinding annotationのcontent_hashと完全一致する(9)',
+      record.actual_analysis.content_hash === expectedActHash, { actual:record.actual_analysis.content_hash, expected:expectedActHash });
+    check('requirement/actualのcontent_hashを取り違えていない(異なる値であることの確認、9)',
+      record.requirement_analysis.content_hash !== record.actual_analysis.content_hash, record);
+    check('content_hash付加後も生analysisの既存フィールド(quantity_id)を失わない(9)',
+      record.requirement_analysis.quantity_id === record.requirement_ref.quantity_id
+      && record.actual_analysis.quantity_id === record.actual_ref.quantity_id, record);
   }
 
   // ══════════════ 10. actual source_rowが正しい元レコードから取得される ══════════════
@@ -265,7 +297,7 @@ function generate(binding, relations, overrides) {
       { relationshipOverrides:{ source:undefined, match_method:undefined, match_confidence:undefined, review_category:undefined, linked_at:undefined } });
     const result = generate(binding, relations);
     check('relationship.sourceが欠落するとfail closedする(15)',
-      result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_relationship_metadata_missing'
+      result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_relationship_metadata_invalid'
         && d.failed_invariants?.includes('source_invalid')), result);
   }
   {
@@ -273,7 +305,7 @@ function generate(binding, relations, overrides) {
       { relationshipOverrides:{ source:'matching_engine', match_method:undefined } });
     const result = generate(binding, relations);
     check('source:matching_engineでmatch_methodが欠落するとfail closedする(15)',
-      result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_relationship_metadata_missing'
+      result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_relationship_metadata_invalid'
         && d.failed_invariants?.includes('match_method_missing')), result);
   }
   {
@@ -281,7 +313,7 @@ function generate(binding, relations, overrides) {
       { relationshipOverrides:{ source:'matching_engine', match_confidence:1.5 } });
     const result = generate(binding, relations);
     check('source:matching_engineでmatch_confidenceが範囲外だとfail closedする(15)',
-      result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_relationship_metadata_missing'
+      result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_relationship_metadata_invalid'
         && d.failed_invariants?.includes('match_confidence_invalid')), result);
   }
   {
@@ -290,6 +322,82 @@ function generate(binding, relations, overrides) {
     const result = generate(binding, relations);
     check('source:manualはmatch_method/match_confidence/review_category/linked_atがnullでも成功する(15)',
       result.ready === true, result.diagnostics);
+  }
+  {
+    // 黙示的null変換を撤回した確認: match_confidenceが文字列でも(以前はnullへ暗黙変換されていた)、
+    // 数値ではないため型検査で拒否される。
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'manual-badconfidence-type',
+      { relationshipOverrides:{ source:'manual', match_confidence:'invalid' } });
+    const result = generate(binding, relations);
+    check('source:manualでもmatch_confidenceが文字列だとfail closedする(暗黙null変換をしない、15)',
+      result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_relationship_metadata_invalid'
+        && d.failed_invariants?.includes('match_confidence_invalid')), result);
+  }
+  {
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'manual-badmethod-type',
+      { relationshipOverrides:{ source:'manual', match_method:123 } });
+    const result = generate(binding, relations);
+    check('source:manualでもmatch_methodが数値だとfail closedする(15)',
+      result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_relationship_metadata_invalid'
+        && d.failed_invariants?.includes('match_method_invalid')), result);
+  }
+  {
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'manual-badcategory-type',
+      { relationshipOverrides:{ source:'manual', review_category:{ unexpected:true } } });
+    const result = generate(binding, relations);
+    check('source:manualでもreview_categoryがオブジェクトだとfail closedする(15)',
+      result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_relationship_metadata_invalid'
+        && d.failed_invariants?.includes('review_category_invalid')), result);
+  }
+  {
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'badlinkedat',
+      { relationshipOverrides:{ linked_at:'not-a-date' } });
+    const result = generate(binding, relations);
+    check('linked_atが非canonical形式だとfail closedする(15)',
+      result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_relationship_metadata_invalid'
+        && d.failed_invariants?.includes('linked_at_invalid')), result);
+  }
+  {
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'goodlinkedat',
+      { relationshipOverrides:{ linked_at:'2026-07-22T00:00:00.000Z' } });
+    const result = generate(binding, relations);
+    check('linked_atがcanonical UTC timestampなら成功する(15)', result.ready === true, result.diagnostics);
+  }
+
+  // ══════════════ 15b. 候補が0件でも不正なrelation行はfail closedする(重大3、対応する
+  //    automatic_judgement_resultsが1件も無くても索引構築時点で検出する) ══════════════
+  {
+    const reqTrace = { _trace_records:[{ trace_id:'req-15b-mismatch', source_raw_text:'電源電圧200 V以上とする。', tags:['電源電圧'] }] };
+    const actTrace = { _trace_records:[{ trace_id:'act-15b-mismatch', source_raw_text:'周囲温度は35度Cとした。', tags:['周囲温度'] }] };
+    const binding = await bind(reqTrace,
+      id => (id === 'req-15b-mismatch' ? [analysis('15b-mm-r', 'voltage', 'V', 'acceptable_region', iv(200, true, null, false))] : []),
+      actTrace,
+      id => (id === 'act-15b-mismatch' ? [analysis('15b-mm-a', 'temperature', 'degC', 'achieved_point', pt(35))] : []));
+    // matcher_b_idがnull(不正)なdimension不一致専用のrelation行。候補は0件(dimension_mismatchで
+    // not_analyzedへ回る)だが、それでもrelation行自体の不正は索引構築時点でfail closedするべき。
+    const relations = [{ requirement_trace_id:'req-15b-mismatch', actual_trace_id:'act-15b-mismatch', matcher_a_id:'A', matcher_b_id:null,
+      source:'matching_engine', match_method:'tag', match_confidence:0.5, review_category:'要確認', linked_at:null }];
+    const judgement = core.generateAutomaticJudgementResults({ binding, relations });
+    const result = generate(binding, relations);
+    check('前提確認: このシナリオではautomatic_judgement_resultsが0件になる(15b)', judgement.automatic_judgement_results.length === 0, judgement);
+    check('候補0件でも4参照ID不正(matcher_b_id:null)のrelation行はfail closedする(15b)',
+      result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_input_invariant_violation'
+        && d.failed_invariants?.includes('relation_reference_id_invalid')), result);
+  }
+  {
+    const reqTrace = { _trace_records:[{ trace_id:'req-15c-unresolved', source_raw_text:'よくわからない記述。', tags:[] }] };
+    const actTrace = { _trace_records:[{ trace_id:'act-15c-unresolved', source_raw_text:'よくわからない記述その2。', tags:[] }] };
+    const binding = await bind(reqTrace,
+      id => (id === 'req-15c-unresolved' ? [analysis('15c-r', 'power', 'kW', 'acceptable_region', iv(0, true, 50, true))] : []),
+      actTrace,
+      id => (id === 'act-15c-unresolved' ? [analysis('15c-a', 'power', 'kW', 'achieved_point', pt(25))] : []));
+    // trace_idが空文字列(不正)のrelation行。property_unresolved等で候補が0件になる状況でも検出する。
+    const relations = [{ requirement_trace_id:'', actual_trace_id:'act-15c-unresolved', matcher_a_id:'A', matcher_b_id:'B',
+      source:'matching_engine', match_method:'tag', match_confidence:0.5, review_category:'要確認', linked_at:null }];
+    const result = generate(binding, relations);
+    check('trace_idが空文字列のrelation行は候補0件でもfail closedする(15b)',
+      result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_input_invariant_violation'
+        && d.failed_invariants?.includes('relation_reference_id_invalid')), result);
   }
 
   // ══════════════ 16. display_contextを変えてもcomparison_id・判定結果が不変 ══════════════
