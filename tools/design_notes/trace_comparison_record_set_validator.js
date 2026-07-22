@@ -139,6 +139,15 @@ function checkComparisonRecord(record, thresholds, errors, recordPath) {
   if (record.actual_analysis?.quantity_id !== record.actual_ref?.quantity_id) {
     errors.push(`${recordPath}.actual_analysis.quantity_id: actual_ref.quantity_idと一致しません`);
   }
+  // 【レビュー修正、中】producer(relationshipRefs()、quantity_sidecar_binding_core.js)は
+  // actual_ref.source_rowに対しNumber.isSafeInteger(context.source_row) && context.source_row > 0
+  // を要求するが、SchemaはtypeMatches()の`Number.isInteger()`ベースの'integer'判定(1e20のような
+  // 安全整数範囲外の値もNumber.isInteger()===trueのため通過する)+minimum:1しか課していない。
+  // producer契約より緩いSchemaを正式artifact validatorが受理してしまうため、独立に再検証する。
+  if (record.actual_ref?.source_row !== undefined
+    && !(Number.isSafeInteger(record.actual_ref.source_row) && record.actual_ref.source_row > 0)) {
+    errors.push(`${recordPath}.actual_ref.source_row: 安全な正整数(Number.isSafeInteger && > 0)ではありません`);
+  }
   // comparison_inputの数量値は、generateTraceComparisonRecordSet()内でentry.requirement_quantity_value等
   // (analysis.quantity.quantityそのもの、または単位変換後の値)として転記される。requirement側は
   // 変換を適用しないため、analysisの生値と完全一致するはずである(actual側はoriginal(変換前)と
@@ -284,53 +293,79 @@ function checkComparisonRecord(record, thresholds, errors, recordPath) {
 
 // 【レビュー修正、重大2】diagnostics/not_analyzedは意図的にadditionalProperties:falseを付けない
 // 開放型の$defであり(16種超の理由コード形状差異に対応するため)、循環参照や極端な深さ・件数を
-// Schemaでは排除できない。以前の実装は循環検出なしで再帰していたため、自己参照するdiagnostic
-// (`d.self = d`)を含むartifactがRangeError(スタックオーバーフロー)を投げ、「例外を投げない
-// 総関数」という契約に違反していた。祖先パス(現在の再帰経路上にあるオブジェクト/配列)を
-// Setで追跡して真の循環だけを検出し(枝分かれで同じオブジェクトを複数箇所から参照するDAGは
-// 循環ではないため誤検出しない)、深さ・総ノード数にも上限を設ける。
-const MAX_WALK_DEPTH = 64;
-const MAX_WALK_NODES = 200000;
+// Schemaでは排除できない。深さ・総ノード数の上限自体はSchema検証より前に効かせる必要がある
+// (レビュー再指摘: 以前の実装はSchema検証→semantic検証の後にしかノード数上限を検査しておらず、
+// 巨大なdiagnostics/comparisons配列がSchema層のO(N)走査を素通りしてから初めてinvalidになって
+// いた。計算量そのものを制限できていなかった)。祖先パス(現在の再帰経路上にあるオブジェクト/
+// 配列)をSetで追跡して真の循環だけを検出する(枝分かれで同じオブジェクトを複数箇所から参照する
+// DAGは循環ではないため誤検出しない)。
+const MAX_GRAPH_DEPTH = 64;
+const MAX_GRAPH_NODES = 200000;
+const MAX_ARRAY_ITEMS = 20000;
 
-// obj以下を再帰的に走査し、typeof 'number'の値がすべてNumber.isFinite()を満たすことを確認する
-// (json_schema_minivalidator.jsのtype:'number'検査自体はNaN/Infinityを素通りさせるため、JSON再
-// パース由来かメモリ上のオブジェクトかによらず、ここで別途一括して検査する)。JSON非互換の値
-// (undefined/function/symbol/bigint)も、JSON再パースを経ないメモリ上のオブジェクトでは
-// 混入しうるため、ここで拒否する。
-function checkAllNumbersFinite(value, path, errors, ancestors, budget) {
-  if (budget.stopped) return;
-  budget.nodeCount++;
-  if (budget.nodeCount > MAX_WALK_NODES) {
-    errors.push(`$: 走査ノード数が上限(${MAX_WALK_NODES})を超えました(異常に巨大なartifactの可能性)`);
-    budget.stopped = true;
-    return;
-  }
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) errors.push(`${path}: 非有限数です(NaNまたはInfinity)`);
-    return;
-  }
-  if (typeof value === 'undefined' || typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint') {
-    errors.push(`${path}: JSON非互換の値です(${typeof value})`);
-    return;
-  }
-  if (Array.isArray(value)) {
-    if (ancestors.has(value)) { errors.push(`${path}: 循環参照を検出しました`); return; }
-    if (ancestors.size >= MAX_WALK_DEPTH) { errors.push(`${path}: 入れ子が深すぎます(最大${MAX_WALK_DEPTH})`); return; }
-    ancestors.add(value);
-    for (let i = 0; i < value.length && !budget.stopped; i++) checkAllNumbersFinite(value[i], `${path}[${i}]`, errors, ancestors, budget);
-    ancestors.delete(value);
-    return;
-  }
-  if (isPlainObject(value)) {
-    if (ancestors.has(value)) { errors.push(`${path}: 循環参照を検出しました`); return; }
-    if (ancestors.size >= MAX_WALK_DEPTH) { errors.push(`${path}: 入れ子が深すぎます(最大${MAX_WALK_DEPTH})`); return; }
-    ancestors.add(value);
-    for (const [key, sub] of Object.entries(value)) {
-      if (budget.stopped) break;
-      checkAllNumbersFinite(sub, `${path}.${key}`, errors, ancestors, budget);
+// 【レビュー修正、重大1】isPlainObject()相当の判定(typeof==='object'かつ非配列)は名前に反して
+// プロトタイプを確認しておらず、Object.create(someValidObject)のような「own propertyを持たず
+// プロトタイプ経由でのみ必須フィールドを持つ」オブジェクトを、mini-validatorの`key in value`判定
+// (プロトタイプ継承チェーンも辿る)経由でvalid:trueにし得た(JSON.stringify()はown enumerable
+// propertyしかシリアライズしないため、検証合格したオブジェクトと実際に保存されるJSONの内容が
+// 一致しないという致命的な乖離があった)。Schema検証より前に、JSON data graph全体を
+// 「null/boolean/string/有限number/array/プロトタイプがObject.prototypeまたはnullのobject」
+// だけに制限するpreflightを行い、Date/Map/Set/RegExp/typed array/custom class instance・
+// symbolキー・accessorプロパティ(getter/setter)・非enumerableプロパティ・循環・
+// JSON非互換primitive(undefined/function/symbol/bigint)をすべて拒否する。
+function preflightJsonGraph(root) {
+  const errors = [];
+  const ancestors = new Set();
+  const budget = { nodeCount: 0, stopped: false };
+
+  function walk(node, path, depth) {
+    if (budget.stopped) return;
+    budget.nodeCount++;
+    if (budget.nodeCount > MAX_GRAPH_NODES) {
+      errors.push(`${path}: 走査ノード数が上限(${MAX_GRAPH_NODES})を超えました(異常に巨大なartifactの可能性)`);
+      budget.stopped = true;
+      return;
     }
-    ancestors.delete(value);
+    if (node === null || typeof node === 'boolean' || typeof node === 'string') return;
+    if (typeof node === 'number') {
+      if (!Number.isFinite(node)) errors.push(`${path}: 非有限数です(NaNまたはInfinity)`);
+      return;
+    }
+    if (typeof node !== 'object') {
+      errors.push(`${path}: JSON非互換の値です(${typeof node})`);
+      return;
+    }
+    if (depth > MAX_GRAPH_DEPTH) { errors.push(`${path}: 入れ子が深すぎます(最大${MAX_GRAPH_DEPTH})`); return; }
+    if (ancestors.has(node)) { errors.push(`${path}: 循環参照を検出しました`); return; }
+
+    const isArray = Array.isArray(node);
+    const proto = Object.getPrototypeOf(node);
+    if (isArray) {
+      if (proto !== Array.prototype) { errors.push(`${path}: 配列の標準プロトタイプ(Array.prototype)ではありません`); return; }
+      if (node.length > MAX_ARRAY_ITEMS) { errors.push(`${path}: 配列要素数が上限(${MAX_ARRAY_ITEMS})を超えています(実際${node.length})`); return; }
+    } else if (proto !== Object.prototype && proto !== null) {
+      errors.push(`${path}: 標準のプレーンオブジェクトではありません(Date/Map/Set/RegExp/typed array/custom classなど、またはObject.create(既存オブジェクト)によるプロトタイプ継承を含む)`);
+      return;
+    }
+
+    if (Object.getOwnPropertySymbols(node).length > 0) { errors.push(`${path}: symbolキーを含んでいます`); return; }
+
+    ancestors.add(node);
+    const descriptors = Object.getOwnPropertyDescriptors(node);
+    for (const key of Object.keys(descriptors)) {
+      if (budget.stopped) break;
+      if (isArray && key === 'length') continue; // 配列のlengthは正規の非enumerableプロパティ
+      const descriptor = descriptors[key];
+      const childPath = isArray ? `${path}[${key}]` : `${path}.${key}`;
+      if (!descriptor.enumerable) { errors.push(`${childPath}: 非enumerableなプロパティです`); continue; }
+      if (descriptor.get || descriptor.set) { errors.push(`${childPath}: accessorプロパティ(getter/setter)です`); continue; }
+      walk(descriptor.value, childPath, depth + 1);
+    }
+    ancestors.delete(node);
   }
+
+  walk(root, '$', 0);
+  return errors;
 }
 
 function validateSemantics(recordSet) {
@@ -367,21 +402,26 @@ function validateSemantics(recordSet) {
     }
   }
 
-  checkAllNumbersFinite(recordSet, '$', errors, new Set(), { nodeCount: 0, stopped: false });
-
   return errors;
 }
 
-// 総関数(例外を投げない)。段階1(Schema構造検証)が失敗した場合、段階2(semantic検証)は
-// 実行しない(reviewer確定方針: 構造が壊れた文書に対してsemantic検証を走らせても無意味な
-// エラーが積み上がるだけであり、valid判定はSchema失敗の時点で確定している)。
+// 総関数(例外を投げない)。実行順は preflight → Schema構造検証 → semantic検証。前段が失敗した
+// 場合、後段は実行しない(reviewer確定方針: 構造が壊れた文書に対して後段の検証を走らせても
+// 無意味なエラーが積み上がるだけであり、valid判定は前段失敗の時点で確定している)。
 //
-// 【レビュー修正、重大2】checkAllNumbersFinite()の循環検出等は主要な例外経路を塞ぐが、
-// 「例外を投げない総関数」という文書化された契約を個々の防御の網羅性に依存させず、公開入口
-// 全体をtry/catchで保護する(想定していない他の例外経路が将来増えても、契約自体は必ず守られる
-// ようにする、多層防御)。
+// 【レビュー再指摘、重大1・重大2】preflightJsonGraph()をSchema検証より前に置くのは、単に
+// 「先に安全な値だけ通す」だけでなく、Schema検証自体の計算量(O(ノード数))をpreflightの
+// ノード数上限で先に打ち切るためでもある。以前はSchema検証→semantic検証の後に初めてノード数
+// 上限を検査しており、巨大なdiagnostics/comparisons配列がSchema層の全件走査を素通りしてから
+// invalidになっていた(上限が判定結果を変えるだけで、計算量そのものを制限できていなかった)。
+// 【レビュー修正、重大2】公開入口全体をtry/catchでも保護する(想定していない例外経路が将来
+// 増えても、「例外を投げない総関数」という契約自体は必ず守られるようにする、多層防御)。
 function validateTraceComparisonRecordSet(recordSet) {
   try {
+    const preflightErrors = preflightJsonGraph(recordSet);
+    if (preflightErrors.length > 0) {
+      return { valid: false, schema_errors: preflightErrors, semantic_errors: [] };
+    }
     if (!isPlainObject(recordSet)) {
       return { valid: false, schema_errors: ['record_setがオブジェクトではありません'], semantic_errors: [] };
     }

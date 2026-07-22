@@ -21,6 +21,8 @@ function resolveRef(root, ref) {
   return node;
 }
 
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+
 function typeOf(value) {
   if (value === null) return 'null';
   if (Array.isArray(value)) return 'array';
@@ -74,12 +76,17 @@ function validateNode(schema, value, path, root, errors) {
     value.forEach((item, i) => validateNode(schema.items, item, `${path}[${i}]`, root, errors));
   }
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    // 【レビュー修正、重大1】`key in value`はプロトタイプ継承チェーンも辿るため、
+    // own propertyを持たずプロトタイプ経由でのみ必須フィールドを「持つ」オブジェクト
+    // (例: Object.create(validRecordSet))を誤って合格させていた。JSON.stringify()は
+    // own enumerable propertyしかシリアライズしないため、検証合格したオブジェクトと
+    // 実際に保存されるJSONの内容が一致しない致命的な乖離があった。hasOwnPropertyへ変更する。
     for (const key of (schema.required || [])) {
-      if (!(key in value)) errors.push(`${path}: 必須フィールド不足: ${key}`);
+      if (!hasOwn(value, key)) errors.push(`${path}: 必須フィールド不足: ${key}`);
     }
     if (schema.properties) {
       for (const [key, subSchema] of Object.entries(schema.properties)) {
-        if (key in value) validateNode(subSchema, value[key], `${path}.${key}`, root, errors);
+        if (hasOwn(value, key)) validateNode(subSchema, value[key], `${path}.${key}`, root, errors);
       }
     }
     if (schema.additionalProperties === false && schema.properties) {

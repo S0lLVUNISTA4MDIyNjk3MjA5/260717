@@ -313,22 +313,21 @@ const iv = (lo, loInc, hi, hiInc) => ({ kind: 'interval', lower: lo === null ? n
   }
 
   // ══════════════ 18. 非有限数(JSON再パースではなくメモリ上のオブジェクトに直接混入) ══════════════
+  // 【レビュー再指摘】preflightJsonGraph()がSchema検証より前に走るようになったため、非有限数
+  // 混入はpreflight段階で検出され、エラーはschema_errors側に積まれる(semantic_errorsではない)。
   {
     const rs = clone(BASE_RECORD_SET);
     rs.comparisons[0].numeric_comparison.signed_boundary_deltas.lower_actual_minus_requirement = NaN;
     const result = validateTraceComparisonRecordSet(rs);
-    check('NaNが混入していれば拒否する(Schema層のtype:numberはNaNを素通りさせるため、semantic層が拒否)',
-      !result.valid && result.semantic_errors.some(e => e.includes('非有限数')), result.semantic_errors);
+    check('NaNが混入していれば拒否する(preflightが非有限数を拒否する)',
+      !result.valid && result.schema_errors.some(e => e.includes('非有限数')), result.schema_errors);
   }
   {
-    // 0〜1のminimum/maximumを持つ数値フィールドだとInfinityがSchema層のmaximum違反で先に
-    // 拒否されてしまう(semantic層まで到達しない)ため、min/maxを持たないsigned_boundary_deltas
-    // (type:["number","null"]のみ)で非有限数検査自体を確認する。
     const rs = clone(BASE_RECORD_SET);
     rs.comparisons[0].numeric_comparison.signed_boundary_deltas.upper_requirement_minus_actual = Infinity;
     const result = validateTraceComparisonRecordSet(rs);
-    check('Infinityが混入していれば拒否する(Schema層のtype:numberはInfinityを素通りさせるため、semantic層が拒否)',
-      !result.valid && result.semantic_errors.some(e => e.includes('非有限数')), result.semantic_errors);
+    check('Infinityが混入していれば拒否する(preflightが非有限数を拒否する)',
+      !result.valid && result.schema_errors.some(e => e.includes('非有限数')), result.schema_errors);
   }
 
   // ══════════════ 18b. 循環参照するdiagnosticでも例外を投げず、valid:falseを返す(重大2) ══════════════
@@ -342,8 +341,8 @@ const iv = (lo, loInc, hi, hiInc) => ({ kind: 'interval', lower: lo === null ? n
     try { result = validateTraceComparisonRecordSet(rs); }
     catch (e) { threw = true; }
     check('循環参照するdiagnosticでも例外を投げない(総関数契約、重大2)', !threw);
-    check('循環参照するdiagnosticはvalid:falseとして検出する(重大2)',
-      !threw && !result.valid && result.semantic_errors.some(e => e.includes('循環参照')), result?.semantic_errors);
+    check('循環参照するdiagnosticはvalid:falseとして検出する(preflight、重大2)',
+      !threw && !result.valid && result.schema_errors.some(e => e.includes('循環参照')), result?.schema_errors);
   }
 
   // ══════════════ 18c. 極端に深い入れ子のdiagnosticでも例外を投げない(重大2) ══════════════
@@ -358,24 +357,36 @@ const iv = (lo, loInc, hi, hiInc) => ({ kind: 'interval', lower: lo === null ? n
     try { result = validateTraceComparisonRecordSet(rs); }
     catch (e) { threw = true; }
     check('極端に深い入れ子のdiagnosticでも例外を投げない(重大2)', !threw);
-    check('極端に深い入れ子は深さ上限違反として検出する(重大2)',
-      !threw && !result.valid && result.semantic_errors.some(e => e.includes('深すぎます')), result?.semantic_errors);
+    check('極端に深い入れ子は深さ上限違反として検出する(preflight、重大2)',
+      !threw && !result.valid && result.schema_errors.some(e => e.includes('深すぎます')), result?.schema_errors);
   }
 
-  // ══════════════ 18cb. 公開入口全体のtry/catch自体の効果(内部の循環/深さ対策の外側で発生する例外、重大2) ══════════════
-  // checkAllNumbersFinite()自身の循環/深さ対策は例外を投げず直接errorsへ積むため、それだけでは
-  // 公開入口のtry/catch自体の効果を証明できない(try/catchを外しても18b/18cは落ちない)。
-  // Schema検証がフィールドへアクセスする際に例外を投げるgetter trapを使い、try/catch自体に
-  // 「テイス」があることを別途確認する。
+  // ══════════════ 18cb. 公開入口全体のtry/catch自体の効果(preflightを通過した後に発生する例外、重大2) ══════════════
+  // 単純なaccessorプロパティ(getter/setter)はpreflightJsonGraph()自身がdescriptor検査で構造的に
+  // 拒否するようになったため(getterを実際に呼び出す前にreject)、もはやtry/catchの実効性を証明
+  // する経路にならない。そこでpreflightの構造検査(プロトタイプ・own property descriptor)は
+  // すべて素通りしつつ、Schema検証がbracket記法(`value[key]`、[[Get]]内部メソッド)でフィールド
+  // へアクセスした瞬間にだけ例外を投げるProxyを使う([[GetOwnProperty]]を使うpreflight/
+  // hasOwnPropertyとは異なる内部メソッドを経由するため、Proxyのgetトラップだけを狙って発火できる)。
   {
     const rs = clone(BASE_RECORD_SET);
-    Object.defineProperty(rs, 'generated_at', { get() { throw new Error('boom from malicious getter'); }, enumerable: true, configurable: true });
+    const inner = { ...rs };
+    const proxied = new Proxy(inner, {
+      get(target, prop, receiver) {
+        if (prop === 'generated_at') throw new Error('boom from malicious proxy get trap');
+        return Reflect.get(target, prop, receiver);
+      },
+    });
     let threw = false;
     let result;
-    try { result = validateTraceComparisonRecordSet(rs); }
+    try { result = validateTraceComparisonRecordSet(proxied); }
     catch (e) { threw = true; }
-    check('フィールドアクセスで例外を投げるgetterがあっても、公開入口のtry/catchで例外を投げない(重大2)', !threw);
-    check('getter起因の例外はvalid:falseとして検出する(重大2)', !threw && result.valid === false, result);
+    check('preflightを通過した後、Schema検証中のget trap例外があっても公開入口のtry/catchで例外を投げない(重大2)', !threw);
+    // 例外メッセージ自体がsemantic_errorsに含まれることをもって、(a)preflightがこのProxyを
+    // 構造的に拒否せず素通りさせたこと(拒否していればget trapは発火せず別のエラー文言になる)、
+    // (b)Schema層のget trap例外が公開入口のtry/catchで実際に捕捉されたことの両方を直接証明する。
+    check('Proxy get trap起因の例外はvalid:falseとして検出され、例外メッセージが記録される(重大2)',
+      !threw && result.valid === false && result.semantic_errors.some(e => e.includes('boom from malicious proxy get trap')), result);
   }
 
   // ══════════════ 18d. netstring長さプレフィックスの桁数上限(スプレッド引数上限を避けるための対策、重大2) ══════════════
@@ -384,6 +395,106 @@ const iv = (lo, loInc, hi, hiInc) => ({ kind: 'interval', lower: lo === null ? n
     const hugeDigits = '9'.repeat(100000);
     const r = decodeUtf8NetstringElements(enc2(`${hugeDigits}:x,3:foo,3:bar,`), 3);
     check('極端に長い桁数のnetstring長さプレフィックスでも例外を投げず拒否する(重大2)', r.ok === false, r);
+  }
+
+  // ══════════════ 18e. Object.create(validRecordSet): own propertyを持たずプロトタイプ継承だけで
+  //     必須フィールドを「持つ」オブジェクトを拒否する(再指摘・重大1) ══════════════
+  {
+    const inheritedOnly = Object.create(BASE_RECORD_SET);
+    check('JSON.stringify(Object.create(validRecordSet))は空オブジェクトになる(own propertyが無いことの前提確認)',
+      JSON.stringify(inheritedOnly) === '{}');
+    const result = validateTraceComparisonRecordSet(inheritedOnly);
+    check('Object.create(validRecordSet)は継承フィールドだけではvalid:trueにならない(重大1)',
+      result.valid === false, result);
+    check('Object.create(validRecordSet)はpreflightのプロトタイプ検査で拒否される',
+      result.schema_errors.some(e => e.includes('標準のプレーンオブジェクトではありません')), result.schema_errors);
+  }
+
+  // ══════════════ 18f. ネストしたref(requirement_ref)がプロトタイプ継承だけでquantity_idを
+  //     「持つ」場合も拒否する(重大1、ルート直下だけでなく任意の深さで有効な防御であることの確認) ══════════════
+  {
+    const rs = clone(BASE_RECORD_SET);
+    const validRef = rs.comparisons[0].requirement_ref;
+    rs.comparisons[0].requirement_ref = Object.create(validRef);
+    check('前提: ネストしたref自体はJSON.stringify()で空オブジェクトになる',
+      JSON.stringify(rs.comparisons[0].requirement_ref) === '{}');
+    const result = validateTraceComparisonRecordSet(rs);
+    check('ネストしたrequirement_refがプロトタイプ継承のみで必須フィールドを持つ場合も拒否する(重大1)',
+      result.valid === false, result);
+  }
+
+  // ══════════════ 18g. Date/Map/Set/RegExp/typed arrayが混入したdiagnosticsを拒否する(重大1) ══════════════
+  for (const [label, badValue] of [
+    ['Date', new Date('2026-07-22T00:00:00.000Z')],
+    ['Map', new Map([['a', 1]])],
+    ['Set', new Set([1, 2, 3])],
+    ['RegExp', /x/],
+    ['Uint8Array', new Uint8Array([1, 2, 3])],
+  ]) {
+    const rs = clone(BASE_RECORD_SET);
+    rs.diagnostics = [{ code: 'x', severity: 'error', payload: badValue }];
+    const result = validateTraceComparisonRecordSet(rs);
+    check(`diagnosticsに${label}が混入していれば拒否する(重大1)`,
+      result.valid === false && result.schema_errors.some(e => e.includes('標準のプレーンオブジェクトではありません') || e.includes('配列の標準プロトタイプ')), result.schema_errors);
+  }
+
+  // ══════════════ 18h. 非enumerable/accessorプロパティ・symbolキーを拒否する(重大1) ══════════════
+  {
+    const rs = clone(BASE_RECORD_SET);
+    const diagnostic = { code: 'x', severity: 'error' };
+    Object.defineProperty(diagnostic, 'hidden', { value: 1, enumerable: false, configurable: true });
+    rs.diagnostics = [diagnostic];
+    const result = validateTraceComparisonRecordSet(rs);
+    check('非enumerableなプロパティを持つdiagnosticを拒否する(重大1)',
+      result.valid === false && result.schema_errors.some(e => e.includes('非enumerable')), result.schema_errors);
+  }
+  {
+    const rs = clone(BASE_RECORD_SET);
+    const diagnostic = { code: 'x', severity: 'error' };
+    Object.defineProperty(diagnostic, 'computed', { get() { return 1; }, enumerable: true, configurable: true });
+    rs.diagnostics = [diagnostic];
+    const result = validateTraceComparisonRecordSet(rs);
+    check('accessorプロパティ(getter)を持つdiagnosticを拒否する(重大1)',
+      result.valid === false && result.schema_errors.some(e => e.includes('accessorプロパティ')), result.schema_errors);
+  }
+  {
+    const rs = clone(BASE_RECORD_SET);
+    const sym = Symbol('x');
+    const diagnostic = { code: 'x', severity: 'error', [sym]: 1 };
+    rs.diagnostics = [diagnostic];
+    const result = validateTraceComparisonRecordSet(rs);
+    check('symbolキーを持つdiagnosticを拒否する(重大1)',
+      result.valid === false && result.schema_errors.some(e => e.includes('symbolキー')), result.schema_errors);
+  }
+
+  // ══════════════ 18i. preflightがSchema検証より前に走る(計算量の防御が判定順序として効いている
+  //     ことの確認、重大2) ══════════════
+  {
+    const rs = clone(BASE_RECORD_SET);
+    // MAX_ARRAY_ITEMS(20000)を超える巨大なnot_analyzed配列を追加する。Schema層が先に全件走査
+    // していれば「配列要素数上限」以外のSchemaエラー(要素形状違反等)が同時に混入していても
+    // 気づけないが、preflightが先に走っていれば配列要素数上限だけで即座に打ち切られる。
+    rs.not_analyzed = new Array(20001).fill({ reason_code: 'no_annotation' });
+    const result = validateTraceComparisonRecordSet(rs);
+    check('MAX_ARRAY_ITEMS超過の配列はpreflightで拒否される(Schema層のO(N)走査より前、重大2)',
+      result.valid === false && result.schema_errors.some(e => e.includes('配列要素数が上限')), result.schema_errors);
+  }
+
+  // ══════════════ 18j. actual_ref.source_rowがsafe positive integerでない場合を拒否する(中) ══════════════
+  for (const badSourceRow of [Number.MAX_SAFE_INTEGER + 1, 1e20]) {
+    const rs = clone(BASE_RECORD_SET);
+    rs.comparisons[0].actual_ref.source_row = badSourceRow;
+    const result = validateTraceComparisonRecordSet(rs);
+    check(`actual_ref.source_row=${badSourceRow}はNumber.isInteger()では真だがsafe integerではないため拒否する(中)`,
+      !result.valid && result.semantic_errors.some(e => e.includes('actual_ref.source_row')), result.semantic_errors);
+  }
+  {
+    // Schema層自体は通過してしまうこと(producer契約より緩いことの再現)を別途確認する。
+    const rs = clone(BASE_RECORD_SET);
+    rs.comparisons[0].actual_ref.source_row = 1e20;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('前提: source_row=1e20はSchema層のtype:integer+minimum:1自体は通過する(semantic層のみが拒否する)',
+      result.schema_errors.length === 0, result.schema_errors);
   }
 
   // ══════════════ 19. netstring復号: 各種不正形式(decodeUtf8NetstringElements直接テスト) ══════════════
