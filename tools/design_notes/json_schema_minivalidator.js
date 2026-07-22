@@ -8,6 +8,10 @@
 // 「ちょうど1つに一致」ではなく「1つ以上に一致すればよい」という緩い判定にしている。
 // quantity-annotation側は分岐をkindフィールドのconstで判別可能に設計しているため実用上問題ない)、
 // $ref(同一ドキュメント内の#/...のみ)。
+(function(root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else if (root) root.JsonSchemaMinivalidator = factory();
+})(typeof globalThis !== 'undefined' ? globalThis : this, function() {
 'use strict';
 
 function resolveRef(root, ref) {
@@ -108,4 +112,5 @@ function validate(schema, value) {
   return { valid: errors.length === 0, errors };
 }
 
-module.exports = { validate };
+return { validate };
+});

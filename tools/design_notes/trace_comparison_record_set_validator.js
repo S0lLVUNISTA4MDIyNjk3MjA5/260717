@@ -8,10 +8,29 @@
 // generateTraceComparisonRecordSet()(quantity_sidecar_binding_core.js)が返す
 // {ready, result_complete, diagnostics, record_set}のうち、record_set(正式artifact本体)だけを
 // この関数へ渡すこと。runtime envelope自体はSchema/semantic検証の対象外。
+(function(root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory(
+      require('./json_schema_minivalidator.js'),
+      require('./trace_comparison_schema_v2.json'),
+      require('../quantity_sidecar_binding_core.js')
+    );
+  } else if (root) {
+    root.TraceComparisonRecordSetValidator = factory(
+      root.JsonSchemaMinivalidator,
+      root.TraceComparisonSchemaV2,
+      root.QuantitySidecarBinding
+    );
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : this, function(
+  JsonSchemaMinivalidator,
+  TraceComparisonSchemaV2,
+  QuantitySidecarBinding
+) {
 'use strict';
-const { validate: validateSchema } = require('./json_schema_minivalidator.js');
-const schema = require('./trace_comparison_schema_v2.json');
-const core = require('../quantity_sidecar_binding_core.js');
+const validateSchema = JsonSchemaMinivalidator && JsonSchemaMinivalidator.validate;
+const schema = TraceComparisonSchemaV2;
+const core = QuantitySidecarBinding;
 
 function isPlainObject(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 function isFiniteNumber(value) { return typeof value === 'number' && Number.isFinite(value); }
@@ -678,4 +697,5 @@ function validateTraceComparisonRecordSet(recordSet) {
   }
 }
 
-module.exports = { validateTraceComparisonRecordSet, decodeUtf8NetstringElements, isRealCanonicalTimestamp };
+return { validateTraceComparisonRecordSet, decodeUtf8NetstringElements, isRealCanonicalTimestamp };
+});
