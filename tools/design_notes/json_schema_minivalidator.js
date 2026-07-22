@@ -90,8 +90,13 @@ function validateNode(schema, value, path, root, errors) {
       }
     }
     if (schema.additionalProperties === false && schema.properties) {
+      // 【レビュー修正、重大1】`key in schema.properties`はschema.properties自身のプロトタイプ
+      // 継承チェーン(通常のオブジェクトリテラルなのでObject.prototype)も辿るため、
+      // constructor/toString/valueOf/hasOwnProperty/__proto__等の予約名はSchemaで未定義でも
+      // "定義済み"と誤判定され、additionalProperties:falseの拒否をすり抜けていた
+      // (これらの名前を持つ余分なフィールドが実際に文書へ保存されうる)。hasOwnPropertyへ変更する。
       for (const key of Object.keys(value)) {
-        if (!(key in schema.properties)) errors.push(`${path}: 未定義フィールド(additionalProperties:false): ${key}`);
+        if (!hasOwn(schema.properties, key)) errors.push(`${path}: 未定義フィールド(additionalProperties:false): ${key}`);
       }
     }
   }

@@ -343,6 +343,34 @@ function preflightJsonGraph(root) {
     if (isArray) {
       if (proto !== Array.prototype) { errors.push(`${path}: 配列の標準プロトタイプ(Array.prototype)ではありません`); return; }
       if (node.length > MAX_ARRAY_ITEMS) { errors.push(`${path}: 配列要素数が上限(${MAX_ARRAY_ITEMS})を超えています(実際${node.length})`); return; }
+      // 【レビュー修正、重大2】疎配列(例: new Array(1))のholeは、検証側のforEach()相当の走査では
+      // 存在しない要素として素通りされる一方、JSON.stringify()はholeをnullへ変換して保存するため、
+      // 「検証時にvalid:trueだったオブジェクト」と「実際に保存されるJSON」が別構造になる
+      // (comparisons=new Array(1)がvalid:trueになり、保存後は[null]になるという致命的な乖離)。
+      // 全indexがown propertyとして実在することを明示的に確認する(getOwnPropertyDescriptors()は
+      // 存在しないインデックスをそもそも返さないため、この専用チェックなしでは検出できない)。
+      let hasArrayShapeError = false;
+      for (let i = 0; i < node.length; i++) {
+        if (!Object.prototype.hasOwnProperty.call(node, i)) {
+          errors.push(`${path}[${i}]: 疎配列のholeです(JSON.stringify()はholeをnullへ変換するため検証時と保存時が乖離する)`);
+          hasArrayShapeError = true;
+        }
+      }
+      // 配列へ付与された名前付きプロパティ(例: arr.extra = 'x')は、JSON配列がindex 0..length-1
+      // だけをシリアライズする仕様上JSON.stringify()では保存されない。これも検証時と保存時の
+      // 乖離になるため、own string keyがlengthとcanonical array index以外を持たないことを
+      // 確認する(このチェックが無いと、後続の汎用descriptorループがこのキーを単なる子要素として
+      // 素通りしてしまう)。
+      for (const key of Object.getOwnPropertyNames(node)) {
+        if (key === 'length') continue;
+        const index = Number(key);
+        const isCanonicalIndex = Number.isInteger(index) && index >= 0 && index < node.length && String(index) === key;
+        if (!isCanonicalIndex) {
+          errors.push(`${path}.${key}: 配列の非indexプロパティです(JSON.stringify()では保存されないため検証時と保存時が乖離する)`);
+          hasArrayShapeError = true;
+        }
+      }
+      if (hasArrayShapeError) return;
     } else if (proto !== Object.prototype && proto !== null) {
       errors.push(`${path}: 標準のプレーンオブジェクトではありません(Date/Map/Set/RegExp/typed array/custom classなど、またはObject.create(既存オブジェクト)によるプロトタイプ継承を含む)`);
       return;

@@ -480,6 +480,62 @@ const iv = (lo, loInc, hi, hiInc) => ({ kind: 'interval', lower: lo === null ? n
       result.valid === false && result.schema_errors.some(e => e.includes('配列要素数が上限')), result.schema_errors);
   }
 
+  // ══════════════ 18k. additionalProperties:falseが予約名(constructor/toString/__proto__)で
+  //     回避されないことの確認(再指摘・重大1) ══════════════
+  // `generator`は{tool,version}のみのadditionalProperties:false閉じたオブジェクト。
+  for (const [label, badValue] of [
+    ['constructor', 'unexpected-field'],
+    ['toString', 'unexpected-field'],
+    ['hasOwnProperty', 'unexpected-field'],
+  ]) {
+    const rs = clone(BASE_RECORD_SET);
+    Object.defineProperty(rs.generator, label, { value: badValue, enumerable: true, writable: true, configurable: true });
+    const result = validateTraceComparisonRecordSet(rs);
+    check(`generator.${label}(Object.prototypeの予約名)を余分なフィールドとして拒否する(重大1)`,
+      result.valid === false && result.schema_errors.some(e => e.includes('未定義フィールド') && e.includes(label)), result.schema_errors);
+  }
+  {
+    // JSON.parse()が生成する"__proto__"はプロトタイプを書き換えず、通常のown data propertyに
+    // なる(`{"__proto__":...}`をJSON.parse()した場合の既知の仕様)。additionalProperties判定が
+    // `key in schema.properties`のままだと、あらゆるオブジェクトが継承する"__proto__"アクセサ
+    // 経由で常にtrueになり、この余分なフィールドを見逃す。
+    const mutated = JSON.parse(JSON.stringify(BASE_RECORD_SET).replace('"tool":"test-generator"', '"tool":"test-generator","__proto__":{"evil":true}'));
+    check('前提: JSON.parse()由来の__proto__はプロトタイプを書き換えず、own data propertyになる',
+      Object.getPrototypeOf(mutated.generator) === Object.prototype && Object.prototype.hasOwnProperty.call(mutated.generator, '__proto__'));
+    const result = validateTraceComparisonRecordSet(mutated);
+    check('generator.__proto__(JSON.parse由来のown property)を余分なフィールドとして拒否する(重大1)',
+      result.valid === false && result.schema_errors.some(e => e.includes('未定義フィールド') && e.includes('__proto__')), result.schema_errors);
+  }
+
+  // ══════════════ 18l. 疎配列(hole)は検証時と保存時で別構造になるため拒否する(再指摘・重大2) ══════════════
+  for (const field of ['diagnostics', 'not_analyzed', 'comparisons']) {
+    const rs = clone(BASE_RECORD_SET);
+    rs[field] = new Array(1); // holeを持つ疎配列(要素0が存在しない)
+    check(`前提: ${field}=new Array(1)はJSON.stringify()で[null]になる(holeがnullへ変換される)`,
+      JSON.stringify(rs[field]) === '[null]');
+    const result = validateTraceComparisonRecordSet(rs);
+    check(`${field}が疎配列(hole)を含む場合、検証時と保存時の乖離を防ぐため拒否する(重大2)`,
+      result.valid === false && result.schema_errors.some(e => e.includes('疎配列のholeです')), result.schema_errors);
+  }
+
+  // ══════════════ 18m. 配列の名前付き非indexプロパティは保存時に消えるため拒否する(再指摘・重大2) ══════════════
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.diagnostics.extra = 'ignored-by-JSON-stringify';
+    check('前提: 配列への名前付きプロパティはJSON.stringify()で保存されない',
+      JSON.parse(JSON.stringify(rs.diagnostics)).extra === undefined);
+    const result = validateTraceComparisonRecordSet(rs);
+    check('diagnosticsへ名前付きプロパティ(extra)を追加した場合、検証時と保存時の乖離を防ぐため拒否する(重大2)',
+      result.valid === false && result.schema_errors.some(e => e.includes('配列の非indexプロパティです') && e.includes('extra')), result.schema_errors);
+  }
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.diagnostics['01'] = { code: 'x', severity: 'error' }; // 非canonical index表記(先頭ゼロ)
+    const result = validateTraceComparisonRecordSet(rs);
+    check(`diagnostics["01"](非canonical index表記)を配列の非indexプロパティとして拒否する(重大2)`,
+      result.valid === false && result.schema_errors.some(e => e.includes('配列の非indexプロパティです') && e.includes('01')), result.schema_errors);
+  }
+
   // ══════════════ 18j. actual_ref.source_rowがsafe positive integerでない場合を拒否する(中) ══════════════
   for (const badSourceRow of [Number.MAX_SAFE_INTEGER + 1, 1e20]) {
     const rs = clone(BASE_RECORD_SET);

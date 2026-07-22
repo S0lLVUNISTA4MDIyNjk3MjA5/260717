@@ -254,6 +254,33 @@ async function sidecar(trace, side) {
   check('全ネストobjectの余分プロパティ・必須欠落・型違反で正本とブラウザの合否が一致する', differential.length >= 80 && disagreements.length === 0, { count:differential.length, disagreements:disagreements.slice(0, 5).map(x => x.label) });
   check('差分テストで生成した全違反入力を正本Schemaが拒否する', unexpectedlyValid.length === 0, unexpectedlyValid.slice(0, 5).map(x => x.label));
 
+  // ══════════════ own property修正の正本(json_schema_minivalidator.js)⇔移植コピー
+  //     (quantity_sidecar_binding_core.js内validateAnnotationSchema())間のdrift検査 ══════════════
+  // 【レビュー再指摘】正本側の`key in value`→hasOwnProperty()修正が、本ファイル内に別途移植
+  // されているbrowser向けSchema検証コピー(validateSchemaNode()、quantity_sidecar_binding_core.js)
+  // へ同期していなかった。プロトタイプ継承・additionalProperties予約名バイパスのいずれも
+  // 移植コピー側に個別に再現し、両実装が同じ判定を返すことを確認する。
+  {
+    const baseDoc = differentialDocs[0];
+    const inheritedOnly = Object.create(baseDoc);
+    const primaryResult = validate(quantitySchema, inheritedOnly);
+    const coreResult = core.validateAnnotationSchema(inheritedOnly, browserSchema);
+    check('Object.create(正当な文書)は正本Schemaでvalid:falseになる(own property修正)',
+      primaryResult.valid === false, primaryResult);
+    check('Object.create(正当な文書)は移植コピー(validateAnnotationSchema)でもvalid:falseになる(drift検査)',
+      coreResult.valid === false, coreResult);
+  }
+  for (const reservedKey of ['constructor', 'toString', 'hasOwnProperty']) {
+    const mutated = structuredClone(differentialDocs[0]);
+    Object.defineProperty(mutated.generator, reservedKey, { value: 'unexpected-field', enumerable: true, writable: true, configurable: true });
+    const primaryResult = validate(quantitySchema, mutated);
+    const coreResult = core.validateAnnotationSchema(mutated, browserSchema);
+    check(`generator.${reservedKey}(予約名)は正本Schemaで余分なフィールドとして拒否される`,
+      primaryResult.valid === false && primaryResult.errors.some(e => e.includes('未定義フィールド') && e.includes(reservedKey)), primaryResult);
+    check(`generator.${reservedKey}(予約名)は移植コピーでも余分なフィールドとして拒否される(drift検査)`,
+      coreResult.valid === false && coreResult.errors.some(e => e.includes('未定義フィールド') && e.includes(reservedKey)), coreResult);
+  }
+
   console.log('\n=== quantity_sidecar_binding_verification 結果 ===');
   let failed = 0;
   checks.forEach(c => { console.log(`[${c.ok ? 'OK' : 'NG'}] ${c.name}`); if (!c.ok) { failed++; if (c.detail) console.log('  ', JSON.stringify(c.detail)); } });

@@ -79,10 +79,15 @@
     }
     if (Array.isArray(value) && schema.items) value.forEach((item, i) => validateSchemaNode(schema.items, item, `${path}[${i}]`, root, errors));
     if (isObject(value)) {
-      for (const key of (schema.required || [])) if (!(key in value)) errors.push(`${path}: 必須フィールド不足: ${key}`);
-      for (const [key, child] of Object.entries(schema.properties || {})) if (key in value) validateSchemaNode(child, value[key], `${path}.${key}`, root, errors);
+      // 【レビュー修正、重大(移植コピー同期)】json_schema_minivalidator.jsのown-property修正
+      // (`key in value`はプロトタイプ継承チェーンも辿るため、Object.create(既存オブジェクト)や
+      // constructor/toString等の予約名フィールドを誤って受理し得る)を、本ファイル内の移植コピー
+      // (browser向けrc1 Schema検証)へも同期する。hasOwn()は本ファイル下部で既に定義済み
+      // (関数宣言のためこの位置からも参照可能)。
+      for (const key of (schema.required || [])) if (!hasOwn(value, key)) errors.push(`${path}: 必須フィールド不足: ${key}`);
+      for (const [key, child] of Object.entries(schema.properties || {})) if (hasOwn(value, key)) validateSchemaNode(child, value[key], `${path}.${key}`, root, errors);
       if (schema.additionalProperties === false && schema.properties) {
-        for (const key of Object.keys(value)) if (!(key in schema.properties)) errors.push(`${path}: 未定義フィールド(additionalProperties:false): ${key}`);
+        for (const key of Object.keys(value)) if (!hasOwn(schema.properties, key)) errors.push(`${path}: 未定義フィールド(additionalProperties:false): ${key}`);
       }
     }
   }
