@@ -273,12 +273,20 @@
     // 末端の値だけをsnapshotValue()していたが、それを包むbinding要素自体・bindings配列・
     // ruleset_version(以前はannotationへの生参照のままだった)・戻り値オブジェクト自体は
     // 可変のままだったため、呼び出し後に外側から書き換え可能だった、と指摘された。
-    return deepFreeze({ side:expectedSide, ready:isReady(diagnostics), dataset_signature:signature, ruleset_version:snapAnnotation.ruleset_version,
+    return deepFreeze({ side:expectedSide, ready:isReady(diagnostics), source_trace_file:snapAnnotation.source_trace_file,
+      dataset_signature:signature, ruleset_version:snapAnnotation.ruleset_version,
       bindings, diagnostics, not_analyzed:notAnalyzed, candidate_records:[], satisfaction_judgements:[] });
   }
 
+  // 【B-3aレビュー修正】B-3(generateTraceComparisonRecordSet())が正式artifactの
+  // provenance.sourceへ転記するsource_trace_fileを、bindSide()の成功結果へ加算的に保持する。
+  // 以前はsnapAnnotation.source_trace_file(quantity-annotationスキーマの必須フィールド、
+  // 既にvalidateAnnotationSchema()で非空文字列として検証済み)がbindSide()の戻り値へ一切
+  // 転記されず、bindingだけを信頼入力とするB-3から参照できなかった。blocked()側は
+  // 文書全体が結合されない経路のため、常にnullとする(B-3はready:trueの結果からのみ
+  // provenanceを組み立てるため、ここが参照されることはない)。
   function blocked(side, diagnostics, signature) {
-    return deepFreeze({ side, ready:false, dataset_signature:signature || null, ruleset_version:null, bindings:[], diagnostics,
+    return deepFreeze({ side, ready:false, source_trace_file:null, dataset_signature:signature || null, ruleset_version:null, bindings:[], diagnostics,
       not_analyzed:[], candidate_records:[], satisfaction_judgements:[] });
   }
 
@@ -2390,6 +2398,384 @@
       not_analyzed: autoResult.not_analyzed };
   }
 
+  // ── Phase B-3b: trace-comparison/1.0-rc2 正式レコード組み立て(pure。幾何比較・
+  // auto applicability・自動判定の再計算は一切行わない。写像・ID生成・provenance集約・
+  // 初期review状態の付加・not_analyzedの保持のみ) ──
+
+  const TRACE_COMPARISON_SCHEMA_VERSION = 'trace-comparison/1.0-rc2';
+  const CANONICAL_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+  const QUANTITY_ID_PATTERN = /^q-[0-9a-f]{32}$/;
+  const DATASET_SIGNATURE_PATTERN = /^QA-SHA256:[0-9a-f]{64}$/;
+
+  function isNonEmptyString(value) { return typeof value === 'string' && value.length > 0; }
+
+  function isCanonicalTimestamp(value) {
+    if (!isNonEmptyString(value) || !CANONICAL_TIMESTAMP_PATTERN.test(value)) return false;
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+  }
+
+  // UTF-8バイト長のnetstring([length]:[value],)。呼び出し側が非空stringであることを事前に
+  // 検証してから渡す契約(このヘルパー自体はString(value)による暗黙変換を型検査の代わりに
+  // 使わない、B-3aレビューで明示された契約)。trace_id/matcher_idは元trace由来の任意文字列で
+  // 区切り文字の衝突を排除できないため、単純な"::"連結ではなくこの方式を使う。
+  function encodeUtf8Netstring(value) {
+    const byteLength = new TextEncoder().encode(value).length;
+    return `${byteLength}:${value},`;
+  }
+
+  // relations行から関係性metadata(4参照IDとは別経路で後から組み合わせない、同じrowから
+  // 原子的に取得する)。既存relationRefs()と対になるヘルパー。
+  function relationshipRefs(row) {
+    return {
+      source: row?.source ?? null,
+      match_method: row?.match_method ?? null,
+      match_confidence: typeof row?.match_confidence === 'number' ? row.match_confidence : null,
+      review_category: row?.review_category ?? null,
+      linked_at: row?.linked_at ?? null,
+    };
+  }
+
+  function blockedTraceComparisonResult(diagnostics, judgementResult) {
+    return { ready:false, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(judgementResult?.diagnostics || [])]),
+      record_set:null };
+  }
+
+  // side単位で、quantity_idごとの生analysis・record単位content_hash・trace_id・source_rowを
+  // 1回の走査で取得する(B-2.4a由来のanalysisByQuantityId()を拡張し、B-3の正式artifactに
+  // 必要な監査情報を同じ走査で追加取得する)。単純なMap.set()による後勝ち上書きを禁止し、
+  // 同一side内でquantity_idが重複した場合はfail closedする。
+  function analysisContextByQuantityId(sideResult) {
+    const map = new Map();
+    const diagnostics = [];
+    (sideResult?.bindings || []).forEach(b => {
+      if (b.status !== 'bound' || !b.annotation) return;
+      const contentHash = b.annotation.content_hash;
+      const sourceRow = b.record?.source_row;
+      (b.annotation.analyses || []).forEach(analysis => {
+        if (!analysis?.quantity_id) return;
+        if (map.has(analysis.quantity_id)) {
+          diagnostics.push({ code:'trace_comparison_analysis_context_duplicate', severity:'error',
+            quantity_id:analysis.quantity_id, detail:'同一side内でquantity_idが重複するanalysis contextが見つかりました' });
+          return;
+        }
+        map.set(analysis.quantity_id, { trace_id:b.trace_id, quantity_id:analysis.quantity_id, content_hash:contentHash,
+          analysis, source_row: sourceRow !== undefined ? sourceRow : null });
+      });
+    });
+    return { ok:diagnostics.length === 0, map, diagnostics };
+  }
+
+  // (side + quantity_id)単位でproperty resolutionを索引化する。同じくMap.set()による
+  // 後勝ち上書きを禁止する。
+  function propertyResolutionByKey(propertyResult) {
+    const map = new Map();
+    const diagnostics = [];
+    (propertyResult?.resolutions || []).forEach(r => {
+      const key = `${r.side}:${r.quantity_id}`;
+      if (map.has(key)) {
+        diagnostics.push({ code:'trace_comparison_mapping_resolution_duplicate', severity:'error',
+          side:r.side, quantity_id:r.quantity_id, detail:'同一side内でquantity_idが重複するproperty resolutionが見つかりました' });
+        return;
+      }
+      map.set(key, r);
+    });
+    return { ok:diagnostics.length === 0, map, diagnostics };
+  }
+
+  // relations行を1回走査し、4参照ID(relationRefs())とrelationship metadata(relationshipRefs())を
+  // 同じ行から原子的に取得してrelation_keyで索引化する。同一keyが複数行ある場合、metadataが
+  // canonical JSON上同一ならduplicate、異なればconflictとして区別し、いずれか一方だけを
+  // 全体fail closedの理由コードとして記録する(両方を同時に生成しない)。4参照IDのいずれかが
+  // 非空文字列でない行は索引化せず読み飛ばす(該当する候補があれば後段でrelationship_metadata_missingに
+  // より捕捉される)。
+  function relationContextByKey(relations) {
+    const map = new Map();
+    const diagnostics = [];
+    (relations || []).forEach(row => {
+      const refs = relationRefs(row);
+      if (!isNonEmptyString(refs.requirement_trace_id) || !isNonEmptyString(refs.actual_trace_id)
+        || !isNonEmptyString(refs.matcher_a_id) || !isNonEmptyString(refs.matcher_b_id)) return;
+      const key = encodeUtf8Netstring(refs.requirement_trace_id) + encodeUtf8Netstring(refs.actual_trace_id)
+        + encodeUtf8Netstring(refs.matcher_a_id) + encodeUtf8Netstring(refs.matcher_b_id);
+      const relationship = relationshipRefs(row);
+      if (map.has(key)) {
+        const sameContent = canonicalJson(map.get(key).relationship) === canonicalJson(relationship);
+        diagnostics.push({ code: sameContent ? 'trace_comparison_relationship_duplicate' : 'trace_comparison_relationship_conflict',
+          severity:'error', requirement_trace_id:refs.requirement_trace_id, actual_trace_id:refs.actual_trace_id,
+          matcher_a_id:refs.matcher_a_id, matcher_b_id:refs.matcher_b_id,
+          detail: sameContent ? '同一relation_keyの行が複数あります(内容は同一)' : '同一relation_keyの行が複数あり、relationship metadataが競合しています' });
+        return;
+      }
+      map.set(key, { refs, relationship });
+    });
+    return { ok:diagnostics.length === 0, map, diagnostics };
+  }
+
+  function initialReviewTarget(status) { return { status, reviewer:null, reviewed_at:null, verdict:null, note:null }; }
+
+  function generateTraceComparisonRecordSet({ binding, relations, generatedAt, generator, displayContext,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    // 段階1: 呼び出し側供給metadataの検証(pure関数契約。内部でnew Date()を呼ばない)。
+    const metadataDiagnostics = [];
+    if (!isCanonicalTimestamp(generatedAt)) {
+      metadataDiagnostics.push({ code:'trace_comparison_metadata_invalid', severity:'error',
+        detail:'generatedAtがYYYY-MM-DDTHH:mm:ss.sssZ形式のcanonical UTC timestampではありません' });
+    }
+    if (!generator || typeof generator !== 'object' || !isNonEmptyString(generator.tool) || !isNonEmptyString(generator.version)) {
+      metadataDiagnostics.push({ code:'trace_comparison_metadata_invalid', severity:'error',
+        detail:'generatorは{tool, version}(ともに非空文字列)を持つオブジェクトである必要があります' });
+    }
+    const displayContextKeys = displayContext && typeof displayContext === 'object' ? Object.keys(displayContext) : null;
+    const displayContextValid = displayContext === null || displayContext === undefined
+      || (displayContextKeys && displayContextKeys.length === 1 && displayContextKeys[0] === 'matching_dataset_signature'
+        && isNonEmptyString(displayContext.matching_dataset_signature));
+    if (!displayContextValid) {
+      metadataDiagnostics.push({ code:'trace_comparison_metadata_invalid', severity:'error',
+        detail:'displayContextはnull、またはmatching_dataset_signature(非空文字列)のみを持つオブジェクトである必要があります' });
+    }
+    if (metadataDiagnostics.length) return blockedTraceComparisonResult(metadataDiagnostics, null);
+
+    // 段階2: B-2.6bを内部で再計算する(外部から中間結果を受け取らない、B-2.2a以来の設計方針)。
+    const judgementResult = generateAutomaticJudgementResults({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (judgementResult.ready !== true || judgementResult.result_complete !== true) {
+      return blockedTraceComparisonResult([{ code:'automatic_judgement_results_not_ready_or_incomplete', severity:'error',
+        detail:`generateAutomaticJudgementResults()がready=${JSON.stringify(judgementResult.ready)}、result_complete=${JSON.stringify(judgementResult.result_complete)}のため正式レコードを組み立てられません` }],
+        judgementResult);
+    }
+
+    // 段階3: provenance(source_trace_file・dataset_signature・ruleset_version)の検証。
+    const provenanceDiagnostics = [];
+    const reqSide = binding.requirement, actSide = binding.actual;
+    if (!isNonEmptyString(reqSide?.source_trace_file) || !isNonEmptyString(actSide?.source_trace_file)) {
+      provenanceDiagnostics.push({ code:'trace_comparison_provenance_missing', severity:'error',
+        detail:'requirement側またはactual側のsource_trace_fileが欠落しています' });
+    }
+    if (!DATASET_SIGNATURE_PATTERN.test(reqSide?.dataset_signature || '') || !DATASET_SIGNATURE_PATTERN.test(actSide?.dataset_signature || '')) {
+      provenanceDiagnostics.push({ code:'trace_comparison_provenance_missing', severity:'error',
+        detail:'requirement側またはactual側のdataset_signatureが"QA-SHA256:"+64桁16進の形式ではありません' });
+    }
+    const rulesetVersion = reqSide?.ruleset_version;
+    if (!rulesetVersion || !isNonEmptyString(rulesetVersion.quantity_extraction) || !isNonEmptyString(rulesetVersion.semantics_rules)
+      || !rulesetVersion.auto_applicable_thresholds || !isFiniteNumber(rulesetVersion.auto_applicable_thresholds.modeConfidence)
+      || !isFiniteNumber(rulesetVersion.auto_applicable_thresholds.margin) || !isFiniteNumber(rulesetVersion.auto_applicable_thresholds.propertyConfidence)) {
+      provenanceDiagnostics.push({ code:'trace_comparison_provenance_missing', severity:'error',
+        detail:'ruleset_versionが完全なタプル(quantity_extraction/semantics_rules/auto_applicable_thresholdsの3閾値)ではありません' });
+    }
+    if (provenanceDiagnostics.length) return blockedTraceComparisonResult(provenanceDiagnostics, judgementResult);
+
+    // 段階4: 索引の構築(analysis context・property resolution・relation context)。
+    const reqContext = analysisContextByQuantityId(reqSide);
+    const actContext = analysisContextByQuantityId(actSide);
+    const propertyResult = generatePropertyResolutions({ binding });
+    const propertyByKey = propertyResolutionByKey(propertyResult);
+    const relationByKey = relationContextByKey(relations);
+    const indexDiagnostics = [...reqContext.diagnostics, ...actContext.diagnostics, ...propertyByKey.diagnostics, ...relationByKey.diagnostics];
+    if (indexDiagnostics.length) return blockedTraceComparisonResult(indexDiagnostics, judgementResult);
+
+    // 段階5: 候補ごとの検証・写像。
+    const entryDiagnostics = [];
+    const quantityPairIdsSeen = new Set();
+    const comparisonRecordsById = new Map();
+    const records = [];
+
+    for (const entry of judgementResult.automatic_judgement_results) {
+      const failedInvariants = [];
+      const refIds = { requirement_quantity_id:entry.requirement_quantity_id, actual_quantity_id:entry.actual_quantity_id };
+
+      // --- 自動判定構造の境界防御(再導出ではなく、正式artifactへ転記する直前の検証) ---
+      if (typeof entry.auto_applicability?.auto_applicable !== 'boolean') failedInvariants.push('auto_applicable_not_boolean');
+      if (typeof entry.numeric_comparison?.geometric_relation_holds !== 'boolean') failedInvariants.push('geometric_relation_holds_not_boolean');
+      const state = entry.automatic_judgement?.state;
+      const satisfied = entry.automatic_judgement?.satisfied;
+      if (!['satisfied', 'not_satisfied', 'needs_confirmation'].includes(state)) failedInvariants.push('automatic_judgement_state_invalid');
+      else if (state === 'satisfied' && satisfied !== true) failedInvariants.push('automatic_judgement_satisfied_mismatch');
+      else if (state === 'not_satisfied' && satisfied !== false) failedInvariants.push('automatic_judgement_satisfied_mismatch');
+      else if (state === 'needs_confirmation' && satisfied !== null) failedInvariants.push('automatic_judgement_satisfied_mismatch');
+      if (entry.automatic_judgement?.judgement_source !== 'automatic_pipeline') failedInvariants.push('judgement_source_invalid');
+      if (entry.automatic_judgement?.human_confirmed !== false) failedInvariants.push('human_confirmed_invalid');
+
+      // --- 4参照IDが非空文字列であること(String()による暗黙変換をID生成前に禁止する) ---
+      for (const [label, value] of [['requirement_trace_id', entry.requirement_trace_id], ['actual_trace_id', entry.actual_trace_id],
+        ['matcher_a_id', entry.matcher_a_id], ['matcher_b_id', entry.matcher_b_id]]) {
+        if (!isNonEmptyString(value)) failedInvariants.push(`${label}_not_string`);
+      }
+      if (failedInvariants.length) {
+        entryDiagnostics.push({ code:'trace_comparison_input_invariant_violation', severity:'error', failed_invariants:failedInvariants, ...refIds });
+        continue;
+      }
+
+      // --- quantity_id形式 ---
+      const idFormatInvalid = [];
+      if (!QUANTITY_ID_PATTERN.test(entry.requirement_quantity_id)) idFormatInvalid.push('requirement_quantity_id');
+      if (!QUANTITY_ID_PATTERN.test(entry.actual_quantity_id)) idFormatInvalid.push('actual_quantity_id');
+      if (idFormatInvalid.length) {
+        entryDiagnostics.push({ code:'trace_comparison_quantity_id_invalid', severity:'error', invalid_fields:idFormatInvalid, ...refIds });
+        continue;
+      }
+
+      // --- analysis context ---
+      const reqAnalysisContext = reqContext.map.get(entry.requirement_quantity_id);
+      const actAnalysisContext = actContext.map.get(entry.actual_quantity_id);
+      const contextIssues = [];
+      for (const [label, context, expectedTraceId] of [
+        ['requirement', reqAnalysisContext, entry.requirement_trace_id], ['actual', actAnalysisContext, entry.actual_trace_id]]) {
+        if (!context) { contextIssues.push(`${label}_context_missing`); continue; }
+        if (context.trace_id !== expectedTraceId) contextIssues.push(`${label}_context_trace_id_mismatch`);
+        if (!isNonEmptyString(context.content_hash) || !/^[0-9a-f]{64}$/.test(context.content_hash)) contextIssues.push(`${label}_content_hash_invalid`);
+        if (context.source_row !== null && !(Number.isSafeInteger(context.source_row) && context.source_row > 0)) contextIssues.push(`${label}_source_row_invalid`);
+      }
+      if (contextIssues.length) {
+        entryDiagnostics.push({ code:'trace_comparison_analysis_context_missing', severity:'error', failed_invariants:contextIssues, ...refIds });
+        continue;
+      }
+
+      // --- property resolution(両側resolved・concept_id整合・basisとのtop_confidence整合) ---
+      const reqResolution = propertyByKey.map.get(`requirement:${entry.requirement_quantity_id}`);
+      const actResolution = propertyByKey.map.get(`actual:${entry.actual_quantity_id}`);
+      if (!reqResolution || !actResolution) {
+        entryDiagnostics.push({ code:'trace_comparison_mapping_resolution_missing', severity:'error', ...refIds });
+        continue;
+      }
+      const mappingInvariants = [];
+      const resolutionBySide = { requirement:reqResolution, actual:actResolution };
+      const topConfidenceBySide = {};
+      const marginBySide = {};
+      for (const side of ['requirement', 'actual']) {
+        const resolution = resolutionBySide[side];
+        if (resolution.status !== 'resolved') { mappingInvariants.push(`${side}_resolution_not_resolved`); continue; }
+        if (resolution.concept_id !== entry.concept_id || resolution.candidates?.[0]?.concept_id !== entry.concept_id) {
+          mappingInvariants.push(`${side}_resolution_concept_id_mismatch`); continue;
+        }
+        topConfidenceBySide[side] = resolution.candidates[0].confidence;
+        marginBySide[side] = marginOf(resolution.candidates);
+      }
+      if (topConfidenceBySide.requirement !== entry.auto_applicability.basis.requirement_property_top_confidence) mappingInvariants.push('requirement_top_confidence_basis_mismatch');
+      if (topConfidenceBySide.actual !== entry.auto_applicability.basis.actual_property_top_confidence) mappingInvariants.push('actual_top_confidence_basis_mismatch');
+      if (mappingInvariants.length) {
+        entryDiagnostics.push({ code:'trace_comparison_mapping_invariant_violation', severity:'error', failed_invariants:mappingInvariants, ...refIds });
+        continue;
+      }
+
+      // --- relationship ---
+      const relationKey = encodeUtf8Netstring(entry.requirement_trace_id) + encodeUtf8Netstring(entry.actual_trace_id)
+        + encodeUtf8Netstring(entry.matcher_a_id) + encodeUtf8Netstring(entry.matcher_b_id);
+      const relationContext = relationByKey.map.get(relationKey);
+      if (!relationContext) {
+        entryDiagnostics.push({ code:'trace_comparison_relationship_metadata_missing', severity:'error', ...refIds });
+        continue;
+      }
+      const relationship = relationContext.relationship;
+      const relationshipIssues = [];
+      if (relationship.source !== 'matching_engine' && relationship.source !== 'manual') {
+        relationshipIssues.push('source_invalid');
+      } else if (relationship.source === 'matching_engine') {
+        if (!isNonEmptyString(relationship.match_method)) relationshipIssues.push('match_method_missing');
+        if (!isFiniteNumber(relationship.match_confidence) || relationship.match_confidence < 0 || relationship.match_confidence > 1) relationshipIssues.push('match_confidence_invalid');
+        if (!isNonEmptyString(relationship.review_category)) relationshipIssues.push('review_category_missing');
+      }
+      if (relationshipIssues.length) {
+        entryDiagnostics.push({ code:'trace_comparison_relationship_metadata_missing', severity:'error', failed_invariants:relationshipIssues, ...refIds });
+        continue;
+      }
+
+      // --- ID生成・重複検査 ---
+      const quantityPairId = entry.requirement_quantity_id + '::' + entry.actual_quantity_id;
+      const comparisonId = 'cmp-v1:' + encodeUtf8Netstring(entry.requirement_trace_id) + encodeUtf8Netstring(entry.actual_trace_id)
+        + encodeUtf8Netstring(quantityPairId);
+      if (quantityPairIdsSeen.has(quantityPairId)) {
+        entryDiagnostics.push({ code:'trace_comparison_quantity_pair_id_duplicate', severity:'error', quantity_pair_id:quantityPairId, ...refIds });
+        continue;
+      }
+      quantityPairIdsSeen.add(quantityPairId);
+
+      const record = {
+        comparison_id: comparisonId, quantity_pair_id: quantityPairId,
+        requirement_ref: { trace_id:entry.requirement_trace_id, matcher_id:entry.matcher_a_id, quantity_id:entry.requirement_quantity_id },
+        actual_ref: { trace_id:entry.actual_trace_id, matcher_id:entry.matcher_b_id, quantity_id:entry.actual_quantity_id,
+          ...(actAnalysisContext.source_row !== null ? { source_row:actAnalysisContext.source_row } : {}) },
+        relationship: relationContext.relationship,
+        requirement_analysis: reqAnalysisContext.analysis,
+        actual_analysis: actAnalysisContext.analysis,
+        mapping: {
+          status: 'resolved', selected_concept_id: entry.concept_id, dimension: entry.dimension,
+          requirement_resolution: { status:'resolved', concept_id:reqResolution.concept_id,
+            top_confidence:topConfidenceBySide.requirement, margin:marginBySide.requirement,
+            candidates:reqResolution.candidates, source:'generatePropertyResolutions' },
+          actual_resolution: { status:'resolved', concept_id:actResolution.concept_id,
+            top_confidence:topConfidenceBySide.actual, margin:marginBySide.actual,
+            candidates:actResolution.candidates, source:'generatePropertyResolutions' },
+        },
+        comparison_input: {
+          requirement_quantity_value: entry.requirement_quantity_value,
+          actual_quantity_value_original: entry.actual_quantity_value_original,
+          actual_quantity_value_normalized: entry.actual_quantity_value_normalized,
+          unit_conversion_plan: entry.unit_conversion_plan,
+          interval_semantics_resolution: {
+            requirement: { status:entry.requirement_condition_status, value:entry.requirement_condition_value,
+              top_confidence:entry.requirement_condition_top_confidence, margin:entry.requirement_condition_margin,
+              has_opposing_evidence:entry.requirement_condition_has_opposing_evidence },
+            actual: { status:entry.actual_condition_status, value:entry.actual_condition_value,
+              top_confidence:entry.actual_condition_top_confidence, margin:entry.actual_condition_margin,
+              has_opposing_evidence:entry.actual_condition_has_opposing_evidence },
+          },
+          comparison_mode: { value:entry.comparison_mode_candidate, confidence:entry.comparison_mode_confidence, derived_from:entry.derived_from },
+        },
+        numeric_comparison: entry.numeric_comparison,
+        auto_applicability: entry.auto_applicability,
+        automatic_judgement: entry.automatic_judgement,
+        review: {
+          quantity_extraction: initialReviewTarget('unreviewed'),
+          property_mapping: initialReviewTarget('unreviewed'),
+          interval_semantics: initialReviewTarget('unreviewed'),
+          comparison_mode: initialReviewTarget('unreviewed'),
+          satisfaction: initialReviewTarget('not_eligible'),
+        },
+      };
+
+      const recordJson = canonicalJson(record);
+      if (comparisonRecordsById.has(comparisonId)) {
+        const sameContent = comparisonRecordsById.get(comparisonId) === recordJson;
+        entryDiagnostics.push({ code: sameContent ? 'trace_comparison_id_duplicate' : 'trace_comparison_id_content_conflict',
+          severity:'error', comparison_id:comparisonId, ...refIds });
+        continue;
+      }
+      comparisonRecordsById.set(comparisonId, recordJson);
+      records.push(record);
+    }
+
+    if (entryDiagnostics.length) return blockedTraceComparisonResult(entryDiagnostics, judgementResult);
+
+    // 段階6: comparisonsを安定キーで並べ替える(relations入力順に依存させない)。
+    records.sort((a, b) => {
+      const keyOf = r => [r.requirement_ref.trace_id, r.actual_ref.trace_id, r.requirement_ref.quantity_id, r.actual_ref.quantity_id,
+        r.requirement_ref.matcher_id, r.actual_ref.matcher_id].join(' ');
+      const ka = keyOf(a), kb = keyOf(b);
+      return ka < kb ? -1 : ka > kb ? 1 : 0;
+    });
+
+    const recordSetDraft = {
+      schema_version: TRACE_COMPARISON_SCHEMA_VERSION,
+      generated_at: generatedAt, generator,
+      source: { requirement_trace_file:reqSide.source_trace_file, actual_trace_file:actSide.source_trace_file },
+      provenance: {
+        hash_algorithm:'SHA-256', id_hash_algorithm:'SHA-256/128',
+        id_contracts: { quantity_id:'SHA-256/128', quantity_pair_id:'quantity-id-double-colon-v1', comparison_id:'utf8-netstring-v1' },
+        normalization: 'v12-normalize-v1',
+        requirement_dataset_signature: reqSide.dataset_signature, actual_dataset_signature: actSide.dataset_signature,
+        ruleset_version: rulesetVersion,
+      },
+      display_context: displayContext ?? null,
+      diagnostics: judgementResult.diagnostics,
+      not_analyzed: judgementResult.not_analyzed,
+      comparisons: records,
+    };
+
+    return snapshotValue({ ready:true, result_complete:true, diagnostics:judgementResult.diagnostics, record_set:recordSetDraft });
+  }
+
   return Object.freeze({ SCHEMA_VERSION, SUPPORTED_RULESETS, validateAnnotationSchema, validateRulesetCompatibility,
     canonicalValue, canonicalJson, normalize, hashParts, computeDatasetSignature, computeRecordContentHash,
     traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates,
@@ -2399,5 +2785,5 @@
     COMPARISON_MODE_DERIVATION_TABLE, generateComparisonModeCandidates,
     KNOWN_CANONICAL_UNITS_BY_DIMENSION, LINEAR_UNIT_SCALE_TO_BASE, generateUnitConversionPlans,
     generateNormalizedQuantityViews, generateNumericComparisonResults, generateAutoApplicabilityResults,
-    generateAutomaticJudgementResults });
+    generateAutomaticJudgementResults, generateTraceComparisonRecordSet });
 });
