@@ -88,6 +88,30 @@ const iv = (lo, loInc, hi, hiInc) => ({ kind: 'interval', lower: lo === null ? n
     check('実generatorのrecord_setはSchema・semantic両層とも合格する', result.valid && result.schema_errors.length === 0 && result.semantic_errors.length === 0, result);
   }
 
+  // ══════════════ 1b. 改行を含むtrace_id/matcher_idを持つ実生成物も合格する(中、Schema patternの改行安全性) ══════════════
+  // 【レビュー修正、中】comparison_idのSchema patternが以前"^cmp-v1:.+$"だった頃、JS正規表現の
+  // "."は改行文字(U+000A/U+000D/U+2028/U+2029)に一致しないため、trace_id/matcher_idに改行を
+  // 含む正当なB-3b生成物がSchema層で誤って拒否されうる欠陥があった。修正後は"^cmp-v1:"
+  // (prefix検査のみ、詳細はnetstring復号を担うsemantic層が検証する)にした。
+  {
+    const nlReqTraceId = 'req-with-\n-newline';
+    const nlActTraceId = 'act-x';
+    const nlReqTrace = traceWithText(nlReqTraceId, '冷房能力12 kW以上を確保すること。', ['冷房能力']);
+    const nlActTrace = traceWithText(nlActTraceId, '冷房能力12.5 kWを実測した。', ['冷房能力']);
+    const nlBinding = await bind(
+      nlReqTrace, id => (id === nlReqTraceId ? [analysis('nl-r', 'power', 'kW', 'acceptable_region', iv(0, true, 50, true))] : []),
+      nlActTrace, id => (id === nlActTraceId ? [analysis('nl-a', 'power', 'kW', 'achieved_point', pt(25))] : []),
+    );
+    const nlRelations = [relationRow(nlReqTraceId, nlActTraceId, 'A\nB', 'B')];
+    const nlGenerated = core.generateTraceComparisonRecordSet({
+      binding: nlBinding, relations: nlRelations, generatedAt: '2026-07-22T00:00:00.000Z', generator: { tool: 't', version: '1' },
+    });
+    check('改行を含むtrace_id/matcher_idでも実generatorはready:trueで完了する', nlGenerated.ready === true, nlGenerated.diagnostics);
+    const nlResult = validateTraceComparisonRecordSet(nlGenerated.record_set);
+    check('改行を含むtrace_id/matcher_idを持つ実生成物もSchema・semantic両層とも合格する(中)',
+      nlResult.valid && nlResult.schema_errors.length === 0 && nlResult.semantic_errors.length === 0, nlResult);
+  }
+
   // ══════════════ 2. 旧rc1文書はSchema層で拒否され、semantic層はスキップされる ══════════════
   {
     const rc1 = readJson('runtime_fixtures/trace_comparison_example_verified.json');
@@ -186,6 +210,32 @@ const iv = (lo, loInc, hi, hiInc) => ({ kind: 'interval', lower: lo === null ? n
       !result.valid && result.semantic_errors.some(e => e.includes('property_confidence_meets_threshold')), result.semantic_errors);
   }
 
+  // ══════════════ 12b. raw analysisのwarningsだけ増やし、basisの件数は書き換えないartifact(重大1) ══════════════
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.comparisons[0].requirement_analysis.quantity.extraction.warnings.push('spurious warning');
+    const result = validateTraceComparisonRecordSet(rs);
+    check('requirement_analysisへwarningsを追加してもbasisの件数を書き換えなければ拒否する(重大1a)',
+      !result.valid && result.semantic_errors.some(e => e.includes('requirement_extraction_warnings_count')), result.semantic_errors);
+  }
+
+  // ══════════════ 12c. 内部整合はしているが閾値未満(producerでは生成不能な状態)のartifact(重大1) ══════════════
+  {
+    const rs = clone(BASE_RECORD_SET);
+    const rec = rs.comparisons[0];
+    rec.comparison_input.interval_semantics_resolution.requirement.top_confidence = 0.1;
+    rec.comparison_input.interval_semantics_resolution.actual.top_confidence = 0.1;
+    rec.comparison_input.comparison_mode.confidence = 0.1;
+    rec.auto_applicability.basis.comparison_mode_confidence = 0.1;
+    // meets_thresholdフラグ自体は閾値比較として正しくfalse(内部矛盾はない)だが、
+    // auto_applicable:true/automatic_judgement:satisfiedはそのまま(B-2.6a上流ゲートでは
+    // 到達不能なはずの組み合わせ)。
+    rec.auto_applicability.basis.comparison_mode_confidence_meets_threshold = false;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('meets_thresholdが内部整合したfalseでも、comparisons[]到達済みレコードでは常にtrueのはずのため拒否する(重大1b)',
+      !result.valid && result.semantic_errors.some(e => e.includes('meets_threshold') && e.includes('常にtrue')), result.semantic_errors);
+  }
+
   // ══════════════ 13. auto_applicable × geometric_relation_holds → state/satisfied相関違反 ══════════════
   {
     const rs = clone(BASE_RECORD_SET);
@@ -207,6 +257,33 @@ const iv = (lo, loInc, hi, hiInc) => ({ kind: 'interval', lower: lo === null ? n
     const result = validateTraceComparisonRecordSet(rs);
     check('comparison_mode:point_in_regionなのにouter_side:requirementなら拒否する',
       !result.valid && result.semantic_errors.some(e => e.includes('outer_side')), result.semantic_errors);
+  }
+
+  // ══════════════ 14b. requirement_analysis.quantity_idがrequirement_ref.quantity_idと不一致(重大3) ══════════════
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.comparisons[0].requirement_analysis.quantity_id = 'q-' + 'f'.repeat(32);
+    const result = validateTraceComparisonRecordSet(rs);
+    check('requirement_analysis.quantity_idがrequirement_ref.quantity_idと不一致なら拒否する(重大3a)',
+      !result.valid && result.semantic_errors.some(e => e.includes('requirement_analysis.quantity_id')), result.semantic_errors);
+  }
+
+  // ══════════════ 14c. comparison_input.requirement_quantity_valueがrequirement_analysis.quantity.quantityと不一致(重大3) ══════════════
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.comparisons[0].comparison_input.requirement_quantity_value = { kind: 'interval', lower: { value: -999, inclusive: true }, upper: { value: 999, inclusive: true } };
+    const result = validateTraceComparisonRecordSet(rs);
+    check('comparison_input.requirement_quantity_valueがrequirement_analysis.quantity.quantityと不一致なら拒否する(重大3b)',
+      !result.valid && result.semantic_errors.some(e => e.includes('comparison_input.requirement_quantity_value')), result.semantic_errors);
+  }
+
+  // ══════════════ 14d. geometric_relation_holdsがlower_check/upper_check.holdsと矛盾(重大3) ══════════════
+  {
+    const rs = clone(BASE_RECORD_SET);
+    rs.comparisons[0].numeric_comparison.lower_check.holds = false;
+    const result = validateTraceComparisonRecordSet(rs);
+    check('geometric_relation_holdsがlower_check.holds && upper_check.holdsと矛盾すれば拒否する(重大3c)',
+      !result.valid && result.semantic_errors.some(e => e.includes('geometric_relation_holds')), result.semantic_errors);
   }
 
   // ══════════════ 15. interval_semantics_resolution ⇔ comparison_mode.derived_from不一致 ══════════════
@@ -252,6 +329,61 @@ const iv = (lo, loInc, hi, hiInc) => ({ kind: 'interval', lower: lo === null ? n
     const result = validateTraceComparisonRecordSet(rs);
     check('Infinityが混入していれば拒否する(Schema層のtype:numberはInfinityを素通りさせるため、semantic層が拒否)',
       !result.valid && result.semantic_errors.some(e => e.includes('非有限数')), result.semantic_errors);
+  }
+
+  // ══════════════ 18b. 循環参照するdiagnosticでも例外を投げず、valid:falseを返す(重大2) ══════════════
+  {
+    const rs = clone(BASE_RECORD_SET);
+    const diagnostic = { code: 'x', severity: 'error' };
+    diagnostic.self = diagnostic;
+    rs.diagnostics = [diagnostic];
+    let threw = false;
+    let result;
+    try { result = validateTraceComparisonRecordSet(rs); }
+    catch (e) { threw = true; }
+    check('循環参照するdiagnosticでも例外を投げない(総関数契約、重大2)', !threw);
+    check('循環参照するdiagnosticはvalid:falseとして検出する(重大2)',
+      !threw && !result.valid && result.semantic_errors.some(e => e.includes('循環参照')), result?.semantic_errors);
+  }
+
+  // ══════════════ 18c. 極端に深い入れ子のdiagnosticでも例外を投げない(重大2) ══════════════
+  {
+    const rs = clone(BASE_RECORD_SET);
+    let deep = { code: 'x', severity: 'error' };
+    let cursor = deep;
+    for (let i = 0; i < 5000; i++) { cursor.nested = {}; cursor = cursor.nested; }
+    rs.diagnostics = [deep];
+    let threw = false;
+    let result;
+    try { result = validateTraceComparisonRecordSet(rs); }
+    catch (e) { threw = true; }
+    check('極端に深い入れ子のdiagnosticでも例外を投げない(重大2)', !threw);
+    check('極端に深い入れ子は深さ上限違反として検出する(重大2)',
+      !threw && !result.valid && result.semantic_errors.some(e => e.includes('深すぎます')), result?.semantic_errors);
+  }
+
+  // ══════════════ 18cb. 公開入口全体のtry/catch自体の効果(内部の循環/深さ対策の外側で発生する例外、重大2) ══════════════
+  // checkAllNumbersFinite()自身の循環/深さ対策は例外を投げず直接errorsへ積むため、それだけでは
+  // 公開入口のtry/catch自体の効果を証明できない(try/catchを外しても18b/18cは落ちない)。
+  // Schema検証がフィールドへアクセスする際に例外を投げるgetter trapを使い、try/catch自体に
+  // 「テイス」があることを別途確認する。
+  {
+    const rs = clone(BASE_RECORD_SET);
+    Object.defineProperty(rs, 'generated_at', { get() { throw new Error('boom from malicious getter'); }, enumerable: true, configurable: true });
+    let threw = false;
+    let result;
+    try { result = validateTraceComparisonRecordSet(rs); }
+    catch (e) { threw = true; }
+    check('フィールドアクセスで例外を投げるgetterがあっても、公開入口のtry/catchで例外を投げない(重大2)', !threw);
+    check('getter起因の例外はvalid:falseとして検出する(重大2)', !threw && result.valid === false, result);
+  }
+
+  // ══════════════ 18d. netstring長さプレフィックスの桁数上限(スプレッド引数上限を避けるための対策、重大2) ══════════════
+  {
+    const enc2 = s => new TextEncoder().encode(s);
+    const hugeDigits = '9'.repeat(100000);
+    const r = decodeUtf8NetstringElements(enc2(`${hugeDigits}:x,3:foo,3:bar,`), 3);
+    check('極端に長い桁数のnetstring長さプレフィックスでも例外を投げず拒否する(重大2)', r.ok === false, r);
   }
 
   // ══════════════ 19. netstring復号: 各種不正形式(decodeUtf8NetstringElements直接テスト) ══════════════

@@ -83,7 +83,7 @@
         "requirement_analysis", "actual_analysis", "mapping", "comparison_input", "numeric_comparison",
         "auto_applicability", "automatic_judgement", "review"],
       "properties": {
-        "comparison_id": { "type": "string", "pattern": "^cmp-v1:.+$" },
+        "comparison_id": { "type": "string", "pattern": "^cmp-v1:" },
         "quantity_pair_id": { "type": "string", "pattern": "^q-[0-9a-f]{32}::q-[0-9a-f]{32}$" },
         "requirement_ref": { "$ref": "#/$defs/requirementRef" },
         "actual_ref": { "$ref": "#/$defs/actualRef" },

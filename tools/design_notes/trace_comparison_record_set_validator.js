@@ -29,6 +29,11 @@ function isRealCanonicalTimestamp(value) {
 // encodeUtf8Netstring()(quantity_sidecar_binding_core.js)の生成契約と表裏一体: 桁が10進数字のみ・
 // 先頭ゼロ拒否(1桁の"0"自体は許可対象外、本契約では長さ0の要素が生成されないため)・符号なし・
 // UTF-8バイト長超過なし・区切りコロン/末尾カンマの存在・全要素消費後に余剰バイトがないことを検査する。
+// netstring長さの桁数上限。Number.MAX_SAFE_INTEGER(2^53-1)は16桁のため、それを下回る桁数に
+// キャップする(この桁数を超える入力は、後段のNumber.isSafeInteger()検査でどのみち拒否される
+// ため、正当な入力を誤って拒否しない)。
+const MAX_NETSTRING_LENGTH_DIGITS = 15;
+
 function decodeUtf8NetstringElements(bytes, expectedCount) {
   const elements = [];
   let pos = 0;
@@ -37,7 +42,12 @@ function decodeUtf8NetstringElements(bytes, expectedCount) {
     let digitsEnd = pos;
     while (digitsEnd < bytes.length && bytes[digitsEnd] >= 0x30 && bytes[digitsEnd] <= 0x39) digitsEnd++;
     if (digitsEnd === pos) return { ok: false, error: 'netstring長さが10進数字ではありません(空・非数字・符号付きを含む)' };
-    const digits = String.fromCharCode(...bytes.slice(pos, digitsEnd));
+    // 【レビュー修正、重大2】String.fromCharCode(...bytes.slice(...))はスプレッド引数の展開のため、
+    // 極端に長い数字列(攻撃的な入力)で引数上限(V8で約65536)に達し例外を投げうる。桁数を先に
+    // 上限で打ち切り、ループで1文字ずつ連結することでスプレッドを避ける。
+    if (digitsEnd - pos > MAX_NETSTRING_LENGTH_DIGITS) return { ok: false, error: 'netstring長さの桁数が上限を超えています' };
+    let digits = '';
+    for (let i = pos; i < digitsEnd; i++) digits += String.fromCharCode(bytes[i]);
     if (digits.length > 1 && digits[0] === '0') return { ok: false, error: 'netstring長さに先頭ゼロがあります' };
     const length = Number(digits);
     if (!Number.isSafeInteger(length)) return { ok: false, error: 'netstring長さが安全な整数範囲を超えています' };
@@ -120,6 +130,27 @@ function checkComparisonRecord(record, thresholds, errors, recordPath) {
 
   checkComparisonId(record, errors, recordPath);
 
+  // --- 【レビュー修正、重大3】ref側とanalysis側のquantity_idが同一数量を指しているかの結合整合性を
+  //     検査していなかったため、requirement_analysis.quantity_idだけを別の有効形式IDへ差し替えた
+  //     artifactを誤って合格させていた。 ---
+  if (record.requirement_analysis?.quantity_id !== record.requirement_ref?.quantity_id) {
+    errors.push(`${recordPath}.requirement_analysis.quantity_id: requirement_ref.quantity_idと一致しません`);
+  }
+  if (record.actual_analysis?.quantity_id !== record.actual_ref?.quantity_id) {
+    errors.push(`${recordPath}.actual_analysis.quantity_id: actual_ref.quantity_idと一致しません`);
+  }
+  // comparison_inputの数量値は、generateTraceComparisonRecordSet()内でentry.requirement_quantity_value等
+  // (analysis.quantity.quantityそのもの、または単位変換後の値)として転記される。requirement側は
+  // 変換を適用しないため、analysisの生値と完全一致するはずである(actual側はoriginal(変換前)と
+  // 比較する。normalizedは変換後のため一致しない)。canonicalJson()(quantity_sidecar_binding_core.js)
+  // でキー順序に依存しない構造的一致を確認する。
+  if (core.canonicalJson(record.comparison_input?.requirement_quantity_value) !== core.canonicalJson(record.requirement_analysis?.quantity?.quantity)) {
+    errors.push(`${recordPath}.comparison_input.requirement_quantity_value: requirement_analysis.quantity.quantityと一致しません`);
+  }
+  if (core.canonicalJson(record.comparison_input?.actual_quantity_value_original) !== core.canonicalJson(record.actual_analysis?.quantity?.quantity)) {
+    errors.push(`${recordPath}.comparison_input.actual_quantity_value_original: actual_analysis.quantity.quantityと一致しません`);
+  }
+
   // --- relationship.linked_at(非null時のみ実在暦日時) ---
   if (record.relationship?.linked_at !== null && record.relationship?.linked_at !== undefined
     && !isRealCanonicalTimestamp(record.relationship.linked_at)) {
@@ -158,7 +189,25 @@ function checkComparisonRecord(record, thresholds, errors, recordPath) {
     if (record.numeric_comparison.inner_side !== sides.inner_side) errors.push(`${recordPath}.numeric_comparison.inner_side: comparison_modeに対応する値(${JSON.stringify(sides.inner_side)})と一致しません`);
   }
 
+  // --- 【レビュー修正、重大3】geometric_relation_holdsとlower_check/upper_check.holdsの内部矛盾を
+  //     検査していなかった(mode/side相関だけでは幾何結果自体の整合性を捉えられない)。 ---
+  const nc = record.numeric_comparison || {};
+  if (nc.geometric_relation_holds !== (nc.lower_check?.holds === true && nc.upper_check?.holds === true)) {
+    errors.push(`${recordPath}.numeric_comparison.geometric_relation_holds: lower_check.holds && upper_check.holdsと一致しません`);
+  }
+
   // --- auto_applicability.basis: 導出式 ---
+  // 【レビュー修正、重大1】basis内部の計算(合計・閾値比較)だけを検証しており、その計算の入力
+  // そのものが生analysisと一致するかを検証していなかった。requirement_analysis/actual_analysisへ
+  // 直接warningsを追加してもbasisの件数を書き換えなければ検出できなかった。
+  const reqWarnings = record.requirement_analysis?.quantity?.extraction?.warnings;
+  const actWarnings = record.actual_analysis?.quantity?.extraction?.warnings;
+  if (!Array.isArray(reqWarnings) || basis.requirement_extraction_warnings_count !== reqWarnings.length) {
+    errors.push(`${recordPath}.auto_applicability.basis.requirement_extraction_warnings_count: requirement_analysis.quantity.extraction.warnings.lengthと一致しません`);
+  }
+  if (!Array.isArray(actWarnings) || basis.actual_extraction_warnings_count !== actWarnings.length) {
+    errors.push(`${recordPath}.auto_applicability.basis.actual_extraction_warnings_count: actual_analysis.quantity.extraction.warnings.lengthと一致しません`);
+  }
   if (basis.extraction_warnings_count !== basis.requirement_extraction_warnings_count + basis.actual_extraction_warnings_count) {
     errors.push(`${recordPath}.auto_applicability.basis.extraction_warnings_count: requirement/actualの合計と一致しません`);
   }
@@ -193,6 +242,27 @@ function checkComparisonRecord(record, thresholds, errors, recordPath) {
   if (basis.property_confidence !== expectedPropertyConfidence) errors.push(`${recordPath}.auto_applicability.basis.property_confidence: Math.min(requirement/actual top_confidence)と一致しません`);
   if (basis.property_confidence_meets_threshold !== (basis.property_confidence >= thresholds.propertyConfidence)) errors.push(`${recordPath}.auto_applicability.basis.property_confidence_meets_threshold: 閾値比較と一致しません`);
 
+  // 【レビュー修正、重大1】上記は各*_meets_thresholdフラグが「自分自身の閾値比較の結果」と
+  // 一致するかしか検証しておらず、比較レコードとしてcomparisons[]へ到達している時点でこれら
+  // すべてが必ずtrueであるはずという、B-2.6a上流ゲート(comparison_mode_confidence・
+  // requirement/actual側condition margin・opposing evidence・property confidenceの5基準を
+  // 満たさない候補はnumeric_comparison_resultsへ到達せずauto_applicability_upstream_gate_
+  // invariant_violationでfail closedする)由来の不変条件を検証していなかった。内部整合性だけを
+  // 保った「閾値未満だがフラグ自体は正しくfalse」というproducerでは生成不能な状態が合格し得た。
+  for (const [flagName, flagValue] of [
+    ['comparison_mode_confidence_meets_threshold', basis.comparison_mode_confidence_meets_threshold],
+    ['requirement_condition_margin_meets_threshold', basis.requirement_condition_margin_meets_threshold],
+    ['actual_condition_margin_meets_threshold', basis.actual_condition_margin_meets_threshold],
+    ['property_confidence_meets_threshold', basis.property_confidence_meets_threshold],
+  ]) {
+    if (flagValue !== true) {
+      errors.push(`${recordPath}.auto_applicability.basis.${flagName}: comparisons[]へ到達した候補はB-2.6a上流ゲートを通過済みのはずのため、常にtrueでなければなりません(実際${JSON.stringify(flagValue)})`);
+    }
+  }
+  if (basis.opposing_evidence_absent !== true) {
+    errors.push(`${recordPath}.auto_applicability.basis.opposing_evidence_absent: comparisons[]へ到達した候補は否定根拠が無いはずのため、常にtrueでなければなりません`);
+  }
+
   // --- auto_applicable × geometric_relation_holds → state/satisfied 相関(3状態排他) ---
   const autoApplicable = record.auto_applicability?.auto_applicable;
   const geometricHolds = record.numeric_comparison?.geometric_relation_holds;
@@ -212,20 +282,54 @@ function checkComparisonRecord(record, thresholds, errors, recordPath) {
   }
 }
 
+// 【レビュー修正、重大2】diagnostics/not_analyzedは意図的にadditionalProperties:falseを付けない
+// 開放型の$defであり(16種超の理由コード形状差異に対応するため)、循環参照や極端な深さ・件数を
+// Schemaでは排除できない。以前の実装は循環検出なしで再帰していたため、自己参照するdiagnostic
+// (`d.self = d`)を含むartifactがRangeError(スタックオーバーフロー)を投げ、「例外を投げない
+// 総関数」という契約に違反していた。祖先パス(現在の再帰経路上にあるオブジェクト/配列)を
+// Setで追跡して真の循環だけを検出し(枝分かれで同じオブジェクトを複数箇所から参照するDAGは
+// 循環ではないため誤検出しない)、深さ・総ノード数にも上限を設ける。
+const MAX_WALK_DEPTH = 64;
+const MAX_WALK_NODES = 200000;
+
 // obj以下を再帰的に走査し、typeof 'number'の値がすべてNumber.isFinite()を満たすことを確認する
 // (json_schema_minivalidator.jsのtype:'number'検査自体はNaN/Infinityを素通りさせるため、JSON再
-// パース由来かメモリ上のオブジェクトかによらず、ここで別途一括して検査する)。
-function checkAllNumbersFinite(value, path, errors) {
+// パース由来かメモリ上のオブジェクトかによらず、ここで別途一括して検査する)。JSON非互換の値
+// (undefined/function/symbol/bigint)も、JSON再パースを経ないメモリ上のオブジェクトでは
+// 混入しうるため、ここで拒否する。
+function checkAllNumbersFinite(value, path, errors, ancestors, budget) {
+  if (budget.stopped) return;
+  budget.nodeCount++;
+  if (budget.nodeCount > MAX_WALK_NODES) {
+    errors.push(`$: 走査ノード数が上限(${MAX_WALK_NODES})を超えました(異常に巨大なartifactの可能性)`);
+    budget.stopped = true;
+    return;
+  }
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) errors.push(`${path}: 非有限数です(NaNまたはInfinity)`);
     return;
   }
+  if (typeof value === 'undefined' || typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint') {
+    errors.push(`${path}: JSON非互換の値です(${typeof value})`);
+    return;
+  }
   if (Array.isArray(value)) {
-    value.forEach((item, i) => checkAllNumbersFinite(item, `${path}[${i}]`, errors));
+    if (ancestors.has(value)) { errors.push(`${path}: 循環参照を検出しました`); return; }
+    if (ancestors.size >= MAX_WALK_DEPTH) { errors.push(`${path}: 入れ子が深すぎます(最大${MAX_WALK_DEPTH})`); return; }
+    ancestors.add(value);
+    for (let i = 0; i < value.length && !budget.stopped; i++) checkAllNumbersFinite(value[i], `${path}[${i}]`, errors, ancestors, budget);
+    ancestors.delete(value);
     return;
   }
   if (isPlainObject(value)) {
-    for (const [key, sub] of Object.entries(value)) checkAllNumbersFinite(sub, `${path}.${key}`, errors);
+    if (ancestors.has(value)) { errors.push(`${path}: 循環参照を検出しました`); return; }
+    if (ancestors.size >= MAX_WALK_DEPTH) { errors.push(`${path}: 入れ子が深すぎます(最大${MAX_WALK_DEPTH})`); return; }
+    ancestors.add(value);
+    for (const [key, sub] of Object.entries(value)) {
+      if (budget.stopped) break;
+      checkAllNumbersFinite(sub, `${path}.${key}`, errors, ancestors, budget);
+    }
+    ancestors.delete(value);
   }
 }
 
@@ -263,7 +367,7 @@ function validateSemantics(recordSet) {
     }
   }
 
-  checkAllNumbersFinite(recordSet, '$', errors);
+  checkAllNumbersFinite(recordSet, '$', errors, new Set(), { nodeCount: 0, stopped: false });
 
   return errors;
 }
@@ -271,16 +375,25 @@ function validateSemantics(recordSet) {
 // 総関数(例外を投げない)。段階1(Schema構造検証)が失敗した場合、段階2(semantic検証)は
 // 実行しない(reviewer確定方針: 構造が壊れた文書に対してsemantic検証を走らせても無意味な
 // エラーが積み上がるだけであり、valid判定はSchema失敗の時点で確定している)。
+//
+// 【レビュー修正、重大2】checkAllNumbersFinite()の循環検出等は主要な例外経路を塞ぐが、
+// 「例外を投げない総関数」という文書化された契約を個々の防御の網羅性に依存させず、公開入口
+// 全体をtry/catchで保護する(想定していない他の例外経路が将来増えても、契約自体は必ず守られる
+// ようにする、多層防御)。
 function validateTraceComparisonRecordSet(recordSet) {
-  if (!isPlainObject(recordSet)) {
-    return { valid: false, schema_errors: ['record_setがオブジェクトではありません'], semantic_errors: [] };
+  try {
+    if (!isPlainObject(recordSet)) {
+      return { valid: false, schema_errors: ['record_setがオブジェクトではありません'], semantic_errors: [] };
+    }
+    const schemaResult = validateSchema(schema, recordSet);
+    if (!schemaResult.valid) {
+      return { valid: false, schema_errors: schemaResult.errors, semantic_errors: [] };
+    }
+    const semanticErrors = validateSemantics(recordSet);
+    return { valid: semanticErrors.length === 0, schema_errors: [], semantic_errors: semanticErrors };
+  } catch (error) {
+    return { valid: false, schema_errors: [], semantic_errors: [`検証中に例外が発生しました(${error?.constructor?.name || 'Error'}: ${String(error?.message || error)})`] };
   }
-  const schemaResult = validateSchema(schema, recordSet);
-  if (!schemaResult.valid) {
-    return { valid: false, schema_errors: schemaResult.errors, semantic_errors: [] };
-  }
-  const semanticErrors = validateSemantics(recordSet);
-  return { valid: semanticErrors.length === 0, schema_errors: [], semantic_errors: semanticErrors };
 }
 
 module.exports = { validateTraceComparisonRecordSet, decodeUtf8NetstringElements, isRealCanonicalTimestamp };
