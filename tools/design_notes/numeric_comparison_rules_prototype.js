@@ -53,7 +53,14 @@ function coversUpper(outer, inner) {
 // 実仕様側の点、B-2.4bの単位正規化済み)が真の点であるかを確認したうえで、requirementInterval
 // の範囲内にあるかを判定する。actualPointIntervalが真の点でない場合は幾何比較そのものが
 // 無意味なため、outcome:'unsupported'を返す(呼び出し側でnot_analyzedへ回す想定)。
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function comparePointInRegion(requirementInterval, actualPointInterval) {
+  if (!isPlainObject(requirementInterval) || !isPlainObject(actualPointInterval)) {
+    return { outcome:'unsupported', reason_code:'geometric_comparison_input_invalid' };
+  }
   if (!isGenuinePoint(actualPointInterval)) {
     return { outcome:'unsupported', reason_code:'point_in_region_actual_not_point' };
   }
@@ -82,6 +89,9 @@ function comparePointInRegion(requirementInterval, actualPointInterval) {
 // この関数の外側(呼び出し側、comparison_mode_candidateに応じたrequirement/actualの割り当て)で
 // 決定する——この関数自体はrequirement/actualの意味を一切知らない、純粋な幾何判定。
 function compareIntervalCoverage(outerInterval, innerInterval) {
+  if (!isPlainObject(outerInterval) || !isPlainObject(innerInterval)) {
+    return { outcome:'unsupported', reason_code:'geometric_comparison_input_invalid' };
+  }
   const lowerHolds = coversLower(outerInterval, innerInterval);
   const upperHolds = coversUpper(outerInterval, innerInterval);
   const lowerBoundaryMismatch = !!(innerInterval.lower && outerInterval.lower
@@ -150,6 +160,16 @@ if (require.main === module) {
   const sampleResult = comparePointInRegion(req0to50, { lower:{ value:25, inclusive:true }, upper:{ value:25, inclusive:true } });
   check('comparePointInRegion()の出力にsatisfied/confidence/auto_applicable等が含まれない',
     !('satisfied' in sampleResult.result) && !('confidence' in sampleResult.result) && !('auto_applicable' in sampleResult.result) && !('assumptions' in sampleResult.result));
+
+  // ── 【レビュー修正、中】null/非オブジェクトの入力を例外なく判別可能な結果として返す ──
+  check('comparePointInRegion(x, null)は例外を投げずgeometric_comparison_input_invalidを返す',
+    comparePointInRegion(req0to50, null).reason_code === 'geometric_comparison_input_invalid');
+  check('comparePointInRegion(null, x)は例外を投げずgeometric_comparison_input_invalidを返す',
+    comparePointInRegion(null, { lower:{ value:5, inclusive:true }, upper:{ value:5, inclusive:true } }).reason_code === 'geometric_comparison_input_invalid');
+  check('compareIntervalCoverage(null, x)は例外を投げずgeometric_comparison_input_invalidを返す',
+    compareIntervalCoverage(null, { lower:null, upper:null }).reason_code === 'geometric_comparison_input_invalid');
+  check('compareIntervalCoverage(x, null)は例外を投げずgeometric_comparison_input_invalidを返す',
+    compareIntervalCoverage({ lower:null, upper:null }, null).reason_code === 'geometric_comparison_input_invalid');
 
   console.log('\n=== numeric_comparison_rules_prototype セルフチェック結果 ===');
   let failed = 0;

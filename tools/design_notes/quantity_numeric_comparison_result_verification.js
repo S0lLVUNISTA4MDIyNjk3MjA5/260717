@@ -300,6 +300,51 @@ const alt = (...options) => ({ kind:'alternatives', options, selection_semantics
       { forward:forwardResult.numeric_comparison_results, reversed:reversedResult.numeric_comparison_results });
   }
 
+  // ══════════════ 14. signed_boundary_deltasの非有限演算結果(重大1、3巡目レビュー) ══════════════
+  // B-2.4bは各境界値が個別に有限であることは保証するが、大きさの異なる区間同士の減算結果
+  // (1e308 - (-1e308) === Infinity)まで有限である保証はない。個々の値が有限でも減算結果が
+  // 非有限になりうることを、実際にactual_covers_requirementモード経由で確認する。
+  {
+    const { binding, relations } = await pairBinding(
+      'required_capability_domain', 'capability_domain', iv(-1e308, true, null, false), iv(1e308, true, null, false), 'delta-lower-infinite');
+    const result = core.generateNumericComparisonResults({ binding, relations });
+    check('lower delta(1e308 - (-1e308))が非有限の場合はnumeric_comparison_resultsを生成せずnot_analyzedへ回す(14)',
+      result.numeric_comparison_results.length === 0
+      && result.not_analyzed.some(n => n.reason_code === 'numeric_comparison_delta_non_finite' && n.lower_delta_non_finite === true && n.upper_delta_non_finite === false),
+      result);
+  }
+  {
+    const { binding, relations } = await pairBinding(
+      'required_capability_domain', 'capability_domain', iv(null, false, 1e308, true), iv(null, false, -1e308, true), 'delta-upper-infinite');
+    const result = core.generateNumericComparisonResults({ binding, relations });
+    check('upper delta(1e308 - (-1e308))が非有限の場合はnumeric_comparison_resultsを生成せずnot_analyzedへ回す(14)',
+      result.numeric_comparison_results.length === 0
+      && result.not_analyzed.some(n => n.reason_code === 'numeric_comparison_delta_non_finite' && n.upper_delta_non_finite === true && n.lower_delta_non_finite === false),
+      result);
+  }
+  {
+    // 通常の(有限な)ケースでは、生成されたsigned_boundary_deltasのnullでない値がすべて有限数であり、
+    // JSON.stringify()経由でも(Infinityがnullへ暗黙変換されて欠陥を隠すことなく)そのまま復元できる。
+    const { binding, relations } = await pairBinding(
+      'required_capability_domain', 'capability_domain', iv(10, true, 20, true), iv(5, true, 25, true), 'delta-finite-roundtrip');
+    const result = core.generateNumericComparisonResults({ binding, relations });
+    const deltas = result.numeric_comparison_results[0]?.numeric_comparison?.signed_boundary_deltas;
+    const roundTripped = JSON.parse(JSON.stringify(deltas));
+    check('有限なsigned_boundary_deltasはnullでない値がすべてNumber.isFiniteであり、JSON往復後も値が変化しない(14)',
+      Number.isFinite(deltas.lower_actual_minus_requirement) && Number.isFinite(deltas.upper_requirement_minus_actual)
+      && roundTripped.lower_actual_minus_requirement === deltas.lower_actual_minus_requirement
+      && roundTripped.upper_requirement_minus_actual === deltas.upper_requirement_minus_actual,
+      deltas);
+  }
+
+  // ══════════════ 15. 未知・欠落したquantity kindの全体fail closed(重大2、3巡目レビュー) ══════════════
+  // requirement_quantity_value/actual_quantity_value_normalizedのkindが'interval'/'alternatives'の
+  // いずれでもない状態は、bindSide()のJSON Schema検証(kindをこの2値の判別可能な共用体としてのみ許可)
+  // により、実際のbindInputPair()経由の公開パイプラインでは構造的に到達不能である
+  // (numeric_comparison_mode_unsupported、11節と同じ前例)。そのため、この防御(invariant検査が
+  // validateQuantityValueStructure()を再利用してkind不明も含めfail closedすること)はバグ注入検証
+  // (disable→失敗確認→復元)でのみ確認し、恒久テストとしては追加しない。
+
   // ══════════════ 実fixtureでend-to-end確認 ══════════════
   {
     const pdfFixture = readJson('runtime_fixtures/quantity_annotation_pdf_verified.json');

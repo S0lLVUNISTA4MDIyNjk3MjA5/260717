@@ -27,7 +27,7 @@ const PROPERTY_LIB_RANGE_B = [438, 511]; // CONCEPT_DICTIONARY 〜 generatePrope
 const COMPARISON_MODE_TABLE_RANGE = [368, 374]; // COMPARISON_MODE_DERIVATION_TABLE
 const UNIT_RULES_RANGE = [25, 271]; // KNOWN_CANONICAL_UNITS_BY_DIMENSION 〜 applyLinearConversion()(B-2.4bレビュー修正で拡張、6巡目)
 const QUANTITY_LIB_RANGE_C = [467, 492]; // isGenuinePoint() 〜 coversUpper()(B-2.5でnumeric_comparison_rules_prototype.jsへ移植)
-const NUMERIC_RULES_RANGE = [24, 100]; // isGenuinePoint() 〜 compareIntervalCoverage()
+const NUMERIC_RULES_RANGE = [24, 110]; // isGenuinePoint() 〜 compareIntervalCoverage()(中(3巡目)のisPlainObject入力検査追加で拡張)
 
 const assertions = [];
 function check(name, ok, detail) { assertions.push({ name, ok: !!ok, detail }); }

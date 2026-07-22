@@ -1915,7 +1915,14 @@
   // 実仕様側の点、B-2.4bの単位正規化済み)が真の点であるかを確認したうえで、requirementInterval
   // の範囲内にあるかを判定する。actualPointIntervalが真の点でない場合は幾何比較そのものが
   // 無意味なため、outcome:'unsupported'を返す(呼び出し側でnot_analyzedへ回す想定)。
+  function isPlainObject(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+  }
+
   function comparePointInRegion(requirementInterval, actualPointInterval) {
+    if (!isPlainObject(requirementInterval) || !isPlainObject(actualPointInterval)) {
+      return { outcome:'unsupported', reason_code:'geometric_comparison_input_invalid' };
+    }
     if (!isGenuinePoint(actualPointInterval)) {
       return { outcome:'unsupported', reason_code:'point_in_region_actual_not_point' };
     }
@@ -1944,6 +1951,9 @@
   // この関数の外側(呼び出し側、comparison_mode_candidateに応じたrequirement/actualの割り当て)で
   // 決定する——この関数自体はrequirement/actualの意味を一切知らない、純粋な幾何判定。
   function compareIntervalCoverage(outerInterval, innerInterval) {
+    if (!isPlainObject(outerInterval) || !isPlainObject(innerInterval)) {
+      return { outcome:'unsupported', reason_code:'geometric_comparison_input_invalid' };
+    }
     const lowerHolds = coversLower(outerInterval, innerInterval);
     const upperHolds = coversUpper(outerInterval, innerInterval);
     const lowerBoundaryMismatch = !!(innerInterval.lower && outerInterval.lower
@@ -2003,18 +2013,20 @@
 
     // 段階2(防御的): requirement_quantity_value/actual_quantity_value_normalizedは
     // generateNormalizedQuantityViews()が既に構造検証・精度損失検査を済ませているため、
-    // ここへ到達する時点で常にkind:'interval'なら整形済みのはずである(kind:'alternatives'は
-    // 下記の段階3で別途扱う)。intervalかつlower/upperの両方がnull、または存在するのに
-    // valueが非有限、といった不整合は構造的に起こらないはずだが、万一に備えて検査する。
+    // ここへ到達する時点で常にkind:'interval'|'alternatives'のいずれかとして整形済みのはずである。
+    // 【レビュー指摘、重大2】以前はkind!=='interval'を無条件でスキップしており、'alternatives'
+    // だけでなく未知・欠落したkindも同じ経路で静かに見逃していた。既存の完全な構造検査
+    // (validateQuantityValueStructure()、'interval'/'alternatives'/それ以外を判別可能に検証する)
+    // を再利用し、side別にoutcome!=='ok'であれば呼び出し全体をfail closedする。
     const invariantDiagnostics = [];
     for (const view of viewResult.normalized_quantity_views) {
-      for (const [label, qv] of [['requirement', view.requirement_quantity_value], ['actual', view.actual_quantity_value_normalized]]) {
-        if (qv.kind !== 'interval') continue;
-        const boundsOk = [qv.lower, qv.upper].every(b => b === null || (b && isFiniteNumber(b.value) && typeof b.inclusive === 'boolean'));
-        if (!boundsOk || (qv.lower === null && qv.upper === null)) {
+      for (const [side, qv] of [['requirement', view.requirement_quantity_value], ['actual', view.actual_quantity_value_normalized]]) {
+        const structureCheck = validateQuantityValueStructure(qv);
+        if (structureCheck.outcome !== 'ok') {
           invariantDiagnostics.push({ code:'numeric_comparison_input_invariant_violation', severity:'error',
-            requirement_quantity_id:view.requirement_quantity_id, actual_quantity_id:view.actual_quantity_id, side:label,
-            detail:'正規化ビューのinterval数量値が構造検証済みであるという前提が崩れています' });
+            requirement_quantity_id:view.requirement_quantity_id, actual_quantity_id:view.actual_quantity_id, side,
+            upstream_reason_code:structureCheck.reason_code,
+            detail:'正規化ビューの数量値構造がB-2.4bの保証に違反しています' });
         }
       }
     }
@@ -2030,7 +2042,10 @@
     for (const view of viewResult.normalized_quantity_views) {
       const reqQv = view.requirement_quantity_value;
       const actQv = view.actual_quantity_value_normalized;
-      if (reqQv.kind !== 'interval' || actQv.kind !== 'interval') {
+      // 【レビュー指摘、重大2】上のinvariant検査が既にkindを'interval'/'alternatives'の
+      // いずれかであると保証しているため、ここでは'alternatives'(選択意味論が未設計で
+      // 比較不能)だけを明示的に判定する('interval'以外という否定形では判定しない)。
+      if (reqQv.kind === 'alternatives' || actQv.kind === 'alternatives') {
         notAnalyzed.push({ reason_code:'quantity_comparison_kind_unsupported', ...view,
           requirement_quantity_kind:reqQv.kind, actual_quantity_kind:actQv.kind });
         continue;
@@ -2057,9 +2072,23 @@
       // signed_boundary_deltasは、outer/innerに関わらず常にrequirement/actualの実値から
       // 直接計算する固定式(3モードとも同一。point_in_regionではactual.lower===actual.upper===
       // 点の値のため、この式が自然にpointInRegionResult()相当の距離計算と一致する)。
+      // 【レビュー指摘、重大1】各境界値が個別に有限であることはB-2.4bが保証するが、大きさの
+      // 異なる区間同士の減算結果まで有限である保証はない(例: 1e308 - (-1e308) === Infinity)。
+      // nullは「この境界が存在しない」という別の意味を持つため、非有限をnullへ置き換えず、
+      // 候補ごとnot_analyzedへ送る(推測しない)。
+      const lowerDelta = (reqQv.lower && actQv.lower) ? actQv.lower.value - reqQv.lower.value : null;
+      const upperDelta = (reqQv.upper && actQv.upper) ? reqQv.upper.value - actQv.upper.value : null;
+      const lowerDeltaNonFinite = lowerDelta !== null && !Number.isFinite(lowerDelta);
+      const upperDeltaNonFinite = upperDelta !== null && !Number.isFinite(upperDelta);
+      if (lowerDeltaNonFinite || upperDeltaNonFinite) {
+        notAnalyzed.push({ reason_code:'numeric_comparison_delta_non_finite', ...view,
+          comparison_mode_candidate:mode,
+          lower_delta_non_finite:lowerDeltaNonFinite, upper_delta_non_finite:upperDeltaNonFinite });
+        continue;
+      }
       const signedBoundaryDeltas = {
-        lower_actual_minus_requirement: (reqQv.lower && actQv.lower) ? actQv.lower.value - reqQv.lower.value : null,
-        upper_requirement_minus_actual: (reqQv.upper && actQv.upper) ? reqQv.upper.value - actQv.upper.value : null,
+        lower_actual_minus_requirement: lowerDelta,
+        upper_requirement_minus_actual: upperDelta,
       };
       numericComparisonResults.push({ ...view,
         numeric_comparison: {
