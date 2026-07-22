@@ -2108,6 +2108,182 @@
       not_analyzed: [...viewResult.not_analyzed, ...notAnalyzed] };
   }
 
+  function blockedAutoApplicabilityResult(diagnostics, numericResult) {
+    return { ready:false, auto_applicability_results:[], candidate_count:0, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(numericResult?.diagnostics || [])]),
+      not_analyzed:dedupeByCanonicalJson(numericResult?.not_analyzed || []) };
+  }
+
+  // Phase B-2.6a: 段階4の最後の部分として、B-2.5が算出済みのgeometric_relation_holdsを一切
+  // 変更せず、その候補を自動判定へ使ってよいか(auto_applicable)だけを決定する。
+  //
+  // 【設計方針、レビュー確定】comparison_mode_confidence・requirement/actual側condition
+  // margin・opposing evidence・property confidenceの5基準は、B-2.2b(generatePropertyResolutions()の
+  // resolvePropertyStatus())・B-2.3a(generateConditionResolutions()のresolveConditionStatus())・
+  // B-2.3b(generateComparisonModeCandidates())が既にresolved判定のゲートとして適用済みであり、
+  // numeric_comparison_resultsへ到達した候補はこの5基準を構造的に満たしている。したがって
+  // このB-2.6aでは、これらを「基準未達なら自動判定不可」という通常の判定条件としては扱わず、
+  // 「基準を満たしているはずという上流契約のinvariant」として再検証する。違反時は個々の候補を
+  // auto_applicable:falseにするのではなく、呼び出し全体をfail closedする(パイプラインの不整合を
+  // 「正常な要確認候補」として隠さないため)。現行rulesetにおいて、正常経路でauto_applicableを
+  // falseにし得る実効条件は抽出警告件数(analysis.quantity.extraction.warnings)だけである
+  // (この値はどの段階でもまだ検査されていない、B-2.6aで初めて参照する値)。
+  //
+  // 新しい閾値は導入しない。既存のauto_applicable_thresholds(modeConfidence/margin/
+  // propertyConfidence)をそのまま再利用する(原型のevaluateAutoApplicable()自身が「検証用
+  // パラメータ、実データでの再調整が必要」と明記しており、根拠なく厳格化しないため)。
+  function generateAutoApplicabilityResults({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    const numericResult = generateNumericComparisonResults({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (numericResult.ready !== true || numericResult.result_complete !== true) {
+      return blockedAutoApplicabilityResult([{ code:'numeric_comparison_results_not_ready_or_incomplete', severity:'error',
+        detail:`generateNumericComparisonResults()がready=${JSON.stringify(numericResult.ready)}、result_complete=${JSON.stringify(numericResult.result_complete)}のため自動適用可否を判定できません(段階3以降と同じくready===trueかつresult_complete===trueを要求してfail closedする契約)` }],
+        numericResult);
+    }
+
+    // 段階1(防御的): requirement側とactual側のruleset_versionが完全一致することを要求する。
+    // 現在のSUPPORTED_RULESETSは1タプルのみのため両側は常に一致するが、将来複数タプルが
+    // 追加された場合、bindSide()は各側を個別にSUPPORTED_RULESETSと照合するだけで、両側が
+    // 互いに同じタプルであることまでは検証しない。異なるタプル同士がrequirement側の閾値だけで
+    // 判定される事故を防ぐため、ここで両側の完全一致を要求する(sameRuleset()を、
+    // SUPPORTED_RULESETSとの照合ではなく両側同士の照合に転用する)。
+    const reqRuleset = binding.requirement?.ruleset_version;
+    const actRuleset = binding.actual?.ruleset_version;
+    if (!reqRuleset || !actRuleset || !sameRuleset(reqRuleset, actRuleset)) {
+      return blockedAutoApplicabilityResult([{ code:'auto_applicability_ruleset_inconsistent', severity:'error',
+        requirement_ruleset_version: reqRuleset || null, actual_ruleset_version: actRuleset || null,
+        detail:'requirement側とactual側のruleset_version(auto_applicable_thresholds含む)が一致しません' }],
+        numericResult);
+    }
+    const thresholds = reqRuleset.auto_applicable_thresholds;
+
+    // 段階2: property resolutionを同じbindingから同期的に再計算し、(side, quantity_id)で
+    // 索引化する(B-2.4a/bのanalysisByQuantityId()と同じ「別引数として受け取らず必ず
+    // bindingから再計算する」設計方針)。
+    const propertyResult = generatePropertyResolutions({ binding });
+    const propertyResolutionByKey = new Map();
+    for (const r of propertyResult.resolutions) propertyResolutionByKey.set(`${r.side}:${r.quantity_id}`, r);
+    const reqAnalysisById = analysisByQuantityId(binding.requirement);
+    const actAnalysisById = analysisByQuantityId(binding.actual);
+
+    const inRange01 = value => isFiniteNumber(value) && value >= 0 && value <= 1;
+
+    const upstreamGateDiagnostics = [];
+    const extractionInputDiagnostics = [];
+    const prepared = [];
+
+    for (const entry of numericResult.numeric_comparison_results) {
+      const failedInvariants = [];
+      const refIds = { requirement_quantity_id:entry.requirement_quantity_id, actual_quantity_id:entry.actual_quantity_id };
+
+      // --- comparison_mode_confidence: 値域・requirement/actual top_confidenceからの導出式・閾値 ---
+      const modeConfidence = entry.comparison_mode_confidence;
+      if (!inRange01(modeConfidence)) {
+        failedInvariants.push('comparison_mode_confidence_out_of_range');
+      } else if (modeConfidence !== Math.min(entry.requirement_condition_top_confidence, entry.actual_condition_top_confidence)) {
+        failedInvariants.push('comparison_mode_confidence_derivation_mismatch');
+      } else if (modeConfidence < thresholds.modeConfidence) {
+        failedInvariants.push('comparison_mode_confidence_below_threshold');
+      }
+
+      // --- requirement/actual側condition margin: 値域・閾値 ---
+      for (const [label, value] of [['requirement', entry.requirement_condition_margin], ['actual', entry.actual_condition_margin]]) {
+        if (!inRange01(value)) failedInvariants.push(`${label}_condition_margin_out_of_range`);
+        else if (value < thresholds.margin) failedInvariants.push(`${label}_condition_margin_below_threshold`);
+      }
+
+      // --- requirement/actual側opposing evidence: 型・値 ---
+      for (const [label, value] of [
+        ['requirement', entry.requirement_condition_has_opposing_evidence], ['actual', entry.actual_condition_has_opposing_evidence]]) {
+        if (typeof value !== 'boolean') failedInvariants.push(`${label}_condition_has_opposing_evidence_not_boolean`);
+        else if (value === true) failedInvariants.push(`${label}_condition_has_opposing_evidence_true`);
+      }
+
+      // --- requirement/actual側property resolution: 存在・resolved状態・concept_id整合・confidence値域 ---
+      const propertyTopConfidenceBySide = {};
+      for (const [label, quantityId] of [['requirement', entry.requirement_quantity_id], ['actual', entry.actual_quantity_id]]) {
+        const resolution = propertyResolutionByKey.get(`${label}:${quantityId}`);
+        if (!resolution) { failedInvariants.push(`${label}_property_resolution_missing`); continue; }
+        if (resolution.status !== 'resolved') { failedInvariants.push(`${label}_property_resolution_not_resolved`); continue; }
+        if (resolution.concept_id !== entry.concept_id || resolution.candidates[0]?.concept_id !== entry.concept_id) {
+          failedInvariants.push(`${label}_property_resolution_concept_id_mismatch`); continue;
+        }
+        const topConfidence = resolution.candidates[0]?.confidence;
+        if (!inRange01(topConfidence)) { failedInvariants.push(`${label}_property_top_confidence_out_of_range`); continue; }
+        propertyTopConfidenceBySide[label] = topConfidence;
+      }
+      let propertyConfidence = null;
+      if ('requirement' in propertyTopConfidenceBySide && 'actual' in propertyTopConfidenceBySide) {
+        propertyConfidence = Math.min(propertyTopConfidenceBySide.requirement, propertyTopConfidenceBySide.actual);
+        if (propertyConfidence < thresholds.propertyConfidence) failedInvariants.push('property_confidence_below_threshold');
+      }
+
+      if (failedInvariants.length) {
+        upstreamGateDiagnostics.push({ code:'auto_applicability_upstream_gate_invariant_violation', severity:'error',
+          failed_invariants:failedInvariants, ...refIds,
+          detail:'B-2.2b/B-2.3a/B-2.3bが既に通過済みのはずの信頼度・margin・否定根拠・property解決の前提が崩れています' });
+      }
+
+      // --- requirement/actual側抽出警告件数: analysis存在・warnings配列妥当性(B-2.6aで初めて参照) ---
+      const extractionWarningsCountBySide = {};
+      for (const [label, quantityId, analysisById] of [
+        ['requirement', entry.requirement_quantity_id, reqAnalysisById], ['actual', entry.actual_quantity_id, actAnalysisById]]) {
+        const analysis = analysisById.get(quantityId);
+        if (!analysis) { extractionInputDiagnostics.push({ code:'auto_applicability_extraction_input_invariant_violation', severity:'error',
+          side:label, ...refIds, detail:'候補のquantity_idに対応するanalysisがbinding内に見つかりません' }); continue; }
+        const warnings = analysis.quantity?.extraction?.warnings;
+        if (!Array.isArray(warnings)) { extractionInputDiagnostics.push({ code:'auto_applicability_extraction_input_invariant_violation', severity:'error',
+          side:label, ...refIds, detail:'analysis.quantity.extraction.warningsが配列ではありません(警告0件と解釈しない)' }); continue; }
+        extractionWarningsCountBySide[label] = warnings.length;
+      }
+
+      prepared.push({ entry, modeConfidence, propertyTopConfidenceBySide, propertyConfidence, extractionWarningsCountBySide });
+    }
+
+    if (upstreamGateDiagnostics.length) return blockedAutoApplicabilityResult(upstreamGateDiagnostics, numericResult);
+    if (extractionInputDiagnostics.length) return blockedAutoApplicabilityResult(extractionInputDiagnostics, numericResult);
+
+    // 段階3: ここまでで上流ゲートのinvariantは全候補で成立しているため、正常経路で
+    // auto_applicableを左右する実効条件は抽出警告件数だけになる(設計方針コメント参照)。
+    const autoApplicabilityResults = prepared.map(({ entry, modeConfidence, propertyTopConfidenceBySide, propertyConfidence, extractionWarningsCountBySide }) => {
+      const requirementExtractionWarningsCount = extractionWarningsCountBySide.requirement;
+      const actualExtractionWarningsCount = extractionWarningsCountBySide.actual;
+      const extractionWarningsAbsent = requirementExtractionWarningsCount === 0 && actualExtractionWarningsCount === 0;
+      return { ...entry,
+        auto_applicability: {
+          auto_applicable: extractionWarningsAbsent,
+          basis: {
+            requirement_extraction_warnings_count: requirementExtractionWarningsCount,
+            actual_extraction_warnings_count: actualExtractionWarningsCount,
+            extraction_warnings_count: requirementExtractionWarningsCount + actualExtractionWarningsCount,
+            extraction_warnings_absent: extractionWarningsAbsent,
+            comparison_mode_confidence: modeConfidence,
+            comparison_mode_confidence_meets_threshold: modeConfidence >= thresholds.modeConfidence,
+            requirement_condition_margin: entry.requirement_condition_margin,
+            requirement_condition_margin_meets_threshold: entry.requirement_condition_margin >= thresholds.margin,
+            actual_condition_margin: entry.actual_condition_margin,
+            actual_condition_margin_meets_threshold: entry.actual_condition_margin >= thresholds.margin,
+            requirement_condition_has_opposing_evidence: entry.requirement_condition_has_opposing_evidence,
+            actual_condition_has_opposing_evidence: entry.actual_condition_has_opposing_evidence,
+            opposing_evidence_absent: !entry.requirement_condition_has_opposing_evidence && !entry.actual_condition_has_opposing_evidence,
+            requirement_property_top_confidence: propertyTopConfidenceBySide.requirement,
+            actual_property_top_confidence: propertyTopConfidenceBySide.actual,
+            property_confidence: propertyConfidence,
+            property_confidence_meets_threshold: propertyConfidence >= thresholds.propertyConfidence,
+          },
+        } };
+    });
+
+    return { ready:true, auto_applicability_results:autoApplicabilityResults, candidate_count:autoApplicabilityResults.length, result_complete:true,
+      auto_applicability_policy: {
+        ruleset_version: { quantity_extraction:reqRuleset.quantity_extraction, semantics_rules:reqRuleset.semantics_rules },
+        thresholds: { modeConfidence:thresholds.modeConfidence, margin:thresholds.margin, propertyConfidence:thresholds.propertyConfidence },
+      },
+      diagnostics: numericResult.diagnostics,
+      not_analyzed: numericResult.not_analyzed };
+  }
+
   return Object.freeze({ SCHEMA_VERSION, SUPPORTED_RULESETS, validateAnnotationSchema, validateRulesetCompatibility,
     canonicalValue, canonicalJson, normalize, hashParts, computeDatasetSignature, computeRecordContentHash,
     traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates,
@@ -2116,5 +2292,5 @@
     generateComparisonCandidates, generateConditionResolutions, generateConditionAnnotatedComparisonCandidates,
     COMPARISON_MODE_DERIVATION_TABLE, generateComparisonModeCandidates,
     KNOWN_CANONICAL_UNITS_BY_DIMENSION, LINEAR_UNIT_SCALE_TO_BASE, generateUnitConversionPlans,
-    generateNormalizedQuantityViews, generateNumericComparisonResults });
+    generateNormalizedQuantityViews, generateNumericComparisonResults, generateAutoApplicabilityResults });
 });
