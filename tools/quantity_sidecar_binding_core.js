@@ -2555,6 +2555,23 @@
 
   function initialReviewTarget(status) { return { status, reviewer:null, reviewed_at:null, verdict:null, note:null }; }
 
+  // 【レビュー修正、重大(B-3cレビュー)】区切り文字連結によるソートキー衝突を避けるため、
+  // 6フィールドを1つずつ順に比較する(区切り文字を一切使わない)。trace_comparison_record_set_
+  // validator.js(B-3c)のsemantic validatorも、comparisonsの安定順検証にこの関数をそのまま
+  // 再利用する(同じ比較契約を別実装で複製しない)。
+  function compareText(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
+  function compareComparisonRecords(a, b) {
+    const fieldsA = [a.requirement_ref.trace_id, a.actual_ref.trace_id, a.requirement_ref.quantity_id, a.actual_ref.quantity_id,
+      a.requirement_ref.matcher_id, a.actual_ref.matcher_id];
+    const fieldsB = [b.requirement_ref.trace_id, b.actual_ref.trace_id, b.requirement_ref.quantity_id, b.actual_ref.quantity_id,
+      b.requirement_ref.matcher_id, b.actual_ref.matcher_id];
+    for (let i = 0; i < fieldsA.length; i++) {
+      const result = compareText(fieldsA[i], fieldsB[i]);
+      if (result !== 0) return result;
+    }
+    return 0;
+  }
+
   function generateTraceComparisonRecordSet({ binding, relations, generatedAt, generator, displayContext,
     candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
     totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
@@ -2564,17 +2581,25 @@
       metadataDiagnostics.push({ code:'trace_comparison_metadata_invalid', severity:'error',
         detail:'generatedAtがYYYY-MM-DDTHH:mm:ss.sssZ形式のcanonical UTC timestampではありません' });
     }
-    if (!generator || typeof generator !== 'object' || !isNonEmptyString(generator.tool) || !isNonEmptyString(generator.version)) {
+    // 【レビュー修正、重大(B-3cレビュー)】generator/displayContextのproducer受理条件をrc2 Schemaの
+    // additionalProperties:falseと一致させる。配列はtypeof==='object'を通過してしまうため、
+    // Array.isArray()で明示的に除外してからObject.keys()で余分なキーを検査する。
+    const generatorIsObject = generator !== null && typeof generator === 'object' && !Array.isArray(generator);
+    const generatorKeys = generatorIsObject ? Object.keys(generator) : null;
+    const generatorValid = generatorIsObject && generatorKeys.length === 2 && generatorKeys.includes('tool') && generatorKeys.includes('version')
+      && isNonEmptyString(generator.tool) && isNonEmptyString(generator.version);
+    if (!generatorValid) {
       metadataDiagnostics.push({ code:'trace_comparison_metadata_invalid', severity:'error',
-        detail:'generatorは{tool, version}(ともに非空文字列)を持つオブジェクトである必要があります' });
+        detail:'generatorはtool/versionの2キーのみ(ともに非空文字列)を持つ非配列オブジェクトである必要があります(余分なキーは拒否)' });
     }
-    const displayContextKeys = displayContext && typeof displayContext === 'object' ? Object.keys(displayContext) : null;
+    const displayContextIsObject = displayContext !== null && displayContext !== undefined && typeof displayContext === 'object' && !Array.isArray(displayContext);
+    const displayContextKeys = displayContextIsObject ? Object.keys(displayContext) : null;
     const displayContextValid = displayContext === null || displayContext === undefined
-      || (displayContextKeys && displayContextKeys.length === 1 && displayContextKeys[0] === 'matching_dataset_signature'
+      || (displayContextIsObject && displayContextKeys.length === 1 && displayContextKeys[0] === 'matching_dataset_signature'
         && isNonEmptyString(displayContext.matching_dataset_signature));
     if (!displayContextValid) {
       metadataDiagnostics.push({ code:'trace_comparison_metadata_invalid', severity:'error',
-        detail:'displayContextはnull、またはmatching_dataset_signature(非空文字列)のみを持つオブジェクトである必要があります' });
+        detail:'displayContextはnull、またはmatching_dataset_signature(非空文字列)のみを持つ非配列オブジェクトである必要があります' });
     }
     if (metadataDiagnostics.length) return blockedTraceComparisonResult(metadataDiagnostics, null);
 
@@ -2779,12 +2804,12 @@
     if (entryDiagnostics.length) return blockedTraceComparisonResult(entryDiagnostics, judgementResult);
 
     // 段階6: comparisonsを安定キーで並べ替える(relations入力順に依存させない)。
-    records.sort((a, b) => {
-      const keyOf = r => [r.requirement_ref.trace_id, r.actual_ref.trace_id, r.requirement_ref.quantity_id, r.actual_ref.quantity_id,
-        r.requirement_ref.matcher_id, r.actual_ref.matcher_id].join(' ');
-      const ka = keyOf(a), kb = keyOf(b);
-      return ka < kb ? -1 : ka > kb ? 1 : 0;
-    });
+    // 【レビュー修正、重大(B-3cレビュー)】trace_id/matcher_idは任意の外部文字列で区切り文字を
+    // 含まないという保証がないため、単純な区切り文字連結(NUL文字等)で1本のキー文字列を作ると、
+    // 異なる6要素タプルが同じ連結文字列になり得る(安定ソートでは衝突時に入力順が残るため、
+    // relations入力順非依存という契約が崩れる)。区切り文字を使わず、フィールドを1つずつ
+    // 順に比較する。
+    records.sort(compareComparisonRecords);
 
     const recordSetDraft = {
       schema_version: TRACE_COMPARISON_SCHEMA_VERSION,
@@ -2815,5 +2840,5 @@
     COMPARISON_MODE_DERIVATION_TABLE, generateComparisonModeCandidates,
     KNOWN_CANONICAL_UNITS_BY_DIMENSION, LINEAR_UNIT_SCALE_TO_BASE, generateUnitConversionPlans,
     generateNormalizedQuantityViews, generateNumericComparisonResults, generateAutoApplicabilityResults,
-    generateAutomaticJudgementResults, generateTraceComparisonRecordSet });
+    generateAutomaticJudgementResults, generateTraceComparisonRecordSet, compareComparisonRecords });
 });

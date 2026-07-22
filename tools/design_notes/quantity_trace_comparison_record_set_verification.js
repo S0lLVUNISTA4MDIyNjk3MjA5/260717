@@ -137,11 +137,18 @@ function generate(binding, relations, overrides) {
   // ══════════════ 5. generator欠落・不正でfail closed ══════════════
   {
     const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'badgen');
-    for (const bad of [null, {}, { tool:'x' }, { tool:'', version:'1' }, { tool:'x', version:'' }]) {
+    for (const bad of [null, {}, { tool:'x' }, { tool:'', version:'1' }, { tool:'x', version:'' },
+      { tool:'x', version:'1', extra:true }, ['x', '1']]) {
       const result = generate(binding, relations, { generator:bad });
       check(`generator不正(${JSON.stringify(bad)})でfail closedする(5)`,
         result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_metadata_invalid'), result);
     }
+  }
+  {
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'baddisplay-array');
+    const result = generate(binding, relations, { displayContext:['matching_dataset_signature'] });
+    check('displayContextが配列だとfail closedする(5)',
+      result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_metadata_invalid'), result);
   }
 
   // ══════════════ 6/7/8. property resolution両側の候補全件保持・混同なし・top_confidence/margin整合 ══════════════
@@ -458,6 +465,28 @@ function generate(binding, relations, overrides) {
     check('relations正順・逆順で生成されるcomparisonsが完全に同一順序(安定ソート、18)',
       JSON.stringify(forwardResult.record_set.comparisons) === JSON.stringify(reversedResult.record_set.comparisons),
       { forward:forwardResult.record_set.comparisons.map(c => c.comparison_id), reversed:reversedResult.record_set.comparisons.map(c => c.comparison_id) });
+  }
+
+  // ══════════════ 18b. compareComparisonRecords()の区切り文字衝突耐性を直接確認 ══════════════
+  // 旧実装は6フィールドをNUL文字(U+0000)で連結した1本のキー文字列を比較していた。任意の単一文字
+  // 区切りでの連結は、その文字自体をフィールド値が含む場合にフィールド境界を跨いだ衝突を起こし
+  // うる、という一般的な欠陥クラスを示すため、ここでは(ソースファイルへ生NUL文字を埋め込むことを
+  // 避け)空白文字で同型の衝突を再現する:
+  //   X: requirement trace_id='A B', actual trace_id='C'
+  //   Y: requirement trace_id='A',   actual trace_id='B C'
+  //   区切り文字連結キー(X) = 'A B' + <区切り> + 'C' + ... = 'A B C ...'
+  //   区切り文字連結キー(Y) = 'A'   + <区切り> + 'B C' + ... = 'A B C ...'  (同一になる)
+  // フィールド単位比較なら、1フィールド目('A B' vs 'A')だけで非ゼロの決定的な結果が出る。
+  {
+    const recordX = { requirement_ref:{ trace_id:'A B', matcher_id:'M1', quantity_id:'Q1' },
+      actual_ref:{ trace_id:'C', matcher_id:'M2', quantity_id:'Q2' } };
+    const recordY = { requirement_ref:{ trace_id:'A', matcher_id:'M1', quantity_id:'Q1' },
+      actual_ref:{ trace_id:'B C', matcher_id:'M2', quantity_id:'Q2' } };
+    const cmpXY = core.compareComparisonRecords(recordX, recordY);
+    const cmpYX = core.compareComparisonRecords(recordY, recordX);
+    check('区切り文字連結なら衝突する2レコードでも、フィールド単位比較は非ゼロの決定的な結果を返す(18b)',
+      cmpXY !== 0 && cmpYX !== 0 && Math.sign(cmpXY) === -Math.sign(cmpYX), { cmpXY, cmpYX });
+    check('比較結果が反対称(引数順を入れ替えると符号が反転する、18b)', cmpXY === -cmpYX, { cmpXY, cmpYX });
   }
 
   // ══════════════ 19. 旧rc1 fixtureをrc2として誤って通さない ══════════════
