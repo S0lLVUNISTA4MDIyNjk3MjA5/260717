@@ -110,6 +110,18 @@ test('marker and snapshot identity failures use identity diagnostic', () => {
   assert.strictEqual(a.diagnostics[0].code, 'review_artifact_identity_mismatch');
   assert.strictEqual(b.diagnostics[0].code, 'review_artifact_identity_mismatch');
 });
+test('matching dataset signature must be a non-empty trimmed string', () => {
+  for (const matching_dataset_signature of [null, undefined, 1, true, '', ' match-1 ']) {
+    const liveSourceMarker=marker();
+    liveSourceMarker.matching_dataset_signature=matching_dataset_signature;
+    const result=core.createInitialReviewSessionState({
+      sessionId:'s', startedAt:at, startedBy:'r', liveSourceMarker,
+      snapshotIdentity:snapshot(), comparisonIds:['cmp-v1:a']
+    });
+    assert(!result.ok);
+    assert.strictEqual(result.diagnostics[0].code, 'review_artifact_identity_mismatch');
+  }
+});
 test('hidden and symbol marker snapshot extras rejected', () => {
   for (const [field, factory] of [['liveSourceMarker', marker], ['snapshotIdentity', snapshot]]) {
     for (const decorate of [value => Object.defineProperty(value, 'hidden', {value:true}), value => { value[Symbol('extra')]=true; }]) {

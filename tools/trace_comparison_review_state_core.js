@@ -71,6 +71,8 @@
     const trimmed = value.trim();
     return codePoints(trimmed) >= 1 && codePoints(trimmed) <= maximum ? trimmed : null;
   };
+  const nonEmptyTrimmedString = value => typeof value === 'string'
+    && value.length > 0 && value.trim() === value;
   const validNote = value => value === null || (typeof value === 'string' && codePoints(value) <= 4096);
 
   function deepFreeze(value) {
@@ -116,7 +118,7 @@
       && matches(value.binding_identity, new RegExp(`^b4-binding-v1:${HEX64}$`))
       && matches(value.requirement_dataset_signature, new RegExp(`^QA-SHA256:${HEX64}$`))
       && matches(value.actual_dataset_signature, new RegExp(`^QA-SHA256:${HEX64}$`))
-      && boundedTrimmed(value.matching_dataset_signature, Number.MAX_SAFE_INTEGER) === value.matching_dataset_signature
+      && nonEmptyTrimmedString(value.matching_dataset_signature)
       && matches(value.relation_snapshot_digest, new RegExp(`^SHA-256:${HEX64}$`));
   }
 

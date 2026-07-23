@@ -2843,7 +2843,8 @@
   }
 
   return Object.freeze({ SCHEMA_VERSION, SUPPORTED_RULESETS, validateAnnotationSchema, validateRulesetCompatibility,
-    canonicalValue, canonicalJson, normalize, hashParts, computeDatasetSignature, computeRecordContentHash,
+    canonicalValue, canonicalJson, normalize, hashParts, rawSha256Utf8:sha256,
+    computeDatasetSignature, computeRecordContentHash,
     traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates,
     CONCEPT_DICTIONARY, generatePropertyCandidates, generatePropertyResolutions,
     DEFAULT_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT,

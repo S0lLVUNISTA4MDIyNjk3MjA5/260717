@@ -593,3 +593,31 @@ B-4aではreview overlayを次のいずれにも保存しない。
 - サーバー
 
 B-5では、保存用artifactのSchema/version、artifact identityの再検証、監査イベント、reset/stale/破棄履歴、再読込、複数レビュアー、署名・権限、競合解決、旧artifactからの明示的migration、retentionを設計する。B-5の保存形式を決める際もrc2へ暗黙にフィールドを追加せず、新Schema版または明示的な別artifactとする。B-4a overlayのruntime例を、そのまま永続形式として採用したものとは解釈しない。
+
+## 17. B-4a Stage 2実装記録
+
+B-4a Stage 2では、`tools/quantity_sidecar_binding_core.js`の既存`sha256()`を再実装せず`rawSha256Utf8`として加算的に公開し、`tools/trace_comparison_review_session_core.js`にNode／browser共用のreview session coordinatorを実装した。実装済みの範囲は、relation snapshotのexact検証・canonical化・raw digest、binding generation・binding全体raw digest・binding identity、binding lifecycle token、live source marker、record set raw digest、snapshot identity、非同期`startReviewSession()`のprepare/commit、validator前にclone・recursive freezeしたexact record set snapshot、開始中のsource変更によるtoken失効、coordinator-localな同期source invalidationである。
+
+レビュー開始では、producerのruntime envelopeをsession snapshotとして流用しない。`record_set`単体を`structuredClone()`し、直後かつvalidator前にrecursive freezeする。validator入力、record set digest対象、coordinator保持snapshotは同一参照である。開始requestのcallback参照、metadata、clone・freeze済みgeneratorは最初のcallback／`await`より前に捕捉し、以後元requestを再読取りしない。初回captureと公開直前recaptureは同じ捕捉済みcallback参照を使う。公開直前には、開始token、`review_source_epoch`、binding参照・generation・digest・identity、matching run/generation、3 dataset signature、relation canonical JSON、active job、stale状態を同期再確認し、最終確認とsession／snapshotの一括代入の間に`await`やcallbackを挟まない。
+
+恒久検査は`tools/design_notes/trace_comparison_review_session_core_verification.js`で行う。共有hash API、Node／browser API、固定digest vector、relation snapshot、binding lifecycle、正常開始、非同期競合、identity境界、fail closed、stale化、および実`bindInputPair()`→実`generateTraceComparisonRecordSet()`→実`validateTraceComparisonRecordSet()`→実`createInitialReviewSessionState()`の統合経路を直接検証する。加えて、binding raw digest、live marker hash、record set digestの各待機中にcaller入力を変更しても捕捉値が維持されること、開始requestのmetadataとcallback差替えを無視すること、relationsと別snapshot由来digestの組合せを拒否することを固定する。
+
+Stage 2では通常transition coordinator、transition token／commit CAS、accept／override／reset／discardのapplication-level commit、HTML／UI統合、既存出力接続、Web Storage／IndexedDB、B-4b、B-5を実装しない。Stage 1の純粋review state core、rc2 Schema、validator、fixture、既存テストも変更しない。
+
+## 18. B-4a Stage 2訂正記録
+
+本節は既存の規範本文を置換せず、Stage 2実装で追加した信頼境界を記録する。全async identity helperは、最初の`await`より前に必要値を捕捉し、以後caller所有inputを再読取りしない。review開始requestも最初のsource取得callbackまたは`await`より前にcallback参照、metadata、clone・recursive freeze済みgeneratorを捕捉し、初回captureと公開直前recaptureには同じ関数参照を使用する。
+
+公開identity helperはprefixとhex桁数だけでは正当性を認めない。binding runtimeはexact frozen `binding_ref`のcanonical JSONに対するraw SHA-256と、`binding_generation`およびそのdigestに対するdomain-separated identityを再計算する。live markerは保存field群に対するdomain-separated hashを再計算する。供給値と再計算値が一致しない場合は`review_artifact_identity_mismatch`で拒否する。structured clone後にdigest、identity、marker valueだけを差し替えたobjectも同様に拒否する。
+
+Stage 1 coreはdependencyとして注入可能であるため、coordinatorはその戻り値を信頼しない。初期sessionはrecursive frozen、固定shape、overlay version、active、revision 0、要求したidentity、exact comparison ID集合と初期target状態を満たす場合だけ公開する。stale化結果はactive入力なら`changed:true`、revisionの正確な+1、identity・comparison参照の保持、要求したstale metadataを必須とする。不正な戻り値はcoordinator内部状態へ代入しない。
+
+source context、producer envelope、validator resultの非同期判定では`.then`を直接読まない。許可fieldがown enumerable data descriptorだけで構成されるexact recordであることを先に検査し、own／継承accessorを実行せず拒否する。
+
+## 19. B-4a Stage 2 v4訂正記録
+
+`matching_dataset_signature`はStage 1／Stage 2の全信頼境界で、`typeof value === 'string'`、非空、`trim()`前後一致を明示的に要求する。非文字列をtrim helperの戻り値と比較して受理してはならない。review開始requestの`generator.tool`／`generator.version`にも同じ非空trim済み文字列契約を適用する。
+
+注入可能なStage 1 dependencyが返すsessionについて、coordinatorはnested `live_source_marker`／`snapshot_identity`をcanonical JSONだけで比較しない。両recordのprototype、`Reflect.ownKeys()`、enumerable data descriptor、exact key集合、全fieldの型・形式を直接検査した後に、期待identityとのcanonical JSON一致を確認する。hidden／symbol／accessor／custom prototypeを含むsessionは公開しない。
+
+relationの4参照IDは従来どおりtrim後の非空文字列へ正規化する。一方、`relationship.match_method`／`review_category`はproducer契約どおり、`null`または非空文字列だけを認め、文字列の空白をtrimせず実データのまま保持する。relation snapshot digestはこのraw metadataを含むrelation itemのcanonical JSONに対するraw SHA-256とし、`"tag"`と`" tag "`を異なるidentityとして扱う。
