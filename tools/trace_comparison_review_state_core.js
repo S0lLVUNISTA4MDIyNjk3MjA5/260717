@@ -354,6 +354,7 @@
   return Object.freeze({
     OVERLAY_VERSION, UPSTREAM_TARGETS, REVIEW_TARGETS, SATISFACTION_VERDICTS, ACTION_TYPES,
     createInitialReviewSessionState, transitionReviewState, invalidateReviewSession,
-    deriveSatisfactionEligibility, deriveHumanSatisfaction, deriveAllReviewed
+    deriveSatisfactionEligibility, deriveHumanSatisfaction, deriveAllReviewed,
+    structurallyUsableSession, sessionIdentityInvalid
   });
 });
