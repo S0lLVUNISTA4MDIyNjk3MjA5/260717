@@ -195,6 +195,13 @@ function makeAccessor(object, key, counter) {
   });
   return object;
 }
+function acceptAction(target = 'quantity_extraction', overrides = {}) {
+  return { type:'accept_review_target', comparison_id:'cmp-v1:test', target,
+    reviewer:'reviewer', reviewed_at:at, verdict:'accept', note:null, ...overrides };
+}
+function transitionInput(action, captureSourceContext = () => sourceContext()) {
+  return { action, captureSourceContext, occurredAt:at };
+}
 
 test('CommonJS API and constants', () => {
   assert.strictEqual(typeof sessionCore.createReviewSessionCoordinator, 'function');
@@ -1303,6 +1310,1548 @@ test('real fixture integrates binding producer validator and Stage 1 core', asyn
   assert(/^b4-live-source-v1:[0-9a-f]{64}$/.test(started.value.live_source_marker.value));
   assert(/^b4-snapshot-v1:[0-9a-f]{64}$/.test(started.value.snapshot_identity.value));
   frozenTree(coordinator.getRecordSetSnapshot());
+});
+
+test('Stage 3 transition APIs are public and token stays opaque', async () => {
+  const h = await readyHarness();
+  assert.strictEqual(typeof h.coordinator.coordinateReviewTransition, 'function');
+  assert.strictEqual(typeof h.coordinator.isReviewTransitionInFlight, 'function');
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+  assert((await startReady(h)).ok);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(h.coordinator.getReviewSession(), 'transition_token'), false);
+});
+test('Stage 3 commits accept and preserves the retained snapshot reference', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const snapshot = h.coordinator.getRecordSetSnapshot();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  assert(result.ok && result.changed, JSON.stringify(result));
+  assert.strictEqual(result.session.session_revision, before.session_revision + 1);
+  assert.strictEqual(result.session.comparisons['cmp-v1:test'].quantity_extraction.verdict, 'accept');
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('Stage 3 forwards malformed action diagnostic without invoking source callback', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  let called = 0;
+  const result = await h.coordinator.coordinateReviewTransition({
+    action:{ type:'unknown' }, captureSourceContext:() => { called += 1; return sourceContext(); }, occurredAt:at
+  });
+  assert.strictEqual(result.diagnostics[0].code, 'review_action_unknown');
+  assert.strictEqual(called, 0);
+});
+test('Stage 3 discard does not capture source and clears session plus snapshot atomically', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const result = await h.coordinator.coordinateReviewTransition({
+    action:{ type:'discard_review_session' }, captureSourceContext:null, occurredAt:null
+  });
+  assert(result.ok && result.changed);
+  assert.strictEqual(h.coordinator.getReviewSession(), null);
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), null);
+  assert(h.coordinator.getBindingRuntime());
+});
+test('Stage 3 forwards a malformed discard action to the reducer instead of rejecting it as an artifact', async () => {
+  // {type:'discard_review_session', extra:true} is not an *exact* discard
+  // action, so isDiscard must be false for it -- but it must still reach
+  // the authoritative reducer (which reports review_transition_not_allowed
+  // for a known action type with the wrong key set) rather than being
+  // rejected earlier as review_artifact_invalid just because a null
+  // captureSourceContext/occurredAt pair doesn't satisfy the *non*-discard
+  // callback contract.
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const snapshot = h.coordinator.getRecordSetSnapshot();
+  let captureCalls = 0;
+  const result = await h.coordinator.coordinateReviewTransition({
+    action:{ type:'discard_review_session', extra:true },
+    captureSourceContext:() => { captureCalls += 1; return sourceContext(); },
+    occurredAt:null
+  });
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_transition_not_allowed');
+  assert.strictEqual(captureCalls, 0);
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('Stage 3 source invalidation clears the captured transition token immediately', async () => {
+  // This must run (and be able to fail on its own named assertion) before
+  // any later test that only *incidentally* depends on the same token-clear
+  // behavior as a precondition -- otherwise a mutation that breaks this
+  // could surface as that later test's precondition assertion failing
+  // instead of this test's own direct, dedicated one.
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const gate = deferred();
+  h.q.rawSha256Utf8 = async text => { await gate.promise; return bindingCore.rawSha256Utf8(text); };
+  const before = h.coordinator.getReviewSession();
+  const beforeTarget = before.comparisons['cmp-v1:test'];
+  const running = h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  await Promise.resolve();
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), true);
+  const invalidation = h.coordinator.invalidateReviewSource({
+    reasonCode:'source_changed', occurredAt:at, affectsBinding:false
+  });
+  assert(invalidation.ok, JSON.stringify(invalidation));
+  assert.strictEqual(
+    h.coordinator.isReviewTransitionInFlight(), false,
+    'source invalidation clears the captured transition token immediately'
+  );
+  assert.strictEqual(h.coordinator.getReviewSession().session_status, 'stale');
+  assert.strictEqual(h.coordinator.getReviewSession().session_revision, before.session_revision + 1);
+  assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget);
+  gate.resolve();
+  const result = await running;
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_session_stale');
+});
+test('Stage 3 treats a discard-only race as busy rather than an artifact mismatch', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const gate = deferred();
+  h.q.rawSha256Utf8 = async text => { await gate.promise; return bindingCore.rawSha256Utf8(text); };
+  const running = h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  await Promise.resolve();
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), true);
+  assert(h.coordinator.invalidateReviewSource({ reasonCode:'source_changed', occurredAt:at, affectsBinding:false }).ok);
+  const discardResult = await h.coordinator.coordinateReviewTransition({
+    action:{ type:'discard_review_session' }, captureSourceContext:null, occurredAt:null
+  });
+  assert(discardResult.ok && discardResult.changed);
+  assert.strictEqual(h.coordinator.getReviewSession(), null);
+  gate.resolve();
+  const result = await running;
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(
+    result.diagnostics[0].code, 'review_session_busy',
+    'discard-only race was classified as an artifact mismatch instead of busy'
+  );
+  assert.strictEqual(h.coordinator.getReviewSession(), null);
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), null);
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('Stage 3 action snapshot is immune to caller mutation while digest awaits', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const gate = deferred(); h.q.rawSha256Utf8 = async text => { await gate.promise; return bindingCore.rawSha256Utf8(text); };
+  const action = acceptAction();
+  const running = h.coordinator.coordinateReviewTransition(transitionInput(action));
+  await Promise.resolve();
+  action.target = 'property_mapping'; action.reviewer = 'changed';
+  gate.resolve();
+  const result = await running;
+  assert(result.ok && result.changed);
+  assert.strictEqual(result.session.comparisons['cmp-v1:test'].quantity_extraction.reviewer, 'reviewer');
+});
+test('Stage 3 single-flight rejects a concurrent transition', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const gate = deferred(); h.q.rawSha256Utf8 = async text => { await gate.promise; return bindingCore.rawSha256Utf8(text); };
+  const first = h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  await Promise.resolve();
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), true);
+  const secondPromise = h.coordinator.coordinateReviewTransition(transitionInput(acceptAction('property_mapping')));
+  const pending = Symbol('pending');
+  const observed = await Promise.race([
+    secondPromise.then(result => ({ settled:true, result })),
+    new Promise(resolve => setTimeout(() => resolve(pending), 0))
+  ]);
+  assert.notStrictEqual(observed, pending, 'concurrent transition did not fail fast with review_session_busy');
+  assert.strictEqual(observed.result.diagnostics[0].code, 'review_session_busy');
+  gate.resolve(); assert((await first).ok);
+});
+test('Stage 3 concurrent transition fails fast with review_session_busy', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const gate = deferred();
+  let hashCalls = 0;
+  h.q.rawSha256Utf8 = async text => { hashCalls += 1; await gate.promise; return bindingCore.rawSha256Utf8(text); };
+  let captureCalls = 0;
+  const countingCapture = () => { captureCalls += 1; return sourceContext(); };
+  const first = h.coordinator.coordinateReviewTransition(transitionInput(acceptAction(), countingCapture));
+  await Promise.resolve();
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), true);
+  const hashCallsBeforeSecond = hashCalls;
+  const captureCallsBeforeSecond = captureCalls;
+  const second = h.coordinator.coordinateReviewTransition(
+    transitionInput(acceptAction('property_mapping'), countingCapture)
+  );
+  // The busy rejection must be decided by the synchronous single-flight gate
+  // before any hashing/capture work starts, so it settles well within this
+  // turn of the event loop -- it must never actually block on `gate`.
+  const pending = Symbol('pending');
+  const observed = await Promise.race([
+    second.then(result => ({ settled:true, result })),
+    new Promise(resolve => setTimeout(() => resolve(pending), 0))
+  ]);
+  assert.notStrictEqual(
+    observed, pending,
+    'concurrent transition did not fail fast with review_session_busy'
+  );
+  assert.strictEqual(observed.result.diagnostics[0].code, 'review_session_busy');
+  assert.strictEqual(hashCalls, hashCallsBeforeSecond);
+  assert.strictEqual(captureCalls, captureCallsBeforeSecond);
+  gate.resolve();
+  const firstResult = await first;
+  assert(firstResult.ok && firstResult.changed, JSON.stringify(firstResult));
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('Stage 3 source invalidation stales an in-flight transition and prevents commit', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const gate = deferred(); h.q.rawSha256Utf8 = async text => { await gate.promise; return bindingCore.rawSha256Utf8(text); };
+  const running = h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  await Promise.resolve();
+  assert(h.coordinator.invalidateReviewSource({ reasonCode:'source_changed', occurredAt:at, affectsBinding:false }).ok);
+  gate.resolve();
+  const result = await running;
+  assert.strictEqual(result.diagnostics[0].code, 'review_session_stale');
+  assert.strictEqual(h.coordinator.getReviewSession().session_status, 'stale');
+  assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'].quantity_extraction.status, 'unreviewed');
+});
+test('Stage 3 recapture-only active matching job is busy rather than stale', async () => {
+  const h = await readyHarness(); assert((await startReady(h)).ok);
+  let captures = 0;
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction(), () => {
+    captures += 1;
+    return captures === 1 ? sourceContext() : sourceContext({ active_matching_job:{ id:'job-2' } });
+  }));
+  assert.strictEqual(result.ok, false, 'recapture-time active matching job did not reject the transition');
+  assert.strictEqual(result.changed, false, 'recapture-time busy result unexpectedly changed the session');
+  assert.strictEqual(result.diagnostics[0]?.code, 'review_session_busy');
+  assert.strictEqual(h.coordinator.getReviewSession().session_status, 'active');
+});
+test('Stage 3 redundant reset is a true no-op', async () => {
+  const h = await readyHarness(); assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession(); const snapshot = h.coordinator.getRecordSetSnapshot();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput({ type:'reset_review_target', comparison_id:'cmp-v1:test', target:'quantity_extraction' }));
+  assert(result.ok && !result.changed);
+  assert.strictEqual(result.session, before);
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+});
+function poisonedRevisionReviewStateCore(rewriteRevision) {
+  return {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      const real = stateCore.transitionReviewState(session, action);
+      if (!real.ok || !real.changed) return real;
+      return deepFreeze({ ...real, session:deepFreeze({
+        ...real.session, session_revision:rewriteRevision(session.session_revision)
+      }) });
+    }
+  };
+}
+test('rejects changed reducer result whose revision increments by more than one', async () => {
+  const reviewStateCore = poisonedRevisionReviewStateCore(revision => revision + 2);
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const beforeTarget = before.comparisons['cmp-v1:test'];
+  const snapshot = h.coordinator.getRecordSetSnapshot();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.changed, false);
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+  assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget);
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('rejects changed reducer result whose revision does not increment', async () => {
+  const reviewStateCore = poisonedRevisionReviewStateCore(revision => revision);
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const beforeTarget = before.comparisons['cmp-v1:test'];
+  const snapshot = h.coordinator.getRecordSetSnapshot();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.changed, false);
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+  assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget);
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('Stage 3 pins the source-context callback reference before the first await', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const gate = deferred();
+  h.q.rawSha256Utf8 = async text => { await gate.promise; return bindingCore.rawSha256Utf8(text); };
+  let swappedCalls = 0;
+  const original = () => sourceContext();
+  const swapped = () => { swappedCalls += 1; return sourceContext(); };
+  const input = transitionInput(acceptAction(), original);
+  const running = h.coordinator.coordinateReviewTransition(input);
+  await Promise.resolve();
+  input.captureSourceContext = swapped;
+  gate.resolve();
+  const result = await running;
+  assert(result.ok && result.changed, JSON.stringify(result));
+  assert.strictEqual(swappedCalls, 0);
+});
+test('Stage 3 preserves a newer transition and session across a stale older transition completion', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  // Each transition's digest computation makes several rawSha256Utf8 calls
+  // (relation hash, then marker/identity). Only the *first* call belonging to
+  // A, and later the first call belonging to B, should actually block; every
+  // other call (Stage 1 session setup, and each transition's remaining
+  // internal hashing) must resolve immediately or the two transitions would
+  // deadlock waiting on each other's gate.
+  const gateA = deferred();
+  const gateB = deferred();
+  let phase = 'a';
+  h.q.rawSha256Utf8 = async text => {
+    if (phase === 'a') { phase = 'free'; await gateA.promise; return bindingCore.rawSha256Utf8(text); }
+    if (phase === 'b') { phase = 'free'; await gateB.promise; return bindingCore.rawSha256Utf8(text); }
+    return bindingCore.rawSha256Utf8(text);
+  };
+  const runningA = h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  await Promise.resolve();
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), true);
+  assert(h.coordinator.invalidateReviewSource({ reasonCode:'source_changed', occurredAt:at, affectsBinding:false }).ok);
+  const discardResult = await h.coordinator.coordinateReviewTransition({
+    action:{ type:'discard_review_session' }, captureSourceContext:null, occurredAt:null
+  });
+  assert(discardResult.ok && discardResult.changed);
+  assert.strictEqual(h.coordinator.getReviewSession(), null);
+  assert((await startReady(h)).ok);
+  const sessionB = h.coordinator.getReviewSession();
+  phase = 'b';
+  const runningB = h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  await Promise.resolve();
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), true);
+  gateA.resolve();
+  const resultA = await runningA;
+  assert.strictEqual(resultA.ok, false);
+  assert.strictEqual(resultA.diagnostics[0].code, 'review_session_busy');
+  assert.strictEqual(
+    h.coordinator.isReviewTransitionInFlight(), true,
+    'stale older completion cleared the newer transition token'
+  );
+  assert.strictEqual(h.coordinator.getReviewSession(), sessionB);
+  assert.strictEqual(h.coordinator.getReviewSession().session_status, 'active');
+  gateB.resolve();
+  const resultB = await runningB;
+  assert(resultB.ok && resultB.changed, JSON.stringify(resultB));
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('Stage 3 rejects reducer result that mutates an unrelated target within the same comparison', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      const real = stateCore.transitionReviewState(session, action);
+      if (!real.ok || !real.changed) return real;
+      const comparison = real.session.comparisons[action.comparison_id];
+      const corrupted = { ...comparison, property_mapping:{
+        ...comparison.property_mapping, note:'tampered'
+      } };
+      return deepFreeze({ ...real, session:deepFreeze({
+        ...real.session,
+        comparisons:deepFreeze({ ...real.session.comparisons, [action.comparison_id]:deepFreeze(corrupted) })
+      }) });
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const beforeTarget = before.comparisons['cmp-v1:test'];
+  const snapshot = h.coordinator.getRecordSetSnapshot();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction('quantity_extraction')));
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.changed, false);
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+  assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget);
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('Stage 3 commit CAS rejects a candidate committed after a reentrant reducer invalidates the source', async () => {
+  // stateApi.transitionReviewState is an injectable dependency: nothing stops
+  // it from synchronously calling back into the coordinator's own public API
+  // while it runs, after sourceChanged has already passed. commitReviewTransition's
+  // CAS block is what has to catch that, since nothing else does.
+  const box = {};
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      const candidate = stateCore.transitionReviewState(session, action);
+      const reentered = box.coordinator.invalidateReviewSource({
+        reasonCode:'source_changed_during_reducer', occurredAt:at, affectsBinding:false
+      });
+      assert(reentered.ok, JSON.stringify(reentered));
+      return candidate;
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  box.coordinator = h.coordinator;
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const beforeTarget = before.comparisons['cmp-v1:test'];
+  const snapshot = h.coordinator.getRecordSetSnapshot();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_session_stale');
+  assert.strictEqual(h.coordinator.getReviewSession().session_status, 'stale');
+  assert.strictEqual(h.coordinator.getReviewSession().session_revision, before.session_revision + 1);
+  assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget);
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('Stage 3 reports an artifact identity mismatch when the recomputed snapshot identity diverges', async () => {
+  // The snapshot identity is derived only from the immutable record set
+  // snapshot and the session's own stored marker -- both fixed for the
+  // lifetime of the session -- so a mismatch here can only mean the hash
+  // recomputation itself is inconsistent, not that the source changed.
+  // Nothing should be staled or committed; the session must stay exactly
+  // as it was.
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const beforeTarget = before.comparisons['cmp-v1:test'];
+  const snapshot = h.coordinator.getRecordSetSnapshot();
+  const realHashParts = h.q.hashParts;
+  h.q.hashParts = async (namespace, parts) => namespace === 'b4-review-snapshot-identity-v1'
+    ? realHashParts(namespace, ['tampered', ...parts])
+    : realHashParts(namespace, parts);
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_identity_mismatch');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+  assert.strictEqual(h.coordinator.getReviewSession().session_status, 'active');
+  assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget);
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('Stage 3 stales a transition whose recomputed live marker drifts from an unchanged source identity', async () => {
+  // Drive both the initial capture and the recapture through the same
+  // drifted source context (a different matching_generation, which feeds
+  // the marker hash but is otherwise consistent between the two calls).
+  // sameTransitionSourceIdentity() compares *before* against *after*, so it
+  // stays satisfied -- the only thing that can catch this is comparing the
+  // freshly recomputed marker against the session's originally stored one.
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const beforeTarget = before.comparisons['cmp-v1:test'];
+  const snapshot = h.coordinator.getRecordSetSnapshot();
+  const driftedContext = () => sourceContext({ matching_generation:2 });
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction(), driftedContext));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_session_stale');
+  assert.strictEqual(h.coordinator.getReviewSession().session_status, 'stale');
+  assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget);
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('Stage 3 rejects a no-op result that substitutes a different session reference', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => deepFreeze({
+      ok:true, changed:false, session:deepFreeze({ ...session }), diagnostics:[]
+    })
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const beforeTarget = before.comparisons['cmp-v1:test'];
+  const snapshot = h.coordinator.getRecordSetSnapshot();
+  const result = await h.coordinator.coordinateReviewTransition(
+    transitionInput({ type:'reset_review_target', comparison_id:'cmp-v1:test', target:'quantity_extraction' })
+  );
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.changed, false);
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+  assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget);
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('Stage 3 rejects a mutable (non-frozen) reducer result wrapper', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      const real = stateCore.transitionReviewState(session, action);
+      return { ok:real.ok, changed:real.changed, session:real.session, diagnostics:real.diagnostics };
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const beforeTarget = before.comparisons['cmp-v1:test'];
+  const snapshot = h.coordinator.getRecordSetSnapshot();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.changed, false);
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+  assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget);
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('Stage 3 rejects a changed result that substitutes the marker or snapshot identity reference', async () => {
+  for (const corrupt of [
+    s => ({ ...s, live_source_marker:{ ...s.live_source_marker } }),
+    s => ({ ...s, snapshot_identity:{ ...s.snapshot_identity } })
+  ]) {
+    const reviewStateCore = {
+      ...stateCore,
+      transitionReviewState:(session, action) => {
+        const real = stateCore.transitionReviewState(session, action);
+        if (!real.ok || !real.changed) return real;
+        return deepFreeze({ ...real, session:deepFreeze(corrupt(real.session)) });
+      }
+    };
+    const h = await readyHarness({ reviewStateCore });
+    assert((await startReady(h)).ok);
+    const before = h.coordinator.getReviewSession();
+    const beforeTarget = before.comparisons['cmp-v1:test'];
+    const snapshot = h.coordinator.getRecordSetSnapshot();
+    const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+    assert.strictEqual(result.ok, false, JSON.stringify(result));
+    assert.strictEqual(result.changed, false);
+    assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+    assert.strictEqual(h.coordinator.getReviewSession(), before);
+    assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget);
+    assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+    assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+  }
+});
+test('Stage 3 rejects a changed target whose fields do not match the requesting action (or is emptied out)', async () => {
+  for (const corrupt of [
+    // Right key set, wrong semantic content: a different reviewer than the
+    // action actually requested.
+    target => ({ ...target, reviewer:'someone-else' }),
+    // Structurally-shaped but empty out the target entirely.
+    () => ({})
+  ]) {
+    const reviewStateCore = {
+      ...stateCore,
+      transitionReviewState:(session, action) => {
+        const real = stateCore.transitionReviewState(session, action);
+        if (!real.ok || !real.changed) return real;
+        const comparison = real.session.comparisons[action.comparison_id];
+        const corruptedTarget = deepFreeze(corrupt(comparison[action.target]));
+        const corrupted = { ...comparison, [action.target]:corruptedTarget };
+        return deepFreeze({ ...real, session:deepFreeze({
+          ...real.session,
+          comparisons:deepFreeze({ ...real.session.comparisons, [action.comparison_id]:deepFreeze(corrupted) })
+        }) });
+      }
+    };
+    const h = await readyHarness({ reviewStateCore });
+    assert((await startReady(h)).ok);
+    const before = h.coordinator.getReviewSession();
+    const beforeTarget = before.comparisons['cmp-v1:test'];
+    const snapshot = h.coordinator.getRecordSetSnapshot();
+    const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+    assert.strictEqual(result.ok, false, JSON.stringify(result));
+    assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+    assert.strictEqual(h.coordinator.getReviewSession(), before);
+    assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget);
+    assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+    assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+  }
+});
+test('Stage 3 rejects a changed target carrying a hidden, symbol, or non-plain-prototype property', async () => {
+  for (const mutate of [
+    v => { Object.defineProperty(v, 'hidden', { value:'x', enumerable:false }); },
+    v => { v[Symbol('s')] = 'x'; },
+    v => Object.setPrototypeOf(v, { custom:true })
+  ]) {
+    const reviewStateCore = {
+      ...stateCore,
+      transitionReviewState:(session, action) => {
+        const real = stateCore.transitionReviewState(session, action);
+        if (!real.ok || !real.changed) return real;
+        const comparison = real.session.comparisons[action.comparison_id];
+        const target = structuredClone(comparison[action.target]);
+        mutate(target);
+        const corrupted = { ...comparison, [action.target]:deepFreeze(target) };
+        return deepFreeze({ ...real, session:deepFreeze({
+          ...real.session,
+          comparisons:deepFreeze({ ...real.session.comparisons, [action.comparison_id]:deepFreeze(corrupted) })
+        }) });
+      }
+    };
+    const h = await readyHarness({ reviewStateCore });
+    assert((await startReady(h)).ok);
+    const before = h.coordinator.getReviewSession();
+    const beforeTarget = before.comparisons['cmp-v1:test'];
+    const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+    assert.strictEqual(result.ok, false, JSON.stringify(result));
+    assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+    assert.strictEqual(h.coordinator.getReviewSession(), before);
+    assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget);
+  }
+});
+test('Stage 3 rejects a changed result that alters overlay_version', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      const real = stateCore.transitionReviewState(session, action);
+      if (!real.ok || !real.changed) return real;
+      return deepFreeze({ ...real, session:deepFreeze({ ...real.session, overlay_version:'tampered' }) });
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects a changed result that carries non-empty diagnostics', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      const real = stateCore.transitionReviewState(session, action);
+      if (!real.ok || !real.changed) return real;
+      return deepFreeze({ ...real, diagnostics:deepFreeze([
+        deepFreeze({ code:'review_target_unknown', severity:'warning', detail:'x' })
+      ]) });
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects a reset result whose target does not return to the canonical initial state', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      const real = stateCore.transitionReviewState(session, action);
+      if (!real.ok || !real.changed || action.type !== 'reset_review_target') return real;
+      const comparison = real.session.comparisons[action.comparison_id];
+      const corrupted = { ...comparison, [action.target]:deepFreeze({
+        ...comparison[action.target], status:'unreviewed', verdict:'accept'
+      }) };
+      return deepFreeze({ ...real, session:deepFreeze({
+        ...real.session,
+        comparisons:deepFreeze({ ...real.session.comparisons, [action.comparison_id]:deepFreeze(corrupted) })
+      }) });
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  assert((await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()))).ok);
+  const before = h.coordinator.getReviewSession();
+  const beforeTarget = before.comparisons['cmp-v1:test'];
+  const result = await h.coordinator.coordinateReviewTransition(
+    transitionInput({ type:'reset_review_target', comparison_id:'cmp-v1:test', target:'quantity_extraction' })
+  );
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+  assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget);
+});
+test('Stage 3 rejects a changed result that also mutates an unrelated comparison', async () => {
+  const otherId = 'cmp-v1:other';
+  const overrides = { recordSet:recordSetStub(at, 'matching-1', ['cmp-v1:test', otherId]) };
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      const real = stateCore.transitionReviewState(session, action);
+      if (!real.ok || !real.changed) return real;
+      const otherComparison = real.session.comparisons[otherId];
+      const corrupted = { ...otherComparison, property_mapping:{
+        ...otherComparison.property_mapping, note:'tampered'
+      } };
+      return deepFreeze({ ...real, session:deepFreeze({
+        ...real.session,
+        comparisons:deepFreeze({ ...real.session.comparisons, [otherId]:deepFreeze(corrupted) })
+      }) });
+    }
+  };
+  const h = await readyHarness({ ...overrides, reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  assert(Object.prototype.hasOwnProperty.call(before.comparisons, otherId), 'fixture must expose an unrelated comparison');
+  const beforeOther = before.comparisons[otherId];
+  const snapshot = h.coordinator.getRecordSetSnapshot();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.changed, false);
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+  assert.strictEqual(h.coordinator.getReviewSession().comparisons[otherId], beforeOther);
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('Stage 3 keeps a preflight-time busy source from being staled', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const beforeTarget = before.comparisons['cmp-v1:test'];
+  const snapshot = h.coordinator.getRecordSetSnapshot();
+  const busyContext = () => sourceContext({ active_matching_job:{ id:'job-1' } });
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction(), busyContext));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_session_busy');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+  assert.strictEqual(h.coordinator.getReviewSession().session_status, 'active');
+  assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget);
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+
+test('Stage 3 captures occurredAt once so caller mutation during hash awaits cannot alter the recorded stale time', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const gate = deferred();
+  h.q.rawSha256Utf8 = async text => { await gate.promise; return bindingCore.rawSha256Utf8(text); };
+  const driftedContext = () => sourceContext({ matching_generation:2 });
+  const input = transitionInput(acceptAction(), driftedContext);
+  const originalOccurredAt = input.occurredAt;
+  const running = h.coordinator.coordinateReviewTransition(input);
+  await Promise.resolve();
+  input.occurredAt = '2026-07-23T09:09:09.999Z';
+  gate.resolve();
+  const result = await running;
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_session_stale');
+  assert.strictEqual(
+    h.coordinator.getReviewSession().stale_runtime.occurred_at, originalOccurredAt,
+    'stale_runtime.occurred_at must reflect the originally captured occurredAt, not a mutation made while hashing was in flight'
+  );
+});
+test('Stage 3 pins occurredAt before preflight source validation, not just before hash awaits', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const input = transitionInput(acceptAction());
+  const originalOccurredAt = input.occurredAt;
+  input.captureSourceContext = () => {
+    // A malicious/careless caller mutates occurredAt from inside its own
+    // capture callback, before preflightSource ever gets to run -- this is
+    // synchronous, so there is no hash await to race against.
+    input.occurredAt = '2026-07-23T09:09:09.999Z';
+    return sourceContext({ input_stale:true });
+  };
+  const result = await h.coordinator.coordinateReviewTransition(input);
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_session_stale');
+  assert.strictEqual(
+    h.coordinator.getReviewSession().stale_runtime.occurred_at, originalOccurredAt,
+    'stale_runtime.occurred_at must reflect the originally captured occurredAt, not a mutation made from inside the source-capture callback before preflight validation'
+  );
+});
+test('Stage 3 delegates a transition with no active session to Stage 1 without any capture or hash calls', async () => {
+  const h = harness();
+  assert.strictEqual(h.coordinator.getReviewSession(), null);
+  let captureCalls = 0;
+  let hashCalls = 0;
+  h.q.rawSha256Utf8 = async text => { hashCalls += 1; return bindingCore.rawSha256Utf8(text); };
+  const result = await h.coordinator.coordinateReviewTransition(
+    transitionInput(acceptAction(), () => { captureCalls += 1; return sourceContext(); })
+  );
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_session_not_started');
+  assert.strictEqual(captureCalls, 0);
+  assert.strictEqual(hashCalls, 0);
+});
+test('Stage 3 delegates a non-discard transition against a stale session to Stage 1 without any capture or hash calls', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  assert(h.coordinator.invalidateReviewSource({ reasonCode:'source_changed', occurredAt:at, affectsBinding:false }).ok);
+  assert.strictEqual(h.coordinator.getReviewSession().session_status, 'stale');
+  let captureCalls = 0;
+  let hashCalls = 0;
+  h.q.rawSha256Utf8 = async text => { hashCalls += 1; return bindingCore.rawSha256Utf8(text); };
+  const result = await h.coordinator.coordinateReviewTransition(
+    transitionInput(acceptAction(), () => { captureCalls += 1; return sourceContext(); })
+  );
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_session_stale');
+  assert.strictEqual(captureCalls, 0);
+  assert.strictEqual(hashCalls, 0);
+});
+test('Stage 3 delegates a known-shaped action with invalid property value types to Stage 1 without any capture or hash calls', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  let captureCalls = 0;
+  let hashCalls = 0;
+  h.q.rawSha256Utf8 = async text => { hashCalls += 1; return bindingCore.rawSha256Utf8(text); };
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(
+    acceptAction('quantity_extraction', { reviewer:123 }),
+    () => { captureCalls += 1; return sourceContext(); }
+  ));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_transition_not_allowed');
+  assert.strictEqual(captureCalls, 0);
+  assert.strictEqual(hashCalls, 0);
+});
+test('Stage 3 rejects a malicious reducer that accepts the satisfaction target via accept_review_target', async () => {
+  // Only intercept once satisfaction has genuinely reached 'unreviewed' (all
+  // four upstream targets for real) -- otherwise the precondition check
+  // alone (status must be 'unreviewed') would mask whether the dedicated
+  // UPSTREAM_TARGETS membership check is doing any independent work.
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      if (action.target !== 'satisfaction') return stateCore.transitionReviewState(session, action);
+      const comparison = session.comparisons[action.comparison_id];
+      const nextComparison = deepFreeze({ ...comparison, satisfaction:deepFreeze({
+        status:'reviewed', reviewer:action.reviewer.trim(), reviewed_at:action.reviewed_at, verdict:'accept', note:action.note
+      }) });
+      return deepFreeze({ ok:true, changed:true, diagnostics:[], session:deepFreeze({
+        ...session, session_revision:session.session_revision + 1,
+        comparisons:deepFreeze({ ...session.comparisons, [action.comparison_id]:nextComparison })
+      }) });
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  for (const target of stateCore.UPSTREAM_TARGETS) {
+    assert((await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction(target)))).ok);
+  }
+  const before = h.coordinator.getReviewSession();
+  assert.strictEqual(before.comparisons['cmp-v1:test'].satisfaction.status, 'unreviewed');
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction('satisfaction')));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects a malicious reducer that honors an accept_review_target action carrying an invalid verdict', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      const comparison = session.comparisons[action.comparison_id];
+      const nextComparison = deepFreeze({ ...comparison, [action.target]:deepFreeze({
+        status:'reviewed', reviewer:action.reviewer.trim(), reviewed_at:action.reviewed_at, verdict:'accept', note:action.note
+      }) });
+      return deepFreeze({ ok:true, changed:true, diagnostics:[], session:deepFreeze({
+        ...session, session_revision:session.session_revision + 1,
+        comparisons:deepFreeze({ ...session.comparisons, [action.comparison_id]:nextComparison })
+      }) });
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const result = await h.coordinator.coordinateReviewTransition(
+    transitionInput(acceptAction('quantity_extraction', { verdict:'override_satisfied' }))
+  );
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects a malicious reducer that honors a review_satisfaction action with a disallowed verdict', async () => {
+  // The forged verdict must match action.verdict exactly -- otherwise a
+  // plain field-mismatch against the requested verdict would mask whether
+  // the dedicated SATISFACTION_VERDICTS membership check does anything.
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      if (action.type !== 'review_satisfaction') return stateCore.transitionReviewState(session, action);
+      const comparison = session.comparisons[action.comparison_id];
+      const nextComparison = deepFreeze({ ...comparison, satisfaction:deepFreeze({
+        status:'reviewed', reviewer:action.reviewer.trim(), reviewed_at:action.reviewed_at, verdict:action.verdict, note:action.note
+      }) });
+      return deepFreeze({ ok:true, changed:true, diagnostics:[], session:deepFreeze({
+        ...session, session_revision:session.session_revision + 1,
+        comparisons:deepFreeze({ ...session.comparisons, [action.comparison_id]:nextComparison })
+      }) });
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  for (const target of stateCore.UPSTREAM_TARGETS) {
+    assert((await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction(target)))).ok);
+  }
+  const before = h.coordinator.getReviewSession();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput({
+    type:'review_satisfaction', comparison_id:'cmp-v1:test', reviewer:'reviewer', reviewed_at:at, verdict:'bogus', note:null
+  }));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects a malicious reducer that marks satisfaction reviewed before all upstream targets are accepted', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      if (action.type !== 'review_satisfaction') return stateCore.transitionReviewState(session, action);
+      const comparison = session.comparisons[action.comparison_id];
+      const nextComparison = deepFreeze({ ...comparison, satisfaction:deepFreeze({
+        status:'reviewed', reviewer:action.reviewer.trim(), reviewed_at:action.reviewed_at, verdict:'override_satisfied', note:action.note
+      }) });
+      return deepFreeze({ ok:true, changed:true, diagnostics:[], session:deepFreeze({
+        ...session, session_revision:session.session_revision + 1,
+        comparisons:deepFreeze({ ...session.comparisons, [action.comparison_id]:nextComparison })
+      }) });
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput({
+    type:'review_satisfaction', comparison_id:'cmp-v1:test', reviewer:'reviewer', reviewed_at:at, verdict:'override_satisfied', note:null
+  }));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects a malicious reducer that accepts a target using an empty reviewer or malformed timestamp', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      if (action.type !== 'accept_review_target') return stateCore.transitionReviewState(session, action);
+      const comparison = session.comparisons[action.comparison_id];
+      const nextComparison = deepFreeze({ ...comparison, [action.target]:deepFreeze({
+        status:'reviewed', reviewer:action.reviewer.trim(), reviewed_at:action.reviewed_at, verdict:'accept', note:action.note
+      }) });
+      return deepFreeze({ ok:true, changed:true, diagnostics:[], session:deepFreeze({
+        ...session, session_revision:session.session_revision + 1,
+        comparisons:deepFreeze({ ...session.comparisons, [action.comparison_id]:nextComparison })
+      }) });
+    }
+  };
+  for (const badAction of [
+    acceptAction('quantity_extraction', { reviewer:'   ' }),
+    acceptAction('property_mapping', { reviewed_at:'not-a-timestamp' })
+  ]) {
+    const h = await readyHarness({ reviewStateCore });
+    assert((await startReady(h)).ok);
+    const before = h.coordinator.getReviewSession();
+    const result = await h.coordinator.coordinateReviewTransition(transitionInput(badAction));
+    assert.strictEqual(result.ok, false, JSON.stringify(result));
+    assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+    assert.strictEqual(h.coordinator.getReviewSession(), before);
+  }
+});
+test('Stage 3 rejects a malicious reducer that marks satisfaction reviewed with an empty reviewer or malformed timestamp', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      if (action.type !== 'review_satisfaction') return stateCore.transitionReviewState(session, action);
+      const comparison = session.comparisons[action.comparison_id];
+      const nextComparison = deepFreeze({ ...comparison, satisfaction:deepFreeze({
+        status:'reviewed', reviewer:action.reviewer.trim(), reviewed_at:action.reviewed_at, verdict:action.verdict, note:action.note
+      }) });
+      return deepFreeze({ ok:true, changed:true, diagnostics:[], session:deepFreeze({
+        ...session, session_revision:session.session_revision + 1,
+        comparisons:deepFreeze({ ...session.comparisons, [action.comparison_id]:nextComparison })
+      }) });
+    }
+  };
+  for (const badFields of [{ reviewer:'   ' }, { reviewed_at:'not-a-timestamp' }]) {
+    const h = await readyHarness({ reviewStateCore });
+    assert((await startReady(h)).ok);
+    for (const target of stateCore.UPSTREAM_TARGETS) {
+      assert((await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction(target)))).ok);
+    }
+    const before = h.coordinator.getReviewSession();
+    const badAction = {
+      type:'review_satisfaction', comparison_id:'cmp-v1:test',
+      reviewer:'reviewer', reviewed_at:at, verdict:'accept', note:null, ...badFields
+    };
+    const result = await h.coordinator.coordinateReviewTransition(transitionInput(badAction));
+    assert.strictEqual(result.ok, false, JSON.stringify(result));
+    assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+    assert.strictEqual(h.coordinator.getReviewSession(), before);
+  }
+});
+test('Stage 3 rejects a malicious reducer that omits the mandatory satisfaction unlock on the fourth upstream accept', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      const real = stateCore.transitionReviewState(session, action);
+      if (!real.ok || !real.changed || action.type !== 'accept_review_target') return real;
+      const comparison = real.session.comparisons[action.comparison_id];
+      const previousComparison = session.comparisons[action.comparison_id];
+      if (comparison.satisfaction === previousComparison.satisfaction) return real;
+      const corrupted = { ...comparison, satisfaction:previousComparison.satisfaction };
+      return deepFreeze({ ...real, session:deepFreeze({
+        ...real.session,
+        comparisons:deepFreeze({ ...real.session.comparisons, [action.comparison_id]:deepFreeze(corrupted) })
+      }) });
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const targets = stateCore.UPSTREAM_TARGETS;
+  for (let i = 0; i < targets.length - 1; i += 1) {
+    assert((await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction(targets[i])))).ok);
+  }
+  const before = h.coordinator.getReviewSession();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction(targets[targets.length - 1])));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects a malicious reducer that omits the mandatory satisfaction reset when an upstream target is reset', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      const real = stateCore.transitionReviewState(session, action);
+      if (!real.ok || !real.changed || action.type !== 'reset_review_target' || action.target === 'satisfaction') return real;
+      const comparison = real.session.comparisons[action.comparison_id];
+      const previousComparison = session.comparisons[action.comparison_id];
+      const corrupted = { ...comparison, satisfaction:previousComparison.satisfaction };
+      return deepFreeze({ ...real, session:deepFreeze({
+        ...real.session,
+        comparisons:deepFreeze({ ...real.session.comparisons, [action.comparison_id]:deepFreeze(corrupted) })
+      }) });
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  for (const target of stateCore.UPSTREAM_TARGETS) {
+    assert((await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction(target)))).ok);
+  }
+  const before = h.coordinator.getReviewSession();
+  assert.strictEqual(before.comparisons['cmp-v1:test'].satisfaction.status, 'unreviewed');
+  const result = await h.coordinator.coordinateReviewTransition(
+    transitionInput({ type:'reset_review_target', comparison_id:'cmp-v1:test', target:stateCore.UPSTREAM_TARGETS[0] })
+  );
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects a changed result whose comparisons map has a non-plain prototype or a hidden id', async () => {
+  const corruptions = [
+    map => Object.setPrototypeOf({ ...map }, { custom:true }),
+    map => {
+      const clone = { ...map };
+      const firstKey = Object.keys(clone)[0];
+      Object.defineProperty(clone, firstKey, { value:clone[firstKey], enumerable:false, configurable:true });
+      return clone;
+    }
+  ];
+  for (const corruptMap of corruptions) {
+    const reviewStateCore = {
+      ...stateCore,
+      transitionReviewState:(session, action) => {
+        const real = stateCore.transitionReviewState(session, action);
+        if (!real.ok || !real.changed) return real;
+        return deepFreeze({ ...real, session:deepFreeze({
+          ...real.session, comparisons:deepFreeze(corruptMap(real.session.comparisons))
+        }) });
+      }
+    };
+    const h = await readyHarness({ reviewStateCore });
+    assert((await startReady(h)).ok);
+    const before = h.coordinator.getReviewSession();
+    const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+    assert.strictEqual(result.ok, false, JSON.stringify(result));
+    assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+    assert.strictEqual(h.coordinator.getReviewSession(), before);
+  }
+});
+test('Stage 3 rejects a malicious reducer failure result with empty or malformed diagnostics', async () => {
+  const emptyDiagnostics = {
+    ...stateCore,
+    transitionReviewState:session => deepFreeze({ ok:false, changed:false, session, diagnostics:[] })
+  };
+  const malformedDiagnostics = {
+    ...stateCore,
+    transitionReviewState:session => deepFreeze({
+      ok:false, changed:false, session, diagnostics:deepFreeze([deepFreeze({ code:'x' })])
+    })
+  };
+  for (const reviewStateCore of [emptyDiagnostics, malformedDiagnostics]) {
+    const h = await readyHarness({ reviewStateCore });
+    assert((await startReady(h)).ok);
+    const before = h.coordinator.getReviewSession();
+    const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+    assert.strictEqual(result.ok, false, JSON.stringify(result));
+    assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+    assert.strictEqual(h.coordinator.getReviewSession(), before);
+  }
+});
+test('Stage 3 rejects a recomputed snapshot identity whose value matches the stored one but the record digest diverges', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const storedIdentity = before.snapshot_identity;
+  const recordSetText = bindingCore.canonicalJson(h.coordinator.getRecordSetSnapshot());
+  const realRaw = h.q.rawSha256Utf8;
+  h.q.rawSha256Utf8 = async text => text === recordSetText ? hex('9') : realRaw(text);
+  const realHashParts = h.q.hashParts;
+  h.q.hashParts = async (namespace, parts) => namespace === 'b4-review-snapshot-identity-v1'
+    ? storedIdentity.value.slice(sessionCore.SNAPSHOT_IDENTITY_PREFIX.length)
+    : realHashParts(namespace, parts);
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_identity_mismatch');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 stales a transition whose recomputed live marker carries a different matching_run_id despite an unchanged marker value', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const beforeTarget = before.comparisons['cmp-v1:test'];
+  const snapshot = h.coordinator.getRecordSetSnapshot();
+  const driftedContext = () => sourceContext({ matching_run_id:99 });
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction(), driftedContext));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_session_stale');
+  assert.strictEqual(h.coordinator.getReviewSession().session_status, 'stale');
+  assert.strictEqual(h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget);
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('Stage 3 rejects a malicious reducer that reports no-op success for an accept_review_target action that must change', async () => {
+  // Stage 1 never returns changed:false for accept_review_target -- when it
+  // succeeds at all, something always changes.
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => action.type === 'accept_review_target'
+      ? deepFreeze({ ok:true, changed:false, session, diagnostics:[] })
+      : stateCore.transitionReviewState(session, action)
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects a malicious reducer that reports no-op success for a review_satisfaction action that must change', async () => {
+  // Same as above for review_satisfaction -- Stage 1 has no no-op path for it.
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => action.type === 'review_satisfaction'
+      ? deepFreeze({ ok:true, changed:false, session, diagnostics:[] })
+      : stateCore.transitionReviewState(session, action)
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  for (const target of stateCore.UPSTREAM_TARGETS) {
+    assert((await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction(target)))).ok);
+  }
+  const before = h.coordinator.getReviewSession();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput({
+    type:'review_satisfaction', comparison_id:'cmp-v1:test', reviewer:'reviewer', reviewed_at:at, verdict:'accept', note:null
+  }));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects a malicious reducer that reports a changed result for a redundant satisfaction reset', async () => {
+  // satisfaction is already at its canonical resting shape on a fresh
+  // session (not_eligible, all nulls) -- Stage 1 would report changed:false
+  // here, never changed:true, even with a reference-distinct but
+  // value-identical replacement and an incremented revision.
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => {
+      if (action.type !== 'reset_review_target' || action.target !== 'satisfaction') {
+        return stateCore.transitionReviewState(session, action);
+      }
+      const comparison = session.comparisons[action.comparison_id];
+      const nextComparison = deepFreeze({ ...comparison, satisfaction:deepFreeze({ ...comparison.satisfaction }) });
+      return deepFreeze({ ok:true, changed:true, diagnostics:[], session:deepFreeze({
+        ...session, session_revision:session.session_revision + 1,
+        comparisons:deepFreeze({ ...session.comparisons, [action.comparison_id]:nextComparison })
+      }) });
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  assert.strictEqual(before.comparisons['cmp-v1:test'].satisfaction.status, 'not_eligible');
+  const result = await h.coordinator.coordinateReviewTransition(
+    transitionInput({ type:'reset_review_target', comparison_id:'cmp-v1:test', target:'satisfaction' })
+  );
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 never accepts an ok:true/changed:false result from the malformed/unknown-action delegation path', async () => {
+  // External contract test, not a dedicated single-line mutation category:
+  // the malformed/unknown-action delegation call site deliberately omits
+  // captured.action, and an ok:true forgery there is rejected by
+  // validReducerResult() as a whole. Probing confirmed no single guard
+  // inside it is independently, cleanly mutation-testable at this exact
+  // call site -- removing just the changed:false branch's !captured.action
+  // check still fails safe (validNoOpAction throws on undefined.type,
+  // caught by the outer try/catch), so this invariant is verified here as a
+  // regression/contract test instead.
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session) => deepFreeze({ ok:true, changed:false, session, diagnostics:[] })
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  let captureCalls = 0;
+  const result = await h.coordinator.coordinateReviewTransition({
+    action:{ type:'unknown' }, captureSourceContext:() => { captureCalls += 1; return sourceContext(); }, occurredAt:at
+  });
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(captureCalls, 0);
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 never accepts an ok:true/changed:true result from the malformed/unknown-action delegation path', async () => {
+  // Same external contract as above for the changed:true branch. Probing
+  // confirmed removing just its !captured.action check also fails safe
+  // (the forged session's revision mismatches captured.sessionRevision,
+  // which is undefined -- NaN -- at this call site), so this too is a
+  // contract/regression test rather than an independently mutation-testable
+  // single-line category.
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session) => deepFreeze({
+      ok:true, changed:true, diagnostics:[], session:deepFreeze({ ...session, session_revision:session.session_revision + 1 })
+    })
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  let captureCalls = 0;
+  const result = await h.coordinator.coordinateReviewTransition({
+    action:{ type:'unknown' }, captureSourceContext:() => { captureCalls += 1; return sourceContext(); }, occurredAt:at
+  });
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(captureCalls, 0);
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 counts reviewer and note limits in Unicode code points, matching Stage 1 exactly', async () => {
+  // U+1F600 is a surrogate pair in UTF-16 (2 code units, 1 code point) --
+  // counting by .length instead of code points would halve the effective
+  // limit and reject input Stage 1 itself accepts.
+  const emoji = count => '\u{1F600}'.repeat(count);
+  const boundaries = [
+    { reviewer:emoji(256), note:null, expectOk:true, label:'reviewer at 256 code points' },
+    { reviewer:emoji(257), note:null, expectOk:false, label:'reviewer at 257 code points' },
+    { reviewer:'reviewer', note:emoji(4096), expectOk:true, label:'note at 4096 code points' },
+    { reviewer:'reviewer', note:emoji(4097), expectOk:false, label:'note at 4097 code points' }
+  ];
+  for (const { reviewer, note, expectOk, label } of boundaries) {
+    const h = await readyHarness();
+    assert((await startReady(h)).ok);
+    const result = await h.coordinator.coordinateReviewTransition(
+      transitionInput(acceptAction('quantity_extraction', { reviewer, note }))
+    );
+    assert.strictEqual(result.ok, expectOk, `${label}: ${JSON.stringify(result)}`);
+  }
+});
+
+test('Stage 3 rejects a reentrant discard during mid-transition source invalidation as busy, without reviving or corrupting the session', async () => {
+  const box = {};
+  const reviewStateCore = {
+    ...stateCore,
+    invalidateReviewSession:(session, payload) => {
+      const real = stateCore.invalidateReviewSession(session, payload);
+      box.reentrantDiscard = box.coordinator.coordinateReviewTransition({
+        action:{ type:'discard_review_session' }, captureSourceContext:null, occurredAt:null
+      });
+      return real;
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  box.coordinator = h.coordinator;
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const beforeTarget = before.comparisons['cmp-v1:test'];
+  const snapshot = h.coordinator.getRecordSetSnapshot();
+  const driftedContext = () => sourceContext({ matching_generation:2 });
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction(), driftedContext));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_session_stale');
+  const reentrantResult = await box.reentrantDiscard;
+  assert.strictEqual(reentrantResult.ok, false, JSON.stringify(reentrantResult));
+  assert.strictEqual(
+    reentrantResult.diagnostics[0].code, 'review_session_busy',
+    'a reentrant discard during mid-transition source invalidation must be rejected as busy'
+  );
+  assert.strictEqual(h.coordinator.getReviewSession().session_status, 'stale');
+  assert.strictEqual(h.coordinator.getReviewSession().session_revision, before.session_revision + 1);
+  assert.strictEqual(
+    h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget,
+    'the staled session must not be corrupted or replaced by a revived old session'
+  );
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+  assert.strictEqual(h.coordinator.isReviewTransitionInFlight(), false);
+});
+test('Stage 3 rejects a reentrant invalidateReviewSource call while another source invalidation is in flight', async () => {
+  const box = { calls:0 };
+  const reviewStateCore = {
+    ...stateCore,
+    invalidateReviewSession:(session, payload) => {
+      box.calls += 1;
+      if (box.calls === 1) {
+        box.reentrant = box.coordinator.invalidateReviewSource({
+          reasonCode:'reentrant', occurredAt:at, affectsBinding:false
+        });
+      }
+      return stateCore.invalidateReviewSession(session, payload);
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  box.coordinator = h.coordinator;
+  assert((await startReady(h)).ok);
+  const result = h.coordinator.invalidateReviewSource({
+    reasonCode:'source_changed', occurredAt:at, affectsBinding:false
+  });
+  assert(result.ok, JSON.stringify(result));
+  assert.strictEqual(box.calls, 1, 'reentrant invalidateReviewSource must not reach the dependency a second time');
+  assert.strictEqual(box.reentrant.ok, false, JSON.stringify(box.reentrant));
+  assert.strictEqual(box.reentrant.diagnostics[0].code, 'review_session_busy');
+  assert.strictEqual(h.coordinator.getReviewSession().session_status, 'stale');
+});
+test('Stage 3 rejects a reentrant beginBindingRefresh call while a source invalidation is in flight', async () => {
+  const box = { calls:0 };
+  const reviewStateCore = {
+    ...stateCore,
+    invalidateReviewSession:(session, payload) => {
+      box.calls += 1;
+      if (box.calls === 1) {
+        box.reentrant = box.coordinator.beginBindingRefresh({ reasonCode:'reentrant', occurredAt:at });
+      }
+      return stateCore.invalidateReviewSession(session, payload);
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  box.coordinator = h.coordinator;
+  assert((await startReady(h)).ok);
+  const generationBefore = h.coordinator.getBindingGeneration();
+  const result = h.coordinator.beginBindingRefresh({ reasonCode:'source_changed', occurredAt:at });
+  assert(result.ok, JSON.stringify(result));
+  assert.strictEqual(box.calls, 1, 'reentrant beginBindingRefresh must not reach the dependency a second time');
+  assert.strictEqual(box.reentrant.ok, false, JSON.stringify(box.reentrant));
+  assert.strictEqual(box.reentrant.diagnostics[0].code, 'review_session_busy');
+  assert.strictEqual(h.coordinator.getBindingGeneration(), generationBefore + 1);
+});
+test('Stage 3 uses its own trusted UPSTREAM_TARGETS, not the injectable stateApi one', async () => {
+  const reviewStateCore = { ...stateCore, UPSTREAM_TARGETS:Object.freeze([]) };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  assert(result.ok && result.changed, JSON.stringify(result));
+  assert.strictEqual(result.session.comparisons['cmp-v1:test'].quantity_extraction.verdict, 'accept');
+});
+test('Stage 3 uses its own trusted SATISFACTION_VERDICTS, not the injectable stateApi one', async () => {
+  const reviewStateCore = { ...stateCore, SATISFACTION_VERDICTS:Object.freeze([]) };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  for (const target of stateCore.UPSTREAM_TARGETS) {
+    assert((await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction(target)))).ok);
+  }
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput({
+    type:'review_satisfaction', comparison_id:'cmp-v1:test', reviewer:'reviewer', reviewed_at:at, verdict:'accept', note:null
+  }));
+  assert(result.ok && result.changed, JSON.stringify(result));
+  assert.strictEqual(result.session.comparisons['cmp-v1:test'].satisfaction.verdict, 'accept');
+});
+test('Stage 3 rejects an accept_review_target satisfaction forgery even when the injected stateApi.UPSTREAM_TARGETS includes it', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    UPSTREAM_TARGETS:Object.freeze([...stateCore.UPSTREAM_TARGETS, 'satisfaction']),
+    transitionReviewState:(session, action) => {
+      if (action.target !== 'satisfaction') return stateCore.transitionReviewState(session, action);
+      const comparison = session.comparisons[action.comparison_id];
+      const nextComparison = deepFreeze({ ...comparison, satisfaction:deepFreeze({
+        status:'reviewed', reviewer:action.reviewer.trim(), reviewed_at:action.reviewed_at, verdict:'accept', note:action.note
+      }) });
+      return deepFreeze({ ok:true, changed:true, diagnostics:[], session:deepFreeze({
+        ...session, session_revision:session.session_revision + 1,
+        comparisons:deepFreeze({ ...session.comparisons, [action.comparison_id]:nextComparison })
+      }) });
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  for (const target of stateCore.UPSTREAM_TARGETS) {
+    assert((await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction(target)))).ok);
+  }
+  const before = h.coordinator.getReviewSession();
+  assert.strictEqual(before.comparisons['cmp-v1:test'].satisfaction.status, 'unreviewed');
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction('satisfaction')));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects a discard result that reports failure with an otherwise-exact success shape', async () => {
+  // Every field except `ok` matches the one legitimate discard success shape,
+  // isolating the `result.ok === true` clause specifically.
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => action.type === 'discard_review_session'
+      ? deepFreeze({ ok:false, changed:true, session:null, diagnostics:[] })
+      : stateCore.transitionReviewState(session, action)
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const result = await h.coordinator.coordinateReviewTransition({
+    action:{ type:'discard_review_session' }, captureSourceContext:null, occurredAt:null
+  });
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert(result.diagnostics.length >= 1, `expected at least one diagnostic: ${JSON.stringify(result)}`);
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects a discard result that reports a no-op with an otherwise-exact success shape', async () => {
+  // Every field except `changed` matches the one legitimate discard success
+  // shape, isolating the `result.changed === true` clause specifically.
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => action.type === 'discard_review_session'
+      ? deepFreeze({ ok:true, changed:false, session:null, diagnostics:[] })
+      : stateCore.transitionReviewState(session, action)
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const result = await h.coordinator.coordinateReviewTransition({
+    action:{ type:'discard_review_session' }, captureSourceContext:null, occurredAt:null
+  });
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert(result.diagnostics.length >= 1, `expected at least one diagnostic: ${JSON.stringify(result)}`);
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects a discard result that reports success with a non-null session, with an otherwise-exact success shape', async () => {
+  // Every field except `session` matches the one legitimate discard success
+  // shape, isolating the `result.session === null` clause specifically.
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => action.type === 'discard_review_session'
+      ? deepFreeze({ ok:true, changed:true, session, diagnostics:[] })
+      : stateCore.transitionReviewState(session, action)
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const result = await h.coordinator.coordinateReviewTransition({
+    action:{ type:'discard_review_session' }, captureSourceContext:null, occurredAt:null
+  });
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert(result.diagnostics.length >= 1, `expected at least one diagnostic: ${JSON.stringify(result)}`);
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects a discard result that reports success with a non-empty diagnostics array, with an otherwise-exact success shape', async () => {
+  // Every field except `diagnostics` matches the one legitimate discard
+  // success shape, isolating the `result.diagnostics.length === 0` clause
+  // specifically.
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:(session, action) => action.type === 'discard_review_session'
+      ? deepFreeze({ ok:true, changed:true, session:null, diagnostics:deepFreeze([
+        deepFreeze({ code:'review_session_stale', severity:'error', detail:'Review session is stale.' })
+      ]) })
+      : stateCore.transitionReviewState(session, action)
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const beforeTarget = before.comparisons['cmp-v1:test'];
+  const snapshot = h.coordinator.getRecordSetSnapshot();
+  const result = await h.coordinator.coordinateReviewTransition({
+    action:{ type:'discard_review_session' }, captureSourceContext:null, occurredAt:null
+  });
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert(result.diagnostics.length >= 1, `expected at least one diagnostic: ${JSON.stringify(result)}`);
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+  assert.strictEqual(
+    h.coordinator.getReviewSession().comparisons['cmp-v1:test'], beforeTarget,
+    'the active session and its comparisons must be unchanged, not partially discarded'
+  );
+  assert.strictEqual(h.coordinator.getRecordSetSnapshot(), snapshot);
+});
+test('Stage 3 rejects a failure result with more than one diagnostic entry', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:session => deepFreeze({
+      ok:false, changed:false, session,
+      diagnostics:deepFreeze([
+        deepFreeze({ code:'review_target_unknown', severity:'error', detail:'Review target is unknown.' }),
+        deepFreeze({ code:'review_target_unknown', severity:'error', detail:'Review target is unknown.' })
+      ])
+    })
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects a failure diagnostic whose severity or detail does not match the official Stage 1 registry', async () => {
+  for (const badEntry of [
+    { code:'review_target_unknown', severity:'warning', detail:'Review target is unknown.' },
+    { code:'review_target_unknown', severity:'error', detail:'tampered' }
+  ]) {
+    const reviewStateCore = {
+      ...stateCore,
+      transitionReviewState:session => deepFreeze({
+        ok:false, changed:false, session, diagnostics:deepFreeze([deepFreeze(badEntry)])
+      })
+    };
+    const h = await readyHarness({ reviewStateCore });
+    assert((await startReady(h)).ok);
+    const before = h.coordinator.getReviewSession();
+    const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+    assert.strictEqual(result.ok, false, JSON.stringify(result));
+    assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+    assert.strictEqual(h.coordinator.getReviewSession(), before);
+  }
+});
+test('Stage 3 rejects a failure diagnostic with a code outside the Stage 1 registry', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    transitionReviewState:session => deepFreeze({
+      ok:false, changed:false, session,
+      diagnostics:deepFreeze([deepFreeze({ code:'totally_made_up', severity:'error', detail:'nope' })])
+    })
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 normalizes an unknown error reviewCode to review_artifact_invalid', async () => {
+  const h = await readyHarness();
+  assert((await startReady(h)).ok);
+  const before = h.coordinator.getReviewSession();
+  h.q.rawSha256Utf8 = async () => {
+    const error = new Error('bogus');
+    error.reviewCode = 'not_a_real_code';
+    throw error;
+  };
+  const result = await h.coordinator.coordinateReviewTransition(transitionInput(acceptAction()));
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(result.diagnostics[0].code, 'review_artifact_invalid');
+  assert.strictEqual(h.coordinator.getReviewSession(), before);
+});
+test('Stage 3 rejects an invalidation success result with non-empty diagnostics', async () => {
+  const reviewStateCore = {
+    ...stateCore,
+    invalidateReviewSession:(session, payload) => {
+      const real = stateCore.invalidateReviewSession(session, payload);
+      return deepFreeze({ ...real, diagnostics:deepFreeze([
+        deepFreeze({ code:'review_session_stale', severity:'error', detail:'x' })
+      ]) });
+    }
+  };
+  const h = await readyHarness({ reviewStateCore });
+  assert((await startReady(h)).ok);
+  const active = h.coordinator.getReviewSession();
+  const result = h.coordinator.invalidateReviewSource({ reasonCode:'x', occurredAt:at, affectsBinding:false });
+  assert.strictEqual(result.ok, false, JSON.stringify(result));
+  assert.strictEqual(h.coordinator.getReviewSession(), active);
+  assert.strictEqual(h.coordinator.getReviewSourceEpoch(), 1);
 });
 
 (async () => {

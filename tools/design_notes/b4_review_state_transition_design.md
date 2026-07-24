@@ -621,3 +621,85 @@ source context、producer envelope、validator resultの非同期判定では`.t
 注入可能なStage 1 dependencyが返すsessionについて、coordinatorはnested `live_source_marker`／`snapshot_identity`をcanonical JSONだけで比較しない。両recordのprototype、`Reflect.ownKeys()`、enumerable data descriptor、exact key集合、全fieldの型・形式を直接検査した後に、期待identityとのcanonical JSON一致を確認する。hidden／symbol／accessor／custom prototypeを含むsessionは公開しない。
 
 relationの4参照IDは従来どおりtrim後の非空文字列へ正規化する。一方、`relationship.match_method`／`review_category`はproducer契約どおり、`null`または非空文字列だけを認め、文字列の空白をtrimせず実データのまま保持する。relation snapshot digestはこのraw metadataを含むrelation itemのcanonical JSONに対するraw SHA-256とし、`"tag"`と`" tag "`を異なるidentityとして扱う。
+
+## 20. B-4a Stage 3実装記録
+
+Stage 3では通常review transitionをcoordinator内で単一実行にし、opaqueなtransition token、await前のaction snapshot、live source markerと保持snapshot identityの再照合、注入可能なreducer出力の厳密検証、同期commit CASを追加した。source identity不一致は通常競合と分離し、進行tokenを失効させてactive sessionをstaleへ同期commitする。`discard_review_session`だけはsource callback・binding・hashを参照せず、sessionとrecord set snapshotを同じ同期commitで破棄する。`changed:false`は再代入しない。
+
+未実装の範囲はHTML／UI、既存出力接続、overlay保存、B-4b、B-5である。
+
+### Stage 3レビュー後訂正（2026-07-23）
+
+静的レビューにより、次の診断分類・検証境界を訂正した。
+
+recomputed snapshot identityが保持値と一致しない場合、これはimmutableなrecord set snapshotと保持markerからのみ導出される値の再計算矛盾であり、source変更ではないため、`review_session_stale`ではなく`review_artifact_identity_mismatch`として扱い、sessionへ一切手を加えない。recomputed live markerの不一致は引き続き`review_session_stale`（真正のsource変化）として扱う。
+
+`validReducerResult()`は、どのcomparison／targetの参照が変化したかだけでなく、変化後の値がaction意味論と完全一致することを検証するよう拡張した。`overlay_version`の一致、変更targetのexact 5-field record（hidden／symbol／accessor／custom prototypeなし）、action由来のreviewer／timestamp／verdict／noteとの完全一致、reset後の正式初期状態、許可されたsatisfaction連動のみを直接検査する。
+
+`coordinateReviewTransition()`は、actionがknown exactでない場合（malformedなdiscardを含む）、callback／timestamp契約の検査より前にStage 1 reducerへ同期委譲するよう順序を変更した。discardによって`current_review_session`がnullになった状態での旧transition競合は、`review_artifact_invalid`ではなく`review_session_busy`として分類する。
+
+### Stage 3レビュー後訂正 第2回（2026-07-23）
+
+第2回静的レビューにより、次を追加で訂正した。
+
+`input.occurredAt`は入力検証直後の一箇所で`capturedOccurredAt`として固定し、以後`commitSourceInvalidation()`の呼び出し（preflight失敗時・recapture後のsource変更検出時の双方）はこの捕捉値だけを参照する。callerがsource capture callback内部または後続の待機中に`input.occurredAt`を書き換えても、記録される`stale_runtime.occurred_at`は最初に捕捉した値のまま変化しない。
+
+`coordinateReviewTransition()`は、session不在・非discard actionに対するstale session・known exact shapeだが型不正なaction（例:`reviewer`が文字列でない）の3種を、`current_review_session`の状態と`action`のproperty型だけから判定し、Stage 1 reducerへ一度だけ同期委譲するようにした。この経路はsource capture callbackもhash APIも一切呼び出さず、reducerが`ok:true`を返しても採用しない（この経路でreducerが正当に成功することはあり得ないため）。診断そのものは常にStage 1由来であり、coordinator独自の診断へ置き換えない。
+
+`validChangedComparison()`は、変化後targetの形だけでなく、action自体がそもそも実行可能だったかを独立に再検証するよう拡張した。`accept_review_target`は対象がUPSTREAM_TARGETSに含まれること、verdictが`accept`固定であること、reviewer／timestamp／noteがStage 1契約を満たすこと、対象targetの事前状態が`unreviewed`であることを検査する。`review_satisfaction`は許可されたverdict集合、reviewer／timestamp／noteの契約、上流4対象が事前にaccept済みであること、satisfactionの事前状態が`unreviewed`であることを検査する。また、上流4件目のacceptによるsatisfaction unlockと、reviewed upstream targetのresetによるsatisfaction resetは、条件が成立する限り必須の連動として扱い、省略した結果を拒否する。
+
+`validReducerResult()`のcomparisons mapに対する構造検査を、key集合の長さ一致だけでなく、prototypeがObject.prototypeまたはnullであること、全comparison IDがown enumerable data propertyであることを直接検査するexact recordの検査へ強化した。失敗(`ok:false`)結果についても、`diagnostics`が最低1件のexact record（`code`／`severity`／`detail`が非空文字列）であることを検査するようにした。
+
+recomputed snapshot identityおよびlive markerの一致検査は、`value`フィールドだけでなく、両record全体のcanonical JSON一致で判定するよう変更した。悪性hash dependencyが`value`だけを保存値へ合わせ、`record_set_digest`・`schema_version`・markerの各保存fieldを別値にする経路を遮断する。
+
+恒久検査ファイルでは、source invalidationによるtransition token即時失効を検証する専用testを、それに依存する別testより前に配置し、当該mutationが専用named assertionで直接検出されるようにした。
+
+### Stage 3レビュー後訂正 第3回（2026-07-23）
+
+第3回静的レビューにより、次を追加で訂正した。
+
+`validReducerResult()`は、`changed:false`結果についても`result.session === captured.sessionRef`と空`diagnostics`だけでなく、そのaction・事前sessionの組合せが実際にno-opとして正当かを新設の`validNoOpAction()`で独立検証するようにした。Stage 1では`accept_review_target`・`review_satisfaction`・`discard_review_session`はいずれも成功時必ず変化し、no-opを返し得るのは`reset_review_target`が対象targetまたはsatisfactionの正式初期状態に既に一致している場合だけである。この検証により、本来必ず変化するactionに対し悪性reducerが`changed:false`で成功を偽装する経路を遮断する。
+
+`validChangedComparison()`のsatisfaction reset分岐に、変更前のsatisfactionが既に正式な期待状態（`upstreamAllAccepted()`に応じたinitial shape）と一致している場合は`changed:true`を受理しない検査を追加した。悪性reducerが同値だが参照の異なるsatisfaction targetとrevision増加を伴う偽の`changed:true`を返す、冗長resetの詐称経路を遮断する。
+
+`validReviewActionMetadata()`のreviewer・note文字数上限を、UTF-16コード単位数(`.length`)からUnicodeコードポイント数(`[...value].length`)へ修正し、Stage 1の`codePoints()`契約と一致させた。絵文字等のsurrogate pair文字を含む、Stage 1では正当なreviewer・noteをStage 3が誤って`review_artifact_invalid`にしていた不整合を解消した。
+
+恒久検査として、本来必ず変化する`accept_review_target`／`review_satisfaction`に対する悪性no-op偽装、冗長satisfaction resetに対する偽`changed:true`、reviewer 256／257コードポイントおよびnote 4096／4097コードポイント境界(絵文字使用)の計4テストを追加した。
+
+### Stage 3一括mutation前訂正（2026-07-23）
+
+全分類一括mutation実行の準備として、malformed／unknown-action同期委譲経路にあった`if (result?.ok !== false) return stateFailure('review_artifact_invalid', current_review_session);`という個別ガードを削除した。この経路は`captured.action`を意図的に設定しないため、`validReducerResult()`の`!captured.action`検査を、同期委譲経路の`ok:true`を明示的に拒否する中央の意図的なチェックとした。個別call site側には重複するガードを置かない。
+
+この整理に伴い、旧mutation分類「#R6-5(同期委譲経路のok:true不採用)」は独立分類から除外した。実験的注入により、この中央チェック自体を除去しても、後続の別検査がfail-closedとして働くため、単独では独立検出できないことを確認した。`changed:false`分岐では、`!captured.action`検査を外してもcaptured.actionが`undefined`のまま`validNoOpAction(undefined, session)`が呼ばれ`action.type`アクセスで例外が送出され、外側の`try/catch`により結果的に同じ`review_artifact_invalid`へ収束する。`changed:true`分岐では、同検査を外してもcaptured.sessionRevisionが`undefined`であるため`next.session_revision !== captured.sessionRevision + 1`(`NaN`比較)が別途成立し、同じく`review_artifact_invalid`へ収束する。すなわちこの経路での「`ok:true`を採用しない」という外部契約は、`!captured.action`という意図的な中央チェックと、それを除去した場合にfail-closedとして働く後続検査群の両方によって支えられており、単一行のmutationでは独立に検出できない。該当する2つの回帰テスト(`ok:true/changed:false`・`ok:true/changed:true`)は削除せず、外部契約を固定する回帰テストとして維持しつつ、分類数には算入しない。
+
+以上により、Stage 3の一括mutation対象は41分類(丸め値ではなく、独立検出を実際に確認した実数)として今回のcheckpointを構成する。
+
+### Stage 3レビュー後訂正 第4回（2026-07-24）
+
+第4回静的レビューにより、次の5点を追加で修正した。
+
+**(1) source invalidationの原子性。** 注入可能な`stateApi.invalidateReviewSession()`は、その実行中にcoordinatorの公開APIへ同期的に再入し得る。`commitSourceInvalidation()`(`staleCurrentSession()`経由)・`beginBindingRefresh()`・`invalidateReviewSource()`の3箇所が、この依存への呼び出しを個別に行っていた。新設の共有guard`source_invalidation_token`と、それを使う`invalidateSessionAtomically()`を追加し、依存呼び出し前にguardを取得、呼び出し後にguard・session参照・session_id・session_revision・session_statusを最終CASしたうえで、CAS成立時だけsession代入とguard解放を同一同期区間(`finally`)で行うようにした。`coordinateReviewTransition()`の単一実行gateにも`source_invalidation_token`を追加し、source invalidation進行中の再入transition(discardを含む)を`review_session_busy`として拒否する。
+
+再入discardの恒久検査を追加し、注入した`invalidateReviewSession()`から`discard_review_session`へ同期的に再入した場合に、再入側が`review_session_busy`として拒否され、外側のstale化が正しくcommitされ、旧session復活やsnapshot不整合が起きないことを固定した。`invalidateReviewSource()`・`beginBindingRefresh()`自体への直接再入も同様に拒否されることを個別に固定した。
+
+なお、`invalidateSessionAtomically()`内部のguard検査、その最終CAS、および`beginBindingRefresh()`・`invalidateReviewSource()`各々の入口guardは、いずれか1つが残っていれば他の除去だけでは同じ再入が防止されてしまうため、単独mutationでは独立に検出できないことを実験的に確認した(`coordinateReviewTransition()`側のgate除去だけは、他に代替する検査がなく独立に検出できる)。これは、複数箇所が同じ共有状態を多重に守る意図的な多重防御であり、まとめて1分類として扱う。
+
+**(2) action意味論検証の信頼境界。** `upstreamAllAccepted()`・`validChangedComparison()`が参照していた`stateApi.UPSTREAM_TARGETS`／`stateApi.SATISFACTION_VERDICTS`を、injectable dependencyからの読み取りから、session core内に新設した信頼済み固定配列(`UPSTREAM_TARGETS`／`SATISFACTION_VERDICTS`、Stage 1の同名exportと同一値)へ置き換えた。悪性dependencyがこれらの配列を偽装しても、Stage 3自身の判定に影響しない。
+
+**(3) discardの厳密な成功shape。** `validReducerResult()`に、`captured.isDiscard`の場合の専用分岐を追加し、`{ok:true, changed:true, session:null, diagnostics:[]}`の1形状だけを受理するようにした。failure、success no-op(`changed:false`)、非null sessionはいずれも`review_artifact_invalid`とする。
+
+**(4) failure diagnosticsの公式registryとの完全一致。** Stage 1の診断registryをsession core内に信頼済み固定table(`STAGE1_DIAGNOSTICS`)として複製し、`validFailureDiagnostics()`を、diagnostics配列が正確に1件であること、その`code`が同tableに存在すること、`severity`／`detail`が同tableの値と完全一致することを要求するよう書き換えた。また`asCode()`を、`error.reviewCode`がsession core自身の`DIAGNOSTICS`registryに存在しない場合はfallback(`review_artifact_invalid`)へ正規化するよう修正した(従来はfallbackのseverity/detailだけを借用し、`code`自体は未知の値のまま残っていた)。
+
+**(5) invalidation成功結果のdiagnostics空検査。** `validInvalidationResult()`のsuccess分岐に`result.diagnostics.length === 0`を追加した。
+
+恒久検査として、reentrant discard・reentrant invalidateReviewSource・reentrant beginBindingRefresh・信頼済みUPSTREAM_TARGETS／SATISFACTION_VERDICTS(各1件)・discard厳密shape(4件、ok/changed/session/diagnostics各clauseを個別mutationで分離検証)・failure diagnostics複数件拒否・failure diagnostics registry不一致拒否・failure diagnostics未知code拒否・asCode正規化・invalidation成功時diagnostics非空拒否の計14テストを追加した。
+
+### Stage 3レビュー後訂正 第5回（2026-07-24）
+
+第5回静的レビューにより、次を追加で訂正した。
+
+`validReducerResult()`のdiscard専用分岐が要求する`{ok:true, changed:true, session:null, diagnostics:[]}`のうち、`diagnostics.length === 0`clauseを直接単独で固定する恒久検査を追加した(ok/changed/session各clauseは前回既に個別検査済みだったが、diagnostics clauseのみ専用検査を欠いていた)。同clauseだけを除去する単独mutationで、新設テストの専用named assertionが直接失敗しexit 1になることを確認した。同テストはsession／snapshotが不変であることも直接検査する。
+
+`source_invalidation_token`のコメントにあった「four call sites」という表現を、実際の内訳(`stateApi.invalidateReviewSession()`を呼び出す3つのdependency call site、および呼び出しは行わず同じguardを参照するだけの`coordinateReviewTransition()`側のtransition entry gate)を区別する表現へ訂正した。
+
+ロジック変更はdiscard diagnostics検査の追加だけであるため、既存の全mutation分類の再実行は不要と判断し、新規mutation1件のみを単独確認した。
