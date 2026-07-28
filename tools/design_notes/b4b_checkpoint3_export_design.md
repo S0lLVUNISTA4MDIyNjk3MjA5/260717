@@ -1,12 +1,15 @@
 # B-4b Checkpoint 3 設計案（Rev.6・実装完了版）: レビュー済みprojectionの正式エクスポート接続
 
-状態: **実装完了（未commit・未push）**。B-4b Checkpoint 3 Design Gate。Rev.4
+状態: **実装完了・レビュー承認済み・commit/push済み**。B-4b Checkpoint 3 Design Gate。Rev.4
 （Conditional Approve、実装契約として固定）どおりに実装した上で、実装・実測テストの過程で
 判明した事項（「Rev.5: 実装で判明した事項」）、および2回のRequest Changes（実装Request
 Changes round 2・round 3）で指摘された正式artifact境界のBlockerを反映した最終版
 （下記「Rev.6: Request Changes round 2/3で指摘された事項」）。
 Node検証69/69・Playwright検証42/42（新規）・既存Checkpoint 2 Playwright検証53/53（無変更・
-回帰なし）まで実測済み。commit/pushはまだ行っていない（レビュー待ち）。
+回帰なし）まで実測済み。
+
+Commit: `17cd834f539808a7d3fb14e489128ba37bff40ad`
+Branch: `b4b-review-projection`
 
 ## Rev.5: 実装で判明した事項（設計を裏切らない範囲での実装時発見）
 
@@ -1075,5 +1078,6 @@ Checkpoint 1 projection core検証と同じスタイル（`assert`ベースの�
 - 既存Checkpoint 2 Playwright検証（`b4b_checkpoint2_ui_verification.js`）: **53/53 成功、
   無変更・回帰なし**（Checkpoint 3追加後も再実行して確認）。
 - 3スイートとも複数回連続実行して安定することを確認済み。
-- commit/pushは未実施（レビュー待ち）。`git status --porcelain`は新規/変更ファイルのみを
-  示し、想定外の差分はない。
+- Request Changes round 4でConditional Approve（残件は本ドキュメントの記述整合のみ）を
+  受けたのち、commit `17cd834f539808a7d3fb14e489128ba37bff40ad`（branch
+  `b4b-review-projection`）としてcommit/push済み。
