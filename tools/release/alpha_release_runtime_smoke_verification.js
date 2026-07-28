@@ -16,8 +16,8 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 
-const DIST_DIR = path.join(__dirname, '..', '..', 'dist', 'json_ab_trace_matching_tool_v12.1.15-alpha-build');
-const DIST_HTML_PATH = path.join(DIST_DIR, 'json_ab_trace_matching_tool_v12.1.15.html');
+const DIST_DIR = path.join(__dirname, '..', '..', 'dist', 'trace-matching-tool-v12.2.0-alpha.1');
+const DIST_HTML_PATH = path.join(DIST_DIR, 'json_ab_trace_matching_tool_v12.2.0-alpha.1.html');
 const RUNTIME_DIR = path.join(DIST_DIR, 'runtime');
 
 const checks = [];
