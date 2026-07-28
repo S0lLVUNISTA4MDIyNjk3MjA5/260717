@@ -30,8 +30,13 @@
     "package_license_id": "MIT",
     "original_notice_file": "vendor/tiny-segmenter-0.2.0/ORIGINAL_LICENSE_NOTICE.txt",
     "original_notice_sha256": "3a63cc817e1c3789c59c35d2f39f3031761fdec786cf43084b49518551cfe998",
-    "original_license_id": "New BSD License",
     "original_copyright": "Copyright (c) 2008 Taku Kudo <taku@chasen.org>",
-    "original_notice_source": "Verbatim header comment (lines 1-4) of the shipped tiny-segmenter-0.2.0.js file itself. The full license text at the URL referenced by that header (http://chasen.org/~taku/software/TinySegmenter/LICENCE.txt) could not be fetched in this build environment (host not in the network egress allowlist); this notice file records only the in-file verbatim attribution, not the complete external license document."
+    "original_notice_source": "Verbatim header comment (lines 1-4) of the shipped tiny-segmenter-0.2.0.js file itself. The full license text at the URL referenced by that header (http://chasen.org/~taku/software/TinySegmenter/LICENCE.txt) could not be fetched in this build environment (host not in the network egress allowlist); this notice file records only the in-file verbatim attribution, not the complete external license document.",
+    "original_license_id": "BSD-3-Clause",
+    "original_license_name": "BSD 3-Clause New or Revised License",
+    "original_license_file": "vendor/tiny-segmenter-0.2.0/ORIGINAL_LICENSE_BSD-3-CLAUSE.txt",
+    "original_license_sha256": "f515f7b94186cec29a228fd7caa3e9e969fd0e1f28e2849a236a36cb8bd5eccd",
+    "original_license_text_basis": "SPDX/OSI canonical BSD-3-Clause text",
+    "original_upstream_license_url_retrieved": false
   }
 }

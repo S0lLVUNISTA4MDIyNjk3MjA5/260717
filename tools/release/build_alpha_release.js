@@ -125,6 +125,33 @@ function main() {
     fs.writeFileSync(path.join(RUNTIME_DIR, entry.dest), buf);
   }
 
+  // License provenance: every {file, sha256} pair the manifest declares (per
+  // vendor -- cytoscape/xlsx each have one; tiny_segmenter has three, since its
+  // provenance is recorded in two layers: the npm-repackaging license and the
+  // original JavaScript implementation's own license) must exist on disk and
+  // hash-match exactly. This doesn't copy anything into dist/ (licenses/ is
+  // Checkpoint 2's packaging concern) -- it only guards against the checked-in
+  // vendor_manifest.json going stale relative to the vendor/ directory it
+  // describes.
+  const LICENSE_FIELD_PAIRS = [
+    ['license_file', 'license_sha256'],
+    ['package_license_file', 'package_license_sha256'],
+    ['original_notice_file', 'original_notice_sha256'],
+    ['original_license_file', 'original_license_sha256'],
+  ];
+  for (const entry of VENDOR_ENTRIES) {
+    const record = manifest[entry.key];
+    for (const [fileKey, shaKey] of LICENSE_FIELD_PAIRS) {
+      if (!(fileKey in record)) continue;
+      const srcPath = path.join(RELEASE_DIR, record[fileKey]);
+      const buf = readFileOrFail(srcPath, `${entry.key}:${fileKey}`);
+      const actualSha = sha256(buf);
+      if (actualSha !== record[shaKey]) {
+        fail(`${entry.key} ${fileKey} SHA-256 mismatch: manifest=${record[shaKey]} actual=${actualSha}`);
+      }
+    }
+  }
+
   // Self-authored runtime: copy byte-for-byte, then re-read the written copy to
   // confirm the write itself didn't alter anything (defense against any
   // encoding-related surprise; these are all treated as opaque buffers).
