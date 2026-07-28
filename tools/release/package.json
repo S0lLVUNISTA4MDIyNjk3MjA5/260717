@@ -1,0 +1,8 @@
+{
+  "name": "alpha-release-scripts",
+  "private": true,
+  "description": "Alpha Release Gate build/verification scripts for the offline distribution package. The only runtime dependency is Playwright, pinned to the same version tools/design_notes/package.json uses, needed only to drive the real vendored libraries (Cytoscape.js/xlsx/TinySegmenter) and the completed dist/ build in a real browser for tools/release/alpha_release_runtime_smoke_verification.js and later offline E2E verification. tools/release/build_alpha_release.js itself has no dependencies at all (plain Node fs/path/crypto) and runs fully offline. Run npm ci in this directory before running the Playwright-based scripts.",
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

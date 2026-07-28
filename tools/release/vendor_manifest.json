@@ -1,0 +1,37 @@
+{
+  "cytoscape": {
+    "version": "3.26.0",
+    "source_package": "cytoscape@3.26.0",
+    "source_registry": "https://registry.npmjs.org/cytoscape/-/cytoscape-3.26.0.tgz",
+    "runtime_file": "vendor/cytoscape-3.26.0/cytoscape.min.js",
+    "runtime_sha256": "37ed58d294f044922922bf8e01c671acfee13c91c030885af2aea9ca03c156a9",
+    "license_file": "vendor/cytoscape-3.26.0/LICENSE",
+    "license_sha256": "ac2a446d6e1b489d9568def4ba7790ab81f5023ebba335d49a77dbff1960232e",
+    "license_id": "MIT"
+  },
+  "xlsx": {
+    "version": "0.18.5",
+    "source_package": "xlsx@0.18.5",
+    "source_registry": "https://registry.npmjs.org/xlsx/-/xlsx-0.18.5.tgz",
+    "runtime_file": "vendor/xlsx-0.18.5/xlsx.full.min.js",
+    "runtime_sha256": "c9506197caf809a075b6dee1da0d36fb19da7158ffe8a88e7b0c96c5d8623c99",
+    "license_file": "vendor/xlsx-0.18.5/LICENSE",
+    "license_sha256": "4d2a38ac35cda06a555c84074a819d413339cd3691b822cae50f8f322fe01f64",
+    "license_id": "Apache-2.0"
+  },
+  "tiny_segmenter": {
+    "version": "0.2.0",
+    "source_package": "tiny-segmenter@0.2.0",
+    "source_registry": "https://registry.npmjs.org/tiny-segmenter/-/tiny-segmenter-0.2.0.tgz",
+    "runtime_file": "vendor/tiny-segmenter-0.2.0/tiny-segmenter-0.2.0.js",
+    "runtime_sha256": "91beda36fe50aa9dc90798f2124a38b45beedcf845120fa4f5550229ef8ebe8d",
+    "package_license_file": "vendor/tiny-segmenter-0.2.0/LICENSE",
+    "package_license_sha256": "afb804e4ef33cdafae12af8bcfc43ff2c817c47fdd5b8f00c7b2efc599ec8b71",
+    "package_license_id": "MIT",
+    "original_notice_file": "vendor/tiny-segmenter-0.2.0/ORIGINAL_LICENSE_NOTICE.txt",
+    "original_notice_sha256": "3a63cc817e1c3789c59c35d2f39f3031761fdec786cf43084b49518551cfe998",
+    "original_license_id": "New BSD License",
+    "original_copyright": "Copyright (c) 2008 Taku Kudo <taku@chasen.org>",
+    "original_notice_source": "Verbatim header comment (lines 1-4) of the shipped tiny-segmenter-0.2.0.js file itself. The full license text at the URL referenced by that header (http://chasen.org/~taku/software/TinySegmenter/LICENCE.txt) could not be fetched in this build environment (host not in the network egress allowlist); this notice file records only the in-file verbatim attribution, not the complete external license document."
+  }
+}
