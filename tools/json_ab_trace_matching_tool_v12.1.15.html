@@ -64,6 +64,8 @@
   <script src="./trace_comparison_review_state_core.js"></script>
   <script src="./trace_comparison_review_session_core.js"></script>
   <script src="./trace_comparison_review_projection_core.js"></script>
+  <!-- B-4b Checkpoint 3: レビュー済みprojectionの正式エクスポート接続（pure export core） -->
+  <script src="./trace_comparison_review_export_core.js"></script>
   <style>
     :root {
       --primary: #2563eb;
@@ -576,6 +578,14 @@
           <button id="b4bDiscardReviewBtn" class="secondary" type="button" disabled>レビューを破棄</button>
         </div>
         <div id="b4bSessionStatusDetail" class="field-hint" role="status">入力・照合・数量bindingが完了すると開始できます。</div>
+      </div>
+      <div class="output-group" id="b4bReviewedExportPanel">
+        <div class="output-group-title">レビュー済み成果物（B-4b, Checkpoint 3・opt-in）</div>
+        <div class="workflow-actions" style="margin-top:0;">
+          <button id="b4bReviewedExportJsonBtn" class="success" type="button" disabled>レビュー済みJSON保存</button>
+          <button id="b4bReviewedExportExcelBtn" class="success" type="button" disabled>レビュー済みExcel保存</button>
+        </div>
+        <div id="b4bReviewedExportStatus" class="field-hint" role="status">レビュー中のsessionから生成します（ready時のみ有効）。</div>
       </div>
       <div class="output-group" id="b4bComparisonPanel" style="display:none;">
         <div class="output-group-title">個別レビュー: <span id="b4bComparisonPanelTitle"></span></div>
@@ -11774,7 +11784,12 @@ ${h.name}`, type:'requirement', detail:srcA };
   window.__v1117=Object.freeze({
     exportSettings, currentSettings, buildMatrixWorksheets, appendTwoDimensionalMatrixSheet,
     buildRoCrateMetadata, validateRoCratePackage, createZipBytes, safeZipBasename, uriPath,
-    captureOriginal, ensureOriginal, downloadRoCrateZip
+    captureOriginal, ensureOriginal, downloadRoCrateZip,
+    // B-4b Checkpoint 3: addJsonSheet/writeWorkbookはこのIIFE内のprivate関数で、
+    // 他のscriptブロックから直接参照できない。reviewed Excel保存(§1、流用可・新規に
+    // 類似ヘルパーを増やさない方針)のため、既存の__v1117公開面へ追記するだけで
+    // 関数の実装自体は変更しない。
+    addJsonSheet, writeWorkbook
   });
 })();
 </script>
@@ -13243,8 +13258,264 @@ ${h.name}`, type:'requirement', detail:srcA };
     renderSessionPanel: () => b4bRenderSessionPanel()
   });
 
+  // ─── B-4b Checkpoint 3向け正式runtime bridge(b4b_checkpoint3_export_design.md §0.2)。
+  //     __b4bCheckpoint2Diagnosticsとは別物で、製品機能(export)が実際に依存する唯一の
+  //     公開面とする。cache参照(matcherAIndex/matcherBIndex/matcherPairIndexというMapを
+  //     含む可変オブジェクト)とreviewSourceEpochは公開せず、WeakMapへ内部CASトークンとして
+  //     隠す(公開してよいのはprojected/session/recordSetの3つのみ)。
+  //     既存のb4bPreconditionError()/b4bCoordinator/b4bProjectionCache/
+  //     recomputeAndCacheProjection()を呼ぶだけで、これらの実装には一切手を入れない。 ───
+  const b4bReviewedExportCaptures = new WeakMap();
+
+  function captureReviewedExportState() {
+    const err = b4bPreconditionError();
+    if (err) return Object.freeze({ ok:false, code:'review_export_not_ready', detail:err });
+    if (b4bCoordinator.isReviewStartInFlight() || b4bCoordinator.isReviewTransitionInFlight()) {
+      return Object.freeze({
+        ok:false, code:'review_export_not_ready', detail:'レビュー操作の処理中です。'
+      });
+    }
+    // 唯一のprojection計算窓口を必ず経由してcacheを最新化してからcaptureする。
+    recomputeAndCacheProjection();
+    const cache = b4bProjectionCache;
+    if (cache.status !== 'ready') {
+      return Object.freeze({
+        ok:false, code:'review_export_not_ready', detail:'projectionCacheがready状態ではありません。'
+      });
+    }
+    const session = b4bCoordinator.getReviewSession();
+    const recordSet = b4bCoordinator.getRecordSetSnapshot();
+    const reviewSourceEpoch = b4bCoordinator.getReviewSourceEpoch();
+    // 公開するcaptureオブジェクトにはprojected/session/recordSetの3つだけを載せる。
+    const capture = Object.freeze({ ok:true, projected: cache.projected, session, recordSet });
+    // cache参照・epochはWeakMap側にのみ保持する(captureそのものをキーにするため、
+    // captureが外部でGCされればエントリも自然に消える)。
+    b4bReviewedExportCaptures.set(capture, { cache, session, recordSet, reviewSourceEpoch });
+    return capture;
+  }
+
+  function reviewedExportStateStillCurrent(capture) {
+    if (!capture || capture.ok !== true) return false;
+    const refs = b4bReviewedExportCaptures.get(capture);
+    if (!refs) return false;  // このIIFEが発行したcaptureでなければ無条件にfalse
+    if (b4bPreconditionError() !== null) return false;
+    if (b4bCoordinator.isReviewStartInFlight() || b4bCoordinator.isReviewTransitionInFlight()) return false;
+    if (b4bProjectionCache !== refs.cache) return false;
+    if (b4bProjectionCache.status !== 'ready') return false;
+    if (b4bCoordinator.getReviewSession() !== refs.session) return false;
+    if (b4bCoordinator.getRecordSetSnapshot() !== refs.recordSet) return false;
+    if (b4bCoordinator.getReviewSourceEpoch() !== refs.reviewSourceEpoch) return false;
+    return true;
+  }
+
+  // 表示専用の読み取りだけのpeek(cache参照・session参照は一切公開しない、booleanのみ返す)。
+  // captureReviewedExportState()と違い、recomputeAndCacheProjection()を呼ばない
+  // (=既存のensureLazyTabRendered()経由の非同期再描画を新たに起こさない)。
+  // b4bRenderSessionPanel()が呼ばれた時点でCheckpoint 2側のrecomputeAndCacheProjection()は
+  // 既に実行済みでb4bProjectionCacheは最新のため、ボタンの有効/無効という表示目的だけなら
+  // 読み直すだけで十分であり、再計算は不要。UIの定期/イベント駆動更新はこちらだけを使い、
+  // 実際のexport実行(クリック時)は引き続きcaptureReviewedExportState()を使う。
+  function peekReviewedExportReady() {
+    if (b4bPreconditionError() !== null) return false;
+    if (b4bCoordinator.isReviewStartInFlight() || b4bCoordinator.isReviewTransitionInFlight()) return false;
+    return b4bProjectionCache.status === 'ready';
+  }
+
+  window.TraceComparisonReviewRuntime = Object.freeze({
+    captureReviewedExportState,
+    reviewedExportStateStillCurrent,
+    peekReviewedExportReady
+  });
+
   recomputeAndCacheProjection();
   b4bRenderSessionPanel();
+})();
+</script>
+
+<script>
+/* B-4b Checkpoint 3: レビュー済みprojectionの正式エクスポート接続。
+   tools/design_notes/b4b_checkpoint3_export_design.md (Rev.6) のcapture→async core→CAS→
+   downloadという順序をそのまま実装する。Checkpoint 2 IIFE(直前のscriptブロック)の既存行、
+   Stage 1〜3 / Checkpoint 1 projection coreは一切変更しない。このブロックは
+   window.TraceComparisonReviewRuntime(§0.2)とTraceComparisonReviewExportCoreだけを使い、
+   b4bCoordinator/b4bProjectionCache/recomputeAndCacheProjection()へ直接触れない。 */
+(function() {
+  'use strict';
+  if (!globalThis.TraceComparisonReviewRuntime
+    || typeof globalThis.TraceComparisonReviewRuntime.captureReviewedExportState !== 'function'
+    || typeof globalThis.TraceComparisonReviewRuntime.reviewedExportStateStillCurrent !== 'function'
+    || typeof globalThis.TraceComparisonReviewRuntime.peekReviewedExportReady !== 'function'
+    || !globalThis.TraceComparisonReviewExportCore
+    || typeof globalThis.TraceComparisonReviewExportCore.buildReviewedExportArtifact !== 'function'
+    || typeof globalThis.TraceComparisonReviewExportCore.buildReviewedExcelSheets !== 'function'
+    || !globalThis.__v1117
+    || typeof globalThis.__v1117.addJsonSheet !== 'function'
+    || typeof globalThis.__v1117.writeWorkbook !== 'function') {
+    console.error('B-4b Checkpoint 3: export runtime bridge / export core / Excel書き出しヘルパーが読み込まれていません。');
+    return;
+  }
+
+  const b4bJsonBtn = document.getElementById('b4bReviewedExportJsonBtn');
+  const b4bExcelBtn = document.getElementById('b4bReviewedExportExcelBtn');
+  const b4bStatusEl = document.getElementById('b4bReviewedExportStatus');
+  let b4bExportBusy = false;
+  let b4bRefreshInFlight = false;
+
+  // Checkpoint 2側のrecomputeAndCacheProjection()は呼ばれるたびensureLazyTabRendered()
+  // 経由で detail table の非同期(fire-and-forget)再描画をスケジュールし、その描画中は
+  // 既存の"画面描画中"jobとしてactiveMatchingJobを一時的に使う。b4bRenderSessionPanel()が
+  // 呼ばれた直後(=このMutationObserverが発火した直後)は、まさにその描画jobがまだ
+  // activeMatchingJobを占有している可能性があるため、captureReviewedExportState()を
+  // 即座に読むと一時的な"処理中"を「本当にexport不可」と誤認して表示が固着しうる。
+  // 他の箇所(b4bWaitMatchingIdle等)と同じidiomで、activeMatchingJobがnullに戻るまで
+  // (上限付きで)待ってから読む。
+  // keepStatusText:true (JSON/Excelクリックハンドラのfinallyから呼ぶ場合)は、
+  // ハンドラ自身が既に設定した最終的な結果メッセージ(成功/失敗/中止)を
+  // このrefreshが上書きしないようにする。ボタンのdisabled状態だけを最新化する。
+  async function b4bReviewedExportRefreshUi(keepStatusText) {
+    if (!b4bJsonBtn || !b4bExcelBtn || !b4bStatusEl || b4bRefreshInFlight) return;
+    b4bRefreshInFlight = true;
+    try {
+      const deadline = Date.now() + 2000;
+      while (activeMatchingJob !== null && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 30));
+      }
+      if (b4bExportBusy) return;  // 進行中は表示を変えない(job完了後に改めて反映される)
+      // 表示更新はpeekReviewedExportReady()だけを使う(recomputeAndCacheProjection()を
+      // 再度呼ばない読み取り専用peek)。実際のexport可否判定・実行は引き続き、
+      // クリック時のcaptureReviewedExportState()(§0.2、常にrecomputeする)が単独で担う。
+      const ready = TraceComparisonReviewRuntime.peekReviewedExportReady();
+      b4bJsonBtn.disabled = !ready;
+      b4bExcelBtn.disabled = !ready;
+      if (keepStatusText) return;
+      b4bStatusEl.textContent = ready
+        ? '保存できます。'
+        : 'レビューを開始すると保存できます。';
+    } finally {
+      b4bRefreshInFlight = false;
+    }
+  }
+
+  async function b4bBuildArtifactOrNull(captured) {
+    const built = await TraceComparisonReviewExportCore.buildReviewedExportArtifact({
+      recordSet: captured.recordSet,
+      session: captured.session,
+      projected: captured.projected,
+      generatedAt: new Date().toISOString(),
+      generator: { tool: 'json_ab_trace_matching_tool_v12.1.15.html', version: '12.1.15' }
+    });
+    if (!built.ok) {
+      b4bStatusEl.textContent = 'レビュー済み成果物の生成に失敗しました（コード: '
+        + (built.diagnostics?.[0]?.code || '不明') + '）。';
+      return null;
+    }
+    // captureReviewedExportState()自身のrecomputeAndCacheProjection()呼び出しが
+    // ensureLazyTabRendered()経由の非同期(fire-and-forget)再描画を必ず1回起こし、
+    // その描画は既存の"画面描画中"jobとしてactiveMatchingJobを一時的に占有する
+    // (実測: 描画完了まで数百ms、build自体は数ms)。この自己誘発の一時busyを
+    // 「レビュー中に本当に状態が変わった」と誤認しないよう、CAS再確認の前に
+    // activeMatchingJobがnullに戻るまで(上限付きで)待つ(他箇所のb4bWaitMatchingIdle
+    // 等と同じidiom)。
+    const deadline = Date.now() + 5000;
+    while (activeMatchingJob !== null && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    if (!TraceComparisonReviewRuntime.reviewedExportStateStillCurrent(captured)) {
+      b4bStatusEl.textContent = 'レビュー中に状態が変わったため保存を中止しました。もう一度お試しください。';
+      return null;
+    }
+    return built.artifact;
+  }
+
+  b4bJsonBtn?.addEventListener('click', async () => {
+    if (b4bExportBusy) return;
+    const captured = TraceComparisonReviewRuntime.captureReviewedExportState();
+    if (!captured.ok) { b4bStatusEl.textContent = captured.detail || '現在は保存できません。'; return; }
+    b4bExportBusy = true;
+    b4bJsonBtn.disabled = true; b4bExcelBtn.disabled = true;
+    b4bStatusEl.textContent = 'レビュー済みJSONを生成中...';
+    try {
+      const artifact = await b4bBuildArtifactOrNull(captured);
+      if (!artifact) return;
+      downloadText(
+        `${safeFileName(graphNameOrDefault())}_trace_comparison_reviewed_V12_1_15.json`,
+        JSON.stringify(artifact, null, 2), 'application/json'
+      );
+      b4bStatusEl.textContent = 'レビュー済みJSONを保存しました。';
+    } catch (err) {
+      // coreが予期せずthrowした場合でも、未処理Promise rejectionにせず
+      // fail-closed(ダウンロードなし・ステータス表示)にする。
+      console.error(err);
+      b4bStatusEl.textContent = 'レビュー済みJSON生成中に予期しないエラーが発生しました: ' + (err && err.message || String(err));
+    } finally {
+      b4bExportBusy = false;
+      b4bReviewedExportRefreshUi(true);
+    }
+  });
+
+  b4bExcelBtn?.addEventListener('click', async () => {
+    if (b4bExportBusy) return;
+    const captured = TraceComparisonReviewRuntime.captureReviewedExportState();
+    if (!captured.ok) { b4bStatusEl.textContent = captured.detail || '現在は保存できません。'; return; }
+    b4bExportBusy = true;
+    b4bJsonBtn.disabled = true; b4bExcelBtn.disabled = true;
+    b4bStatusEl.textContent = 'レビュー済みExcelを生成中...';
+    try {
+      const artifact = await b4bBuildArtifactOrNull(captured);
+      if (!artifact) return;
+      const sheetsResult = TraceComparisonReviewExportCore.buildReviewedExcelSheets(artifact);
+      if (!sheetsResult.ok) {
+        b4bStatusEl.textContent = 'レビュー済みExcelの構築に失敗しました（コード: '
+          + (sheetsResult.diagnostics?.[0]?.code || '不明') + '）。';
+        return;
+      }
+      // job開始はCAS通過より必ず後に行う(activeMatchingJobは単一slotのため、CAS前に
+      // 自分のjobを開始すると自分自身のb4bPreconditionError()が「busy」を返し
+      // 自己拒否になる。b4b_checkpoint3_export_design.md §5.2)。
+      const job = beginMatchingJob('レビュー済みExcel生成中', '生成中止');
+      try {
+        const wb = XLSX.utils.book_new();
+        sheetsResult.sheets.forEach(s => __v1117.addJsonSheet(wb, s.sheetName, s.rows));
+        await __v1117.writeWorkbook(
+          wb, `${safeFileName(graphNameOrDefault())}_trace_comparison_reviewed_V12_1_15.xlsx`, job
+        );
+        finishMatchingJob(job, 'レビュー済みExcel保存完了');
+        b4bStatusEl.textContent = 'レビュー済みExcelを保存しました。';
+      } catch (err) {
+        failMatchingJob(job);
+        if (!(err instanceof MatchingCancelledError)) {
+          console.error(err);
+          b4bStatusEl.textContent = 'レビュー済みExcel出力エラー: ' + err.message;
+        } else {
+          b4bStatusEl.textContent = 'レビュー済みExcelの生成を中止しました。';
+        }
+      }
+    } catch (err) {
+      // b4bBuildArtifactOrNull()/buildReviewedExcelSheets()がjob開始前に予期せずthrow
+      // した場合でも、未処理Promise rejectionにせずfail-closedにする。
+      console.error(err);
+      b4bStatusEl.textContent = 'レビュー済みExcel生成中に予期しないエラーが発生しました: ' + (err && err.message || String(err));
+    } finally {
+      b4bExportBusy = false;
+      b4bReviewedExportRefreshUi(true);
+    }
+  });
+
+  // ボタンの有効/無効の表示更新は、タイマーによる定期ポーリングにはしない。
+  // captureReviewedExportState()は内部でrecomputeAndCacheProjection()を呼ぶため
+  // (§0.2)、無関係なタイマーで頻繁に呼ぶとdetail table再描画が不要に走り、
+  // その再描画中に一時的に立つactiveMatchingJob("画面描画中"job)とユーザーの
+  // クリックが競合してボタン表示とcaptureの実際の可否が食い違う原因になる。
+  // 代わりに、Checkpoint 2のb4bRenderSessionPanel()が実際に呼ばれた時
+  // (=セッション状態が本当に変わった時)にだけ表示を更新する
+  // (#b4bReviewSessionPanel自体はCheckpoint 2の既存要素で、監視するだけで
+  // 変更は加えない)。
+  const b4bReviewSessionPanelEl = document.getElementById('b4bReviewSessionPanel');
+  if (b4bReviewSessionPanelEl) {
+    new MutationObserver(() => b4bReviewedExportRefreshUi())
+      .observe(b4bReviewSessionPanelEl, { characterData: true, childList: true, subtree: true, attributes: true });
+  }
+  b4bReviewedExportRefreshUi();
 })();
 </script>
 
