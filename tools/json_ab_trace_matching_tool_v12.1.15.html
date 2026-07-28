@@ -55,6 +55,17 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <!-- 軽量形態素解析（読み込み失敗時は文字種チャンクに自動フォールバック） -->
   <script src="https://unpkg.com/tiny-segmenter@0.2.0/dist/tiny-segmenter-0.2.0.js" onerror="window.__tsLoadFailed=true"></script>
+  <script src="./generated/quantity_annotation_schema_v1.browser.js"></script>
+  <script src="./quantity_sidecar_binding_core.js"></script>
+  <script src="./generated/trace_comparison_schema_v2.browser.js"></script>
+  <script src="./design_notes/json_schema_minivalidator.js"></script>
+  <script src="./design_notes/trace_comparison_record_set_validator.js"></script>
+  <!-- B-4b Checkpoint 2: レビューsession接続（Stage 1〜3 / Checkpoint 1 projection、いずれも無変更） -->
+  <script src="./trace_comparison_review_state_core.js"></script>
+  <script src="./trace_comparison_review_session_core.js"></script>
+  <script src="./trace_comparison_review_projection_core.js"></script>
+  <!-- B-4b Checkpoint 3: レビュー済みprojectionの正式エクスポート接続（pure export core） -->
+  <script src="./trace_comparison_review_export_core.js"></script>
   <style>
     :root {
       --primary: #2563eb;
@@ -478,6 +489,16 @@
           <input type="file" id="plmFile" accept=".json,application/json" />
         </div>
         <div>
+          <label class="json-side-a-label">数量注釈 A（任意・requirement sidecar）</label>
+          <input type="file" id="sysQuantityFile" accept=".json,application/json" />
+          <div class="field-hint">Phase B結合検証。片側だけでは比較候補を生成しません。</div>
+        </div>
+        <div>
+          <label class="json-side-b-label">数量注釈 B（任意・actual sidecar）</label>
+          <input type="file" id="plmQuantityFile" accept=".json,application/json" />
+          <div class="field-hint">Schema・署名・レコードハッシュ・trace_idを厳密検証します。</div>
+        </div>
+        <div>
           <label>ファイル名プレフィックス</label>
           <input type="text" id="graphName" placeholder="例: project_trace_202607" />
           <div class="field-hint">Excel / SysML / JSON / SVGなどの保存ファイル名の先頭に使います。</div>
@@ -487,6 +508,7 @@
       <div class="workflow-actions">
         <button id="loadBtn" class="primary-action" disabled>読み込み・照合</button>
       </div>
+      <div id="quantityBindingStatus" class="field-hint" role="status">数量注釈sidecarは未選択です。</div>
     </section>
 
     <section class="workflow-section secondary" aria-label="出力・保存">
@@ -535,6 +557,41 @@
         <div class="workflow-actions" style="margin-top:0;">
           <button id="downloadExcelBtn" class="success" disabled>照合結果一覧Excel出力</button>
           <button id="downloadJsonBtn" class="secondary" disabled>JSON DL</button>
+        </div>
+      </div>
+      <div class="output-group">
+        <div class="output-group-title">trace-comparison成果物（opt-in）</div>
+        <div class="workflow-actions" style="margin-top:0;">
+          <button id="traceComparisonDownloadBtn" class="success" type="button">trace-comparison JSONを生成・検証して保存</button>
+        </div>
+        <div id="traceComparisonDownloadStatus" class="field-hint" role="status">ボタンを押すまで生成・検証・保存しません。</div>
+      </div>
+      <div class="output-group" id="b4bReviewSessionPanel">
+        <div class="output-group-title">数量比較レビュー（B-4b, Checkpoint 2・opt-in）</div>
+        <div class="workflow-actions" style="margin-top:0; align-items:center; gap:10px; flex-wrap:wrap;">
+          <span id="b4bSessionStatusBadge" style="display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:700; background:#e2e8f0; color:#334155;">未レビュー</span>
+          <label style="display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:600; color:var(--muted);">
+            レビュー担当者
+            <input id="b4bReviewerInput" type="text" style="width:160px; margin:0; padding:5px 7px;" placeholder="氏名等（開始時に必須）" />
+          </label>
+          <button id="b4bStartReviewBtn" class="success" type="button" disabled>レビュー開始</button>
+          <button id="b4bDiscardReviewBtn" class="secondary" type="button" disabled>レビューを破棄</button>
+        </div>
+        <div id="b4bSessionStatusDetail" class="field-hint" role="status">入力・照合・数量bindingが完了すると開始できます。</div>
+      </div>
+      <div class="output-group" id="b4bReviewedExportPanel">
+        <div class="output-group-title">レビュー済み成果物（B-4b, Checkpoint 3・opt-in）</div>
+        <div class="workflow-actions" style="margin-top:0;">
+          <button id="b4bReviewedExportJsonBtn" class="success" type="button" disabled>レビュー済みJSON保存</button>
+          <button id="b4bReviewedExportExcelBtn" class="success" type="button" disabled>レビュー済みExcel保存</button>
+        </div>
+        <div id="b4bReviewedExportStatus" class="field-hint" role="status">レビュー中のsessionから生成します（ready時のみ有効）。</div>
+      </div>
+      <div class="output-group" id="b4bComparisonPanel" style="display:none;">
+        <div class="output-group-title">個別レビュー: <span id="b4bComparisonPanelTitle"></span></div>
+        <div id="b4bComparisonPanelBody"></div>
+        <div class="workflow-actions" style="margin-top:8px;">
+          <button id="b4bComparisonPanelCloseBtn" class="secondary" type="button">閉じる</button>
         </div>
       </div>
       <div class="output-group">
@@ -1578,6 +1635,10 @@
      状態
   ═══════════════════════════════════════════ */
   let plmData = null, sysData = null, mergedResult = null, cy = null;
+  let quantityBindingState = null;
+  let traceComparisonInputStale = true;
+  let traceComparisonReadyRunId = 0;
+  let traceComparisonDownloadBusy = false;
   let editData = [];          // 表形式編集用データ（sysListのコピー）
   let editHeaders = [];
   let isEditMode = false;
@@ -1596,6 +1657,8 @@
   const $ = id => document.getElementById(id);
   const plmFile       = $('plmFile');
   const sysFile       = $('sysFile');
+  const plmQuantityFile = $('plmQuantityFile');
+  const sysQuantityFile = $('sysQuantityFile');
   const graphName     = $('graphName');
   const loadBtn       = $('loadBtn');
   const saveGraphBtn  = $('saveGraphBtn');
@@ -1607,6 +1670,8 @@
   const jsonldBtn     = $('jsonldBtn');
   const downloadJsonBtn   = $('downloadJsonBtn');
   const downloadExcelBtn  = $('downloadExcelBtn');
+  const traceComparisonDownloadBtn = $('traceComparisonDownloadBtn');
+  const traceComparisonDownloadStatus = $('traceComparisonDownloadStatus');
   const dlDetailExcelBtn  = $('dlDetailExcelBtn');
   const statusEl      = $('status');
   const outputArea    = $('outputArea');
@@ -1646,6 +1711,123 @@
       r.readAsText(file, 'UTF-8');
     });
   }
+
+  function quantityBindingSummary(state = quantityBindingState) {
+    if (!state) return { phase:'not_selected', ready:false, diagnostics:[], boundRequirement:0, boundActual:0, notAnalyzed:0, comparisonCandidates:0, satisfactionJudgements:0 };
+    return {
+      phase:'binding_only', ready:!!state.ready,
+      diagnostics:(state.diagnostics || []).map(d => ({ ...d })),
+      boundRequirement:(state.requirement?.bindings || []).filter(b => b.status === 'bound').length,
+      boundActual:(state.actual?.bindings || []).filter(b => b.status === 'bound').length,
+      notAnalyzed:(state.not_analyzed || []).length,
+      comparisonCandidates:(state.comparison_candidates || []).length,
+      satisfactionJudgements:(state.satisfaction_judgements || []).length
+    };
+  }
+
+  // Phase B-2: 次元候補は、結合状態(quantityBindingState)とtraceMatrixRows(照合行)の両方に
+  // 依存する。traceMatrixRowsは読み込み・照合フローの複数箇所(初回照合・再照合・phase7関連付け等)
+  // で更新されるため、loadQuantityBindings()の時点(traceMatrixRowsがまだ確定していないことがある)で
+  // 一度だけ計算してキャッシュすると、その後の再照合で古い照合行のまま表示され続ける危険がある
+  // (このプロジェクトでフェーズAから繰り返し問題になってきた「stale化した中間状態の使い回し」と
+  // 同種の欠陥になる)。そのため計算結果をキャッシュせず、参照するたびにtraceMatrixRowsの
+  // 現在値から都度再計算する。
+  function currentQuantityDimensionState() {
+    if (!quantityBindingState || !quantityBindingState.ready || !globalThis.QuantitySidecarBinding) return null;
+    return globalThis.QuantitySidecarBinding.generateDimensionCandidates({
+      binding:quantityBindingState,
+      relations:(traceMatrixRows || []).map(row => globalThis.QuantitySidecarBinding.relationRefs(row))
+    });
+  }
+
+  // 「圧縮された未解析レコード数」(not_analyzedの件数=圧縮バケット数+dimension_unavailable
+  // 個別件数)と、「excluded_pair_count合計」(実際に除外された数量ペアの総数)は必ず区別して
+  // 見せる——前者は監査記録の件数、後者は実際に比較を諦めた数量ペアの数であり、圧縮バケット1件が
+  // 数百件のペアを表すこともあるため、同じ数値として混同しないようにする(必須修正5)。
+  function quantityDimensionSummary(state = currentQuantityDimensionState()) {
+    if (!state) return { phase:'not_generated', ready:false, diagnostics:[], candidateCount:0, candidateBucketCount:0, notAnalyzedRecordCount:0, excludedPairCount:0 };
+    const dimensionMismatchBuckets = (state.not_analyzed || []).filter(n => n.reason_code === 'dimension_mismatch').length;
+    const dimensionUnavailableCount = (state.not_analyzed || []).filter(n => n.reason_code === 'dimension_unavailable').length;
+    return {
+      phase:'dimension_stage', ready:!!state.ready,
+      diagnostics:(state.diagnostics || []).map(d => ({ ...d })),
+      candidateCount:state.candidate_count || 0,
+      candidateBucketCount:state.candidate_bucket_count || 0,
+      notAnalyzedRecordCount:(state.not_analyzed || []).length,
+      dimensionMismatchBuckets, dimensionUnavailableCount,
+      excludedPairCount:state.excluded_pair_count || 0
+    };
+  }
+
+  function renderQuantityBindingStatus() {
+    const el = $('quantityBindingStatus');
+    if (!el) return;
+    if (!quantityBindingState) {
+      el.textContent = '数量注釈sidecarは未選択です。既存のトレース照合だけを実行します。';
+      return;
+    }
+    const s = quantityBindingSummary();
+    if (!s.ready) {
+      const counts = {};
+      s.diagnostics.forEach(d => { counts[d.code] = (counts[d.code] || 0) + 1; });
+      const detail = Object.entries(counts).map(([code, count]) => `${code}:${count}`).join(' / ');
+      el.textContent = `数量注釈を結合できません（${detail || '診断なし'}）。不整合データから比較候補・充足判定は生成しません。`;
+      return;
+    }
+    const ds = quantityDimensionSummary();
+    let text = `数量注釈の厳密結合が完了しました（要求 ${s.boundRequirement}件 / 実仕様 ${s.boundActual}件` + (s.notAnalyzed ? ` / 未解析 ${s.notAnalyzed}件` : '') + `）。`;
+    if (ds.phase === 'dimension_stage') {
+      if (ds.ready) {
+        // 「圧縮された未解析レコード数」と「除外された数量ペアの実数(excluded_pair_count合計)」は
+        // 異なる粒度の数値のため、必ず別々に表示する(必須修正5)。
+        text += ` 次元候補ペア(未展開): ${ds.candidateCount}件 / 同一次元バケット ${ds.candidateBucketCount}件` +
+          (ds.notAnalyzedRecordCount ? ` / 未解析レコード(圧縮後) ${ds.notAnalyzedRecordCount}件（うち次元不一致バケット ${ds.dimensionMismatchBuckets}件・次元未設定 ${ds.dimensionUnavailableCount}件）` : '') +
+          (ds.excludedPairCount ? ` / 除外された数量ペアの実数 ${ds.excludedPairCount}件（圧縮前の合計）` : '') +
+          `。段階2以降（設計特性候補・条件候補・comparisonMode導出）は未実装です。`;
+      } else {
+        const dCounts = {};
+        ds.diagnostics.forEach(d => { dCounts[d.code] = (dCounts[d.code] || 0) + 1; });
+        const dDetail = Object.entries(dCounts).map(([code, count]) => `${code}:${count}`).join(' / ');
+        text += ` 次元候補は生成できません（${dDetail || '診断なし'}）。`;
+      }
+    } else {
+      text += ` Phase B-1では比較候補・数値比較・充足判定を生成しません。`;
+    }
+    el.textContent = text;
+  }
+
+  async function loadQuantityBindings() {
+    const requirementFile = sysQuantityFile?.files?.[0] || null;
+    const actualFile = plmQuantityFile?.files?.[0] || null;
+    if (!requirementFile && !actualFile) {
+      quantityBindingState = null;
+      renderQuantityBindingStatus();
+      return null;
+    }
+    if (!globalThis.QuantitySidecarBinding) throw new Error('数量注釈結合コアを読み込めませんでした。quantity_sidecar_binding_core.jsをHTMLと同じフォルダへ配置してください。');
+    const requirementAnnotation = requirementFile ? await readJsonFile(requirementFile) : null;
+    const actualAnnotation = actualFile ? await readJsonFile(actualFile) : null;
+    quantityBindingState = await globalThis.QuantitySidecarBinding.bindInputPair({
+      requirementTrace:sysData, requirementAnnotation,
+      actualTrace:plmData, actualAnnotation
+    });
+    // この時点ではtraceMatrixRowsがまだ確定していない(照合はこの後に走る)ため、次元候補の
+    // 計算はここでは行わない。renderQuantityBindingStatus()呼び出し側・診断用アクセサ双方が
+    // currentQuantityDimensionState()を通じてtraceMatrixRows確定後に都度再計算する。
+    renderQuantityBindingStatus();
+    return quantityBindingState;
+  }
+
+  window.__quantityBindingDiagnostics = Object.freeze({
+    state:() => quantityBindingState ? JSON.parse(JSON.stringify(quantityBindingState)) : null,
+    summary:() => quantityBindingSummary(),
+    dimensionState:() => { const s = currentQuantityDimensionState(); return s ? JSON.parse(JSON.stringify(s)) : null; },
+    dimensionSummary:() => quantityDimensionSummary(),
+    relationRows:() => (traceMatrixRows || []).filter(row => row?.requirement_trace_id && row?.actual_trace_id && row?.matcher_a_id && row?.matcher_b_id).map(row => ({
+      ...globalThis.QuantitySidecarBinding.relationRefs(row),
+      ...(traceComparisonRelationship(row) || {})
+    }))
+  });
   function normalizeText(v) {
     if (v == null) return '';
     return String(v).replace(/\r\n/g,'\n').replace(/\u3000/g,' ').trim();
@@ -1657,6 +1839,76 @@
     a.href = URL.createObjectURL(new Blob([text],{type:mime}));
     a.download = filename; document.body.appendChild(a); a.click(); a.remove();
   }
+
+  function traceComparisonDiagnosticSummary(envelope, validation) {
+    const diagnostics = Array.isArray(envelope?.diagnostics) ? envelope.diagnostics : [];
+    const schemaErrors = Array.isArray(validation?.schema_errors) ? validation.schema_errors : [];
+    const semanticErrors = Array.isArray(validation?.semantic_errors) ? validation.semantic_errors : [];
+    const codes = diagnostics.map(item => normalizeText(item?.code || item?.reason_code)).filter(Boolean);
+    const semanticCodes = semanticErrors.map(item => normalizeText(item).split(':')[0]).filter(Boolean);
+    const majorCodes = [...new Set([...codes, ...semanticCodes])].slice(0, 5);
+    return `diagnostics ${diagnostics.length}件 / schema_errors ${schemaErrors.length}件 / semantic_errors ${semanticErrors.length}件` +
+      (majorCodes.length ? ` / 主なコード: ${majorCodes.join(', ')}` : '');
+  }
+
+  async function downloadTraceComparisonRecordSet() {
+    if (traceComparisonDownloadBusy) return;
+    traceComparisonDownloadBusy = true;
+    if (traceComparisonDownloadBtn) traceComparisonDownloadBtn.disabled = true;
+    if (traceComparisonDownloadStatus) traceComparisonDownloadStatus.textContent = '生成・検証中です。';
+    let envelope = null;
+    let validation = null;
+    try {
+      if (activeMatchingJob) {
+        throw new Error('照合または成果物処理の実行中です。完了後に再実行してください。');
+      }
+      const core = globalThis.QuantitySidecarBinding;
+      const validator = globalThis.TraceComparisonRecordSetValidator;
+      if (!core || typeof core.generateTraceComparisonRecordSet !== 'function'
+          || !globalThis.TraceComparisonSchemaV2 || !globalThis.JsonSchemaMinivalidator
+          || !validator || typeof validator.validateTraceComparisonRecordSet !== 'function') {
+        throw new Error('browser依存globalが不足しています。');
+      }
+      if (traceComparisonInputStale || traceComparisonReadyRunId !== matchRunSeq || traceMatrixStale === true
+          || mergedResult?.metadata?.matchStatus !== 'matched') {
+        throw new Error('現在の入力に対する照合が未完了、または照合結果が陳腐化しています。');
+      }
+      if (!quantityBindingState) throw new Error('数量注釈bindingがありません。');
+      if (quantityBindingState.ready !== true) throw new Error('数量注釈bindingがreadyではありません。');
+      const relationAccessor = globalThis.__quantityBindingDiagnostics?.relationRows;
+      if (typeof relationAccessor !== 'function') throw new Error('正式なrelation accessorがありません。');
+      const generatedAt = new Date().toISOString();
+      envelope = core.generateTraceComparisonRecordSet({
+        binding:quantityBindingState,
+        relations:relationAccessor(),
+        generatedAt,
+        generator:{ tool:'json_ab_trace_matching_tool_v12.1.15.html', version:'12.1.15' },
+        displayContext:{ matching_dataset_signature:globalThis.__currentDatasetSignature() }
+      });
+      if (envelope?.ready !== true || envelope?.result_complete !== true || envelope?.record_set === null || envelope?.record_set === undefined) {
+        throw new Error('producerが完全なrecord_setを生成しませんでした。');
+      }
+      validation = validator.validateTraceComparisonRecordSet(envelope.record_set);
+      if (!validation || validation.valid !== true) throw new Error('browser validatorがrecord_setを拒否しました。');
+      let json;
+      try { json = JSON.stringify(envelope.record_set, null, 2) + '\n'; }
+      catch (_) { throw new Error('record_setのJSON直列化に失敗しました。'); }
+      const filename = `${safeFileName(graphNameOrDefault())}_trace_comparison_rc2.json`;
+      downloadText(filename, json, 'application/json;charset=utf-8');
+      if (traceComparisonDownloadStatus) traceComparisonDownloadStatus.textContent = `検証済みrecord_setを保存しました: ${filename}`;
+    } catch (error) {
+      const detail = traceComparisonDiagnosticSummary(envelope, validation);
+      if (traceComparisonDownloadStatus) traceComparisonDownloadStatus.textContent = `保存を中止しました: ${error?.message || '不明なエラー'}（${detail}）`;
+    } finally {
+      traceComparisonDownloadBusy = false;
+      if (traceComparisonDownloadBtn) traceComparisonDownloadBtn.disabled = false;
+    }
+  }
+
+  [sysFile, plmFile, sysQuantityFile, plmQuantityFile].filter(Boolean).forEach(input => {
+    input.addEventListener('change', () => { traceComparisonInputStale = true; });
+  });
+  traceComparisonDownloadBtn?.addEventListener('click', downloadTraceComparisonRecordSet);
   function escapeHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
                     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -1997,6 +2249,10 @@
 
     const resultStart = perfNow();
     traceMatrixRows = applyTraceDiff(buildTraceMatrixRows(sysList, plmList));
+    // traceMatrixRowsがこの照合実行分で確定したので、次元候補(currentQuantityDimensionState()、
+    // Phase B-2)を含む数量注釈結合状態の表示をここで更新する。loadQuantityBindings()の時点では
+    // まだ照合前でtraceMatrixRowsが確定していないため、そこでは更新しない(1750行目付近のコメント参照)。
+    renderQuantityBindingStatus();
     const resultBuildMs = perfNow() - resultStart;
     const timing = {
       annotationMs,
@@ -2025,7 +2281,8 @@
       created_at: new Date().toISOString(),
       metadata: { plmCount:plmList.length, sysCount:sysList.length,
         inputAdapters:{ plm:preparedPlm.adapter, sys:preparedSys.adapter },
-        traceProfile: activeTraceProfile().label, traceProfileId: matchLogic.traceProfile || 'generic', matchStatus:'loaded-only' },
+        traceProfile: activeTraceProfile().label, traceProfileId: matchLogic.traceProfile || 'generic', matchStatus:'loaded-only',
+        quantityBinding:quantityBindingSummary() },
       nodes:[], edges:[], sysml_text:'', sysList, plmList
     };
     traceMatrixRows = [];
@@ -2383,6 +2640,14 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   }
 
   function extractRecordList(data, schemaName) {
+    // 明示的な照合用JSON形式(_trace_records)を最優先で採用する。
+    // findRecordArrays()は配列検出がスキーマ非依存(実質「最大配列」選択)のため、
+    // source_record等の内部にこれより大きい配列が混入すると誤選択される
+    // (tools/design_notes/runtime_fixtures/runtime_verification.md で実証済み)。
+    if (isPlainObject(data) && Array.isArray(data._trace_records)) {
+      return { list: data._trace_records, path: '$._trace_records', candidates: [] };
+    }
+
     const candidates = findRecordArrays(data)
       .filter(c => Array.isArray(c.list) && collectObjectRows(c.list, 5).length)
       .map(c => ({ ...c, score: arrayScoreForSchema(c.list, schemaName) }))
@@ -2722,6 +2987,28 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   function setHiddenRowProp(row, key, value) {
     if (!row || typeof row !== 'object') return;
     Object.defineProperty(row, key, { value, writable:true, configurable:true, enumerable:false });
+  }
+
+  function setTraceComparisonRelationship(row, relationship) {
+    if (!row || typeof row !== 'object' || !relationship) return row;
+    setHiddenRowProp(row, '_traceComparisonRelationship', Object.freeze({
+      source:relationship.source ?? null,
+      match_method:relationship.match_method ?? null,
+      match_confidence:relationship.match_confidence ?? null,
+      review_category:relationship.review_category ?? null,
+      linked_at:relationship.linked_at ?? null
+    }));
+    return row;
+  }
+
+  function traceComparisonRelationship(row) {
+    const relationship = row?._traceComparisonRelationship;
+    return relationship && typeof relationship === 'object' ? relationship : null;
+  }
+
+  function copyTraceComparisonRelationship(source, target) {
+    const relationship = traceComparisonRelationship(source);
+    return relationship ? setTraceComparisonRelationship(target, relationship) : target;
   }
 
   function annotateGranularity(rows, schemaName) {
@@ -6308,11 +6595,13 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     if (!confirmChunkWorkIfNeeded(mergedResult.sysList)) { statusEl.textContent = '文チャンク再照合をキャンセルしました。'; return; }
     const runId = ++matchRunSeq;
     const job = beginMatchingJob('再照合中');
+    traceComparisonInputStale = true;
+    traceComparisonReadyRunId = 0;
     try {
       const sysList = mergedResult.sysList;
       const plmList = mergedResult.plmList;
       await runAsyncMatchPipeline(sysList, plmList, job, '再照合中');
-      if (runId !== matchRunSeq) throw new MatchingCancelledError('古い照合結果を破棄しました。');
+      if (runId !== matchRunSeq || activeMatchingJob !== job) throw new MatchingCancelledError('古い照合結果を破棄しました。');
       mergedResult.created_at = new Date().toISOString();
       mergedResult.metadata = { ...(mergedResult.metadata || {}), matchStatus:'matched', traceProfile:activeTraceProfile().label, traceProfileId:matchLogic.traceProfile || 'generic' };
       mergedResult.nodes = [];
@@ -6323,6 +6612,10 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       dlDetailExcelBtn.disabled = false;
       [downloadBtn, downloadJsonBtn, downloadExcelBtn, saveGraphBtn, saveSvgBtn, dlDetailExcelBtn, reqifBtn, jsonldBtn].forEach(b => { if (b) b.disabled=false; });
       await ensureLazyTabRenderedAsync(currentTabId());
+      assertMatchingNotCancelled(job);
+      if (runId !== matchRunSeq || activeMatchingJob !== job) throw new MatchingCancelledError('古い照合結果を破棄しました。');
+      traceComparisonReadyRunId = runId;
+      traceComparisonInputStale = false;
       const completedStatus = '再照合が完了しました。グラフ・照合結果一覧・モデルテキストは各タブを開いた時に生成します。' + (formatMatchPerformance() ? ` ${formatMatchPerformance()}` : '');
       finishMatchingJob(job, '再照合完了');
       statusEl.textContent = completedStatus;
@@ -7004,7 +7297,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       let diff = '変化なし';
       if (!prev) diff = '新規';
       else if (String(prev['分類'] || '') !== String(r['分類'] || '') || String(prev['方式'] || '') !== String(r['方式'] || '') || String(prev['信頼度'] || '') !== String(r['信頼度'] || '')) diff = '変更';
-      return { ...r, '差分': diff };
+      return copyTraceComparisonRelationship(r, { ...r, '差分': diff });
     });
     Object.entries(traceBaselineSnapshot.pairs).forEach(([key, prev]) => {
       if (seen.has(key)) return;
@@ -7696,7 +7989,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       if (!matches.length) {
         const key = traceReviewKeyFromValues(aId, '', 'A未対応');
         const rv = traceReviewFor(key);
-        rows.push({ '_reviewKey':key, ...aHidden, '_bParentKey':'', '_bParentLabel':'', '_bGroupKey':'', '_bGroupLabel':'', '_bGranularityRule':'', '分類':'A未対応', 'A_ID':aId, 'A_表示名':aTitle, 'A_照合値':aText, 'B_ID':'', 'B_表示名':'', 'B_照合値':'', '信頼度':'', '方式':'', '根拠':'対応先なし', 'レビュー判定':rv.label || '', 'レビューコメント':rv.comment || '' });
+        rows.push({ '_reviewKey':key, ...aHidden, '_bParentKey':'', '_bParentLabel':'', '_bGroupKey':'', '_bGroupLabel':'', '_bGranularityRule':'', requirement_trace_id:normalizeText(item?.trace_id) || null, actual_trace_id:null, matcher_a_id:aId, matcher_b_id:null, '分類':'A未対応', 'A_ID':aId, 'A_表示名':aTitle, 'A_照合値':aText, 'B_ID':'', 'B_表示名':'', 'B_照合値':'', '信頼度':'', '方式':'', '根拠':'対応先なし', 'レビュー判定':rv.label || '', 'レビューコメント':rv.comment || '' });
       }
       else matches.forEach((m, mi) => {
         const bId = plmUniqueKey(m, mi);
@@ -7706,7 +7999,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         const category = matchHasGate(m) ? '要確認' : traceJudgement(m.matchMethod, m.confidence);
         const reviewKey = traceReviewKeyFromValues(aId, bId, category);
         const review = traceReviewFor(reviewKey);
-        rows.push({
+        const row = {
           '_reviewKey': reviewKey,
           ...aHidden,
           '_bParentKey': bMeta.parentKey,
@@ -7717,6 +8010,10 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
           '_matchedChunk': m._matchedChunk || null,
           '_chunkMatches': Array.isArray(m._chunkMatches) ? m._chunkMatches : [],
           '_tagEvidence': m._tagEvidence ? JSON.parse(JSON.stringify(m._tagEvidence)) : null,
+          requirement_trace_id: normalizeText(item?.trace_id) || null,
+          actual_trace_id: normalizeText(srcB?.trace_id) || null,
+          matcher_a_id: aId,
+          matcher_b_id: bId,
           '分類': category,
           'A_ID': aId,
           'A_表示名': aTitle,
@@ -7729,7 +8026,12 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
           '根拠': traceEvidenceForMatch(m),
           'レビュー判定': review.label || '',
           'レビューコメント': review.comment || ''
-        });
+        };
+        rows.push(setTraceComparisonRelationship(row, {
+          source:'matching_engine', match_method:m.matchMethod,
+          match_confidence:Number((m.confidence || 0).toFixed(2)), review_category:category,
+          linked_at:null
+        }));
       });
     });
     plmList.forEach((plm, idx) => {
@@ -7738,7 +8040,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         const bMeta = granularityMeta(plm, bId);
         const key = traceReviewKeyFromValues('', bId, 'B未参照');
         const rv = traceReviewFor(key);
-        rows.push({ '_reviewKey':key, '_aParentKey':'', '_aParentLabel':'', '_aGroupKey':'', '_aGroupLabel':'', '_aGranularityRule':'', '_bParentKey':bMeta.parentKey, '_bParentLabel':bMeta.parentLabel, '_bGroupKey':bMeta.groupKey, '_bGroupLabel':bMeta.groupLabel, '_bGranularityRule':bMeta.rule, '分類':'B未参照', 'A_ID':'', 'A_表示名':'', 'A_照合値':'', 'B_ID':bId, 'B_表示名':plmDisplayName(plm, idx), 'B_照合値':plmModelText(plm), '信頼度':'', '方式':'', '根拠':'A側から参照なし', 'レビュー判定':rv.label || '', 'レビューコメント':rv.comment || '' });
+        rows.push({ '_reviewKey':key, '_aParentKey':'', '_aParentLabel':'', '_aGroupKey':'', '_aGroupLabel':'', '_aGranularityRule':'', '_bParentKey':bMeta.parentKey, '_bParentLabel':bMeta.parentLabel, '_bGroupKey':bMeta.groupKey, '_bGroupLabel':bMeta.groupLabel, '_bGranularityRule':bMeta.rule, requirement_trace_id:null, actual_trace_id:normalizeText(plm?.trace_id) || null, matcher_a_id:null, matcher_b_id:bId, '分類':'B未参照', 'A_ID':'', 'A_表示名':'', 'A_照合値':'', 'B_ID':bId, 'B_表示名':plmDisplayName(plm, idx), 'B_照合値':plmModelText(plm), '信頼度':'', '方式':'', '根拠':'A側から参照なし', 'レビュー判定':rv.label || '', 'レビューコメント':rv.comment || '' });
       }
     });
     return rows;
@@ -8851,10 +9153,21 @@ ${h.name}`, type:'requirement', detail:srcA };
   function updateLoadButton() { loadBtn.disabled = !!activeMatchingJob || !(plmFile.files.length && sysFile.files.length); }
   plmFile.addEventListener('change', updateLoadButton);
   sysFile.addEventListener('change', updateLoadButton);
+  const invalidateQuantityBindingSelection = () => {
+    quantityBindingState = null;
+    const el = $('quantityBindingStatus');
+    if (el) el.textContent = '入力選択が変更されました。「読み込み・照合」で数量注釈を再検証してください。';
+  };
+  plmFile.addEventListener('change', invalidateQuantityBindingSelection);
+  sysFile.addEventListener('change', invalidateQuantityBindingSelection);
+  plmQuantityFile?.addEventListener('change', invalidateQuantityBindingSelection);
+  sysQuantityFile?.addEventListener('change', invalidateQuantityBindingSelection);
 
   loadBtn.addEventListener('click', async () => {
     const runId = ++matchRunSeq;
     const job = beginMatchingJob('読み込み中');
+    traceComparisonInputStale = true;
+    traceComparisonReadyRunId = 0;
     try {
       updateMatchingProgress(job, { phase:'読み込み中', current:0, total:5, detail:'JSONファイルを解析中' });
       resetRuntimeCaches();
@@ -8863,6 +9176,8 @@ ${h.name}`, type:'requirement', detail:srcA };
       plmData = await readJsonFile(plmFile.files[0]);
       assertMatchingNotCancelled(job);
       sysData = await readJsonFile(sysFile.files[0]);
+      assertMatchingNotCancelled(job);
+      await loadQuantityBindings();
       assertMatchingNotCancelled(job);
       updateMatchingProgress(job, { phase:'読み込み中', current:1, total:5, detail:'入力JSONを正規化中' });
       await yieldToUi(0);
@@ -8909,7 +9224,7 @@ ${h.name}`, type:'requirement', detail:srcA };
 
       const autoRun = shouldAutoRunAfterLoad(sysList, plmList);
       if (!autoRun) {
-        if (runId !== matchRunSeq) throw new MatchingCancelledError('古い読み込み結果を破棄しました。');
+        if (runId !== matchRunSeq || activeMatchingJob !== job) throw new MatchingCancelledError('古い読み込み結果を破棄しました。');
         markLazyRenderDirty('loaded-only');
         await ensureLazyTabRenderedAsync(currentTabId());
         const adapterNote = [preparedSys.adapter?.used ? `A側:${preparedSys.adapter.kind}` : '', preparedPlm.adapter?.used ? `B側:${preparedPlm.adapter.kind}` : ''].filter(Boolean).join(' / ');
@@ -8926,7 +9241,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       updateMatchingProgress(job, { phase:'照合中', current:3, total:5, detail:'候補を評価中' });
       await runAsyncMatchPipeline(sysList, plmList, job, '照合中');
       assertMatchingNotCancelled(job);
-      if (runId !== matchRunSeq) throw new MatchingCancelledError('古い照合結果を破棄しました。');
+      if (runId !== matchRunSeq || activeMatchingJob !== job) throw new MatchingCancelledError('古い照合結果を破棄しました。');
 
       mergedResult.metadata.matchStatus = 'matched';
       mergedResult.nodes = [];
@@ -8945,6 +9260,10 @@ ${h.name}`, type:'requirement', detail:srcA };
       const adapterNote = [preparedSys.adapter?.used ? `A側:${preparedSys.adapter.kind}` : '', preparedPlm.adapter?.used ? `B側:${preparedPlm.adapter.kind}` : ''].filter(Boolean).join(' / ');
       const fastNote = genericFastLoadNote(sysList, plmList);
       updateMatchingProgress(job, { phase:'完了', current:5, total:5, detail:'完了' });
+      assertMatchingNotCancelled(job);
+      if (runId !== matchRunSeq || activeMatchingJob !== job) throw new MatchingCancelledError('古い照合結果を破棄しました。');
+      traceComparisonReadyRunId = runId;
+      traceComparisonInputStale = false;
       const completedStatus = '読み込み・照合が完了しました。グラフ・照合結果一覧・モデルテキストは各タブを開いた時に生成します。' + (keyPairReconcileNotice ? ` ${keyPairReconcileNotice}` : '') + (formatMatchPerformance() ? ` ${formatMatchPerformance()}` : '') + (adapterNote ? ` 文書JSON正規化: ${adapterNote}` : '') + (fastNote ? ` ${fastNote}` : '');
       finishMatchingJob(job, '読み込み・照合完了');
       statusEl.textContent = completedStatus;
@@ -9323,6 +9642,10 @@ ${h.name}`, type:'requirement', detail:srcA };
       '_bGranularityRule': base._bGranularityRule || overrides._bGranularityRule || '',
       '_matchedChunk': base._matchedChunk || null,
       '_chunkMatches': Array.isArray(base._chunkMatches) ? base._chunkMatches : [],
+      requirement_trace_id: base.requirement_trace_id || overrides.requirement_trace_id || null,
+      actual_trace_id: base.actual_trace_id || overrides.actual_trace_id || null,
+      matcher_a_id: base.matcher_a_id || overrides.matcher_a_id || base['A_ID'] || overrides.A_ID || null,
+      matcher_b_id: base.matcher_b_id || overrides.matcher_b_id || base['B_ID'] || overrides.B_ID || null,
       '分類': effective.judgement,
       '機械判定': auto.exists ? auto.judgement : (overrides.autoJudgement || '候補消滅'),
       'レビュー判定': label,
@@ -9345,7 +9668,14 @@ ${h.name}`, type:'requirement', detail:srcA };
       'レビューコメント': normalizeReviewRecord(review).comment || ''
     };
     if (base['差分']) row['差分'] = base['差分'];
-    return row;
+    const originalRelationship = traceComparisonRelationship(base) || traceComparisonRelationship(overrides);
+    return setTraceComparisonRelationship(row, {
+      source:originalRelationship?.source || (effective.source === 'manual' ? 'manual' : 'matching_engine'),
+      match_method:originalRelationship?.match_method ?? (auto.method || (effective.source === 'manual' ? 'manual' : null)),
+      match_confidence:originalRelationship?.match_confidence ?? (effective.source === 'manual' ? null : auto.confidence),
+      review_category:originalRelationship?.review_category || effective.judgement,
+      linked_at:originalRelationship?.linked_at ?? null
+    });
   }
 
   function currentSourceMaps(sysList, plmList) {
@@ -9374,8 +9704,8 @@ ${h.name}`, type:'requirement', detail:srcA };
       const review = traceReviewFor(key);
       const manual = activeManualRelation(key);
       const effective = resolveEffectiveRelation(autoRelationFromRow(autoRow), review, manual);
-      pairRows.push(orderedEffectiveRow({ ...autoRow, _reviewKey:key }, review, effective, {
-        relationSource:manual ? 'manual' : 'auto', manualRelation:manual, replacementId:manual?.replacementId || ''
+      pairRows.push(orderedEffectiveRow(autoRow, review, effective, {
+        _reviewKey:key, relationSource:manual ? 'manual' : 'auto', manualRelation:manual, replacementId:manual?.replacementId || ''
       }));
       seen.add(key);
     });
@@ -9393,10 +9723,13 @@ ${h.name}`, type:'requirement', detail:srcA };
         '_reviewKey':key, '_autoExists':false,
         '_aParentKey':aMeta.parentKey, '_aParentLabel':aMeta.parentLabel, '_aGroupKey':aMeta.groupKey, '_aGroupLabel':aMeta.groupLabel, '_aGranularityRule':aMeta.rule,
         '_bParentKey':bMeta.parentKey, '_bParentLabel':bMeta.parentLabel, '_bGroupKey':bMeta.groupKey, '_bGroupLabel':bMeta.groupLabel, '_bGranularityRule':bMeta.rule,
+        requirement_trace_id:normalizeText(aEntry.row?.trace_id) || null, actual_trace_id:normalizeText(bEntry.row?.trace_id) || null,
+        matcher_a_id:manual.aId, matcher_b_id:manual.bId,
         '分類':manual.judgement, 'A_ID':manual.aId, 'A_表示名':sysDisplayName(aEntry.row, aEntry.idx), 'A_照合値':sysAffectedText(aEntry.row),
         'B_ID':manual.bId, 'B_表示名':plmDisplayName(bEntry.row, bEntry.idx), 'B_照合値':plmModelText(bEntry.row),
         '信頼度':'', '方式':'manual', '根拠':manual.comment ? `手動追加: ${manual.comment}` : '人が追加した関係'
       };
+      setTraceComparisonRelationship(synthetic, { source:'manual', match_method:'manual', match_confidence:null, review_category:manual.judgement, linked_at:null });
       const review = traceReviewFor(key);
       const effective = resolveEffectiveRelation({ exists:false, active:false, judgement:'候補なし', confidence:null, method:'manual', evidence:synthetic['根拠'] }, review, manual);
       pairRows.push(orderedEffectiveRow(synthetic, review, effective, { autoJudgement:'候補なし', relationSource:'manual', manualRelation:manual, replacementId:manual.replacementId || '' }));
@@ -9417,6 +9750,8 @@ ${h.name}`, type:'requirement', detail:srcA };
         '_reviewKey':key, '_autoExists':false,
         '_aParentKey':aMeta.parentKey, '_aParentLabel':aMeta.parentLabel, '_aGroupKey':aMeta.groupKey, '_aGroupLabel':aMeta.groupLabel, '_aGranularityRule':aMeta.rule,
         '_bParentKey':bMeta.parentKey, '_bParentLabel':bMeta.parentLabel, '_bGroupKey':bMeta.groupKey, '_bGroupLabel':bMeta.groupLabel, '_bGranularityRule':bMeta.rule,
+        requirement_trace_id:normalizeText(aEntry.row?.trace_id) || null, actual_trace_id:normalizeText(bEntry.row?.trace_id) || null,
+        matcher_a_id:parsed.aId, matcher_b_id:parsed.bId,
         '分類':normalizeText(autoAtReview.judgement || '候補消滅'),
         'A_ID':parsed.aId, 'A_表示名':sysDisplayName(aEntry.row, aEntry.idx), 'A_照合値':sysAffectedText(aEntry.row),
         'B_ID':parsed.bId, 'B_表示名':plmDisplayName(bEntry.row, bEntry.idx), 'B_照合値':plmModelText(bEntry.row),
@@ -9475,7 +9810,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       const review = traceReviewFor(key);
       const auto = autoRelationFromRow(row);
       const effective = resolveEffectiveRelation(auto, review, null);
-      return orderedEffectiveRow({ ...row, _reviewKey:key }, review, effective);
+      return orderedEffectiveRow(row, review, effective, { _reviewKey:key });
     });
   }
 
@@ -9552,6 +9887,9 @@ ${h.name}`, type:'requirement', detail:srcA };
       renderDirty.trace = false;
       postProcessTraceMatrix();
     }
+    // 手動追加・削除・付け替えでもtraceMatrixRowsが変わるため、数量ステータスを同じ
+    // invalidation経路で必ず再描画する。診断APIだけ最新で表示だけ古い状態を残さない。
+    renderQuantityBindingStatus();
   }
 
   function relationDisplayLabel(row) {
@@ -10453,6 +10791,7 @@ ${h.name}`, type:'requirement', detail:srcA };
     const base = [matchLogic.traceProfile || 'generic', activeKeyPairsKey(), aIds.join('\u001f'), bIds.join('\u001f')].join('\u001e');
     return `DS:${simpleHash(base)}:A${aIds.length}:B${bIds.length}`;
   }
+  globalThis.__currentDatasetSignature = currentDatasetSignature;
 
   function parseTrainingPairKey(key) {
     const parts = String(key || '').split('||');
@@ -11445,7 +11784,12 @@ ${h.name}`, type:'requirement', detail:srcA };
   window.__v1117=Object.freeze({
     exportSettings, currentSettings, buildMatrixWorksheets, appendTwoDimensionalMatrixSheet,
     buildRoCrateMetadata, validateRoCratePackage, createZipBytes, safeZipBasename, uriPath,
-    captureOriginal, ensureOriginal, downloadRoCrateZip
+    captureOriginal, ensureOriginal, downloadRoCrateZip,
+    // B-4b Checkpoint 3: addJsonSheet/writeWorkbookはこのIIFE内のprivate関数で、
+    // 他のscriptブロックから直接参照できない。reviewed Excel保存(§1、流用可・新規に
+    // 類似ヘルパーを増やさない方針)のため、既存の__v1117公開面へ追記するだけで
+    // 関数の実装自体は変更しない。
+    addJsonSheet, writeWorkbook
   });
 })();
 </script>
@@ -12348,6 +12692,830 @@ ${h.name}`, type:'requirement', detail:srcA };
   matchLogic.version = VERSION;
   document.title = 'JSON A/B トレース照合ツール V12.1.15';
   const h1 = document.querySelector('body > h1'); if (h1) h1.textContent = 'JSON A/B トレース照合ツール V12.1.15';
+})();
+</script>
+
+<script>
+/* B-4b Checkpoint 2: レビューsessionのHTML/UI接続。
+   Stage 1〜3 (trace_comparison_review_state_core.js / trace_comparison_review_session_core.js)
+   および Checkpoint 1 projection core (trace_comparison_review_projection_core.js) は無変更。
+   本ブロックは既存スクリプトの末尾に追記するのみで、既存関数の本体は書き換えない
+   (renderDetailTableFull / buildGraphElements / renderGraph は後述のとおりラップのみ。
+   #loadBtn / #rerunMatchBtn には追加のclickリスナーを1本ずつ登録するのみ)。
+   projection計算は recomputeAndCacheProjection() の1箇所のみで行い、
+   詳細テーブル・グラフはそこで作られる b4bProjectionCache を読むだけにする。 */
+(function() {
+  'use strict';
+  if (!globalThis.TraceComparisonReviewSessionCore
+    || typeof globalThis.TraceComparisonReviewSessionCore.createReviewSessionCoordinator !== 'function'
+    || !globalThis.TraceComparisonReviewProjectionCore
+    || typeof globalThis.TraceComparisonReviewProjectionCore.projectEffectiveReviewedResultSet !== 'function') {
+    console.error('B-4b Checkpoint 2: レビューcoreが読み込まれていません。');
+    return;
+  }
+
+  const b4bCoordinator = TraceComparisonReviewSessionCore.createReviewSessionCoordinator();
+
+  const b4bStatusBadge = document.getElementById('b4bSessionStatusBadge');
+  const b4bStatusDetail = document.getElementById('b4bSessionStatusDetail');
+  const b4bReviewerInput = document.getElementById('b4bReviewerInput');
+  const b4bStartBtn = document.getElementById('b4bStartReviewBtn');
+  const b4bDiscardBtn = document.getElementById('b4bDiscardReviewBtn');
+  const b4bPanel = document.getElementById('b4bComparisonPanel');
+  const b4bPanelTitle = document.getElementById('b4bComparisonPanelTitle');
+  const b4bPanelBody = document.getElementById('b4bComparisonPanelBody');
+  const b4bPanelCloseBtn = document.getElementById('b4bComparisonPanelCloseBtn');
+
+  const B4B_UPSTREAM_TARGETS = ['quantity_extraction', 'property_mapping', 'interval_semantics', 'comparison_mode'];
+  const B4B_TARGET_LABELS = {
+    quantity_extraction: '数量抽出', property_mapping: '属性対応',
+    interval_semantics: '区間意味論', comparison_mode: '比較モード'
+  };
+
+  // b4bProjectionCache は recomputeAndCacheProjection() でのみ書き込む唯一の投影結果。
+  // status: 'unavailable'(未開始/discard後・projection未呼び出し) | 'ready'(active) |
+  //         'stale'(古い session だが投影は表示) | 'error'(projectionそのものが失敗)
+  let b4bProjectionCache = Object.freeze({ status: 'unavailable' });
+  // discard直後だけ文言を変える表示専用フラグ。projectionCacheにもcoordinatorにも入力しない。
+  let b4bDiscardedRecently = false;
+  let b4bOpenComparisonId = null;
+  let b4bOpenComparisonIds = [];
+  let b4bBusy = false;
+  let b4bTransientMessage = '';
+
+  function b4bNowIso() { return new Date().toISOString(); }
+
+  // downloadTraceComparisonRecordSet() (既存, 1820行台) と同じ前提条件を読むだけの検査。
+  // 判定ロジックは複製せず、既存が既に使っている状態変数を読むのみ。
+  function b4bPreconditionError() {
+    if (activeMatchingJob) return '照合または成果物処理の実行中です。完了後に再実行してください。';
+    if (traceComparisonInputStale || traceComparisonReadyRunId !== matchRunSeq || traceMatrixStale === true
+      || mergedResult?.metadata?.matchStatus !== 'matched') {
+      return '現在の入力に対する照合が未完了、または照合結果が陳腐化しています。';
+    }
+    if (!quantityBindingState) return '数量注釈bindingがありません。';
+    if (quantityBindingState.ready !== true) return '数量注釈bindingがreadyではありません。';
+    if (typeof globalThis.__quantityBindingDiagnostics?.relationRows !== 'function') return '正式なrelation accessorがありません。';
+    if (matchRunSeq < 1) return '照合が一度も完了していません。';
+    return null;
+  }
+
+  // trace_comparison_review_session_core.jsのcaptureSourceContext契約は、4 ID + relationship
+  // (source/match_method/match_confidence/review_category/linked_at)をネストした形を要求する
+  // (RELATION_KEYS/RELATIONSHIP_KEYS。producerRelations()が内部で平坦形へ変換する)。
+  // __quantityBindingDiagnostics.relationRows() は平坦形を返すため、ここで詰め替える。
+  function b4bRelationsForSourceContext() {
+    const flat = typeof globalThis.__quantityBindingDiagnostics?.relationRows === 'function'
+      ? globalThis.__quantityBindingDiagnostics.relationRows() : [];
+    return flat.map(row => ({
+      requirement_trace_id: row.requirement_trace_id,
+      actual_trace_id: row.actual_trace_id,
+      matcher_a_id: row.matcher_a_id,
+      matcher_b_id: row.matcher_b_id,
+      relationship: {
+        source: row.source, match_method: row.match_method, match_confidence: row.match_confidence,
+        review_category: row.review_category, linked_at: row.linked_at
+      }
+    }));
+  }
+
+  function b4bCaptureSourceContext() {
+    const relations = b4bRelationsForSourceContext();
+    return {
+      input_stale: !!traceComparisonInputStale,
+      matching_stale: traceMatrixStale === true,
+      matching_run_id: matchRunSeq,
+      // matching_run_id/matching_generationは別概念だが、本ツールには単一のmatchRunSeqしか
+      // 存在しないため、同一カウンタを両フィールドへ流用する(意図的な簡略化)。
+      matching_generation: matchRunSeq,
+      requirement_dataset_signature: quantityBindingState?.requirement?.dataset_signature || '',
+      actual_dataset_signature: quantityBindingState?.actual?.dataset_signature || '',
+      matching_dataset_signature: typeof globalThis.__currentDatasetSignature === 'function'
+        ? globalThis.__currentDatasetSignature() : '',
+      relations,
+      // coordinatorはactive_matching_jobの中身を解釈せずnull/非nullだけを見るため、
+      // 内部job objectをそのまま渡さずJSON安全な最小プレースホルダにする。
+      active_matching_job: activeMatchingJob ? { busy: true } : null
+    };
+  }
+
+  async function b4bSyncBindingRefresh(reasonCode) {
+    const err = b4bPreconditionError();
+    if (err) { recomputeAndCacheProjection(); b4bRenderSessionPanel(); return; }
+    const beginResult = b4bCoordinator.beginBindingRefresh({ reasonCode, occurredAt: b4bNowIso() });
+    if (!beginResult.ok) {
+      b4bTransientMessage = 'binding refresh開始に失敗しました（コード: ' + (beginResult.diagnostics?.[0]?.code || '不明') + '）。';
+      recomputeAndCacheProjection(); b4bRenderSessionPanel(); return;
+    }
+    let requirementAnnotation = null, actualAnnotation = null;
+    try {
+      requirementAnnotation = sysQuantityFile?.files?.[0] ? await readJsonFile(sysQuantityFile.files[0]) : null;
+      actualAnnotation = plmQuantityFile?.files?.[0] ? await readJsonFile(plmQuantityFile.files[0]) : null;
+    } catch (_) {
+      b4bTransientMessage = 'binding refresh用の注釈ファイル読込に失敗しました。';
+      recomputeAndCacheProjection(); b4bRenderSessionPanel(); return;
+    }
+    const completeResult = await b4bCoordinator.completeBindingRefresh({
+      token: beginResult.value,
+      requirementTrace: sysData, requirementAnnotation,
+      actualTrace: plmData, actualAnnotation
+    });
+    b4bTransientMessage = completeResult.ok ? ''
+      : 'binding refresh完了に失敗しました（コード: ' + (completeResult.diagnostics?.[0]?.code || '不明') + '）。';
+    recomputeAndCacheProjection();
+    b4bRenderSessionPanel();
+  }
+
+  async function b4bWaitMatchingIdle() {
+    while (activeMatchingJob !== null) await new Promise(resolve => setTimeout(resolve, 30));
+  }
+
+  // JSON A/B・quantity注釈のファイル選択が変わった時点で、bindingを変える入力なので
+  // 即座にbeginBindingRefresh()する(active sessionがあれば直ちにstaleへ遷移する)。
+  // 既存の[sysFile,plmFile,sysQuantityFile,plmQuantityFile].forEach(...change...)
+  // (traceComparisonInputStale=trueを立てるだけの既存リスナー)とは別枠の追加リスナーであり、
+  // 既存リスナー自体は書き換えない。
+  function b4bOnSourceFileChanged(reasonCode) {
+    b4bCoordinator.beginBindingRefresh({ reasonCode, occurredAt: b4bNowIso() });
+    recomputeAndCacheProjection();
+    b4bRenderSessionPanel();
+  }
+  [sysFile, plmFile].filter(Boolean).forEach(input => {
+    input.addEventListener('change', () => b4bOnSourceFileChanged('json_ab_file_changed'));
+  });
+  [sysQuantityFile, plmQuantityFile].filter(Boolean).forEach(input => {
+    input.addEventListener('change', () => b4bOnSourceFileChanged('quantity_annotation_file_changed'));
+  });
+
+  // Phase 7の手動trace関係変更(追加・付け替え・削除・レビュー入力)はbinding自体を
+  // 変えないrelation集合の変更のため、invalidateReviewSource({affectsBinding:false})のみ呼ぶ。
+  // Phase 7自身が既にこれらのwindow関数を1段ラップして概要ロールアップ更新に使っているため、
+  // (p7AfterHumanChangeはPhase 7スクリプトのIIFE内に閉じておりここから直接参照できない)
+  // 同じwindow関数群をもう1段ラップして追いかける。
+  // 手動関係削除の実UI経路は window.removeManualTraceRelation (削除ボタンのonclick先、
+  // 10025行付近で定義)であり、deleteManualTraceRelationという名の関数は存在しない
+  // (Phase 7自身の11129行の同名wrapもここでは空振りしている、既存の別問題であり本修正の対象外)。
+  // removeManualTraceRelation/deleteOrphanTraceEntryはconfirm()でユーザーがキャンセルすると
+  // 何も変更せずreturnするため、「関数が呼ばれた」だけでは無条件にstale化しない。
+  // manualTraceRelations/traceReplacementHistoryはPhase 7スクリプトのIIFE内に閉じた変数で
+  // ここから直接参照できないため、既存の公開読み取りAPI window.getManualTraceState()
+  // (manualRelations/replacements/orphans/auditを含む)を使う。traceReviewStoreは
+  // (このIIFEでは再宣言されていないため)共有トップレベル変数として直接参照できる。
+  // これらのcanonical JSON署名を呼び出し前後で比較し、実際に変化した場合のみinvalidateする。
+  function b4bPhase7SourceSignature() {
+    const canon = typeof globalThis.QuantitySidecarBinding?.canonicalJson === 'function'
+      ? globalThis.QuantitySidecarBinding.canonicalJson : JSON.stringify;
+    try {
+      const manualState = typeof window.getManualTraceState === 'function' ? window.getManualTraceState() : null;
+      return canon({ manualState, traceReviewStore });
+    } catch (_) { return null; }
+  }
+  // 個別に同じラップコードを繰り返さず、監視対象の関数名だけを列挙する共通ヘルパー。
+  // importTraceReviewPackage/applyBulkTraceReview/undoBulkTraceReviewも、
+  // 実際にtraceReviewStore/manualTraceRelations/traceReplacementHistoryを書き換え、
+  // 有効トレースを再構築する正式なUI経由のmutation APIであるため、他の5本と同様に
+  // read-only observerとして監視対象へ加える(Phase 7自身の判定ロジック・状態遷移は
+  // 一切変更しない。呼び出し前後の署名比較だけを追加する)。
+  function b4bWrapPhase7SourceMutation(name) {
+    const prior = window[name];
+    if (typeof prior !== 'function') return;
+    window[name] = function(...args) {
+      const before = b4bPhase7SourceSignature();
+      const result = prior.apply(this, args);
+      const after = b4bPhase7SourceSignature();
+      // 署名が取得できなかった場合(想定外の循環参照等)はfail-closedで変化ありとみなす。
+      if (before === null || after === null || before !== after) {
+        b4bCoordinator.invalidateReviewSource({ reasonCode: 'phase7_relation_changed', occurredAt: b4bNowIso(), affectsBinding: false });
+        recomputeAndCacheProjection();
+        b4bRenderSessionPanel();
+      }
+      return result;
+    };
+  }
+  ['updateTraceReview', 'addManualTraceRelationFromValues', 'replaceTraceRelationFromValues',
+    'removeManualTraceRelation', 'deleteOrphanTraceEntry', 'importTraceReviewPackage',
+    'applyBulkTraceReview', 'undoBulkTraceReview'].forEach(b4bWrapPhase7SourceMutation);
+
+  async function b4bWaitReadyFlags(timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!traceComparisonInputStale && traceComparisonReadyRunId === matchRunSeq
+        && mergedResult?.metadata?.matchStatus === 'matched') return true;
+      await new Promise(resolve => setTimeout(resolve, 30));
+    }
+    return false;
+  }
+  async function b4bAfterLoad() {
+    await b4bWaitMatchingIdle();
+    const ready = await b4bWaitReadyFlags(5000);
+    if (ready) {
+      b4bLastSyncedMatchingRunId = traceComparisonReadyRunId;
+      await b4bSyncBindingRefresh('load_or_reload');
+    } else { recomputeAndCacheProjection(); b4bRenderSessionPanel(); }
+  }
+  document.getElementById('loadBtn')?.addEventListener('click', () => { b4bAfterLoad(); });
+
+  // 再照合はbinding(quantity注釈の対応付け)自体を変えないため、
+  // invalidateReviewSource({affectsBinding:false})のみ呼ぶ(3.3節)。ただし「ボタンが押された」
+  // だけではなく「新しいmatching sourceが実際にcommitされた」場合のみ呼ぶ。キャンセル・失敗・
+  // (何らかの理由で)結果が変わらなかった再照合では、既にsyncした runId と比較して不要な
+  // stale化をしない。
+  let b4bLastSyncedMatchingRunId = traceComparisonReadyRunId;
+  async function b4bAfterRematch() {
+    await b4bWaitMatchingIdle();
+    const committedFreshRun = !traceComparisonInputStale && traceComparisonReadyRunId === matchRunSeq
+      && mergedResult?.metadata?.matchStatus === 'matched'
+      && traceComparisonReadyRunId !== b4bLastSyncedMatchingRunId;
+    if (committedFreshRun) {
+      b4bLastSyncedMatchingRunId = traceComparisonReadyRunId;
+      b4bCoordinator.invalidateReviewSource({ reasonCode: 'matching_rerun', occurredAt: b4bNowIso(), affectsBinding: false });
+    }
+    recomputeAndCacheProjection();
+    b4bRenderSessionPanel();
+  }
+  document.getElementById('rerunMatchBtn')?.addEventListener('click', () => { b4bAfterRematch(); });
+
+  // record_setのcomparisonsから、詳細テーブル(JSON A/B基準)・グラフが行/edge単位で
+  // comparison_idを引けるようにする索引。この索引もrecomputeAndCacheProjection()の中で
+  // 1回だけ作り、projectionCacheへ格納する。rendererはこれ以外の場所でcoordinatorの
+  // getRecordSetSnapshot()を直接呼ばない(単一source原則)。
+  function b4bBuildComparisonIndices(snapshot) {
+    const matcherAIndex = new Map();
+    const matcherBIndex = new Map();
+    const matcherPairIndex = new Map();
+    if (snapshot && Array.isArray(snapshot.comparisons)) {
+      snapshot.comparisons.forEach(c => {
+        const a = c?.requirement_ref?.matcher_id;
+        const b = c?.actual_ref?.matcher_id;
+        const id = c?.comparison_id;
+        if (!id) return;
+        if (a) { if (!matcherAIndex.has(a)) matcherAIndex.set(a, []); matcherAIndex.get(a).push(id); }
+        if (b) { if (!matcherBIndex.has(b)) matcherBIndex.set(b, []); matcherBIndex.get(b).push(id); }
+        if (a && b) {
+          const key = a + '::' + b;
+          if (!matcherPairIndex.has(key)) matcherPairIndex.set(key, []);
+          matcherPairIndex.get(key).push(id);
+        }
+      });
+    }
+    return Object.freeze({ matcherAIndex, matcherBIndex, matcherPairIndex });
+  }
+
+  // ─── projection: 唯一の再計算箇所 ───
+  function recomputeAndCacheProjection() {
+    const session = b4bCoordinator.getReviewSession();
+    const snapshot = b4bCoordinator.getRecordSetSnapshot();
+    const indices = b4bBuildComparisonIndices(snapshot);
+    if (session === null) {
+      b4bProjectionCache = Object.freeze({ status: 'unavailable', ...indices });
+    } else {
+      const projected = TraceComparisonReviewProjectionCore.projectEffectiveReviewedResultSet(snapshot, session);
+      b4bProjectionCache = Object.freeze({
+        status: !projected.ok ? 'error' : (session.session_status === 'stale' ? 'stale' : 'ready'),
+        projected, ...indices
+      });
+    }
+    if (typeof renderDirty === 'object' && renderDirty) { renderDirty.detail = true; renderDirty.graph = true; }
+    if (typeof ensureLazyTabRendered === 'function' && typeof currentTabId === 'function') {
+      ensureLazyTabRendered(currentTabId());
+    }
+  }
+
+  // ─── セッションパネル ───
+  function b4bDefaultStatusMessage(session, bindingReady) {
+    if (b4bProjectionCache.status === 'error') {
+      return '投影に失敗しました（コード: ' + (b4bProjectionCache.projected?.diagnostics?.[0]?.code || '不明')
+        + '）。自動照合結果自体は変更されていません。';
+    }
+    if (session === null) {
+      if (!bindingReady) return '入力・照合・数量bindingが完了すると開始できます。';
+      return b4bDiscardedRecently ? '破棄済みです。再度レビュー開始できます。' : '準備ができています。レビューを開始できます。';
+    }
+    if (session.session_status === 'stale') return 'レビューが古くなっています。承認・satisfaction・resetは行えません。破棄のみ可能です。';
+    return '';
+  }
+
+  function b4bRenderSessionPanel() {
+    const session = b4bCoordinator.getReviewSession();
+    const bindingReady = b4bCoordinator.getBindingRuntime() !== null;
+    if (session === null) {
+      b4bStatusBadge.textContent = b4bDiscardedRecently ? '破棄済み（再度開始できます）' : '未レビュー';
+      b4bStatusBadge.style.background = '#e2e8f0'; b4bStatusBadge.style.color = '#334155';
+      b4bStartBtn.disabled = !bindingReady || b4bBusy;
+      b4bDiscardBtn.disabled = true;
+    } else if (session.session_status === 'active') {
+      b4bStatusBadge.textContent = 'レビュー中';
+      b4bStatusBadge.style.background = '#dbeafe'; b4bStatusBadge.style.color = '#1e40af';
+      b4bStartBtn.disabled = true;
+      b4bDiscardBtn.disabled = b4bBusy;
+    } else {
+      b4bStatusBadge.textContent = 'レビューが古くなっています';
+      b4bStatusBadge.style.background = '#fef3c7'; b4bStatusBadge.style.color = '#92400e';
+      b4bStartBtn.disabled = true;
+      b4bDiscardBtn.disabled = b4bBusy;
+    }
+    b4bStatusDetail.textContent = b4bTransientMessage || b4bDefaultStatusMessage(session, bindingReady);
+    b4bRenderComparisonPanel();
+  }
+
+  b4bStartBtn?.addEventListener('click', async () => {
+    if (b4bBusy) return;
+    const reviewer = (b4bReviewerInput.value || '').trim();
+    if (!reviewer) { b4bTransientMessage = 'レビュー担当者を入力してください。'; b4bRenderSessionPanel(); return; }
+    const err = b4bPreconditionError();
+    if (err) { b4bTransientMessage = err; b4bRenderSessionPanel(); return; }
+    if (b4bCoordinator.getBindingRuntime() === null) {
+      b4bTransientMessage = 'binding runtimeの準備ができていません。読み込み・照合を完了してください。';
+      b4bRenderSessionPanel(); return;
+    }
+    b4bBusy = true; b4bRenderSessionPanel();
+    try {
+      const result = await b4bCoordinator.startReviewSession({
+        captureSourceContext: b4bCaptureSourceContext,
+        generatedAt: b4bNowIso(),
+        generator: { tool: 'json_ab_trace_matching_tool_v12.1.15.html', version: '12.1.15' },
+        sessionId: 'b4b-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10),
+        startedAt: b4bNowIso(),
+        startedBy: reviewer
+      });
+      b4bTransientMessage = result.ok ? '' : 'レビュー開始に失敗しました（コード: ' + (result.diagnostics?.[0]?.code || '不明') + '）。';
+      if (result.ok) b4bDiscardedRecently = false;
+    } finally { b4bBusy = false; }
+    recomputeAndCacheProjection();
+    b4bRenderSessionPanel();
+  });
+
+  b4bDiscardBtn?.addEventListener('click', async () => {
+    if (b4bBusy) return;
+    b4bBusy = true; b4bRenderSessionPanel();
+    try {
+      const result = await b4bCoordinator.coordinateReviewTransition({
+        action: { type: 'discard_review_session' }, captureSourceContext: null, occurredAt: null
+      });
+      if (result.ok) {
+        b4bDiscardedRecently = true; b4bOpenComparisonId = null; b4bOpenComparisonIds = [];
+        b4bPanel.style.display = 'none'; b4bTransientMessage = '';
+      } else {
+        b4bTransientMessage = '破棄に失敗しました（コード: ' + (result.diagnostics?.[0]?.code || '不明') + '）。';
+      }
+    } finally { b4bBusy = false; }
+    recomputeAndCacheProjection();
+    b4bRenderSessionPanel();
+  });
+
+  // ─── 個別comparisonパネル ───
+  function b4bOpenComparisonPanel(ids) {
+    if (!ids.length) return;
+    b4bOpenComparisonIds = ids;
+    b4bOpenComparisonId = ids.includes(b4bOpenComparisonId) ? b4bOpenComparisonId : ids[0];
+    b4bPanel.style.display = '';
+    b4bRenderComparisonPanel();
+  }
+  b4bPanelCloseBtn?.addEventListener('click', () => {
+    b4bPanel.style.display = 'none'; b4bOpenComparisonId = null; b4bOpenComparisonIds = [];
+  });
+
+  function b4bRenderComparisonPanel() {
+    if (!b4bOpenComparisonId) { b4bPanel.style.display = 'none'; return; }
+    const ids = b4bOpenComparisonIds.length ? b4bOpenComparisonIds : [b4bOpenComparisonId];
+    b4bPanelTitle.textContent = ids.length + '件中: ' + b4bOpenComparisonId;
+    const canRead = b4bProjectionCache.status === 'ready' || b4bProjectionCache.status === 'stale';
+    const entry = canRead ? b4bProjectionCache.projected.result.comparisons[b4bOpenComparisonId] : null;
+    const stale = b4bProjectionCache.status === 'stale';
+    let html = '';
+    if (ids.length > 1) {
+      html += '<div style="margin-bottom:8px;">' + ids.map(id =>
+        '<button type="button" class="secondary b4b-id-switch" data-id="' + escapeHtml(id) + '" style="margin:2px; padding:3px 8px; font-size:11px;' +
+        (id === b4bOpenComparisonId ? 'background:#c7d2fe;' : '') + '">' + escapeHtml(id.slice(0, 24)) + '…</button>'
+      ).join('') + '</div>';
+    }
+    if (!entry) {
+      html += '<div class="field-hint">この項目のprojectionを表示できません（レビュー未開始、またはprojectionが失敗しています）。</div>';
+    } else {
+      html += '<div style="font-size:12px; color:var(--muted); margin-bottom:8px;">自動判定: ' + escapeHtml(entry.automatic.state)
+        + ' / satisfied=' + String(entry.automatic.satisfied)
+        + (stale ? ' <strong style="color:#ca8a04;">（レビューが古くなっています。操作は破棄のみ可能です）</strong>' : '') + '</div>';
+      B4B_UPSTREAM_TARGETS.forEach(target => {
+        const t = entry.review_overlay[target];
+        html += '<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">'
+          + '<span style="width:110px; font-size:12px; font-weight:600;">' + B4B_TARGET_LABELS[target] + '</span>'
+          + '<span style="font-size:12px;">' + (t.status === 'reviewed' ? '承認済み (' + escapeHtml(t.reviewer || '') + ')' : '未レビュー') + '</span>'
+          + '<button type="button" class="success b4b-action" data-action="accept_review_target" data-target="' + target + '" style="padding:3px 8px; font-size:11px;" '
+          + (stale || t.status === 'reviewed' ? 'disabled' : '') + '>承認</button>'
+          + '<button type="button" class="secondary b4b-action" data-action="reset_review_target" data-target="' + target + '" style="padding:3px 8px; font-size:11px;" '
+          + (stale || t.status !== 'reviewed' ? 'disabled' : '') + '>reset</button>'
+          + '</div>';
+      });
+      const s = entry.review_overlay.satisfaction;
+      const satisfactionDisabled = stale || s.status !== 'unreviewed' || entry.satisfaction_eligible !== true;
+      html += '<div style="margin-top:6px; padding-top:6px; border-top:1px solid #e2e8f0;">'
+        + '<div style="font-size:12px; font-weight:600; margin-bottom:4px;">satisfaction（現在: '
+        + (s.status === 'reviewed' ? escapeHtml(s.verdict) : escapeHtml(s.status)) + '）</div>'
+        + '<button type="button" class="success b4b-action" data-action="review_satisfaction" data-verdict="accept" style="padding:3px 8px; font-size:11px;" '
+        + (satisfactionDisabled ? 'disabled' : '') + '>自動判定を承認</button> '
+        + '<button type="button" class="success b4b-action" data-action="review_satisfaction" data-verdict="override_satisfied" style="padding:3px 8px; font-size:11px;" '
+        + (satisfactionDisabled ? 'disabled' : '') + '>override satisfied</button> '
+        + '<button type="button" class="secondary b4b-action" data-action="review_satisfaction" data-verdict="override_unsatisfied" style="padding:3px 8px; font-size:11px;" '
+        + (satisfactionDisabled ? 'disabled' : '') + '>override unsatisfied</button> '
+        + '<button type="button" class="secondary b4b-action" data-action="reset_review_target" data-target="satisfaction" style="padding:3px 8px; font-size:11px;" '
+        + (stale || s.status !== 'reviewed' ? 'disabled' : '') + '>reset</button>'
+        + '</div>';
+      html += '<label style="display:block; margin-top:8px; font-size:12px; font-weight:600;">note（次のアクションに使われます）'
+        + '<textarea id="b4bNoteInput" style="width:100%; min-height:40px; margin-top:2px;"></textarea></label>';
+    }
+    b4bPanelBody.innerHTML = html;
+    b4bPanelBody.querySelectorAll('.b4b-id-switch').forEach(btn => btn.addEventListener('click', () => {
+      b4bOpenComparisonId = btn.dataset.id; b4bRenderComparisonPanel();
+    }));
+    b4bPanelBody.querySelectorAll('.b4b-action').forEach(btn => btn.addEventListener('click', () => {
+      b4bHandleAction(btn.dataset.action, btn.dataset.target, btn.dataset.verdict);
+    }));
+  }
+
+  async function b4bHandleAction(actionType, target, verdict) {
+    if (b4bBusy) return;
+    const reviewer = (b4bReviewerInput.value || '').trim();
+    if (!reviewer) { b4bTransientMessage = 'レビュー担当者を入力してください。'; b4bRenderSessionPanel(); return; }
+    const note = (document.getElementById('b4bNoteInput')?.value || '').trim() || null;
+    let action;
+    if (actionType === 'accept_review_target') {
+      action = { type: 'accept_review_target', comparison_id: b4bOpenComparisonId, target, reviewer, reviewed_at: b4bNowIso(), verdict: 'accept', note };
+    } else if (actionType === 'review_satisfaction') {
+      action = { type: 'review_satisfaction', comparison_id: b4bOpenComparisonId, reviewer, reviewed_at: b4bNowIso(), verdict, note };
+    } else if (actionType === 'reset_review_target') {
+      action = { type: 'reset_review_target', comparison_id: b4bOpenComparisonId, target };
+    } else { return; }
+    b4bBusy = true;
+    try {
+      const result = await b4bCoordinator.coordinateReviewTransition({
+        action, captureSourceContext: b4bCaptureSourceContext, occurredAt: b4bNowIso()
+      });
+      b4bTransientMessage = result.ok ? '' : 'レビュー操作に失敗しました（コード: ' + (result.diagnostics?.[0]?.code || '不明') + '）。';
+    } finally { b4bBusy = false; }
+    recomputeAndCacheProjection();
+    b4bRenderSessionPanel();
+  }
+
+  // ─── projectionCacheを読むだけのバッジ判定 ───
+  function b4bBadgeForComparisonIds(ids) {
+    if (!ids.length) return { text: '', color: '#94a3b8' };
+    if (b4bProjectionCache.status === 'unavailable') return { text: '未開始', color: '#94a3b8' };
+    if (b4bProjectionCache.status === 'error') return { text: '確認不可', color: '#dc2626' };
+    const results = ids.map(id => b4bProjectionCache.projected.result.comparisons[id]).filter(Boolean);
+    if (results.length !== ids.length) return { text: '確認不可', color: '#dc2626' };
+    const stale = b4bProjectionCache.status === 'stale';
+    const allReviewed = results.every(r => r.all_reviewed === true);
+    const anyReviewed = results.some(r => [
+      r.review_overlay.quantity_extraction, r.review_overlay.property_mapping,
+      r.review_overlay.interval_semantics, r.review_overlay.comparison_mode, r.review_overlay.satisfaction
+    ].some(t => t.status === 'reviewed'));
+    if (stale) return { text: '古い(' + ids.length + ')', color: '#ca8a04' };
+    if (allReviewed) return { text: '承認済み(' + ids.length + ')', color: '#16a34a' };
+    if (anyReviewed) return { text: '一部承認(' + ids.length + ')', color: '#2563eb' };
+    return { text: '未レビュー(' + ids.length + ')', color: '#64748b' };
+  }
+
+  // ─── 詳細テーブル: 追記のみのDOM装飾(既存renderDetailTableFullは書き換えない) ───
+  // comparison_idの検索はprojectionCache.matcherAIndex/matcherBIndex(recomputeAndCacheProjection()
+  // が作る唯一の索引)を読むだけで、ここではcoordinator.getRecordSetSnapshot()を呼ばない。
+  function b4bDecorateDetailTable() {
+    if (!detailTableHead || !detailTableBody) return;
+    const headRow = detailTableHead.querySelector('tr');
+    if (headRow && !headRow.querySelector('.b4b-review-col')) {
+      const th = document.createElement('th');
+      th.className = 'b4b-review-col';
+      th.textContent = 'B-4bレビュー';
+      headRow.appendChild(th);
+    }
+    const rows = [...detailTableBody.querySelectorAll('tr[data-idx]')];
+    // JSON A基準はrow._reqId(=matcher_a_id)、JSON B基準はrow['JSON Bキー'](=matcher_b_id、
+    // buildTraceMatrixRowsのbId/matcher_b_idと同じ値。buildDetailRowsPlmが平文列として保持)で引く。
+    const index = linkBasis === 'sys' ? b4bProjectionCache.matcherAIndex : b4bProjectionCache.matcherBIndex;
+    rows.forEach(tr => {
+      const idx = Number(tr.dataset.idx);
+      const row = detailRows[idx];
+      const matcherKey = linkBasis === 'sys' ? row?._reqId : row?.['JSON Bキー'];
+      const ids = matcherKey && index?.has(matcherKey) ? index.get(matcherKey) : [];
+      const badge = b4bBadgeForComparisonIds(ids);
+      let td = tr.querySelector('.b4b-review-col');
+      if (!td) { td = document.createElement('td'); td.className = 'b4b-review-col'; tr.appendChild(td); }
+      td.innerHTML = '';
+      if (badge.text) {
+        const span = document.createElement('span');
+        span.textContent = badge.text;
+        span.style.color = badge.color; span.style.fontWeight = '700'; span.style.fontSize = '11px';
+        td.appendChild(span);
+      }
+      if (ids.length) {
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'secondary';
+        btn.style.marginLeft = '6px'; btn.style.padding = '2px 8px'; btn.style.fontSize = '11px';
+        btn.textContent = '詳細';
+        btn.addEventListener('click', evt => { evt.stopPropagation(); b4bOpenComparisonPanel(ids); });
+        td.appendChild(btn);
+      }
+    });
+  }
+
+  const b4bBaseRenderDetailTableFull = renderDetailTableFull;
+  renderDetailTableFull = function() {
+    b4bBaseRenderDetailTableFull();
+    b4bDecorateDetailTable();
+  };
+
+  // ─── グラフ: 追記のみのDOM装飾(既存renderGraph/buildGraphElementsは書き換えない)。
+  // read-only表示のみとし、edgeタップから承認等のmutationができるパネルは開かない。 ───
+  function b4bDecorateGraph() {
+    if (!cy) return;
+    const index = b4bProjectionCache.matcherPairIndex;
+    cy.edges().forEach(edge => {
+      const detail = edge.data('detail');
+      const a = detail?.A_ID, b = detail?.B_ID;
+      const key = a && b ? a + '::' + b : null;
+      const ids = key && index?.has(key) ? index.get(key) : [];
+      edge.removeData('b4bReviewColor'); edge.removeData('b4bReviewIds');
+      if (ids.length) {
+        const badge = b4bBadgeForComparisonIds(ids);
+        edge.data('b4bReviewColor', badge.color);
+        edge.data('b4bReviewIds', ids.join(','));
+      }
+    });
+    cy.style().selector('edge[b4bReviewColor]')
+      .style({ 'line-color': 'data(b4bReviewColor)', 'target-arrow-color': 'data(b4bReviewColor)' }).update();
+  }
+
+  const b4bBaseRenderGraph = renderGraph;
+  renderGraph = function(sysList, plmList) {
+    b4bBaseRenderGraph(sysList, plmList);
+    b4bDecorateGraph();
+  };
+
+  // 検査・受入試験用の読み取り専用診断API(既存の__phase7Diagnostics等と同じ位置付け)。
+  window.__b4bCheckpoint2Diagnostics = Object.freeze({
+    coordinator: () => b4bCoordinator,
+    projectionCache: () => b4bProjectionCache,
+    recompute: () => recomputeAndCacheProjection(),
+    renderSessionPanel: () => b4bRenderSessionPanel()
+  });
+
+  // ─── B-4b Checkpoint 3向け正式runtime bridge(b4b_checkpoint3_export_design.md §0.2)。
+  //     __b4bCheckpoint2Diagnosticsとは別物で、製品機能(export)が実際に依存する唯一の
+  //     公開面とする。cache参照(matcherAIndex/matcherBIndex/matcherPairIndexというMapを
+  //     含む可変オブジェクト)とreviewSourceEpochは公開せず、WeakMapへ内部CASトークンとして
+  //     隠す(公開してよいのはprojected/session/recordSetの3つのみ)。
+  //     既存のb4bPreconditionError()/b4bCoordinator/b4bProjectionCache/
+  //     recomputeAndCacheProjection()を呼ぶだけで、これらの実装には一切手を入れない。 ───
+  const b4bReviewedExportCaptures = new WeakMap();
+
+  function captureReviewedExportState() {
+    const err = b4bPreconditionError();
+    if (err) return Object.freeze({ ok:false, code:'review_export_not_ready', detail:err });
+    if (b4bCoordinator.isReviewStartInFlight() || b4bCoordinator.isReviewTransitionInFlight()) {
+      return Object.freeze({
+        ok:false, code:'review_export_not_ready', detail:'レビュー操作の処理中です。'
+      });
+    }
+    // 唯一のprojection計算窓口を必ず経由してcacheを最新化してからcaptureする。
+    recomputeAndCacheProjection();
+    const cache = b4bProjectionCache;
+    if (cache.status !== 'ready') {
+      return Object.freeze({
+        ok:false, code:'review_export_not_ready', detail:'projectionCacheがready状態ではありません。'
+      });
+    }
+    const session = b4bCoordinator.getReviewSession();
+    const recordSet = b4bCoordinator.getRecordSetSnapshot();
+    const reviewSourceEpoch = b4bCoordinator.getReviewSourceEpoch();
+    // 公開するcaptureオブジェクトにはprojected/session/recordSetの3つだけを載せる。
+    const capture = Object.freeze({ ok:true, projected: cache.projected, session, recordSet });
+    // cache参照・epochはWeakMap側にのみ保持する(captureそのものをキーにするため、
+    // captureが外部でGCされればエントリも自然に消える)。
+    b4bReviewedExportCaptures.set(capture, { cache, session, recordSet, reviewSourceEpoch });
+    return capture;
+  }
+
+  function reviewedExportStateStillCurrent(capture) {
+    if (!capture || capture.ok !== true) return false;
+    const refs = b4bReviewedExportCaptures.get(capture);
+    if (!refs) return false;  // このIIFEが発行したcaptureでなければ無条件にfalse
+    if (b4bPreconditionError() !== null) return false;
+    if (b4bCoordinator.isReviewStartInFlight() || b4bCoordinator.isReviewTransitionInFlight()) return false;
+    if (b4bProjectionCache !== refs.cache) return false;
+    if (b4bProjectionCache.status !== 'ready') return false;
+    if (b4bCoordinator.getReviewSession() !== refs.session) return false;
+    if (b4bCoordinator.getRecordSetSnapshot() !== refs.recordSet) return false;
+    if (b4bCoordinator.getReviewSourceEpoch() !== refs.reviewSourceEpoch) return false;
+    return true;
+  }
+
+  // 表示専用の読み取りだけのpeek(cache参照・session参照は一切公開しない、booleanのみ返す)。
+  // captureReviewedExportState()と違い、recomputeAndCacheProjection()を呼ばない
+  // (=既存のensureLazyTabRendered()経由の非同期再描画を新たに起こさない)。
+  // b4bRenderSessionPanel()が呼ばれた時点でCheckpoint 2側のrecomputeAndCacheProjection()は
+  // 既に実行済みでb4bProjectionCacheは最新のため、ボタンの有効/無効という表示目的だけなら
+  // 読み直すだけで十分であり、再計算は不要。UIの定期/イベント駆動更新はこちらだけを使い、
+  // 実際のexport実行(クリック時)は引き続きcaptureReviewedExportState()を使う。
+  function peekReviewedExportReady() {
+    if (b4bPreconditionError() !== null) return false;
+    if (b4bCoordinator.isReviewStartInFlight() || b4bCoordinator.isReviewTransitionInFlight()) return false;
+    return b4bProjectionCache.status === 'ready';
+  }
+
+  window.TraceComparisonReviewRuntime = Object.freeze({
+    captureReviewedExportState,
+    reviewedExportStateStillCurrent,
+    peekReviewedExportReady
+  });
+
+  recomputeAndCacheProjection();
+  b4bRenderSessionPanel();
+})();
+</script>
+
+<script>
+/* B-4b Checkpoint 3: レビュー済みprojectionの正式エクスポート接続。
+   tools/design_notes/b4b_checkpoint3_export_design.md (Rev.6) のcapture→async core→CAS→
+   downloadという順序をそのまま実装する。Checkpoint 2 IIFE(直前のscriptブロック)の既存行、
+   Stage 1〜3 / Checkpoint 1 projection coreは一切変更しない。このブロックは
+   window.TraceComparisonReviewRuntime(§0.2)とTraceComparisonReviewExportCoreだけを使い、
+   b4bCoordinator/b4bProjectionCache/recomputeAndCacheProjection()へ直接触れない。 */
+(function() {
+  'use strict';
+  if (!globalThis.TraceComparisonReviewRuntime
+    || typeof globalThis.TraceComparisonReviewRuntime.captureReviewedExportState !== 'function'
+    || typeof globalThis.TraceComparisonReviewRuntime.reviewedExportStateStillCurrent !== 'function'
+    || typeof globalThis.TraceComparisonReviewRuntime.peekReviewedExportReady !== 'function'
+    || !globalThis.TraceComparisonReviewExportCore
+    || typeof globalThis.TraceComparisonReviewExportCore.buildReviewedExportArtifact !== 'function'
+    || typeof globalThis.TraceComparisonReviewExportCore.buildReviewedExcelSheets !== 'function'
+    || !globalThis.__v1117
+    || typeof globalThis.__v1117.addJsonSheet !== 'function'
+    || typeof globalThis.__v1117.writeWorkbook !== 'function') {
+    console.error('B-4b Checkpoint 3: export runtime bridge / export core / Excel書き出しヘルパーが読み込まれていません。');
+    return;
+  }
+
+  const b4bJsonBtn = document.getElementById('b4bReviewedExportJsonBtn');
+  const b4bExcelBtn = document.getElementById('b4bReviewedExportExcelBtn');
+  const b4bStatusEl = document.getElementById('b4bReviewedExportStatus');
+  let b4bExportBusy = false;
+  let b4bRefreshInFlight = false;
+
+  // Checkpoint 2側のrecomputeAndCacheProjection()は呼ばれるたびensureLazyTabRendered()
+  // 経由で detail table の非同期(fire-and-forget)再描画をスケジュールし、その描画中は
+  // 既存の"画面描画中"jobとしてactiveMatchingJobを一時的に使う。b4bRenderSessionPanel()が
+  // 呼ばれた直後(=このMutationObserverが発火した直後)は、まさにその描画jobがまだ
+  // activeMatchingJobを占有している可能性があるため、captureReviewedExportState()を
+  // 即座に読むと一時的な"処理中"を「本当にexport不可」と誤認して表示が固着しうる。
+  // 他の箇所(b4bWaitMatchingIdle等)と同じidiomで、activeMatchingJobがnullに戻るまで
+  // (上限付きで)待ってから読む。
+  // keepStatusText:true (JSON/Excelクリックハンドラのfinallyから呼ぶ場合)は、
+  // ハンドラ自身が既に設定した最終的な結果メッセージ(成功/失敗/中止)を
+  // このrefreshが上書きしないようにする。ボタンのdisabled状態だけを最新化する。
+  async function b4bReviewedExportRefreshUi(keepStatusText) {
+    if (!b4bJsonBtn || !b4bExcelBtn || !b4bStatusEl || b4bRefreshInFlight) return;
+    b4bRefreshInFlight = true;
+    try {
+      const deadline = Date.now() + 2000;
+      while (activeMatchingJob !== null && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 30));
+      }
+      if (b4bExportBusy) return;  // 進行中は表示を変えない(job完了後に改めて反映される)
+      // 表示更新はpeekReviewedExportReady()だけを使う(recomputeAndCacheProjection()を
+      // 再度呼ばない読み取り専用peek)。実際のexport可否判定・実行は引き続き、
+      // クリック時のcaptureReviewedExportState()(§0.2、常にrecomputeする)が単独で担う。
+      const ready = TraceComparisonReviewRuntime.peekReviewedExportReady();
+      b4bJsonBtn.disabled = !ready;
+      b4bExcelBtn.disabled = !ready;
+      if (keepStatusText) return;
+      b4bStatusEl.textContent = ready
+        ? '保存できます。'
+        : 'レビューを開始すると保存できます。';
+    } finally {
+      b4bRefreshInFlight = false;
+    }
+  }
+
+  async function b4bBuildArtifactOrNull(captured) {
+    const built = await TraceComparisonReviewExportCore.buildReviewedExportArtifact({
+      recordSet: captured.recordSet,
+      session: captured.session,
+      projected: captured.projected,
+      generatedAt: new Date().toISOString(),
+      generator: { tool: 'json_ab_trace_matching_tool_v12.1.15.html', version: '12.1.15' }
+    });
+    if (!built.ok) {
+      b4bStatusEl.textContent = 'レビュー済み成果物の生成に失敗しました（コード: '
+        + (built.diagnostics?.[0]?.code || '不明') + '）。';
+      return null;
+    }
+    // captureReviewedExportState()自身のrecomputeAndCacheProjection()呼び出しが
+    // ensureLazyTabRendered()経由の非同期(fire-and-forget)再描画を必ず1回起こし、
+    // その描画は既存の"画面描画中"jobとしてactiveMatchingJobを一時的に占有する
+    // (実測: 描画完了まで数百ms、build自体は数ms)。この自己誘発の一時busyを
+    // 「レビュー中に本当に状態が変わった」と誤認しないよう、CAS再確認の前に
+    // activeMatchingJobがnullに戻るまで(上限付きで)待つ(他箇所のb4bWaitMatchingIdle
+    // 等と同じidiom)。
+    const deadline = Date.now() + 5000;
+    while (activeMatchingJob !== null && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    if (!TraceComparisonReviewRuntime.reviewedExportStateStillCurrent(captured)) {
+      b4bStatusEl.textContent = 'レビュー中に状態が変わったため保存を中止しました。もう一度お試しください。';
+      return null;
+    }
+    return built.artifact;
+  }
+
+  b4bJsonBtn?.addEventListener('click', async () => {
+    if (b4bExportBusy) return;
+    const captured = TraceComparisonReviewRuntime.captureReviewedExportState();
+    if (!captured.ok) { b4bStatusEl.textContent = captured.detail || '現在は保存できません。'; return; }
+    b4bExportBusy = true;
+    b4bJsonBtn.disabled = true; b4bExcelBtn.disabled = true;
+    b4bStatusEl.textContent = 'レビュー済みJSONを生成中...';
+    try {
+      const artifact = await b4bBuildArtifactOrNull(captured);
+      if (!artifact) return;
+      downloadText(
+        `${safeFileName(graphNameOrDefault())}_trace_comparison_reviewed_V12_1_15.json`,
+        JSON.stringify(artifact, null, 2), 'application/json'
+      );
+      b4bStatusEl.textContent = 'レビュー済みJSONを保存しました。';
+    } catch (err) {
+      // coreが予期せずthrowした場合でも、未処理Promise rejectionにせず
+      // fail-closed(ダウンロードなし・ステータス表示)にする。
+      console.error(err);
+      b4bStatusEl.textContent = 'レビュー済みJSON生成中に予期しないエラーが発生しました: ' + (err && err.message || String(err));
+    } finally {
+      b4bExportBusy = false;
+      b4bReviewedExportRefreshUi(true);
+    }
+  });
+
+  b4bExcelBtn?.addEventListener('click', async () => {
+    if (b4bExportBusy) return;
+    const captured = TraceComparisonReviewRuntime.captureReviewedExportState();
+    if (!captured.ok) { b4bStatusEl.textContent = captured.detail || '現在は保存できません。'; return; }
+    b4bExportBusy = true;
+    b4bJsonBtn.disabled = true; b4bExcelBtn.disabled = true;
+    b4bStatusEl.textContent = 'レビュー済みExcelを生成中...';
+    try {
+      const artifact = await b4bBuildArtifactOrNull(captured);
+      if (!artifact) return;
+      const sheetsResult = TraceComparisonReviewExportCore.buildReviewedExcelSheets(artifact);
+      if (!sheetsResult.ok) {
+        b4bStatusEl.textContent = 'レビュー済みExcelの構築に失敗しました（コード: '
+          + (sheetsResult.diagnostics?.[0]?.code || '不明') + '）。';
+        return;
+      }
+      // job開始はCAS通過より必ず後に行う(activeMatchingJobは単一slotのため、CAS前に
+      // 自分のjobを開始すると自分自身のb4bPreconditionError()が「busy」を返し
+      // 自己拒否になる。b4b_checkpoint3_export_design.md §5.2)。
+      const job = beginMatchingJob('レビュー済みExcel生成中', '生成中止');
+      try {
+        const wb = XLSX.utils.book_new();
+        sheetsResult.sheets.forEach(s => __v1117.addJsonSheet(wb, s.sheetName, s.rows));
+        await __v1117.writeWorkbook(
+          wb, `${safeFileName(graphNameOrDefault())}_trace_comparison_reviewed_V12_1_15.xlsx`, job
+        );
+        finishMatchingJob(job, 'レビュー済みExcel保存完了');
+        b4bStatusEl.textContent = 'レビュー済みExcelを保存しました。';
+      } catch (err) {
+        failMatchingJob(job);
+        if (!(err instanceof MatchingCancelledError)) {
+          console.error(err);
+          b4bStatusEl.textContent = 'レビュー済みExcel出力エラー: ' + err.message;
+        } else {
+          b4bStatusEl.textContent = 'レビュー済みExcelの生成を中止しました。';
+        }
+      }
+    } catch (err) {
+      // b4bBuildArtifactOrNull()/buildReviewedExcelSheets()がjob開始前に予期せずthrow
+      // した場合でも、未処理Promise rejectionにせずfail-closedにする。
+      console.error(err);
+      b4bStatusEl.textContent = 'レビュー済みExcel生成中に予期しないエラーが発生しました: ' + (err && err.message || String(err));
+    } finally {
+      b4bExportBusy = false;
+      b4bReviewedExportRefreshUi(true);
+    }
+  });
+
+  // ボタンの有効/無効の表示更新は、タイマーによる定期ポーリングにはしない。
+  // captureReviewedExportState()は内部でrecomputeAndCacheProjection()を呼ぶため
+  // (§0.2)、無関係なタイマーで頻繁に呼ぶとdetail table再描画が不要に走り、
+  // その再描画中に一時的に立つactiveMatchingJob("画面描画中"job)とユーザーの
+  // クリックが競合してボタン表示とcaptureの実際の可否が食い違う原因になる。
+  // 代わりに、Checkpoint 2のb4bRenderSessionPanel()が実際に呼ばれた時
+  // (=セッション状態が本当に変わった時)にだけ表示を更新する
+  // (#b4bReviewSessionPanel自体はCheckpoint 2の既存要素で、監視するだけで
+  // 変更は加えない)。
+  const b4bReviewSessionPanelEl = document.getElementById('b4bReviewSessionPanel');
+  if (b4bReviewSessionPanelEl) {
+    new MutationObserver(() => b4bReviewedExportRefreshUi())
+      .observe(b4bReviewSessionPanelEl, { characterData: true, childList: true, subtree: true, attributes: true });
+  }
+  b4bReviewedExportRefreshUi();
 })();
 </script>
 

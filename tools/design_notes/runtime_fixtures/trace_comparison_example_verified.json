@@ -1,0 +1,377 @@
+{
+  "schema_version": "trace-comparison/1.0-rc1",
+  "generated_at": "2026-07-19T16:28:27.568Z",
+  "note": "trace_comparison_example_verification.jsにより実データ(samples/hvac_trace_sample_small/)から機械的に生成・検証済み。relationshipもruntime_fixtures/*.jsonから機械的に解決した(手打ちの値は含まない)。",
+  "source": {
+    "requirement_file": "JSON_A_customer_requirements_trace.json",
+    "actual_file": "JSON_B_design_review_trace.json"
+  },
+  "provenance": {
+    "hash_algorithm": "SHA-256",
+    "id_hash_algorithm": "SHA-256/128",
+    "normalization": "v12Normalize相当(NFKC正規化+改行統一+行末空白除去+空白圧縮+trim)",
+    "requirement_dataset_signature": null,
+    "actual_dataset_signature": null,
+    "matching_dataset_signature": "DS:4b6ad0e9:A4:B5"
+  },
+  "not_analyzed": [],
+  "comparisons": [
+    {
+      "comparison_id": "req-cooling-capacity::design-cooling-capacity::q-d877af7681166f129dfa4f6fa4cbd5ca::q-adc7c0a5e1023bd5025e451c725eb983",
+      "requirement_ref": {
+        "trace_id": "req-cooling-capacity",
+        "matcher_id": "req-cooling-capacity"
+      },
+      "actual_ref": {
+        "trace_id": "design-cooling-capacity",
+        "matcher_id": "6",
+        "source_row": 6
+      },
+      "quantity_pair_id": "q-d877af7681166f129dfa4f6fa4cbd5ca::q-adc7c0a5e1023bd5025e451c725eb983",
+      "relationship": {
+        "source": "matching_engine",
+        "match_method": "tag",
+        "match_confidence": 0.88,
+        "review_category": "要確認",
+        "linked_at": null
+      },
+      "requirement_analysis": {
+        "quantity_id": "q-d877af7681166f129dfa4f6fa4cbd5ca",
+        "source_field": "source_raw_text",
+        "occurrence_index": 0,
+        "source_span": {
+          "start": 18,
+          "end": 23
+        },
+        "content_hash": "7317516c674b1f49070dc4e0d08321e95de1ed3f7e40447783fe32c318db8a24",
+        "quantity": {
+          "source_text": "12 kW",
+          "source_span": {
+            "start": 18,
+            "end": 23
+          },
+          "normalized_text": "12 kW",
+          "quantity": {
+            "kind": "interval",
+            "lower": {
+              "value": 12,
+              "inclusive": true
+            },
+            "upper": null
+          },
+          "unit": {
+            "source": "kW",
+            "canonical": "kW",
+            "dimension": "power",
+            "standard_ref": {
+              "standard": "JIS Z 8000-4",
+              "category": "mechanics"
+            }
+          },
+          "context": {
+            "property": null,
+            "subject": null,
+            "state": null,
+            "tokens": []
+          },
+          "extraction": {
+            "confidence": 0.95,
+            "warnings": []
+          },
+          "condition_candidates": [
+            {
+              "source_text": "50 °C",
+              "source_span": {
+                "start": 4,
+                "end": 9
+              },
+              "quantity": {
+                "kind": "interval",
+                "lower": {
+                  "value": 50,
+                  "inclusive": true
+                },
+                "upper": {
+                  "value": 50,
+                  "inclusive": true
+                }
+              },
+              "unit": {
+                "source": "°C",
+                "canonical": "degC",
+                "dimension": "temperature",
+                "standard_ref": {
+                  "standard": "JIS Z 8000-5",
+                  "category": "thermodynamics"
+                }
+              },
+              "confidence": 0.7
+            }
+          ]
+        },
+        "semantics_candidates": [
+          {
+            "value": "acceptable_region",
+            "confidence": 0.6,
+            "evidence": [
+              {
+                "type": "keyword",
+                "value": "acceptable_region",
+                "source_text": "周囲温度50 °Cにおいて、冷房能力12 kW以上を確保すること。",
+                "effect": "supports",
+                "weight": 0.45
+              },
+              {
+                "type": "quantity_shape",
+                "value": "acceptable_region",
+                "source_text": "周囲温度50 °Cにおいて、冷房能力12 kW以上を確保すること。",
+                "effect": "supports",
+                "weight": 0.15
+              }
+            ]
+          },
+          {
+            "value": "unknown",
+            "confidence": 0.15,
+            "evidence": [
+              {
+                "type": "baseline",
+                "value": "unknown",
+                "source_text": "(既定の受け皿。他候補が弱い場合の下限)",
+                "effect": "supports",
+                "weight": 0.15
+              }
+            ]
+          }
+        ]
+      },
+      "actual_analysis": {
+        "quantity_id": "q-adc7c0a5e1023bd5025e451c725eb983",
+        "source_field": "検討結果",
+        "occurrence_index": 0,
+        "source_span": {
+          "start": 10,
+          "end": 17
+        },
+        "content_hash": "9ded8ba4feba1104c74f141478e2be01da981052351ea30cb70d574aff6fc60b",
+        "quantity": {
+          "source_text": "12.5 kW",
+          "source_span": {
+            "start": 10,
+            "end": 17
+          },
+          "normalized_text": "12.5 kW",
+          "quantity": {
+            "kind": "interval",
+            "lower": {
+              "value": 12.5,
+              "inclusive": true
+            },
+            "upper": {
+              "value": 12.5,
+              "inclusive": true
+            }
+          },
+          "unit": {
+            "source": "kW",
+            "canonical": "kW",
+            "dimension": "power",
+            "standard_ref": {
+              "standard": "JIS Z 8000-4",
+              "category": "mechanics"
+            }
+          },
+          "context": {
+            "property": null,
+            "subject": null,
+            "state": null,
+            "tokens": []
+          },
+          "extraction": {
+            "confidence": 0.95,
+            "warnings": []
+          },
+          "condition_candidates": [
+            {
+              "source_text": "50 °C",
+              "source_span": {
+                "start": 4,
+                "end": 9
+              },
+              "quantity": {
+                "kind": "interval",
+                "lower": {
+                  "value": 50,
+                  "inclusive": true
+                },
+                "upper": {
+                  "value": 50,
+                  "inclusive": true
+                }
+              },
+              "unit": {
+                "source": "°C",
+                "canonical": "degC",
+                "dimension": "temperature",
+                "standard_ref": {
+                  "standard": "JIS Z 8000-5",
+                  "category": "thermodynamics"
+                }
+              },
+              "confidence": 0.7
+            }
+          ]
+        },
+        "semantics_candidates": [
+          {
+            "value": "achieved_point",
+            "confidence": 0.75,
+            "evidence": [
+              {
+                "type": "quantity_shape",
+                "value": "achieved_point",
+                "source_text": "冷房能力 / 検討結果: 周囲温度50 °Cで12.5 kW",
+                "effect": "supports",
+                "weight": 0.3
+              },
+              {
+                "type": "column_role",
+                "value": "achieved_point",
+                "source_text": "冷房能力 / 検討結果: 周囲温度50 °Cで12.5 kW",
+                "effect": "supports",
+                "weight": 0.05
+              },
+              {
+                "type": "keyword",
+                "value": "achieved_point",
+                "source_text": "冷房能力 / 検討結果: 周囲温度50 °Cで12.5 kW",
+                "effect": "supports",
+                "weight": 0.4
+              }
+            ]
+          },
+          {
+            "value": "unknown",
+            "confidence": 0.15,
+            "evidence": [
+              {
+                "type": "baseline",
+                "value": "unknown",
+                "source_text": "(既定の受け皿。他候補が弱い場合の下限)",
+                "effect": "supports",
+                "weight": 0.15
+              }
+            ]
+          }
+        ]
+      },
+      "mapping": {
+        "status": "resolved",
+        "concept_id": "performance.cooling_capacity",
+        "confidence": 0.99,
+        "margin": 0.39,
+        "candidates": [
+          {
+            "concept_id": "performance.cooling_capacity",
+            "label": "冷房能力",
+            "confidence": 0.99,
+            "evidence": [
+              "単位次元一致: power",
+              "周辺語: 冷房能力",
+              "タグ: 冷房能力"
+            ]
+          },
+          {
+            "concept_id": "environment.ambient_operating_temperature",
+            "label": "周囲使用温度",
+            "confidence": 0.6,
+            "evidence": [
+              "周辺語: 周囲温度",
+              "タグ: 使用温度"
+            ]
+          }
+        ],
+        "source": "generatePropertyCandidates",
+        "confirmed": false
+      },
+      "automation": {
+        "comparison_mode_candidate": {
+          "value": "point_in_region",
+          "confidence": 0.6,
+          "derived_from": {
+            "requirement_semantics": "acceptable_region",
+            "actual_semantics": "achieved_point"
+          },
+          "confirmed": false
+        },
+        "auto_applicable": {
+          "applicable": true,
+          "reasons": [
+            "comparison_mode確信度0.60が閾値0.4以上",
+            "要求側候補の差0.45が閾値0.2以上",
+            "実仕様側候補の差0.60が閾値0.2以上",
+            "否定根拠なし",
+            "抽出警告なし",
+            "設計特性の対応確信度0.99が閾値0.7以上"
+          ],
+          "fail_reasons": []
+        }
+      },
+      "comparison": {
+        "comparable": true,
+        "provisional": true,
+        "comparison_mode": "point_in_region",
+        "assumptions": [
+          "同じ設計特性として選択済み",
+          "同じ運転条件",
+          "単位換算不要"
+        ],
+        "satisfied": true,
+        "lowGap": 0.5,
+        "highGap": null,
+        "boundaryMismatch": {
+          "lower": false,
+          "upper": false
+        },
+        "extractionWarnings": []
+      },
+      "review": {
+        "quantity_extraction": {
+          "status": "unreviewed",
+          "reviewer": null,
+          "reviewed_at": null,
+          "verdict": null,
+          "note": null
+        },
+        "property_mapping": {
+          "status": "unreviewed",
+          "reviewer": null,
+          "reviewed_at": null,
+          "verdict": null,
+          "note": null
+        },
+        "condition_equivalence": {
+          "status": "unreviewed",
+          "reviewer": null,
+          "reviewed_at": null,
+          "verdict": null,
+          "note": null
+        },
+        "comparison_mode": {
+          "status": "unreviewed",
+          "reviewer": null,
+          "reviewed_at": null,
+          "verdict": null,
+          "note": null
+        },
+        "satisfaction": {
+          "status": "not_eligible",
+          "reviewer": null,
+          "reviewed_at": null,
+          "verdict": null,
+          "note": null
+        }
+      }
+    }
+  ]
+}
