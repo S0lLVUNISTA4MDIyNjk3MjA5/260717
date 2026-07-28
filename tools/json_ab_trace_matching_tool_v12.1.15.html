@@ -60,6 +60,10 @@
   <script src="./generated/trace_comparison_schema_v2.browser.js"></script>
   <script src="./design_notes/json_schema_minivalidator.js"></script>
   <script src="./design_notes/trace_comparison_record_set_validator.js"></script>
+  <!-- B-4b Checkpoint 2: レビューsession接続（Stage 1〜3 / Checkpoint 1 projection、いずれも無変更） -->
+  <script src="./trace_comparison_review_state_core.js"></script>
+  <script src="./trace_comparison_review_session_core.js"></script>
+  <script src="./trace_comparison_review_projection_core.js"></script>
   <style>
     :root {
       --primary: #2563eb;
@@ -559,6 +563,26 @@
           <button id="traceComparisonDownloadBtn" class="success" type="button">trace-comparison JSONを生成・検証して保存</button>
         </div>
         <div id="traceComparisonDownloadStatus" class="field-hint" role="status">ボタンを押すまで生成・検証・保存しません。</div>
+      </div>
+      <div class="output-group" id="b4bReviewSessionPanel">
+        <div class="output-group-title">数量比較レビュー（B-4b, Checkpoint 2・opt-in）</div>
+        <div class="workflow-actions" style="margin-top:0; align-items:center; gap:10px; flex-wrap:wrap;">
+          <span id="b4bSessionStatusBadge" style="display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:700; background:#e2e8f0; color:#334155;">未レビュー</span>
+          <label style="display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:600; color:var(--muted);">
+            レビュー担当者
+            <input id="b4bReviewerInput" type="text" style="width:160px; margin:0; padding:5px 7px;" placeholder="氏名等（開始時に必須）" />
+          </label>
+          <button id="b4bStartReviewBtn" class="success" type="button" disabled>レビュー開始</button>
+          <button id="b4bDiscardReviewBtn" class="secondary" type="button" disabled>レビューを破棄</button>
+        </div>
+        <div id="b4bSessionStatusDetail" class="field-hint" role="status">入力・照合・数量bindingが完了すると開始できます。</div>
+      </div>
+      <div class="output-group" id="b4bComparisonPanel" style="display:none;">
+        <div class="output-group-title">個別レビュー: <span id="b4bComparisonPanelTitle"></span></div>
+        <div id="b4bComparisonPanelBody"></div>
+        <div class="workflow-actions" style="margin-top:8px;">
+          <button id="b4bComparisonPanelCloseBtn" class="secondary" type="button">閉じる</button>
+        </div>
       </div>
       <div class="output-group">
         <div class="output-group-title">モデルテキスト出力</div>
@@ -12653,6 +12677,574 @@ ${h.name}`, type:'requirement', detail:srcA };
   matchLogic.version = VERSION;
   document.title = 'JSON A/B トレース照合ツール V12.1.15';
   const h1 = document.querySelector('body > h1'); if (h1) h1.textContent = 'JSON A/B トレース照合ツール V12.1.15';
+})();
+</script>
+
+<script>
+/* B-4b Checkpoint 2: レビューsessionのHTML/UI接続。
+   Stage 1〜3 (trace_comparison_review_state_core.js / trace_comparison_review_session_core.js)
+   および Checkpoint 1 projection core (trace_comparison_review_projection_core.js) は無変更。
+   本ブロックは既存スクリプトの末尾に追記するのみで、既存関数の本体は書き換えない
+   (renderDetailTableFull / buildGraphElements / renderGraph は後述のとおりラップのみ。
+   #loadBtn / #rerunMatchBtn には追加のclickリスナーを1本ずつ登録するのみ)。
+   projection計算は recomputeAndCacheProjection() の1箇所のみで行い、
+   詳細テーブル・グラフはそこで作られる b4bProjectionCache を読むだけにする。 */
+(function() {
+  'use strict';
+  if (!globalThis.TraceComparisonReviewSessionCore
+    || typeof globalThis.TraceComparisonReviewSessionCore.createReviewSessionCoordinator !== 'function'
+    || !globalThis.TraceComparisonReviewProjectionCore
+    || typeof globalThis.TraceComparisonReviewProjectionCore.projectEffectiveReviewedResultSet !== 'function') {
+    console.error('B-4b Checkpoint 2: レビューcoreが読み込まれていません。');
+    return;
+  }
+
+  const b4bCoordinator = TraceComparisonReviewSessionCore.createReviewSessionCoordinator();
+
+  const b4bStatusBadge = document.getElementById('b4bSessionStatusBadge');
+  const b4bStatusDetail = document.getElementById('b4bSessionStatusDetail');
+  const b4bReviewerInput = document.getElementById('b4bReviewerInput');
+  const b4bStartBtn = document.getElementById('b4bStartReviewBtn');
+  const b4bDiscardBtn = document.getElementById('b4bDiscardReviewBtn');
+  const b4bPanel = document.getElementById('b4bComparisonPanel');
+  const b4bPanelTitle = document.getElementById('b4bComparisonPanelTitle');
+  const b4bPanelBody = document.getElementById('b4bComparisonPanelBody');
+  const b4bPanelCloseBtn = document.getElementById('b4bComparisonPanelCloseBtn');
+
+  const B4B_UPSTREAM_TARGETS = ['quantity_extraction', 'property_mapping', 'interval_semantics', 'comparison_mode'];
+  const B4B_TARGET_LABELS = {
+    quantity_extraction: '数量抽出', property_mapping: '属性対応',
+    interval_semantics: '区間意味論', comparison_mode: '比較モード'
+  };
+
+  // b4bProjectionCache は recomputeAndCacheProjection() でのみ書き込む唯一の投影結果。
+  // status: 'unavailable'(未開始/discard後・projection未呼び出し) | 'ready'(active) |
+  //         'stale'(古い session だが投影は表示) | 'error'(projectionそのものが失敗)
+  let b4bProjectionCache = Object.freeze({ status: 'unavailable' });
+  // discard直後だけ文言を変える表示専用フラグ。projectionCacheにもcoordinatorにも入力しない。
+  let b4bDiscardedRecently = false;
+  let b4bOpenComparisonId = null;
+  let b4bOpenComparisonIds = [];
+  let b4bBusy = false;
+  let b4bTransientMessage = '';
+
+  function b4bNowIso() { return new Date().toISOString(); }
+
+  // downloadTraceComparisonRecordSet() (既存, 1820行台) と同じ前提条件を読むだけの検査。
+  // 判定ロジックは複製せず、既存が既に使っている状態変数を読むのみ。
+  function b4bPreconditionError() {
+    if (activeMatchingJob) return '照合または成果物処理の実行中です。完了後に再実行してください。';
+    if (traceComparisonInputStale || traceComparisonReadyRunId !== matchRunSeq || traceMatrixStale === true
+      || mergedResult?.metadata?.matchStatus !== 'matched') {
+      return '現在の入力に対する照合が未完了、または照合結果が陳腐化しています。';
+    }
+    if (!quantityBindingState) return '数量注釈bindingがありません。';
+    if (quantityBindingState.ready !== true) return '数量注釈bindingがreadyではありません。';
+    if (typeof globalThis.__quantityBindingDiagnostics?.relationRows !== 'function') return '正式なrelation accessorがありません。';
+    if (matchRunSeq < 1) return '照合が一度も完了していません。';
+    return null;
+  }
+
+  // trace_comparison_review_session_core.jsのcaptureSourceContext契約は、4 ID + relationship
+  // (source/match_method/match_confidence/review_category/linked_at)をネストした形を要求する
+  // (RELATION_KEYS/RELATIONSHIP_KEYS。producerRelations()が内部で平坦形へ変換する)。
+  // __quantityBindingDiagnostics.relationRows() は平坦形を返すため、ここで詰め替える。
+  function b4bRelationsForSourceContext() {
+    const flat = typeof globalThis.__quantityBindingDiagnostics?.relationRows === 'function'
+      ? globalThis.__quantityBindingDiagnostics.relationRows() : [];
+    return flat.map(row => ({
+      requirement_trace_id: row.requirement_trace_id,
+      actual_trace_id: row.actual_trace_id,
+      matcher_a_id: row.matcher_a_id,
+      matcher_b_id: row.matcher_b_id,
+      relationship: {
+        source: row.source, match_method: row.match_method, match_confidence: row.match_confidence,
+        review_category: row.review_category, linked_at: row.linked_at
+      }
+    }));
+  }
+
+  function b4bCaptureSourceContext() {
+    const relations = b4bRelationsForSourceContext();
+    return {
+      input_stale: !!traceComparisonInputStale,
+      matching_stale: traceMatrixStale === true,
+      matching_run_id: matchRunSeq,
+      // matching_run_id/matching_generationは別概念だが、本ツールには単一のmatchRunSeqしか
+      // 存在しないため、同一カウンタを両フィールドへ流用する(意図的な簡略化)。
+      matching_generation: matchRunSeq,
+      requirement_dataset_signature: quantityBindingState?.requirement?.dataset_signature || '',
+      actual_dataset_signature: quantityBindingState?.actual?.dataset_signature || '',
+      matching_dataset_signature: typeof globalThis.__currentDatasetSignature === 'function'
+        ? globalThis.__currentDatasetSignature() : '',
+      relations,
+      // coordinatorはactive_matching_jobの中身を解釈せずnull/非nullだけを見るため、
+      // 内部job objectをそのまま渡さずJSON安全な最小プレースホルダにする。
+      active_matching_job: activeMatchingJob ? { busy: true } : null
+    };
+  }
+
+  async function b4bSyncBindingRefresh(reasonCode) {
+    const err = b4bPreconditionError();
+    if (err) { recomputeAndCacheProjection(); b4bRenderSessionPanel(); return; }
+    const beginResult = b4bCoordinator.beginBindingRefresh({ reasonCode, occurredAt: b4bNowIso() });
+    if (!beginResult.ok) {
+      b4bTransientMessage = 'binding refresh開始に失敗しました（コード: ' + (beginResult.diagnostics?.[0]?.code || '不明') + '）。';
+      recomputeAndCacheProjection(); b4bRenderSessionPanel(); return;
+    }
+    let requirementAnnotation = null, actualAnnotation = null;
+    try {
+      requirementAnnotation = sysQuantityFile?.files?.[0] ? await readJsonFile(sysQuantityFile.files[0]) : null;
+      actualAnnotation = plmQuantityFile?.files?.[0] ? await readJsonFile(plmQuantityFile.files[0]) : null;
+    } catch (_) {
+      b4bTransientMessage = 'binding refresh用の注釈ファイル読込に失敗しました。';
+      recomputeAndCacheProjection(); b4bRenderSessionPanel(); return;
+    }
+    const completeResult = await b4bCoordinator.completeBindingRefresh({
+      token: beginResult.value,
+      requirementTrace: sysData, requirementAnnotation,
+      actualTrace: plmData, actualAnnotation
+    });
+    b4bTransientMessage = completeResult.ok ? ''
+      : 'binding refresh完了に失敗しました（コード: ' + (completeResult.diagnostics?.[0]?.code || '不明') + '）。';
+    recomputeAndCacheProjection();
+    b4bRenderSessionPanel();
+  }
+
+  async function b4bWaitMatchingIdle() {
+    while (activeMatchingJob !== null) await new Promise(resolve => setTimeout(resolve, 30));
+  }
+
+  // JSON A/B・quantity注釈のファイル選択が変わった時点で、bindingを変える入力なので
+  // 即座にbeginBindingRefresh()する(active sessionがあれば直ちにstaleへ遷移する)。
+  // 既存の[sysFile,plmFile,sysQuantityFile,plmQuantityFile].forEach(...change...)
+  // (traceComparisonInputStale=trueを立てるだけの既存リスナー)とは別枠の追加リスナーであり、
+  // 既存リスナー自体は書き換えない。
+  function b4bOnSourceFileChanged(reasonCode) {
+    b4bCoordinator.beginBindingRefresh({ reasonCode, occurredAt: b4bNowIso() });
+    recomputeAndCacheProjection();
+    b4bRenderSessionPanel();
+  }
+  [sysFile, plmFile].filter(Boolean).forEach(input => {
+    input.addEventListener('change', () => b4bOnSourceFileChanged('json_ab_file_changed'));
+  });
+  [sysQuantityFile, plmQuantityFile].filter(Boolean).forEach(input => {
+    input.addEventListener('change', () => b4bOnSourceFileChanged('quantity_annotation_file_changed'));
+  });
+
+  // Phase 7の手動trace関係変更(追加・付け替え・削除・レビュー入力)はbinding自体を
+  // 変えないrelation集合の変更のため、invalidateReviewSource({affectsBinding:false})のみ呼ぶ。
+  // Phase 7自身が既にこれらのwindow関数を1段ラップして概要ロールアップ更新に使っているため、
+  // (p7AfterHumanChangeはPhase 7スクリプトのIIFE内に閉じておりここから直接参照できない)
+  // 同じwindow関数群をもう1段ラップして追いかける。
+  // 手動関係削除の実UI経路は window.removeManualTraceRelation (削除ボタンのonclick先、
+  // 10025行付近で定義)であり、deleteManualTraceRelationという名の関数は存在しない
+  // (Phase 7自身の11129行の同名wrapもここでは空振りしている、既存の別問題であり本修正の対象外)。
+  // removeManualTraceRelation/deleteOrphanTraceEntryはconfirm()でユーザーがキャンセルすると
+  // 何も変更せずreturnするため、「関数が呼ばれた」だけでは無条件にstale化しない。
+  // manualTraceRelations/traceReplacementHistoryはPhase 7スクリプトのIIFE内に閉じた変数で
+  // ここから直接参照できないため、既存の公開読み取りAPI window.getManualTraceState()
+  // (manualRelations/replacements/orphans/auditを含む)を使う。traceReviewStoreは
+  // (このIIFEでは再宣言されていないため)共有トップレベル変数として直接参照できる。
+  // これらのcanonical JSON署名を呼び出し前後で比較し、実際に変化した場合のみinvalidateする。
+  function b4bPhase7SourceSignature() {
+    const canon = typeof globalThis.QuantitySidecarBinding?.canonicalJson === 'function'
+      ? globalThis.QuantitySidecarBinding.canonicalJson : JSON.stringify;
+    try {
+      const manualState = typeof window.getManualTraceState === 'function' ? window.getManualTraceState() : null;
+      return canon({ manualState, traceReviewStore });
+    } catch (_) { return null; }
+  }
+  // 個別に同じラップコードを繰り返さず、監視対象の関数名だけを列挙する共通ヘルパー。
+  // importTraceReviewPackage/applyBulkTraceReview/undoBulkTraceReviewも、
+  // 実際にtraceReviewStore/manualTraceRelations/traceReplacementHistoryを書き換え、
+  // 有効トレースを再構築する正式なUI経由のmutation APIであるため、他の5本と同様に
+  // read-only observerとして監視対象へ加える(Phase 7自身の判定ロジック・状態遷移は
+  // 一切変更しない。呼び出し前後の署名比較だけを追加する)。
+  function b4bWrapPhase7SourceMutation(name) {
+    const prior = window[name];
+    if (typeof prior !== 'function') return;
+    window[name] = function(...args) {
+      const before = b4bPhase7SourceSignature();
+      const result = prior.apply(this, args);
+      const after = b4bPhase7SourceSignature();
+      // 署名が取得できなかった場合(想定外の循環参照等)はfail-closedで変化ありとみなす。
+      if (before === null || after === null || before !== after) {
+        b4bCoordinator.invalidateReviewSource({ reasonCode: 'phase7_relation_changed', occurredAt: b4bNowIso(), affectsBinding: false });
+        recomputeAndCacheProjection();
+        b4bRenderSessionPanel();
+      }
+      return result;
+    };
+  }
+  ['updateTraceReview', 'addManualTraceRelationFromValues', 'replaceTraceRelationFromValues',
+    'removeManualTraceRelation', 'deleteOrphanTraceEntry', 'importTraceReviewPackage',
+    'applyBulkTraceReview', 'undoBulkTraceReview'].forEach(b4bWrapPhase7SourceMutation);
+
+  async function b4bWaitReadyFlags(timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!traceComparisonInputStale && traceComparisonReadyRunId === matchRunSeq
+        && mergedResult?.metadata?.matchStatus === 'matched') return true;
+      await new Promise(resolve => setTimeout(resolve, 30));
+    }
+    return false;
+  }
+  async function b4bAfterLoad() {
+    await b4bWaitMatchingIdle();
+    const ready = await b4bWaitReadyFlags(5000);
+    if (ready) {
+      b4bLastSyncedMatchingRunId = traceComparisonReadyRunId;
+      await b4bSyncBindingRefresh('load_or_reload');
+    } else { recomputeAndCacheProjection(); b4bRenderSessionPanel(); }
+  }
+  document.getElementById('loadBtn')?.addEventListener('click', () => { b4bAfterLoad(); });
+
+  // 再照合はbinding(quantity注釈の対応付け)自体を変えないため、
+  // invalidateReviewSource({affectsBinding:false})のみ呼ぶ(3.3節)。ただし「ボタンが押された」
+  // だけではなく「新しいmatching sourceが実際にcommitされた」場合のみ呼ぶ。キャンセル・失敗・
+  // (何らかの理由で)結果が変わらなかった再照合では、既にsyncした runId と比較して不要な
+  // stale化をしない。
+  let b4bLastSyncedMatchingRunId = traceComparisonReadyRunId;
+  async function b4bAfterRematch() {
+    await b4bWaitMatchingIdle();
+    const committedFreshRun = !traceComparisonInputStale && traceComparisonReadyRunId === matchRunSeq
+      && mergedResult?.metadata?.matchStatus === 'matched'
+      && traceComparisonReadyRunId !== b4bLastSyncedMatchingRunId;
+    if (committedFreshRun) {
+      b4bLastSyncedMatchingRunId = traceComparisonReadyRunId;
+      b4bCoordinator.invalidateReviewSource({ reasonCode: 'matching_rerun', occurredAt: b4bNowIso(), affectsBinding: false });
+    }
+    recomputeAndCacheProjection();
+    b4bRenderSessionPanel();
+  }
+  document.getElementById('rerunMatchBtn')?.addEventListener('click', () => { b4bAfterRematch(); });
+
+  // record_setのcomparisonsから、詳細テーブル(JSON A/B基準)・グラフが行/edge単位で
+  // comparison_idを引けるようにする索引。この索引もrecomputeAndCacheProjection()の中で
+  // 1回だけ作り、projectionCacheへ格納する。rendererはこれ以外の場所でcoordinatorの
+  // getRecordSetSnapshot()を直接呼ばない(単一source原則)。
+  function b4bBuildComparisonIndices(snapshot) {
+    const matcherAIndex = new Map();
+    const matcherBIndex = new Map();
+    const matcherPairIndex = new Map();
+    if (snapshot && Array.isArray(snapshot.comparisons)) {
+      snapshot.comparisons.forEach(c => {
+        const a = c?.requirement_ref?.matcher_id;
+        const b = c?.actual_ref?.matcher_id;
+        const id = c?.comparison_id;
+        if (!id) return;
+        if (a) { if (!matcherAIndex.has(a)) matcherAIndex.set(a, []); matcherAIndex.get(a).push(id); }
+        if (b) { if (!matcherBIndex.has(b)) matcherBIndex.set(b, []); matcherBIndex.get(b).push(id); }
+        if (a && b) {
+          const key = a + '::' + b;
+          if (!matcherPairIndex.has(key)) matcherPairIndex.set(key, []);
+          matcherPairIndex.get(key).push(id);
+        }
+      });
+    }
+    return Object.freeze({ matcherAIndex, matcherBIndex, matcherPairIndex });
+  }
+
+  // ─── projection: 唯一の再計算箇所 ───
+  function recomputeAndCacheProjection() {
+    const session = b4bCoordinator.getReviewSession();
+    const snapshot = b4bCoordinator.getRecordSetSnapshot();
+    const indices = b4bBuildComparisonIndices(snapshot);
+    if (session === null) {
+      b4bProjectionCache = Object.freeze({ status: 'unavailable', ...indices });
+    } else {
+      const projected = TraceComparisonReviewProjectionCore.projectEffectiveReviewedResultSet(snapshot, session);
+      b4bProjectionCache = Object.freeze({
+        status: !projected.ok ? 'error' : (session.session_status === 'stale' ? 'stale' : 'ready'),
+        projected, ...indices
+      });
+    }
+    if (typeof renderDirty === 'object' && renderDirty) { renderDirty.detail = true; renderDirty.graph = true; }
+    if (typeof ensureLazyTabRendered === 'function' && typeof currentTabId === 'function') {
+      ensureLazyTabRendered(currentTabId());
+    }
+  }
+
+  // ─── セッションパネル ───
+  function b4bDefaultStatusMessage(session, bindingReady) {
+    if (b4bProjectionCache.status === 'error') {
+      return '投影に失敗しました（コード: ' + (b4bProjectionCache.projected?.diagnostics?.[0]?.code || '不明')
+        + '）。自動照合結果自体は変更されていません。';
+    }
+    if (session === null) {
+      if (!bindingReady) return '入力・照合・数量bindingが完了すると開始できます。';
+      return b4bDiscardedRecently ? '破棄済みです。再度レビュー開始できます。' : '準備ができています。レビューを開始できます。';
+    }
+    if (session.session_status === 'stale') return 'レビューが古くなっています。承認・satisfaction・resetは行えません。破棄のみ可能です。';
+    return '';
+  }
+
+  function b4bRenderSessionPanel() {
+    const session = b4bCoordinator.getReviewSession();
+    const bindingReady = b4bCoordinator.getBindingRuntime() !== null;
+    if (session === null) {
+      b4bStatusBadge.textContent = b4bDiscardedRecently ? '破棄済み（再度開始できます）' : '未レビュー';
+      b4bStatusBadge.style.background = '#e2e8f0'; b4bStatusBadge.style.color = '#334155';
+      b4bStartBtn.disabled = !bindingReady || b4bBusy;
+      b4bDiscardBtn.disabled = true;
+    } else if (session.session_status === 'active') {
+      b4bStatusBadge.textContent = 'レビュー中';
+      b4bStatusBadge.style.background = '#dbeafe'; b4bStatusBadge.style.color = '#1e40af';
+      b4bStartBtn.disabled = true;
+      b4bDiscardBtn.disabled = b4bBusy;
+    } else {
+      b4bStatusBadge.textContent = 'レビューが古くなっています';
+      b4bStatusBadge.style.background = '#fef3c7'; b4bStatusBadge.style.color = '#92400e';
+      b4bStartBtn.disabled = true;
+      b4bDiscardBtn.disabled = b4bBusy;
+    }
+    b4bStatusDetail.textContent = b4bTransientMessage || b4bDefaultStatusMessage(session, bindingReady);
+    b4bRenderComparisonPanel();
+  }
+
+  b4bStartBtn?.addEventListener('click', async () => {
+    if (b4bBusy) return;
+    const reviewer = (b4bReviewerInput.value || '').trim();
+    if (!reviewer) { b4bTransientMessage = 'レビュー担当者を入力してください。'; b4bRenderSessionPanel(); return; }
+    const err = b4bPreconditionError();
+    if (err) { b4bTransientMessage = err; b4bRenderSessionPanel(); return; }
+    if (b4bCoordinator.getBindingRuntime() === null) {
+      b4bTransientMessage = 'binding runtimeの準備ができていません。読み込み・照合を完了してください。';
+      b4bRenderSessionPanel(); return;
+    }
+    b4bBusy = true; b4bRenderSessionPanel();
+    try {
+      const result = await b4bCoordinator.startReviewSession({
+        captureSourceContext: b4bCaptureSourceContext,
+        generatedAt: b4bNowIso(),
+        generator: { tool: 'json_ab_trace_matching_tool_v12.1.15.html', version: '12.1.15' },
+        sessionId: 'b4b-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10),
+        startedAt: b4bNowIso(),
+        startedBy: reviewer
+      });
+      b4bTransientMessage = result.ok ? '' : 'レビュー開始に失敗しました（コード: ' + (result.diagnostics?.[0]?.code || '不明') + '）。';
+      if (result.ok) b4bDiscardedRecently = false;
+    } finally { b4bBusy = false; }
+    recomputeAndCacheProjection();
+    b4bRenderSessionPanel();
+  });
+
+  b4bDiscardBtn?.addEventListener('click', async () => {
+    if (b4bBusy) return;
+    b4bBusy = true; b4bRenderSessionPanel();
+    try {
+      const result = await b4bCoordinator.coordinateReviewTransition({
+        action: { type: 'discard_review_session' }, captureSourceContext: null, occurredAt: null
+      });
+      if (result.ok) {
+        b4bDiscardedRecently = true; b4bOpenComparisonId = null; b4bOpenComparisonIds = [];
+        b4bPanel.style.display = 'none'; b4bTransientMessage = '';
+      } else {
+        b4bTransientMessage = '破棄に失敗しました（コード: ' + (result.diagnostics?.[0]?.code || '不明') + '）。';
+      }
+    } finally { b4bBusy = false; }
+    recomputeAndCacheProjection();
+    b4bRenderSessionPanel();
+  });
+
+  // ─── 個別comparisonパネル ───
+  function b4bOpenComparisonPanel(ids) {
+    if (!ids.length) return;
+    b4bOpenComparisonIds = ids;
+    b4bOpenComparisonId = ids.includes(b4bOpenComparisonId) ? b4bOpenComparisonId : ids[0];
+    b4bPanel.style.display = '';
+    b4bRenderComparisonPanel();
+  }
+  b4bPanelCloseBtn?.addEventListener('click', () => {
+    b4bPanel.style.display = 'none'; b4bOpenComparisonId = null; b4bOpenComparisonIds = [];
+  });
+
+  function b4bRenderComparisonPanel() {
+    if (!b4bOpenComparisonId) { b4bPanel.style.display = 'none'; return; }
+    const ids = b4bOpenComparisonIds.length ? b4bOpenComparisonIds : [b4bOpenComparisonId];
+    b4bPanelTitle.textContent = ids.length + '件中: ' + b4bOpenComparisonId;
+    const canRead = b4bProjectionCache.status === 'ready' || b4bProjectionCache.status === 'stale';
+    const entry = canRead ? b4bProjectionCache.projected.result.comparisons[b4bOpenComparisonId] : null;
+    const stale = b4bProjectionCache.status === 'stale';
+    let html = '';
+    if (ids.length > 1) {
+      html += '<div style="margin-bottom:8px;">' + ids.map(id =>
+        '<button type="button" class="secondary b4b-id-switch" data-id="' + escapeHtml(id) + '" style="margin:2px; padding:3px 8px; font-size:11px;' +
+        (id === b4bOpenComparisonId ? 'background:#c7d2fe;' : '') + '">' + escapeHtml(id.slice(0, 24)) + '…</button>'
+      ).join('') + '</div>';
+    }
+    if (!entry) {
+      html += '<div class="field-hint">この項目のprojectionを表示できません（レビュー未開始、またはprojectionが失敗しています）。</div>';
+    } else {
+      html += '<div style="font-size:12px; color:var(--muted); margin-bottom:8px;">自動判定: ' + escapeHtml(entry.automatic.state)
+        + ' / satisfied=' + String(entry.automatic.satisfied)
+        + (stale ? ' <strong style="color:#ca8a04;">（レビューが古くなっています。操作は破棄のみ可能です）</strong>' : '') + '</div>';
+      B4B_UPSTREAM_TARGETS.forEach(target => {
+        const t = entry.review_overlay[target];
+        html += '<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">'
+          + '<span style="width:110px; font-size:12px; font-weight:600;">' + B4B_TARGET_LABELS[target] + '</span>'
+          + '<span style="font-size:12px;">' + (t.status === 'reviewed' ? '承認済み (' + escapeHtml(t.reviewer || '') + ')' : '未レビュー') + '</span>'
+          + '<button type="button" class="success b4b-action" data-action="accept_review_target" data-target="' + target + '" style="padding:3px 8px; font-size:11px;" '
+          + (stale || t.status === 'reviewed' ? 'disabled' : '') + '>承認</button>'
+          + '<button type="button" class="secondary b4b-action" data-action="reset_review_target" data-target="' + target + '" style="padding:3px 8px; font-size:11px;" '
+          + (stale || t.status !== 'reviewed' ? 'disabled' : '') + '>reset</button>'
+          + '</div>';
+      });
+      const s = entry.review_overlay.satisfaction;
+      const satisfactionDisabled = stale || s.status !== 'unreviewed' || entry.satisfaction_eligible !== true;
+      html += '<div style="margin-top:6px; padding-top:6px; border-top:1px solid #e2e8f0;">'
+        + '<div style="font-size:12px; font-weight:600; margin-bottom:4px;">satisfaction（現在: '
+        + (s.status === 'reviewed' ? escapeHtml(s.verdict) : escapeHtml(s.status)) + '）</div>'
+        + '<button type="button" class="success b4b-action" data-action="review_satisfaction" data-verdict="accept" style="padding:3px 8px; font-size:11px;" '
+        + (satisfactionDisabled ? 'disabled' : '') + '>自動判定を承認</button> '
+        + '<button type="button" class="success b4b-action" data-action="review_satisfaction" data-verdict="override_satisfied" style="padding:3px 8px; font-size:11px;" '
+        + (satisfactionDisabled ? 'disabled' : '') + '>override satisfied</button> '
+        + '<button type="button" class="secondary b4b-action" data-action="review_satisfaction" data-verdict="override_unsatisfied" style="padding:3px 8px; font-size:11px;" '
+        + (satisfactionDisabled ? 'disabled' : '') + '>override unsatisfied</button> '
+        + '<button type="button" class="secondary b4b-action" data-action="reset_review_target" data-target="satisfaction" style="padding:3px 8px; font-size:11px;" '
+        + (stale || s.status !== 'reviewed' ? 'disabled' : '') + '>reset</button>'
+        + '</div>';
+      html += '<label style="display:block; margin-top:8px; font-size:12px; font-weight:600;">note（次のアクションに使われます）'
+        + '<textarea id="b4bNoteInput" style="width:100%; min-height:40px; margin-top:2px;"></textarea></label>';
+    }
+    b4bPanelBody.innerHTML = html;
+    b4bPanelBody.querySelectorAll('.b4b-id-switch').forEach(btn => btn.addEventListener('click', () => {
+      b4bOpenComparisonId = btn.dataset.id; b4bRenderComparisonPanel();
+    }));
+    b4bPanelBody.querySelectorAll('.b4b-action').forEach(btn => btn.addEventListener('click', () => {
+      b4bHandleAction(btn.dataset.action, btn.dataset.target, btn.dataset.verdict);
+    }));
+  }
+
+  async function b4bHandleAction(actionType, target, verdict) {
+    if (b4bBusy) return;
+    const reviewer = (b4bReviewerInput.value || '').trim();
+    if (!reviewer) { b4bTransientMessage = 'レビュー担当者を入力してください。'; b4bRenderSessionPanel(); return; }
+    const note = (document.getElementById('b4bNoteInput')?.value || '').trim() || null;
+    let action;
+    if (actionType === 'accept_review_target') {
+      action = { type: 'accept_review_target', comparison_id: b4bOpenComparisonId, target, reviewer, reviewed_at: b4bNowIso(), verdict: 'accept', note };
+    } else if (actionType === 'review_satisfaction') {
+      action = { type: 'review_satisfaction', comparison_id: b4bOpenComparisonId, reviewer, reviewed_at: b4bNowIso(), verdict, note };
+    } else if (actionType === 'reset_review_target') {
+      action = { type: 'reset_review_target', comparison_id: b4bOpenComparisonId, target };
+    } else { return; }
+    b4bBusy = true;
+    try {
+      const result = await b4bCoordinator.coordinateReviewTransition({
+        action, captureSourceContext: b4bCaptureSourceContext, occurredAt: b4bNowIso()
+      });
+      b4bTransientMessage = result.ok ? '' : 'レビュー操作に失敗しました（コード: ' + (result.diagnostics?.[0]?.code || '不明') + '）。';
+    } finally { b4bBusy = false; }
+    recomputeAndCacheProjection();
+    b4bRenderSessionPanel();
+  }
+
+  // ─── projectionCacheを読むだけのバッジ判定 ───
+  function b4bBadgeForComparisonIds(ids) {
+    if (!ids.length) return { text: '', color: '#94a3b8' };
+    if (b4bProjectionCache.status === 'unavailable') return { text: '未開始', color: '#94a3b8' };
+    if (b4bProjectionCache.status === 'error') return { text: '確認不可', color: '#dc2626' };
+    const results = ids.map(id => b4bProjectionCache.projected.result.comparisons[id]).filter(Boolean);
+    if (results.length !== ids.length) return { text: '確認不可', color: '#dc2626' };
+    const stale = b4bProjectionCache.status === 'stale';
+    const allReviewed = results.every(r => r.all_reviewed === true);
+    const anyReviewed = results.some(r => [
+      r.review_overlay.quantity_extraction, r.review_overlay.property_mapping,
+      r.review_overlay.interval_semantics, r.review_overlay.comparison_mode, r.review_overlay.satisfaction
+    ].some(t => t.status === 'reviewed'));
+    if (stale) return { text: '古い(' + ids.length + ')', color: '#ca8a04' };
+    if (allReviewed) return { text: '承認済み(' + ids.length + ')', color: '#16a34a' };
+    if (anyReviewed) return { text: '一部承認(' + ids.length + ')', color: '#2563eb' };
+    return { text: '未レビュー(' + ids.length + ')', color: '#64748b' };
+  }
+
+  // ─── 詳細テーブル: 追記のみのDOM装飾(既存renderDetailTableFullは書き換えない) ───
+  // comparison_idの検索はprojectionCache.matcherAIndex/matcherBIndex(recomputeAndCacheProjection()
+  // が作る唯一の索引)を読むだけで、ここではcoordinator.getRecordSetSnapshot()を呼ばない。
+  function b4bDecorateDetailTable() {
+    if (!detailTableHead || !detailTableBody) return;
+    const headRow = detailTableHead.querySelector('tr');
+    if (headRow && !headRow.querySelector('.b4b-review-col')) {
+      const th = document.createElement('th');
+      th.className = 'b4b-review-col';
+      th.textContent = 'B-4bレビュー';
+      headRow.appendChild(th);
+    }
+    const rows = [...detailTableBody.querySelectorAll('tr[data-idx]')];
+    // JSON A基準はrow._reqId(=matcher_a_id)、JSON B基準はrow['JSON Bキー'](=matcher_b_id、
+    // buildTraceMatrixRowsのbId/matcher_b_idと同じ値。buildDetailRowsPlmが平文列として保持)で引く。
+    const index = linkBasis === 'sys' ? b4bProjectionCache.matcherAIndex : b4bProjectionCache.matcherBIndex;
+    rows.forEach(tr => {
+      const idx = Number(tr.dataset.idx);
+      const row = detailRows[idx];
+      const matcherKey = linkBasis === 'sys' ? row?._reqId : row?.['JSON Bキー'];
+      const ids = matcherKey && index?.has(matcherKey) ? index.get(matcherKey) : [];
+      const badge = b4bBadgeForComparisonIds(ids);
+      let td = tr.querySelector('.b4b-review-col');
+      if (!td) { td = document.createElement('td'); td.className = 'b4b-review-col'; tr.appendChild(td); }
+      td.innerHTML = '';
+      if (badge.text) {
+        const span = document.createElement('span');
+        span.textContent = badge.text;
+        span.style.color = badge.color; span.style.fontWeight = '700'; span.style.fontSize = '11px';
+        td.appendChild(span);
+      }
+      if (ids.length) {
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'secondary';
+        btn.style.marginLeft = '6px'; btn.style.padding = '2px 8px'; btn.style.fontSize = '11px';
+        btn.textContent = '詳細';
+        btn.addEventListener('click', evt => { evt.stopPropagation(); b4bOpenComparisonPanel(ids); });
+        td.appendChild(btn);
+      }
+    });
+  }
+
+  const b4bBaseRenderDetailTableFull = renderDetailTableFull;
+  renderDetailTableFull = function() {
+    b4bBaseRenderDetailTableFull();
+    b4bDecorateDetailTable();
+  };
+
+  // ─── グラフ: 追記のみのDOM装飾(既存renderGraph/buildGraphElementsは書き換えない)。
+  // read-only表示のみとし、edgeタップから承認等のmutationができるパネルは開かない。 ───
+  function b4bDecorateGraph() {
+    if (!cy) return;
+    const index = b4bProjectionCache.matcherPairIndex;
+    cy.edges().forEach(edge => {
+      const detail = edge.data('detail');
+      const a = detail?.A_ID, b = detail?.B_ID;
+      const key = a && b ? a + '::' + b : null;
+      const ids = key && index?.has(key) ? index.get(key) : [];
+      edge.removeData('b4bReviewColor'); edge.removeData('b4bReviewIds');
+      if (ids.length) {
+        const badge = b4bBadgeForComparisonIds(ids);
+        edge.data('b4bReviewColor', badge.color);
+        edge.data('b4bReviewIds', ids.join(','));
+      }
+    });
+    cy.style().selector('edge[b4bReviewColor]')
+      .style({ 'line-color': 'data(b4bReviewColor)', 'target-arrow-color': 'data(b4bReviewColor)' }).update();
+  }
+
+  const b4bBaseRenderGraph = renderGraph;
+  renderGraph = function(sysList, plmList) {
+    b4bBaseRenderGraph(sysList, plmList);
+    b4bDecorateGraph();
+  };
+
+  // 検査・受入試験用の読み取り専用診断API(既存の__phase7Diagnostics等と同じ位置付け)。
+  window.__b4bCheckpoint2Diagnostics = Object.freeze({
+    coordinator: () => b4bCoordinator,
+    projectionCache: () => b4bProjectionCache,
+    recompute: () => recomputeAndCacheProjection(),
+    renderSessionPanel: () => b4bRenderSessionPanel()
+  });
+
+  recomputeAndCacheProjection();
+  b4bRenderSessionPanel();
 })();
 </script>
 
