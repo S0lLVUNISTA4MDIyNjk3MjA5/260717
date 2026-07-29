@@ -1,7 +1,24 @@
 # Alpha Release Report — JSON A/B トレース照合ツール V12.2.0-alpha.1
 
-対象commit: `227731a550aab39046fa37c58e82978edf7dfecb`（branch `release/v12.2.0-alpha.1`）
-本リリースはAlpha Release Gate 1（Checkpoint 0〜4）を通じて構築した、既存のB-4b機能・照合ロジック・Schema・B-4b APIを一切変更しない、パッケージング専用のα版です。
+本リリースはAlpha Release Gate 1（Checkpoint 0〜4）を通じて構築した、既存のB-4b機能・照合ロジック・Schema・B-4b APIを一切変更しない、パッケージング専用のα版です。branch `release/v12.2.0-alpha.1`。
+
+**commitトレーサビリティ（役割別）:**
+
+```text
+配布内容・文書の基線commit:
+227731a550aab39046fa37c58e82978edf7dfecb
+（version harmonization + Chromium限定検証の文書化まで）
+
+ZIP packaging初回実装commit:
+b295826（旧SHA-256 20933ffba0...は失効、本レポート内で失効を明記）
+
+ZIP再現性・展開後package verification確定commit:
+7f61d254568e3d033cb0c2db0adad4660a48c2a7
+（現在の正本ZIP SHA-256 a63539456f...はこのcommit時点の実装による）
+
+最終PR head:
+PR #6のGitHub metadataを正本とする（本レポート自身を含む後続commitはPR側で確認）
+```
 
 ## Alpha release browser status
 

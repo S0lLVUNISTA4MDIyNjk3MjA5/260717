@@ -24,7 +24,7 @@
  *   3. Rewrite the 12 known <script src="..."> attributes to point at the
  *      local runtime/ folder.
  *   4. Copy the vendor + self-authored runtime files, the 5 license texts, and
- *      the 3 user-facing docs (tools/release/docs/) into the output directory.
+ *      the 4 user-facing docs (tools/release/docs/) into the output directory.
  *   5. Write SHA256SUMS.txt over every other file in the output tree.
  *
  * Each replacement in VERSION_REPLACEMENTS carries its own expected occurrence
@@ -261,7 +261,7 @@ function main() {
     if (sha256(writtenBuf) !== sha256(buf)) fail(`copy verification failed for ${item.dest}`);
   }
 
-  // Copy the 3 user-facing docs verbatim from their Git-tracked source of
+  // Copy the 4 user-facing docs verbatim from their Git-tracked source of
   // truth (tools/release/docs/); dist/ itself is never hand-edited.
   for (const name of DOC_FILES) {
     const buf = readFileOrFail(path.join(DOCS_DIR, name), `doc:${name}`);
