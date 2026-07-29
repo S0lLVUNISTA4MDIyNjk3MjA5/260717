@@ -21,7 +21,17 @@ const DOCS_DIR = path.join(RELEASE_DIR, 'docs');
 const VENDOR_MANIFEST_PATH = path.join(RELEASE_DIR, 'vendor_manifest.json');
 const DIST_ROOT = path.join(REPO_ROOT, 'dist');
 const OUTPUT_DIR_NAME = 'trace-matching-tool-v12.2.0-alpha.1';
-const OUTPUT_DIR = path.join(DIST_ROOT, OUTPUT_DIR_NAME);
+// Root to verify: defaults to dist/<OUTPUT_DIR_NAME>, but can be pointed at
+// an extracted ZIP (or any other copy) via --root=<dir> or
+// ALPHA_PACKAGE_VERIFY_ROOT, so the exact same checks can run against the
+// final distributable artifact, not just the pre-zip build output.
+const ROOT_OVERRIDE = (() => {
+  const arg = process.argv.find(a => a.startsWith('--root='));
+  if (arg) return path.resolve(arg.slice('--root='.length));
+  if (process.env.ALPHA_PACKAGE_VERIFY_ROOT) return path.resolve(process.env.ALPHA_PACKAGE_VERIFY_ROOT);
+  return null;
+})();
+const OUTPUT_DIR = ROOT_OVERRIDE || path.join(DIST_ROOT, OUTPUT_DIR_NAME);
 const OUTPUT_HTML_NAME = 'json_ab_trace_matching_tool_v12.2.0-alpha.1.html';
 
 const checks = [];

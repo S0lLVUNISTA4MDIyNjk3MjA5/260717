@@ -36,19 +36,21 @@ Chromium限定検証であることを明記済み。BROWSER_VALIDATION_REPORT.m
 | 3C | クリーンルーム(空白パス・日本語パス) | 完了(35/35 × 2回) |
 | 3D | 実Chrome／Edge事前検証 | α版では免除、リリース後評価へ移管 |
 | 3 全体 | | **α版条件付き完了** |
-| 4 | 最終ZIP作成・本レポート | 本ドキュメントで完了 |
+| 4 | 最終ZIP作成・本レポート | 完了(本Request Changes対応版) |
 
 ## 検証結果一覧
 
 | 項目 | 結果 |
 |---|---|
-| package verification | 374/374 |
+| package verification(dist直下) | 374/374 |
+| package verification(ZIP展開物に対して) | 374/374 |
 | Chromium offline E2E | 88/88 × 3回連続 |
 | clean-room verification(空白パス・日本語パス) | 35/35 × 2回連続 |
 | runtime smoke | 19/19 |
 | version verification | 35/35 |
 | network-isolated build(`unshare -n`) | exit 0 |
 | build再現性(2回build内容一致) | バイト完全一致 |
+| **ZIP再現性(2回build+package内容がZIP自体としてバイト完全一致)** | **SHA-256一致・`cmp`終了コード0** |
 | 既存B-4b回帰(state/session/projection/export) | 77/77・152/152・32/32・69/69 |
 | 既存UI回帰(CP2/CP3) | 53/53・42/42 |
 | browser download / Excel xlsx | 31/31・47/47 |
@@ -56,6 +58,7 @@ Chromium限定検証であることを明記済み。BROWSER_VALIDATION_REPORT.m
 | pageerror / console error | 各0件 |
 | git diff --check / git status | 問題なし |
 | ZIP round-trip検証(展開→バイト比較) | 23ファイル完全一致 |
+| ZIP entry構成 | 全23件が`trace-matching-tool-v12.2.0-alpha.1/`配下、余分entry(`__MACOSX`等)0件 |
 
 ## 配布物
 
@@ -63,13 +66,25 @@ Chromium限定検証であることを明記済み。BROWSER_VALIDATION_REPORT.m
 dist/trace-matching-tool-v12.2.0-alpha.1.zip
 ```
 
-- サイズ: 764,988 bytes
-- SHA-256: `20933ffba04717804d9a5bf5b509b90402f4810765a674de9af58cb0ac9dac8e`
-- 内容: `trace-matching-tool-v12.2.0-alpha.1/`(23ファイル、`SHA256SUMS.txt`含む)
-- 生成コマンド: `node tools/release/build_alpha_release.js && node tools/release/package_alpha_zip.js`
-- 検証: ZIPを展開し、`dist/trace-matching-tool-v12.2.0-alpha.1/`の全23ファイルとバイト完全一致することを`package_alpha_zip.js`が自動確認済み。
+**ファイル件数の内訳（正確な表記）:**
 
-### distディレクトリのSHA-256(22ファイル、SHA256SUMS.txt自身は含まない)
+```text
+配布物総ファイル数: 23
+SHA256SUMS.txt登録件数: 22
+SHA256SUMS.txt自身: 登録対象外
+```
+
+- **ZIPサイズ**: 764,510 bytes
+- **ZIP SHA-256**: `a63539456ff2903c2f333db6d2265e4db2e203fcf6fd264910d477aee7347cd1`
+- **SHA256SUMS.txt自身のSHA-256**: `a11f38c785b998c577b16c0fcff55741e50ab44193b5136dbf0bc73c79f4d2fc`
+- 内容: `trace-matching-tool-v12.2.0-alpha.1/`配下、配布物総ファイル数23(うちSHA256SUMS.txt登録件数22)
+- 生成コマンド: `node tools/release/build_alpha_release.js && node tools/release/package_alpha_zip.js`
+- 再現性対応: 全ファイルのmtimeをビルド時に固定値へ正規化し、zip entryを明示的にsortした相対パスリストで`zip -X -D`投入することで、ZIP自体のバイト列を2回のフルビルド間で完全一致させている(`package_alpha_zip.js`のFIXED_TIMESTAMP機構)。
+- 検証: (1) ZIPを展開し`dist/`の全23ファイルとバイト完全一致、(2) 独立した2回のフルビルド+packaging間でZIP自体がSHA-256一致・`cmp`終了コード0、(3) ZIPを新規一時ディレクトリへ展開し`alpha_release_package_verification.js --root=<展開先>`で374/374 —以上すべて`package_alpha_zip.js`が単一実行で自動検証する。
+
+**旧SHA-256の失効について**: 前回報告した`20933ffba04717804d9a5bf5b509b90402f4810765a674de9af58cb0ac9dac8e`（サイズ764,988 bytes）はZIP自体の再現性が未実証だったため失効。上記の値を正本とする。
+
+### distディレクトリのSHA-256(SHA256SUMS.txt対象22ファイル、SHA256SUMS.txt自身は含まない)
 
 ```
 55a4c707d29a46a72a4cd444424623bfa829197ac003d8a9bae53afd172e33f4  BROWSER_VALIDATION_REPORT.md
