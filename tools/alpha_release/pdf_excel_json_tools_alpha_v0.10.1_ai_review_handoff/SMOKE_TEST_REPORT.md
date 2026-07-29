@@ -1,12 +1,15 @@
 # SMOKE_TEST_REPORT — PDF／Excel → JSON 変換 α版 v0.10.1-alpha
 
-実行日時: 2026-07-29T21:34:00.240Z
+実行日時: 2026-07-29T22:51:45.955Z
 
 ## 試験対象
 
-- commit: `fdc1fd676342abde2d029abdfd569995f0719042`（作業ツリーに未commitの変更あり）
-- PDF HTML: `pdf_tool/spec_to_json_conversion_tool_alpha_v0.10.1.html`
-- Excel HTML: `excel_tool/excel_to_json_conversion_tool_alpha_v0.10.1.html`
+製品HTMLファイル自体のSHA-256を主たる根拠として記録します(git commitはワークツリーの状態
+次第で曖昧になりうるため、参考情報にとどめます)。
+
+- PDF HTML: `pdf_tool/spec_to_json_conversion_tool_alpha_v0.10.1.html` — SHA-256 `1cdb510f207987b6e7a5af2d96cf22aad2d5deb97c6c0ca90777602d7767b4c8`
+- Excel HTML: `excel_tool/excel_to_json_conversion_tool_alpha_v0.10.1.html` — SHA-256 `16530a3e17bd875a74d50ac0579dd28e0659b3d13a9b7f203e0005fcc0880d13`
+- 製品HTML対象commit(参考情報): `8715cf1fb701dd6e0fdd4e305103dd2dc7dc8da8`（本試験実行時点で作業ツリーに未commitの変更あり。上記HTMLのSHA-256が正本の照合対象）
 
 ## 試験環境
 

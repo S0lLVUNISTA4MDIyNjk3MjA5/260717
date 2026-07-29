@@ -18,6 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const { chromium } = require('playwright');
 
@@ -299,9 +300,12 @@ function buildReportMarkdown(env) {
   lines.push('');
   lines.push('## 試験対象')
   lines.push('');
-  lines.push(`- commit: \`${env.commitSha}\`${env.gitDirty ? '（作業ツリーに未commitの変更あり）' : ''}`);
-  lines.push(`- PDF HTML: \`pdf_tool/spec_to_json_conversion_tool_alpha_v0.10.1.html\``);
-  lines.push(`- Excel HTML: \`excel_tool/excel_to_json_conversion_tool_alpha_v0.10.1.html\``);
+  lines.push('製品HTMLファイル自体のSHA-256を主たる根拠として記録します(git commitはワークツリーの状態');
+  lines.push('次第で曖昧になりうるため、参考情報にとどめます)。');
+  lines.push('');
+  lines.push(`- PDF HTML: \`pdf_tool/spec_to_json_conversion_tool_alpha_v0.10.1.html\` — SHA-256 \`${env.pdfHtmlSha256}\``);
+  lines.push(`- Excel HTML: \`excel_tool/excel_to_json_conversion_tool_alpha_v0.10.1.html\` — SHA-256 \`${env.excelHtmlSha256}\``);
+  lines.push(`- 製品HTML対象commit(参考情報): \`${env.commitSha}\`${env.gitDirty ? '（本試験実行時点で作業ツリーに未commitの変更あり。上記HTMLのSHA-256が正本の照合対象）' : ''}`);
   lines.push('');
   lines.push('## 試験環境');
   lines.push('');
@@ -387,6 +391,9 @@ async function main() {
     gitDirty = execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).trim().length > 0;
   } catch (e) { /* not fatal to the smoke test itself */ }
 
+  const pdfHtmlSha256 = crypto.createHash('sha256').update(fs.readFileSync(PDF_HTML)).digest('hex');
+  const excelHtmlSha256 = crypto.createHash('sha256').update(fs.readFileSync(EXCEL_HTML)).digest('hex');
+
   const networkAttemptsByScenario = new Map();
   for (const { scenario, url } of GLOBAL.networkAttempts) {
     if (!networkAttemptsByScenario.has(scenario)) networkAttemptsByScenario.set(scenario, []);
@@ -403,6 +410,8 @@ async function main() {
     chromiumVersion: browserVersion,
     commitSha,
     gitDirty,
+    pdfHtmlSha256,
+    excelHtmlSha256,
     totalNetworkAttempts: GLOBAL.networkAttempts.length,
     networkAttemptsByScenario,
     totalPageErrors: GLOBAL.pageErrors.length,

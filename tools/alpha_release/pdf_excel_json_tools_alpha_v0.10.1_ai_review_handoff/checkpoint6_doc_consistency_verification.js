@@ -169,7 +169,11 @@ function implementationAlignmentChecks() {
     /external network attempts/.test(smoke) && /successful external network/.test(smoke));
   check('SMOKE_TEST_REPORT.mdが想定外/想定内のconsole errorを区別して明記',
     /console error（想定外/.test(smoke) && /console error（想定内/.test(smoke));
-  check('SMOKE_TEST_REPORT.mdが試験対象commitを明記', /- commit: `[0-9a-f]{7,40}`/.test(smoke));
+  // PR #7 Final Release Review指摘: git commitはワークツリーの状態次第で曖昧になりうるため、
+  // 製品HTMLファイル自体のSHA-256を主たる根拠として明記しなければならない。
+  check('SMOKE_TEST_REPORT.mdがPDF/Excel製品HTMLのSHA-256を明記',
+    /PDF HTML:.*SHA-256 `[0-9a-f]{64}`/.test(smoke) && /Excel HTML:.*SHA-256 `[0-9a-f]{64}`/.test(smoke));
+  check('SMOKE_TEST_REPORT.mdが製品HTML対象commitを参考情報として明記', /製品HTML対象commit\(参考情報\): `[0-9a-f]{7,40}`/.test(smoke));
 }
 
 // ── THREE_TOOL_COMPATIBILITY_REPORT.mdが「完全互換」を断定していない ──
