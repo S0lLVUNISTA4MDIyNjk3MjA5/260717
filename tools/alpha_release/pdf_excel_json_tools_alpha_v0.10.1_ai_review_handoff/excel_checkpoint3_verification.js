@@ -114,6 +114,21 @@ async function applyBuiltinProfile(page, profileIndex) {
   await clickHidden(page, 'applyProfileBtn');
 }
 
+// Marks every currently-unreviewed row as human-reviewed via the real
+// "未確認を一括確認" modal. review_status/review_method/reviewed_at/
+// review_comment are all top-level fields of each trace record (set by
+// buildTraceOutput's own state-sync override), so this reliably changes
+// dataset_signature -- unlike autoTagBtn, which can be a no-op if the
+// trace profile's keyword rules already tagged everything during
+// applyProfileToCurrentData(true).
+async function bulkReviewAllRows(page) {
+  await clickHidden(page, 'workspaceBulkReviewBtn');
+  await page.waitForSelector('#workspaceBulkAck', { timeout: 10000 });
+  await page.check('#workspaceBulkAck');
+  await page.click('#workspaceModalActions button:has-text("一括確認を実行")');
+  await page.waitForFunction(() => document.getElementById('workspaceModalBackdrop').hidden === true, null, { timeout: 10000 });
+}
+
 // Converts + applies the trace-mode profile (index 2) + clicks the real
 // #buildQuantityAnnotationBtn, capturing both real downloads.
 async function generateTraceAndSidecar(page, tempDir, label) {
@@ -196,6 +211,88 @@ async function runScenarios(browser, tempDir, bindingCoreBuf) {
   const sidecarSha256 = sha256(Buffer.from(run1.sidecarText, 'utf8'));
   check('保存後traceのSHA-256を記録', typeof traceSha256 === 'string' && traceSha256.length === 64, traceSha256);
   check('保存後sidecarのSHA-256を記録', typeof sidecarSha256 === 'string' && sidecarSha256.length === 64, sidecarSha256);
+
+  // ── REQUEST CHANGES対応(4件): 「照合用JSON＋数量注釈JSON保存」が1操作であり、
+  //    利用者が別々の時点で生成して組み合わせる構成になっていないことの直接証明 ──
+
+  // 1. 1操作でtraceとsidecar両方がdownloadされる(generateTraceAndSidecar自体が
+  //    「同一クリックから2件のdownloadイベントを観測できなければ例外を投げる」実装だが、
+  //    ここではその事実を明示的なcheckとして独立に記録する)。
+  const combinedPage = await openFreshPage(browser, pageErrors, consoleErrors);
+  await combinedPage.addScriptTag({ content: fs.readFileSync(schemaSrc, 'utf8') });
+  await combinedPage.addScriptTag({ content: bindingCoreBuf.toString('utf8') });
+  const combinedDownloadTimestamps = [];
+  combinedPage.on('download', () => combinedDownloadTimestamps.push(Date.now()));
+  const combinedRun = await generateTraceAndSidecar(combinedPage, tempDir, 'combined');
+  check('1操作でtraceとsidecar両方がdownloadされる(同一クリックから2件のdownloadイベント)',
+    combinedDownloadTimestamps.length === 2, combinedDownloadTimestamps.length);
+
+  // 2. 両downloadを再読込みしてbindSideへ通す(独立した正本binding coreへの実投入)。
+  const combinedBind = await bindInPage(combinedPage, combinedRun.trace, combinedRun.sidecar, 'actual');
+  check('両downloadを再読込み: bindSide ready === true', combinedBind.ready === true, combinedBind);
+  check('両downloadを再読込み: diagnostics === []', Array.isArray(combinedBind.diagnostics) && combinedBind.diagnostics.length === 0, combinedBind.diagnostics);
+
+  // 3. trace生成途中またはsidecar生成途中で例外を注入し、中途半端な成果物セットを
+  //    正式成功扱いしないことを確認する。downloadText()はHTMLAnchorElement.click()で
+  //    実際のブラウザdownloadを発火させる実装(excel_to_json_conversion_tool_alpha_v0.10.1.html
+  //    1334行目付近)なので、ブラウザAPI境界(HTMLAnchorElement.prototype.click)を
+  //    一時的にフックし、2回目の実download呼び出し(=数量注釈JSON側)だけを失敗させる。
+  //    ツール自身のprivate関数は一切書き換えない(IIFEで閉じているため外部から不可能でもある)。
+  await combinedPage.evaluate(() => {
+    const proto = HTMLAnchorElement.prototype;
+    const original = proto.click;
+    window.__cp3OriginalAnchorClick = original;
+    let downloadClickCount = 0;
+    proto.click = function (...args) {
+      if (this.download) {
+        downloadClickCount++;
+        if (downloadClickCount === 2) {
+          proto.click = original;
+          throw new Error('SIMULATED_SECOND_DOWNLOAD_FAILURE');
+        }
+      }
+      return original.apply(this, args);
+    };
+  });
+  const faultDownloads = [];
+  const onFaultDl = d => faultDownloads.push(d);
+  combinedPage.on('download', onFaultDl);
+  await clickHidden(combinedPage, 'buildQuantityAnnotationBtn');
+  await combinedPage.waitForTimeout(1000);
+  combinedPage.off('download', onFaultDl);
+  const faultMessage = await combinedPage.evaluate(() => {
+    const el = document.getElementById('profileMessage');
+    const div = el?.querySelector('div');
+    return { className: div?.className || null, text: div?.textContent || '' };
+  });
+  check('片側生成失敗時: downloadは1件のみ(2件目は発火しない)', faultDownloads.length === 1, faultDownloads.length);
+  check('片側生成失敗時: UIメッセージがerror(成功表示ではない)', faultMessage.className === 'error', faultMessage);
+  check('片側生成失敗時: メッセージ文言が「生成に失敗」であり成功文言を含まない',
+    faultMessage.text.includes('生成に失敗') && !faultMessage.text.includes('出力しました'), faultMessage);
+  // フックが正しく後始末され、通常の(フォールトなし)生成が引き続き成功することを確認する
+  // (テスト自身が壊れた状態をページに残していないことの確認)。
+  const afterFaultRun = await generateTraceAndSidecar(combinedPage, tempDir, 'after_fault');
+  check('片側生成失敗のテスト後、通常の生成が引き続き成功する(テスト自身の後始末確認)',
+    Array.isArray(afterFaultRun.trace._trace_records) && Array.isArray(afterFaultRun.sidecar.records));
+
+  // 4. trace生成後に元UI stateを変更しても、「同じ保存操作」で作ったsidecarの内容は
+  //    変化しないことを確認する。combinedRun(mutation前)のsidecarを固定値として保持した上で、
+  //    実UI操作(自動タグ付与)でcurrentDataを変更し、別の(新しい)保存操作を行う。
+  //    新しい保存操作の結果はmutationを反映して当然変わるべきだが、既にダウンロード済みの
+  //    combinedRunの内容(このオブジェクト自体、および再読込み時のSHA-256)は不変であること、
+  //    かつ新しい保存操作の内容が確かに変化していること(=別々のスナップショットが
+  //    独立していること)の両方を確認する。
+  const combinedTraceShaBeforeMutation = sha256(Buffer.from(combinedRun.traceText, 'utf8'));
+  const combinedSidecarShaBeforeMutation = sha256(Buffer.from(combinedRun.sidecarText, 'utf8'));
+  await bulkReviewAllRows(combinedPage);
+  const afterMutationRun = await generateTraceAndSidecar(combinedPage, tempDir, 'after_mutation');
+  check('UI変更を挟んでも、既に完了した保存操作(combinedRun)のtraceText/sidecarTextは不変',
+    sha256(Buffer.from(combinedRun.traceText, 'utf8')) === combinedTraceShaBeforeMutation &&
+    sha256(Buffer.from(combinedRun.sidecarText, 'utf8')) === combinedSidecarShaBeforeMutation);
+  check('UI変更後の新しい保存操作は、変更前(combinedRun)とは異なるdataset_signatureを持つ(独立したスナップショットである証明)',
+    afterMutationRun.sidecar.dataset_signature !== combinedRun.sidecar.dataset_signature,
+    { before: combinedRun.sidecar.dataset_signature, after: afterMutationRun.sidecar.dataset_signature });
+  await combinedPage.close();
 
   // ── 同一入力から2回生成した場合の一致性 ──
   const page2 = await openFreshPage(browser, pageErrors, consoleErrors);

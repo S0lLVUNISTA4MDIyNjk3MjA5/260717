@@ -4950,7 +4950,11 @@ I/F = インターフェース"></textarea>
       const withQuantities = sidecar.records.filter(r => r.analyses.length).length;
       showMessage($('profileMessage'), 'info', `照合用JSON(${persistedTraceSnapshot._trace_records.length}件)・数量注釈JSON(数量あり ${withQuantities}件、列役割候補 ${sidecar.column_role_candidates.length}列` + (unresolvedCount ? `、表示形式未解決 ${unresolvedCount}件` : '') + `)を同一スナップショットから出力しました。`);
     } catch (error) {
-      showMessage($('profileMessage'), 'error', `数量注釈JSON生成エラー: ${error.message}`);
+      // 照合用JSON・数量注釈JSONのどちらか一方でも生成/ダウンロードに失敗した場合、
+      // 既にダウンロードされたファイルが存在していても、常に「生成に失敗」として扱い、
+      // 成功表示は絶対に出さない(ブラウザのdownload API上、1つ目のファイルが物理的に
+      // 保存された後に2つ目が失敗する可能性を完全には排除できないため)。
+      showMessage($('profileMessage'), 'error', `照合用JSON＋数量注釈JSONの生成に失敗しました: ${error.message}（ダウンロード済みのファイルがあっても使用しないでください）`);
     }
   }
 
