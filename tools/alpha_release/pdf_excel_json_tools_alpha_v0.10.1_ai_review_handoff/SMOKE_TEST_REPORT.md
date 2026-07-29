@@ -1,10 +1,10 @@
 # SMOKE_TEST_REPORT — PDF／Excel → JSON 変換 α版 v0.10.1-alpha
 
-実行日時: 2026-07-29T21:14:58.615Z
+実行日時: 2026-07-29T21:27:15.902Z
 
 ## 試験対象
 
-- commit: `b3ff0e46620c994b36a412276a24b58264dac472`（作業ツリーに未commitの変更あり）
+- commit: `3a626d0fce3c6067449eb59688b44b3b51cfec51`（作業ツリーに未commitの変更あり）
 - PDF HTML: `pdf_tool/spec_to_json_conversion_tool_alpha_v0.10.1.html`
 - Excel HTML: `excel_tool/excel_to_json_conversion_tool_alpha_v0.10.1.html`
 

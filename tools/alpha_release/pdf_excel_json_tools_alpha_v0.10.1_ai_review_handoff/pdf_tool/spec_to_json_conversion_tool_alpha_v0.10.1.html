@@ -4778,9 +4778,13 @@ $("#tmpl-link").onclick = (e) => {
 
 refreshProfileSelect();
 
-/* ================= 意味検索・類似比較 ================= */
+/* ================= 意味検索・類似比較 =================
+   本α版の対象外機能(KNOWN_LIMITATIONS.md「本α版に含まれないもの」参照)。
+   母体ツールは初回利用時にCDN(@huggingface/transformers)からライブラリを
+   動的importする構成だが、Checkpoint 7(offline hardening)より、この
+   α版配布物を外部CDN依存0件とするため、CDNへは一切接続せず即座に
+   「対象外」エラーを返す。 */
 const EMB_MODEL = "Xenova/multilingual-e5-small";   // 日本語対応・384次元
-const EMB_LIB_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3";
 let embPipeline = null;
 let embStore = null;      // 文書A: {model, dimension, generated_at, nodes:[{id,label,vector}]}
 let embStale = false;
@@ -4816,26 +4820,13 @@ function embUpdateButtons(){
   if(embStoreB) msgs.push(`B: ${embStoreB.model}・${embStoreB.nodes.length}ノード`);
   if(embStore && embStoreB && embStore.model !== embStoreB.model)
     msgs.push("※AとBのモデルが異なるため2文書比較は使用できません。同じ手順で生成し直してください。");
-  if(!hasEmb) msgs.push("初回の「意味検索データを作成」時にモデルをダウンロードします（インターネット接続が必要・数十MB規模）。2回目以降はブラウザのキャッシュが使われます。");
+  if(!hasEmb) msgs.push("意味検索・類似比較はこのα版では未対応です（対象外機能。KNOWN_LIMITATIONS.md参照）。");
   note.textContent = msgs.join(" ／ ");
 }
 
 async function loadEmbedder(){
   if(embPipeline) return embPipeline;
-  embSetStatus("ライブラリ読込中…");
-  const mod = await import(EMB_LIB_URL);
-  const { pipeline, env } = mod;
-  env.allowLocalModels = false;
-  embSetStatus("モデル準備中…");
-  embPipeline = await pipeline("feature-extraction", EMB_MODEL, {
-    progress_callback: (e)=>{
-      if(e && e.status === "progress" && e.file && typeof e.progress === "number"){
-        embSetStatus(`モデル取得中: ${String(e.file).split("/").pop()} ${Math.round(e.progress)}%`);
-      }
-    }
-  });
-  embSetStatus("モデル準備完了");
-  return embPipeline;
+  throw new Error("意味検索・類似比較（埋め込みモデル）はこのα版では未対応です。外部CDNへは接続しません。");
 }
 
 /* ノード文の生成（文書・様式を引数化）: 親見出し＋タイトル＋本文結合 */
@@ -4901,7 +4892,7 @@ async function embGenerate(){
     toast("文書AのEmbeddingを生成しました。");
   }catch(err){
     embSetStatus("エラー");
-    toast("意味検索データを作成に失敗しました: " + err.message + "（インターネット接続とブラウザのコンソールを確認してください）", true);
+    toast("意味検索データを作成に失敗しました: " + err.message, true);
   }finally{ btn.disabled = false; }
 }
 
