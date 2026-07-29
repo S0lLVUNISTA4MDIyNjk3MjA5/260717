@@ -1111,6 +1111,15 @@
         </div>
         <div class="tag-policy-grid">
           <div class="tag-policy-box">
+            <h4>共通タグ辞書（trace-tag-vocabulary/1.0）</h4>
+            <div class="tag-policy-add">
+              <button class="btn" id="shared-tag-vocabulary-load-btn" type="button">辞書ファイルを読み込む</button>
+              <input id="shared-tag-vocabulary-input" type="file" accept=".json,application/json" hidden>
+              <span id="shared-tag-vocabulary-status" class="tag-policy-status"></span>
+            </div>
+            <p class="tag-policy-note">PDF／Excel共通のshared/tag_vocabulary.jsonを読み込み、許可タグ・別名をこの様式へ反映します。読み込んだ辞書のvocabulary_id・version・SHA-256は、次回の照合用JSON出力(tag_vocabulary)へ記録されます。</p>
+          </div>
+          <div class="tag-policy-box">
             <h4>任意タグ登録（tag_policy.allowed_tags）</h4>
             <div class="tag-policy-add">
               <input id="tag-policy-input" type="text" maxlength="60" placeholder="任意のタグ名を入力" autocomplete="off">
@@ -4718,6 +4727,12 @@ $("#profile-editor-export").onclick = () => {
 };
 
 $("#tag-policy-add").onclick=()=>{if(v16RegisterManagerTag($("#tag-policy-input").value)){ $("#tag-policy-input").value=""; v14RenderManagerSuggestions(); }};
+$("#shared-tag-vocabulary-load-btn").onclick=()=>$("#shared-tag-vocabulary-input").click();
+$("#shared-tag-vocabulary-input").onchange=async e=>{
+  const file=e.target.files[0];e.target.value="";
+  const ok=await v40LoadSharedTagVocabulary(file);
+  $("#shared-tag-vocabulary-status").textContent=ok?"読み込み済み":"読み込みに失敗しました";
+};
 $("#tag-policy-input").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();$("#tag-policy-add").click();}};
 $("#tag-suggest-refresh").onclick=v14RenderManagerSuggestions;
 $("#tag-policy-apply").onclick=v14ApplyTagDictionary;
@@ -6844,6 +6859,88 @@ function v12DownloadJson(obj, filename){
   const a = document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=filename; document.body.appendChild(a); a.click();
   setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);
 }
+/* ================= trace-tag-vocabulary/1.0: 共通タグ辞書契約(Checkpoint 4、PDF/Excel完全一致) =================
+ * 出典: shared/tag_vocabulary.json。PDFとExcelはそれぞれ独自の既定タグ集合(spec-domain-ja/
+ * excel-row-tags)を持つ設計をやめ、この1ファイルを唯一の辞書正本として使用する。
+ * vocabulary_sha256は辞書JSON自身に含めない(自己参照防止)。PDF/Excelが辞書を読み込んだ
+ * (または既定値を使う)時点でcanonical化しSHA-256を計算し、生成するTraceRecordSet側
+ * (tag_vocabulary.vocabulary_sha256)へ都度記録する(キャッシュしない。画面上のタグ集合と
+ * 出力metadataのhashが食い違わないようにするため)。 */
+const TAG_VOCABULARY_SCHEMA = "trace-tag-vocabulary/1.0";
+const SHARED_TAG_VOCABULARY_DEFAULT = Object.freeze({
+  schema: TAG_VOCABULARY_SCHEMA,
+  vocabulary_id: "trace-domain-ja",
+  vocabulary_version: "1.0.0",
+  allowed_tags: Object.freeze(["安全","性能","機能","品質","インターフェース","製造","検査","保守"]),
+  aliases: Object.freeze({})
+});
+
+function tagVocabularyNormalize(value){ return v12Normalize(value); }
+
+function validateTagVocabulary(vocab){
+  const errors=[];
+  if(!vocab||typeof vocab!=="object"||Array.isArray(vocab)){errors.push("辞書がJSONオブジェクトではありません。");return {valid:false,errors};}
+  if(vocab.schema!==TAG_VOCABULARY_SCHEMA)errors.push(`schemaが不正です(期待値: ${TAG_VOCABULARY_SCHEMA})。`);
+  if(typeof vocab.vocabulary_id!=="string"||!vocab.vocabulary_id.trim())errors.push("vocabulary_idが空です。");
+  if(typeof vocab.vocabulary_version!=="string"||!vocab.vocabulary_version.trim())errors.push("vocabulary_versionが空です。");
+  if(!Array.isArray(vocab.allowed_tags)){errors.push("allowed_tagsが配列ではありません。");}
+  else{
+    const seenRaw=new Set(),seenNorm=new Set();
+    vocab.allowed_tags.forEach((tag,i)=>{
+      if(typeof tag!=="string"||!tag.trim()){errors.push(`allowed_tags[${i}]が空文字です。`);return;}
+      if(seenRaw.has(tag))errors.push(`allowed_tagsに重複があります: ${tag}`);
+      seenRaw.add(tag);
+      const norm=tagVocabularyNormalize(tag);
+      if(seenNorm.has(norm))errors.push(`allowed_tagsに正規化後の重複があります: ${tag}`);
+      seenNorm.add(norm);
+    });
+  }
+  if(vocab.aliases!==undefined){
+    if(!vocab.aliases||typeof vocab.aliases!=="object"||Array.isArray(vocab.aliases)){errors.push("aliasesがオブジェクトではありません。");}
+    else{
+      const allowedNorm=new Set((Array.isArray(vocab.allowed_tags)?vocab.allowed_tags:[]).map(tagVocabularyNormalize));
+      Object.entries(vocab.aliases).forEach(([alias,target])=>{
+        if(typeof target!=="string"||!allowedNorm.has(tagVocabularyNormalize(target))){
+          errors.push(`aliasの参照先がallowed_tagsに存在しません: ${alias} -> ${target}`);
+        }
+      });
+    }
+  }
+  return {valid:errors.length===0,errors};
+}
+
+async function computeTagVocabularySha256(vocab){
+  const canonical={schema:vocab.schema,vocabulary_id:vocab.vocabulary_id,vocabulary_version:vocab.vocabulary_version,
+    allowed_tags:[...(vocab.allowed_tags||[])],aliases:{...(vocab.aliases||{})}};
+  return v12HashParts("tag-vocabulary-v1",[v12CanonicalJson(canonical)]);
+}
+
+async function v40LoadSharedTagVocabulary(file){
+  if(!file)return false;
+  let vocab;
+  try{ vocab=JSON.parse(await file.text()); }
+  catch(e){ v12Modal("共通タグ辞書を読み込めません",`<pre class="v12-error">JSONの構文が不正です: ${escapeHtml(e.message||String(e))}</pre>`); return false; }
+  const result=validateTagVocabulary(vocab);
+  if(!result.valid){
+    v12Modal("共通タグ辞書を読み込めません",`<pre class="v12-error">${escapeHtml(result.errors.join("\n"))}</pre>`);
+    return false;
+  }
+  const target=activeProfile;
+  if(!target){ toast("様式が選択されていません。",true); return false; }
+  target.tag_policy = target.tag_policy && typeof target.tag_policy==="object" ? target.tag_policy : {};
+  target.tag_policy.mode = "controlled";
+  target.tag_policy.allow_free_input = false;
+  target.tag_policy.vocabulary_id = vocab.vocabulary_id;
+  target.tag_policy.tag_vocabulary_version = vocab.vocabulary_version;
+  target.tag_policy.allowed_tags = [...vocab.allowed_tags];
+  target.tag_policy.tag_aliases = {...(vocab.aliases||{})};
+  if(typeof v14WriteEditorProfile==="function") v14WriteEditorProfile(target);
+  v12MarkDirty?.("共通タグ辞書を読み込み");
+  if(data)render(); if(dataB)applySplit();
+  toast(`共通タグ辞書(${vocab.vocabulary_id} v${vocab.vocabulary_version})を読み込みました（${vocab.allowed_tags.length}件）。`);
+  return true;
+}
+
 /* function v12EnsureProfile：Phase 6統合実装へ移行 */
 profiles.forEach(v12EnsureProfile);
 v12EnsureProfile(DEFAULT_PROFILE,0); v12EnsureProfile(TRACE_TEXT_PROFILE,1); v12EnsureProfile(TRACE_TABLE_PROFILE,2);
@@ -7086,11 +7183,11 @@ function v12EnsureProfile(profile, index){
   if(!profile.tag_policy || typeof profile.tag_policy !== "object"){
     profile.tag_policy = {
       mode:"controlled",
-      vocabulary_id:"spec-domain-ja",
-      tag_vocabulary_version:"1.0",
+      vocabulary_id: SHARED_TAG_VOCABULARY_DEFAULT.vocabulary_id,
+      tag_vocabulary_version: SHARED_TAG_VOCABULARY_DEFAULT.vocabulary_version,
       allow_free_input:false,
-      allowed_tags: [],
-      tag_aliases:{}
+      allowed_tags: [...SHARED_TAG_VOCABULARY_DEFAULT.allowed_tags],
+      tag_aliases:{...SHARED_TAG_VOCABULARY_DEFAULT.aliases}
     };
   }
   profile.tag_policy.mode = "controlled";
@@ -7460,7 +7557,7 @@ async function v12BuildDocumentModel(obj,profile,side="A"){
     sections.push({id:secId,creation_id:sectionKey,stable_key:stableKey,stable_key_quality:stableQuality,number:num,title,blocks});
   }
   v13DowngradeDuplicateStableKeys(sections);
-  const counts=v12ReviewCounts(obj,profile);return {schema_version:"2.0",document:{document_id:docInst,document_instance_id:docInst,document_series_id:seriesId,id_scheme_version:V12_ID_SCHEME,file_name:String(fileName),title:traceDocumentHeading(obj,profile).chapter_title||String(fileName),document_number:docNumber,revision:meta.revision||obj.revision||"",issue_date:meta.issue_date||"",predecessor_document_id:meta.predecessor_document_id||"",revision_note:meta.revision_note||""},provenance:{source_sha256:sourceSha,tool_version:V12_PHASE6_VERSION,profile_id:profile.profile_id,profile_name:profile.profile_name,profile_version:profile.profile_version,profile_sha256:profileSha,extraction_signature:extractionSignature,normalization_version:V12_NORMALIZATION,id_scheme_version:V12_ID_SCHEME,extraction_methods:[...new Set(Object.values(obj._source_by_id||{}).flat().map(r=>r.extraction_method).filter(Boolean))]},tag_policy:{mode:"controlled",vocabulary_id:profile.tag_policy?.vocabulary_id||"spec-domain-ja",tag_vocabulary_version:profile.tag_policy?.tag_vocabulary_version||"1.0",allow_free_input:false,allowed_tags:v12AllowedTags(profile)},sections,review_summary:{unreviewed:counts.unreviewed,needs_fix:counts.needs_fix,reviewed:counts.reviewed,excluded:counts.excluded},history:deepCopy(state.history||[])};
+  const counts=v12ReviewCounts(obj,profile);return {schema_version:"2.0",document:{document_id:docInst,document_instance_id:docInst,document_series_id:seriesId,id_scheme_version:V12_ID_SCHEME,file_name:String(fileName),title:traceDocumentHeading(obj,profile).chapter_title||String(fileName),document_number:docNumber,revision:meta.revision||obj.revision||"",issue_date:meta.issue_date||"",predecessor_document_id:meta.predecessor_document_id||"",revision_note:meta.revision_note||""},provenance:{source_sha256:sourceSha,tool_version:V12_PHASE6_VERSION,profile_id:profile.profile_id,profile_name:profile.profile_name,profile_version:profile.profile_version,profile_sha256:profileSha,extraction_signature:extractionSignature,normalization_version:V12_NORMALIZATION,id_scheme_version:V12_ID_SCHEME,extraction_methods:[...new Set(Object.values(obj._source_by_id||{}).flat().map(r=>r.extraction_method).filter(Boolean))]},tag_policy:{mode:"controlled",vocabulary_id:profile.tag_policy?.vocabulary_id||SHARED_TAG_VOCABULARY_DEFAULT.vocabulary_id,tag_vocabulary_version:profile.tag_policy?.tag_vocabulary_version||SHARED_TAG_VOCABULARY_DEFAULT.vocabulary_version,allow_free_input:false,allowed_tags:v12AllowedTags(profile)},sections,review_summary:{unreviewed:counts.unreviewed,needs_fix:counts.needs_fix,reviewed:counts.reviewed,excluded:counts.excluded},history:deepCopy(state.history||[])};
 }
 
 function v12TraceRecordsFromModel(model,side){
@@ -7488,7 +7585,12 @@ function v12ValidateTrace(trace,profile){
 }
 
 async function v12BuildTrace(obj,profile,side){
-  const model=await v12BuildDocumentModel(obj,profile,side),flat=v12TraceRecordsFromModel(model,side),records=flat.records,trace={file_name:model.document.file_name,chapter_number:"TRACE",chapter_title:model.document.title,trace_format:"chapter-section-trace-v1",schema_version:"1.2",generated_at:new Date().toISOString(),generator:{name:"仕様書PDF→JSON 変換・確認ツール",version:V12_PHASE6_VERSION},source:{document_id:model.document.document_id,document_instance_id:model.document.document_instance_id,document_series_id:model.document.document_series_id,file_name:model.document.file_name,document_sha256:model.provenance.source_sha256,profile_id:model.provenance.profile_id,profile_version:model.provenance.profile_version,profile_sha256:model.provenance.profile_sha256,id_scheme_version:V12_ID_SCHEME,extraction_signature:model.provenance.extraction_signature,tag_vocabulary_id:model.tag_policy.vocabulary_id,tag_vocabulary_version:model.tag_policy.tag_vocabulary_version},options:{text_unit:"block",list_unit:"item",table_unit:"row"},statistics:{sections:model.sections.length,records:records.length,skipped:flat.skipped},warnings:flat.warnings,_trace_adapter:{kind:"section_document_export",side:side==="B"?"plm":"sys",source_file:model.document.file_name,record_count:records.length,generated_at:new Date().toISOString()},_trace_records:records};const errs=v12ValidateTrace(trace,profile);if(errs.length)throw new Error(`照合用JSON検証エラー (${errs.length}件):\n${errs.slice(0,20).join("\n")}`);return trace;
+  const model=await v12BuildDocumentModel(obj,profile,side),flat=v12TraceRecordsFromModel(model,side),records=flat.records;
+  // Checkpoint 4: tag_vocabularyのvocabulary_sha256は、profile.tag_policy(共通辞書を読み込んでいれば
+  // その内容、読み込んでいなければ既定値)から都度その場で計算する(キャッシュしない)。画面上の
+  // 許可タグ・別名と出力metadataのhashが食い違うことを構造的に防ぐ。
+  const tagVocabularySha256=await computeTagVocabularySha256({schema:TAG_VOCABULARY_SCHEMA,vocabulary_id:model.tag_policy.vocabulary_id,vocabulary_version:model.tag_policy.tag_vocabulary_version,allowed_tags:model.tag_policy.allowed_tags,aliases:profile?.tag_policy?.tag_aliases||{}});
+  const trace={file_name:model.document.file_name,chapter_number:"TRACE",chapter_title:model.document.title,trace_format:"chapter-section-trace-v1",schema_version:"1.2",generated_at:new Date().toISOString(),generator:{name:"仕様書PDF→JSON 変換・確認ツール",version:V12_PHASE6_VERSION},source:{document_id:model.document.document_id,document_instance_id:model.document.document_instance_id,document_series_id:model.document.document_series_id,file_name:model.document.file_name,document_sha256:model.provenance.source_sha256,profile_id:model.provenance.profile_id,profile_version:model.provenance.profile_version,profile_sha256:model.provenance.profile_sha256,id_scheme_version:V12_ID_SCHEME,extraction_signature:model.provenance.extraction_signature,tag_vocabulary_id:model.tag_policy.vocabulary_id,tag_vocabulary_version:model.tag_policy.tag_vocabulary_version},options:{text_unit:"block",list_unit:"item",table_unit:"row"},statistics:{sections:model.sections.length,records:records.length,skipped:flat.skipped},warnings:flat.warnings,tag_vocabulary:{vocabulary_id:model.tag_policy.vocabulary_id,vocabulary_version:model.tag_policy.tag_vocabulary_version,vocabulary_sha256:tagVocabularySha256},_trace_adapter:{kind:"section_document_export",side:side==="B"?"plm":"sys",source_file:model.document.file_name,record_count:records.length,generated_at:new Date().toISOString()},_trace_records:records};const errs=v12ValidateTrace(trace,profile);if(errs.length)throw new Error(`照合用JSON検証エラー (${errs.length}件):\n${errs.slice(0,20).join("\n")}`);return trace;
 }
 
 async function v12ExportTraceSide(obj,profile,side,label){

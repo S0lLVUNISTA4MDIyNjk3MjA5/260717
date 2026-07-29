@@ -1092,6 +1092,12 @@
 
       <div class="card">
         <h2>タグ辞書・照合ルール</h2>
+        <label for="sharedTagVocabularyInput">共通タグ辞書（trace-tag-vocabulary/1.0）</label>
+        <div style="display:flex; gap:8px; margin-bottom:6px; align-items:center;">
+          <button id="sharedTagVocabularyLoadBtn" type="button" style="white-space:nowrap;">辞書ファイルを読み込む</button>
+          <input id="sharedTagVocabularyInput" type="file" accept=".json,application/json" hidden />
+        </div>
+        <div class="small" style="margin-bottom:12px;">PDF／Excel共通のshared/tag_vocabulary.jsonを読み込み、許可タグ・別名をこの様式へ反映します。読み込んだ辞書のvocabulary_id・version・SHA-256は、次回の照合用JSON出力(tag_vocabulary)へ記録されます。</div>
         <label for="allowedTagInput">許可タグを追加</label>
         <div style="display:flex; gap:8px; margin-bottom:10px;">
           <input id="allowedTagInput" type="text" maxlength="80" placeholder="例: 安全、性能、インターフェース" />
@@ -1766,7 +1772,7 @@ I/F = インターフェース"></textarea>
         { source: '影響する部品', target: '影響する部品', type: 'string', required: false }
       ],
       tag_policy: {
-        mode: 'controlled', vocabulary_id: 'spec-domain-ja', tag_vocabulary_version: '1.0', allow_free_input: false,
+        mode: 'controlled', vocabulary_id: 'trace-domain-ja', tag_vocabulary_version: '1.0.0', allow_free_input: false,
         allowed_tags: ['安全', '性能', '機能', '品質', 'インターフェース', '製造', '検査', '保守'],
         rules: [
           { tag: '安全', keywords: ['安全', '危険', '保護', 'フェイルセーフ'], fields: [], match: 'OR' },
@@ -1789,7 +1795,7 @@ I/F = インターフェース"></textarea>
       },
       columns: [],
       tag_policy: {
-        mode: 'controlled', vocabulary_id: 'spec-domain-ja', tag_vocabulary_version: '1.0', allow_free_input: false,
+        mode: 'controlled', vocabulary_id: 'trace-domain-ja', tag_vocabulary_version: '1.0.0', allow_free_input: false,
         allowed_tags: ['安全', '性能', '機能', '品質', 'インターフェース', '製造', '検査', '保守'],
         rules: [
           { tag: '安全', keywords: ['安全', '危険', '保護'], fields: [], match: 'OR' },
@@ -3318,6 +3324,95 @@ I/F = インターフェース"></textarea>
   async function v12HashParts(namespace, parts){ const NUL = String.fromCharCode(0); return v12Sha256([namespace, ...parts.map(v12Normalize)].join(NUL)); }
   function v12Id(prefix, digest){ return prefix + digest.slice(0,32); }
 
+  /* ================= trace-tag-vocabulary/1.0: 共通タグ辞書契約(Checkpoint 4、PDF/Excel完全一致) =================
+   * 出典: shared/tag_vocabulary.json。PDFとExcelはそれぞれ独自の既定タグ集合(spec-domain-ja/
+   * excel-row-tags)を持つ設計をやめ、この1ファイルを唯一の辞書正本として使用する。
+   * vocabulary_sha256は辞書JSON自身に含めない(自己参照防止)。PDF/Excelが辞書を読み込んだ
+   * (または既定値を使う)時点でcanonical化しSHA-256を計算し、生成するTraceRecordSet側
+   * (tag_vocabulary.vocabulary_sha256)へ都度記録する(キャッシュしない。画面上のタグ集合と
+   * 出力metadataのhashが食い違わないようにするため)。 */
+  const TAG_VOCABULARY_SCHEMA = "trace-tag-vocabulary/1.0";
+  const SHARED_TAG_VOCABULARY_DEFAULT = Object.freeze({
+    schema: TAG_VOCABULARY_SCHEMA,
+    vocabulary_id: "trace-domain-ja",
+    vocabulary_version: "1.0.0",
+    allowed_tags: Object.freeze(["安全","性能","機能","品質","インターフェース","製造","検査","保守"]),
+    aliases: Object.freeze({})
+  });
+
+  function tagVocabularyNormalize(value){ return v12Normalize(value); }
+
+  function validateTagVocabulary(vocab){
+    const errors=[];
+    if(!vocab||typeof vocab!=="object"||Array.isArray(vocab)){errors.push("辞書がJSONオブジェクトではありません。");return {valid:false,errors};}
+    if(vocab.schema!==TAG_VOCABULARY_SCHEMA)errors.push(`schemaが不正です(期待値: ${TAG_VOCABULARY_SCHEMA})。`);
+    if(typeof vocab.vocabulary_id!=="string"||!vocab.vocabulary_id.trim())errors.push("vocabulary_idが空です。");
+    if(typeof vocab.vocabulary_version!=="string"||!vocab.vocabulary_version.trim())errors.push("vocabulary_versionが空です。");
+    if(!Array.isArray(vocab.allowed_tags)){errors.push("allowed_tagsが配列ではありません。");}
+    else{
+      const seenRaw=new Set(),seenNorm=new Set();
+      vocab.allowed_tags.forEach((tag,i)=>{
+        if(typeof tag!=="string"||!tag.trim()){errors.push(`allowed_tags[${i}]が空文字です。`);return;}
+        if(seenRaw.has(tag))errors.push(`allowed_tagsに重複があります: ${tag}`);
+        seenRaw.add(tag);
+        const norm=tagVocabularyNormalize(tag);
+        if(seenNorm.has(norm))errors.push(`allowed_tagsに正規化後の重複があります: ${tag}`);
+        seenNorm.add(norm);
+      });
+    }
+    if(vocab.aliases!==undefined){
+      if(!vocab.aliases||typeof vocab.aliases!=="object"||Array.isArray(vocab.aliases)){errors.push("aliasesがオブジェクトではありません。");}
+      else{
+        const allowedNorm=new Set((Array.isArray(vocab.allowed_tags)?vocab.allowed_tags:[]).map(tagVocabularyNormalize));
+        Object.entries(vocab.aliases).forEach(([alias,target])=>{
+          if(typeof target!=="string"||!allowedNorm.has(tagVocabularyNormalize(target))){
+            errors.push(`aliasの参照先がallowed_tagsに存在しません: ${alias} -> ${target}`);
+          }
+        });
+      }
+    }
+    return {valid:errors.length===0,errors};
+  }
+
+  // buildTraceOutput()(以下)は既存の同期関数であり、非同期化すると
+  // applyProfileToCurrentData()含む多数の呼び出し元(すべて同期呼び出し、await無し)へ
+  // 影響が波及するため変更しない。v12Sha256Fallback(crypto.subtle不使用時の既存フォールバック、
+  // crypto.subtleと同一のSHA-256を計算する純JS実装)を直接使う同期版で計算する
+  // (namespace・NUL区切り・v12Normalizeの適用方法はv12HashParts()と完全に同一)。
+  function computeTagVocabularySha256Sync(vocab){
+    const canonical={schema:vocab.schema,vocabulary_id:vocab.vocabulary_id,vocabulary_version:vocab.vocabulary_version,
+      allowed_tags:[...(vocab.allowed_tags||[])],aliases:{...(vocab.aliases||{})}};
+    const NUL=String.fromCharCode(0);
+    const text=["tag-vocabulary-v1", v12Normalize(JSON.stringify(canonicalValue(canonical)))].join(NUL);
+    return v12Sha256Fallback(text);
+  }
+
+  async function loadSharedTagVocabularyExcel(file){
+    if(!file)return false;
+    let vocab;
+    try{ vocab=JSON.parse(await file.text()); }
+    catch(e){ showMessage($('profileMessage'),'error',`共通タグ辞書を読み込めません: JSONの構文が不正です(${e.message})`); return false; }
+    const result=validateTagVocabulary(vocab);
+    if(!result.valid){
+      showMessage($('profileMessage'),'error',`共通タグ辞書を読み込めません:\n${result.errors.join('\n')}`);
+      return false;
+    }
+    if(!activeProfile){ showMessage($('profileMessage'),'error','様式が選択されていません。'); return false; }
+    activeProfile.tag_policy = activeProfile.tag_policy && typeof activeProfile.tag_policy==='object' ? activeProfile.tag_policy : {};
+    activeProfile.tag_policy.mode = 'controlled';
+    activeProfile.tag_policy.allow_free_input = false;
+    activeProfile.tag_policy.vocabulary_id = vocab.vocabulary_id;
+    activeProfile.tag_policy.tag_vocabulary_version = vocab.vocabulary_version;
+    activeProfile.tag_policy.allowed_tags = [...vocab.allowed_tags];
+    activeProfile.tag_policy.tag_aliases = {...(vocab.aliases||{})};
+    syncProfileToEditor();
+    renderAllowedTags();
+    if(typeof renderTagRules==='function')renderTagRules();
+    if(typeof renderTagAliases==='function')renderTagAliases();
+    showMessage($('profileMessage'),'info',`共通タグ辞書(${vocab.vocabulary_id} v${vocab.vocabulary_version})を読み込みました（${vocab.allowed_tags.length}件）。`);
+    return true;
+  }
+
   /* ================= quantity-annotation/1.0-rc1: 数量抽出ライブラリ(移植) =================
    * 出典: tools/design_notes/quantity_extraction_prototype.js v2.14（112〜452,458〜469行目相当）。
    * PDF側(spec_to_json_conversion_tool_v1.18.html)と完全に同一のソースを移植する
@@ -4762,6 +4857,20 @@ I/F = インターフェース"></textarea>
     ensureRowStates(); const result=v20BaseBuildTraceOutput(records,profile);
     result.schema_version='1.1'; result.id_scheme=V20_ID_SCHEME; result.generator.version='2.0.8';
     result.tag_policy.tag_aliases=normalizeAliasMap(profile?.tag_policy?.tag_aliases);
+    // Checkpoint 4: vocabulary_sha256は、profile.tag_policy(共通辞書を読み込んでいればその内容、
+    // 読み込んでいなければ既定値)から都度その場で計算する(キャッシュしない)。画面上の許可タグ・
+    // 別名と出力metadataのhashが食い違うことを構造的に防ぐ。
+    result.tag_vocabulary={
+      vocabulary_id: result.tag_policy.vocabulary_id,
+      vocabulary_version: result.tag_policy.tag_vocabulary_version,
+      vocabulary_sha256: computeTagVocabularySha256Sync({
+        schema: TAG_VOCABULARY_SCHEMA,
+        vocabulary_id: result.tag_policy.vocabulary_id,
+        vocabulary_version: result.tag_policy.tag_vocabulary_version,
+        allowed_tags: result.tag_policy.allowed_tags,
+        aliases: result.tag_policy.tag_aliases
+      })
+    };
     result._trace_records.forEach((record,index)=>{
       const state=currentCellMeta[index]?.__row_state;
       if(!state)return; record.trace_id=state.trace_id; record.stable_uid=state.uid; record.content_hash=state.content_hash;
@@ -5764,6 +5873,12 @@ I/F = インターフェース"></textarea>
     renderAllowedTags();
     renderTagRules();
     showMessage($('profileMessage'), 'info', '複製を作成しました。名称や設定を変更して「登録・更新」を押してください。');
+  });
+  $('sharedTagVocabularyLoadBtn').addEventListener('click', () => $('sharedTagVocabularyInput').click());
+  $('sharedTagVocabularyInput').addEventListener('change', async () => {
+    const file = $('sharedTagVocabularyInput').files[0];
+    $('sharedTagVocabularyInput').value = '';
+    await loadSharedTagVocabularyExcel(file);
   });
   $('allowedTagAddBtn').addEventListener('click', () => addAllowedTag($('allowedTagInput').value));
   $('allowedTagInput').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); addAllowedTag(event.target.value); } });

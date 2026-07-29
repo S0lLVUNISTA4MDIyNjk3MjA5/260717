@@ -1,0 +1,16 @@
+{
+  "schema": "trace-tag-vocabulary/1.0",
+  "vocabulary_id": "trace-domain-ja",
+  "vocabulary_version": "1.0.0",
+  "allowed_tags": [
+    "安全",
+    "性能",
+    "機能",
+    "品質",
+    "インターフェース",
+    "製造",
+    "検査",
+    "保守"
+  ],
+  "aliases": {}
+}
