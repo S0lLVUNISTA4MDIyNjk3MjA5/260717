@@ -2110,10 +2110,20 @@ I/F = インターフェース"></textarea>
     return '';
   }
 
+  // 照合用JSON化の過程で行オブジェクトへ書き込まれるツール側の管理用フィールド
+  // (人手確認状態・AI確認状態など)は、Excelの実列データではないため、
+  // text_columns未設定時のフォールバック結合(全列連結)から常に除外する。
+  // 特にai_reviewed(真偽値)は、値が実データとして存在する列のfalseと違い、
+  // 「まだAI確認されていない」という管理用の初期値であって出典テキストの
+  // 一部ではないため、これを結合してtrace_textへ"false"という文字列を
+  // 混入させてはならない(照合に使われるtrace_text/trace_content/
+  // trace_key_textの内容が変質し、類似度・タグ判断に影響しうるため)。
+  const ROW_BOOKKEEPING_FIELDS = ['tags', 'unregistered_tags', 'review_status', '_source',
+    'ai_reviewed', 'ai_reviewed_at', 'ai_review_method', 'ai_review_model', 'ai_review_comment'];
   function textFromColumns(row, columns) {
     const configured = (columns || []).map(column => getByPath(row, column)).filter(value => !isBlank(value)).map(flattenValue);
     if (configured.length) return configured.join(' / ');
-    return Object.entries(row || {}).filter(([key]) => !['tags', 'unregistered_tags', 'review_status', '_source'].includes(key)).map(([, value]) => flattenValue(value)).filter(Boolean).join(' / ');
+    return Object.entries(row || {}).filter(([key]) => !ROW_BOOKKEEPING_FIELDS.includes(key)).map(([, value]) => flattenValue(value)).filter(Boolean).join(' / ');
   }
 
   function buildTraceOutput(records, profile) {

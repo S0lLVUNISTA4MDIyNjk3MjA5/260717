@@ -4,7 +4,7 @@
   "chapter_title": "sample_input",
   "trace_format": "excel-row-trace-v1",
   "schema_version": "1.1",
-  "generated_at": "2026-07-29T12:04:39.482Z",
+  "generated_at": "2026-07-29T12:22:18.546Z",
   "generator": {
     "name": "Excel → JSON 変換・確認ツール",
     "version": "2.0.8"
@@ -44,7 +44,7 @@
     "source_file": "sample_input.xlsx",
     "source_sheet": "検証項目",
     "record_count": 5,
-    "generated_at": "2026-07-29T12:04:39.482Z"
+    "generated_at": "2026-07-29T12:22:18.546Z"
   },
   "_trace_records": [
     {
@@ -157,12 +157,12 @@
       "trace_id": "excel-db27b0ce",
       "parent_id": "sheet-c104c788",
       "trace_title": "3",
-      "trace_text": "3 / 設備 / 換気設備の風量確認 / 特記なし / false",
+      "trace_text": "3 / 設備 / 換気設備の風量確認 / 特記なし",
       "trace_content": [
-        "3 / 設備 / 換気設備の風量確認 / 特記なし / false"
+        "3 / 設備 / 換気設備の風量確認 / 特記なし"
       ],
       "trace_category": "設備",
-      "trace_key_text": "sample_input.xlsx 検証項目 設備 3 3 / 設備 / 換気設備の風量確認 / 特記なし / false",
+      "trace_key_text": "sample_input.xlsx 検証項目 設備 3 3 / 設備 / 換気設備の風量確認 / 特記なし",
       "source_file": "sample_input.xlsx",
       "source_sheet": "検証項目",
       "source_row": 4,
