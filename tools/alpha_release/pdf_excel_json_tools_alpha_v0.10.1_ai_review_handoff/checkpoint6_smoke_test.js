@@ -18,6 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { execFileSync } = require('child_process');
 const { chromium } = require('playwright');
 
 const ROOT = __dirname;
@@ -255,6 +256,12 @@ function buildReportMarkdown(env) {
   lines.push('');
   lines.push(`実行日時: ${env.timestamp}`);
   lines.push('');
+  lines.push('## 試験対象')
+  lines.push('');
+  lines.push(`- commit: \`${env.commitSha}\`${env.gitDirty ? '（作業ツリーに未commitの変更あり）' : ''}`);
+  lines.push(`- PDF HTML: \`pdf_tool/spec_to_json_conversion_tool_alpha_v0.10.1.html\``);
+  lines.push(`- Excel HTML: \`excel_tool/excel_to_json_conversion_tool_alpha_v0.10.1.html\``);
+  lines.push('');
   lines.push('## 試験環境');
   lines.push('');
   lines.push(`- OS: ${env.platform} ${env.release} (${env.arch})`);
@@ -272,7 +279,10 @@ function buildReportMarkdown(env) {
     lines.push(`| ${r.area} | ${r.name} | ${r.ok ? 'PASS' : 'FAIL'} |`);
   }
   lines.push('');
-  lines.push(`合計 ${total}件中 ${passed}件成功`);
+  const pdfCount = results.filter(r => r.area === 'PDF').length;
+  const excelCount = results.filter(r => r.area === 'Excel').length;
+  lines.push(`合計 ${total}件中 ${passed}件成功（PDF ${pdfCount}件、Excel ${excelCount}件の実assertion。`
+    + `「PASS」は個々のassertion結果であり、まとめて1件として記載しているものではありません）`);
   lines.push('');
   lines.push('## 深い機能検証との関係');
   lines.push('');
@@ -309,6 +319,12 @@ async function main() {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 
+  let commitSha = 'unknown', gitDirty = false;
+  try {
+    commitSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
+    gitDirty = execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).trim().length > 0;
+  } catch (e) { /* not fatal to the smoke test itself */ }
+
   const env = {
     timestamp: new Date().toISOString(),
     platform: os.platform(),
@@ -317,6 +333,8 @@ async function main() {
     nodeVersion: process.version,
     playwrightVersion: require('playwright/package.json').version,
     chromiumVersion: browserVersion,
+    commitSha,
+    gitDirty,
   };
 
   const total = results.length;

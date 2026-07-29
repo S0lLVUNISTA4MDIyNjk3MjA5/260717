@@ -1,6 +1,12 @@
 # SMOKE_TEST_REPORT — PDF／Excel → JSON 変換 α版 v0.10.1-alpha
 
-実行日時: 2026-07-29T13:12:41.023Z
+実行日時: 2026-07-29T13:44:15.539Z
+
+## 試験対象
+
+- commit: `9e9044bee5d388c1f8feac8736e761bf4fcac112`（作業ツリーに未commitの変更あり）
+- PDF HTML: `pdf_tool/spec_to_json_conversion_tool_alpha_v0.10.1.html`
+- Excel HTML: `excel_tool/excel_to_json_conversion_tool_alpha_v0.10.1.html`
 
 ## 試験環境
 
@@ -54,7 +60,7 @@
 | Excel | 共通タグ辞書読込: pageerror 0件 | PASS |
 | Excel | 共通タグ辞書読込: console error 0件 | PASS |
 
-合計 38件中 38件成功
+合計 38件中 38件成功（PDF 23件、Excel 15件の実assertion。「PASS」は個々のassertion結果であり、まとめて1件として記載しているものではありません）
 
 ## 深い機能検証との関係
 
