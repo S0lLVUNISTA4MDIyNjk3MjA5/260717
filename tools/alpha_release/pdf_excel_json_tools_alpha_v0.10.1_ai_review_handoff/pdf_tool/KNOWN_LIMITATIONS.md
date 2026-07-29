@@ -71,6 +71,19 @@ worker・cmaps・standard_fonts・tiny-segmenterで完結する経路）にお�
 - サーバー保存・認証・複数人での同時編集
 - 母体に含まれる「照合用+数量注釈JSON」出力機能自体の精度評価
 
+## Fixed in v0.10.1-alpha（本α版で修正済みの過去の不具合）
+
+以下は過去のバージョンで存在した不具合で、**本α版では修正済みであり、現在の制約ではありません**。
+履歴として記録しています。
+
+- **AI入力JSON生成時の`source_content`欠落**: AI入力JSON保存時、一部レコードで`source_content`
+  フィールドが生成されない不具合（ReferenceError由来）があった。全recordで`source_content`が
+  存在することを確認済み（`pdf_checkpoint1_verification.js`参照）。
+- **数量注釈サイドカーの署名不整合**: 照合用JSON・数量注釈JSONの`dataset_signature`／
+  `content_hash`が、照合ツール正本の`quantity_sidecar_binding_core.js`によるbinding時に
+  `source_mismatch`等の診断を生じていた問題。実binding coreを用いた検証でdiagnostics 0件・
+  `ready === true`であることを確認済み。
+
 ## 未検証・未実施の事項
 
 - STEP 2の生成AI連携は、プロンプト／JSONのコピー・保存と回答JSONの貼り付け取込だけを行います。

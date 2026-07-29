@@ -2,9 +2,33 @@
 
 Build date: 2026-07-29
 
+**本配布物は限定評価版（α版）です。** 実業務データでの精度保証、大規模データでの性能保証、
+実Chrome／Edgeでの手動E2E確認は行っておらず、正式な業務用途を意図したものではありません。
+評価目的以外での利用は想定していません。
+
+## 現行版数
+
+- PDF版: `spec_to_json_conversion_tool_alpha_v0.10.1.html` — **v0.10.1-alpha**
+- Excel版: `excel_to_json_conversion_tool_alpha_v0.10.1.html` — **v0.10.1-alpha**
+
+## 現行実装の主要機能
+
+- **生成AI連携**: プロンプトコピー、AI入力JSON保存（固定ID・内容ハッシュ・原文・タグ辞書を含む）、
+  AI回答取込（件数・ID・内容ハッシュ・原文の全件検証後に一括反映）。AI確認済み（`ai_reviewed`等）は
+  人手確認（`review_status`等）とは別項目として保持し、AI取込が人手確認状態を書き換えることはありません。
+- **quantity sidecar（数量注釈JSON）**: PDF版・Excel版とも、照合用JSONと同一の
+  `JSON.stringify`→`JSON.parse`スナップショットから、数量注釈JSONを1操作で生成します
+  （PDF版は母体ツールに元々あった機能、Excel版はv0.10.1で新規に同一ライブラリ・binding-coreを
+  移植して追加）。2ファイル目の生成に失敗した場合は、1ファイル目が物理的にダウンロード済みでも
+  成功表示を出さず「生成に失敗しました」というエラーのみを表示します。
+- **共通タグ辞書（shared tag vocabulary）**: `shared/tag_vocabulary.json`
+  （`vocabulary_id: "trace-domain-ja"`、`vocabulary_version: "1.0.0"`）をPDF版・Excel版共通の
+  初期辞書として使用します。出力側の`tag_vocabulary.vocabulary_sha256`は、出力時点で有効な
+  タグ集合（画面上で編集済みならその内容）をcanonical化して都度計算する値で、キャッシュしません。
+
 ## 今回の変更
 
-v0.10.0からの変更点は以下の4件です。既存の表示形式、確認状態、照合タグ、JSON保存、PDF／Excel保存、
+v0.10.0からの変更点は以下の5件です。既存の表示形式、確認状態、照合タグ、JSON保存、PDF／Excel保存、
 STEP 2の生成AI連携（プロンプトコピー・AI入力JSON保存・AI回答取込）は維持しています。
 
 ### Excel版: AI確認情報の欠落を修正
@@ -43,6 +67,15 @@ PDF版の母体ツールが既に持つ数量抽出ライブラリ・binding-cor
 `generator.version`・`ALPHA_BASE_TOOL`・内部の実装フェーズ識別子（`V12_PHASE6_VERSION`等）は、
 母体ツール自体のバージョンを示す互換性識別子であるため変更していません。
 
+### Excel版: trace_textへのAI管理フィールド混入を修正
+
+照合用JSON生成時、`text_columns`（例:「内容」列）に指定された列が全行で空白の場合、
+`textFromColumns()`のフォールバック処理が行オブジェクトの全キーを結合していたため、
+AI確認状態管理用の`ai_reviewed`（既定値`false`）が`trace_text`／`trace_content`／
+`trace_key_text`へ文字列として混入する不具合がありました。`ai_reviewed`等5つのAI管理
+フィールドをフォールバックの除外対象へ追加して修正しています（数値`0`や実データとしての
+`boolean false`は従来どおり意味のある値として保持されます）。
+
 ## 維持した機能
 
 - 原資料表示／レビューJSON
@@ -72,6 +105,13 @@ PDF版の母体ツールが既に持つ数量抽出ライブラリ・binding-cor
 - 共通タグ辞書: PDF版・Excel版の既定値一致、辞書ファイル読込後のID・版数・ハッシュ一致、
   実ファイルの独立再計算ハッシュとの一致、7種の不正辞書に対するfail-closed検査、
   5種の正当な辞書内容変更後のハッシュ再計算検査
+- Excel版trace_text: 欠落セル・空文字・null相当・数値0・実データboolean false・通常文字列の
+  6境界値検査、および修正コードを意図的に戻すと不具合が再現することを確認するmutation検査
 - 各チェックポイントの回帰検査（v0.10.0時点の検証スクリプトを再実行し、退行がないことを確認）
+- 実行環境・使用ブラウザ・外部networkリクエスト有無を含む実ブラウザスモークテストの詳細は
+  `SMOKE_TEST_REPORT.md`を参照してください。
+- 照合ツール（`json_ab_trace_matching_tool`）との互換性評価（生成側・照合側の責務分離を含む）は
+  `THREE_TOOL_COMPATIBILITY_REPORT.md`を参照してください。
 
-実Chrome／EdgeでのクリックE2E確認は、検証環境にブラウザ本体がないため未実施です。
+実Chrome／EdgeでのクリックE2E確認は、検証環境にブラウザ本体がないため未実施です（詳細は
+`SMOKE_TEST_REPORT.md`を参照）。

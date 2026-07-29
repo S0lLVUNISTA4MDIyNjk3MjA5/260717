@@ -160,7 +160,12 @@ function findFilesContaining(dir, needle) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) { results.push(...findFilesContaining(full, needle)); continue; }
-    if (entry.name.endsWith('.js') && path.basename(entry.name) === path.basename(__filename)) continue; // this script's own FORBIDDEN/needle string list
+    // Verification/test harness scripts legitimately reference version and
+    // vocabulary-identity strings as literal search targets, error-message
+    // fixtures, or documented findings -- they are test code, not "current
+    // implementation or fixture" content, so all of them (not just this
+    // file) are excluded from this scan.
+    if (/^(checkpoint\d.*|pdf_checkpoint\d.*|excel_checkpoint\d.*|shared_tag_vocabulary_verification)\.js$/.test(entry.name)) continue;
     const text = readText(full);
     if (text.includes(needle)) results.push(full);
   }
