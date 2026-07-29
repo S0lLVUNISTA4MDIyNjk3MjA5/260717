@@ -1,0 +1,52 @@
+[
+  {
+    "No": 1,
+    "分類": "構造",
+    "項目": "柱脚接合部の耐震安全性検証",
+    "内容": "地震時の転倒防止に関する安全対策を確認する",
+    "備考": "初回測定",
+    "review_status": "unreviewed",
+    "tags": [],
+    "unregistered_tags": []
+  },
+  {
+    "No": 2,
+    "分類": "構造",
+    "項目": "柱脚接合部の耐力確認",
+    "内容": "圧縮強度を確認する",
+    "備考": "再測定予定",
+    "review_status": "unreviewed",
+    "tags": [],
+    "unregistered_tags": []
+  },
+  {
+    "No": 3,
+    "分類": "設備",
+    "項目": "換気設備の風量確認",
+    "内容": "",
+    "備考": "特記なし",
+    "review_status": "unreviewed",
+    "tags": [],
+    "unregistered_tags": []
+  },
+  {
+    "No": 4,
+    "分類": "設備",
+    "項目": "給水圧力の確認",
+    "内容": "配管の接続部の耐久性を確認する",
+    "備考": "",
+    "review_status": "unreviewed",
+    "tags": [],
+    "unregistered_tags": []
+  },
+  {
+    "No": 5,
+    "分類": "電気",
+    "項目": "分電盤の絶縁抵抗測定",
+    "内容": "絶縁抵抗値が基準値以上であることを確認する",
+    "備考": "測定値記録",
+    "review_status": "unreviewed",
+    "tags": [],
+    "unregistered_tags": []
+  }
+]
