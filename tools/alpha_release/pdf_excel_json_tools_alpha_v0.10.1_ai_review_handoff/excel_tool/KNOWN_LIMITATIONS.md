@@ -1,4 +1,4 @@
-# 既知の制限 — Excel → JSON 変換 α版 v0.1.0-alpha
+# 既知の制限 — Excel → JSON 変換 α版 v0.10.1-alpha
 
 ## 対応対象
 
@@ -10,6 +10,9 @@
 - 変換件数・警告件数・未確認件数の集計表示
 - 基準ツールに内蔵の「照合用JSON（Excel行単位）」様式（`trace`モード）適用による、タグ付け・
   `source_row`等を含む出力（様式・タグロジック自体も無改変）
+- 照合用JSONと同一スナップショットから生成する数量注釈（quantity-annotation）サイドカーJSONの
+  出力（PDF版と共通の抽出ライブラリ・binding-coreを使用）
+- PDF版と共通の辞書ファイル`shared/tag_vocabulary.json`の読込・出力時canonicalハッシュ付与
 
 ## タグ出力に関する既知の仕様（基準ツール既存仕様・バグではありません）
 
@@ -32,6 +35,29 @@
   （タグの未登録等）はこの2つの件数には反映されません。タグに関する情報が必要な場合は、出力JSON中の
   `tag_policy`・各レコードの`tags`/`unregistered_tags`、および`statistics.unregistered_tags`
   （基準ツールが既に出力している値）を確認してください。
+
+## 数量注釈サイドカー（quantity annotation）に関する既知の制限
+
+- 照合用JSONと数量注釈JSONは、`JSON.stringify`→`JSON.parse`で確定させた単一のスナップショット
+  （persisted snapshot）から1操作で生成します。2ファイル目の生成に失敗した場合は「照合用JSON＋
+  数量注釈JSONの生成に失敗しました」というエラー表示のみを行い、1ファイル目が先に物理的に
+  ダウンロードされていても、その成果物セットを正常な出力として扱いません（利用者は再実行してください）。
+- サイドカー内の`dataset_signature`・`content_hash`等は、照合ツール本体（`quantity_sidecar_binding_core.js`）
+  と同一の正本ロジックで計算していますが、実際に照合ツールへ読み込んだ際の突合せ結果（bindingの
+  `ready`/`diagnostics`）そのものの妥当性評価は、本α版の検証範囲では基本的な整合性確認に限定しています。
+- 数量の抽出・単位解釈・区間解釈のルール自体（列役割候補の推定を含む）はPDF版と共通のライブラリを
+  そのまま使用しており、Excel特有の列構成・結合セル・複数単位混在シートに対する精度評価は限定的です。
+
+## 共通タグ辞書（shared tag vocabulary）に関する既知の制限
+
+- `shared/tag_vocabulary.json`はPDF版・Excel版で共通の初期辞書です。画面上で許可タグ・別名を編集する
+  ことは可能ですが、出力される`tag_vocabulary.vocabulary_sha256`はその時点で有効なタグ集合を都度
+  再計算した値であり、辞書ファイル自体のハッシュを固定的にキャッシュしたものではありません。
+- 辞書ファイルの読込は、`vocabulary_id`／`vocabulary_version`が空、`allowed_tags`に重複（正規化後の
+  重複を含む）、`aliases`の参照先が`allowed_tags`に存在しない等、契約として不正な内容を検出した場合に
+  読込全体を拒否します（部分的な取込は行いません）。
+- 照合ツール（`json_ab_trace_matching_tool`）側で`vocabulary_sha256`の不一致を検出・表示する機能は、
+  本α版の対象外です（別チェックポイントで検討予定）。
 
 ## オフライン動作について
 

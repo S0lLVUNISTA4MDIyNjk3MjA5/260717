@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>【α版】仕様書PDF→JSON 変換 v0.10.0-alpha（生成AIレビュー受け渡し）</title>
+<title>【α版】仕様書PDF→JSON 変換 v0.10.1-alpha（生成AIレビュー受け渡し）</title>
 <!-- α版: CDN(unpkg.com)ではなく同梱ライブラリを読み込みます。バージョン・SHA-256・ライセンスは vendor/VENDOR_NOTICE.md を参照。基準ツールv1.18と同一版(0.2.0)、ライブラリ本体は無改変。 -->
 <script src="./vendor/tiny-segmenter/tiny-segmenter-0.2.0.js" onerror="window.__tinySegmenterLoadFailed=true"></script>
 <style>
@@ -831,7 +831,7 @@
 </style>
 <div class="alpha-banner">
   <strong>α版評価用ビルド</strong>
-  <span class="alpha-meta">仕様書PDF → JSON変換 α版 v0.10.0-alpha</span>
+  <span class="alpha-meta">仕様書PDF → JSON変換 α版 v0.10.1-alpha</span>
   <span class="alpha-meta">Build date: 2026-07-27</span>
   <span class="alpha-meta">変換ロジック基準: spec_to_json_conversion_tool_v1.18.html（無改変）</span>
   <button type="button" id="alphaLimitsToggleBtn">対応対象・既知の制限</button>
@@ -8295,7 +8295,7 @@ $("#btn-json-copy-b").onclick=()=>v18CopyJson("B");
    pdfInfo/computeMatches/matchResults/v12ReviewCounts等は、いずれも既存スクリプトがトップレベル
    （IIFEで包まれていない箇所）で宣言した変数・関数をそのまま参照するだけで、書き換えていません。 */
 (() => {
-  const ALPHA_TOOL_VERSION = "0.8.0-alpha";
+  const ALPHA_TOOL_VERSION = "0.10.1-alpha";
   const ALPHA_BUILD_DATE = "2026-07-27";
   const ALPHA_BASE_TOOL = "spec_to_json_conversion_tool_v1.18.html";
 
