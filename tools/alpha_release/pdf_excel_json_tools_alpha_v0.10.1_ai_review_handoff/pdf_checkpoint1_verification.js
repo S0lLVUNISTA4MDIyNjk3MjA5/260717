@@ -52,15 +52,16 @@ function listFilesRecursive(dir) {
 // directories are untouched byte-for-byte copies of the v0.10.0 baseline
 // (identical file-path sets AND identical per-file SHA-256), not merely
 // "look the same" by eye.
-function compareDirsByteParity(dirA, dirB, label) {
+function compareDirsByteParity(dirA, dirB, label, excludeFiles = []) {
   if (!fs.existsSync(dirA) || !fs.existsSync(dirB)) {
     check(`${label}: 両ディレクトリが存在する`, false, { dirA, dirB, existsA: fs.existsSync(dirA), existsB: fs.existsSync(dirB) });
     return;
   }
-  const filesA = listFilesRecursive(dirA);
-  const filesB = listFilesRecursive(dirB);
+  const excludeSet = new Set(excludeFiles);
+  const filesA = listFilesRecursive(dirA).filter(f => !excludeSet.has(f));
+  const filesB = listFilesRecursive(dirB).filter(f => !excludeSet.has(f));
   const sameFileSet = JSON.stringify(filesA) === JSON.stringify(filesB);
-  check(`${label}: ファイル一覧が完全一致(${filesA.length}件)`, sameFileSet,
+  check(`${label}: ファイル一覧が完全一致(${filesA.length}件${excludeFiles.length ? `、既知の更新対象${excludeFiles.length}件を除く` : ''})`, sameFileSet,
     { onlyInA: filesA.filter(f => !filesB.includes(f)), onlyInB: filesB.filter(f => !filesA.includes(f)) });
   if (sameFileSet) {
     const mismatches = filesA.filter(f => sha256(fs.readFileSync(path.join(dirA, f))) !== sha256(fs.readFileSync(path.join(dirB, f))));
@@ -92,8 +93,17 @@ async function main() {
   }
 
   // ── vendor/samples byte parity (v0.10.0 baseline ↔ v0.10.1) ──
+  // sample_expected_normal.json/sample_expected_table.json are deliberately
+  // EXCLUDED: Checkpoint 5 (REQUEST CHANGES round) regenerated them via a
+  // real v0.10.1 tool run to reflect the current output contract (shared
+  // tag vocabulary identity trace-domain-ja/1.0.0 + AI-metadata fields),
+  // per explicit reviewer instruction not to keep stale expected-output
+  // fixtures just to preserve byte parity with the v0.10.0 baseline. All
+  // other vendor/sample files (libraries, sample_input*.pdf) remain
+  // untouched byte-for-byte copies and are still checked here.
   compareDirsByteParity(path.join(V0100_PDF_TOOL_DIR, 'vendor'), path.join(TOOL_DIR, 'vendor'), 'v0.10.0↔v0.10.1 pdf_tool/vendor byte parity');
-  compareDirsByteParity(path.join(V0100_PDF_TOOL_DIR, 'samples'), path.join(TOOL_DIR, 'samples'), 'v0.10.0↔v0.10.1 pdf_tool/samples byte parity');
+  compareDirsByteParity(path.join(V0100_PDF_TOOL_DIR, 'samples'), path.join(TOOL_DIR, 'samples'), 'v0.10.0↔v0.10.1 pdf_tool/samples byte parity',
+    ['sample_expected_normal.json', 'sample_expected_table.json']);
 
   const tempDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'pdf-v0101-cp1-'));
   const browser = await chromium.launch();

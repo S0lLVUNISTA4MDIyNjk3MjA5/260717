@@ -4,7 +4,7 @@
   "chapter_title": "sample_input",
   "trace_format": "excel-row-trace-v1",
   "schema_version": "1.1",
-  "generated_at": "2026-07-24T06:40:45.684Z",
+  "generated_at": "2026-07-29T12:04:39.482Z",
   "generator": {
     "name": "Excel → JSON 変換・確認ツール",
     "version": "2.0.8"
@@ -17,8 +17,8 @@
   },
   "tag_policy": {
     "mode": "controlled",
-    "vocabulary_id": "spec-domain-ja",
-    "tag_vocabulary_version": "1.0",
+    "vocabulary_id": "trace-domain-ja",
+    "tag_vocabulary_version": "1.0.0",
     "allow_free_input": false,
     "allowed_tags": [
       "安全",
@@ -44,7 +44,7 @@
     "source_file": "sample_input.xlsx",
     "source_sheet": "検証項目",
     "record_count": 5,
-    "generated_at": "2026-07-24T06:40:45.685Z"
+    "generated_at": "2026-07-29T12:04:39.482Z"
   },
   "_trace_records": [
     {
@@ -78,6 +78,11 @@
           "安全"
         ],
         "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
         "_source": {
           "file_name": "sample_input.xlsx",
           "sheet_name": "検証項目",
@@ -89,7 +94,12 @@
       "review_method": "",
       "reviewed_at": "",
       "review_comment": "",
-      "exclusion_reason": ""
+      "exclusion_reason": "",
+      "ai_reviewed": false,
+      "ai_reviewed_at": "",
+      "ai_review_method": "",
+      "ai_review_model": "",
+      "ai_review_comment": ""
     },
     {
       "trace_id": "excel-9eb7a988",
@@ -120,6 +130,11 @@
         "review_status": "unreviewed",
         "tags": [],
         "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
         "_source": {
           "file_name": "sample_input.xlsx",
           "sheet_name": "検証項目",
@@ -131,18 +146,23 @@
       "review_method": "",
       "reviewed_at": "",
       "review_comment": "",
-      "exclusion_reason": ""
+      "exclusion_reason": "",
+      "ai_reviewed": false,
+      "ai_reviewed_at": "",
+      "ai_review_method": "",
+      "ai_review_model": "",
+      "ai_review_comment": ""
     },
     {
       "trace_id": "excel-db27b0ce",
       "parent_id": "sheet-c104c788",
       "trace_title": "3",
-      "trace_text": "3 / 設備 / 換気設備の風量確認 / 特記なし",
+      "trace_text": "3 / 設備 / 換気設備の風量確認 / 特記なし / false",
       "trace_content": [
-        "3 / 設備 / 換気設備の風量確認 / 特記なし"
+        "3 / 設備 / 換気設備の風量確認 / 特記なし / false"
       ],
       "trace_category": "設備",
-      "trace_key_text": "sample_input.xlsx 検証項目 設備 3 3 / 設備 / 換気設備の風量確認 / 特記なし",
+      "trace_key_text": "sample_input.xlsx 検証項目 設備 3 3 / 設備 / 換気設備の風量確認 / 特記なし / false",
       "source_file": "sample_input.xlsx",
       "source_sheet": "検証項目",
       "source_row": 4,
@@ -162,6 +182,11 @@
         "review_status": "unreviewed",
         "tags": [],
         "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
         "_source": {
           "file_name": "sample_input.xlsx",
           "sheet_name": "検証項目",
@@ -173,7 +198,12 @@
       "review_method": "",
       "reviewed_at": "",
       "review_comment": "",
-      "exclusion_reason": ""
+      "exclusion_reason": "",
+      "ai_reviewed": false,
+      "ai_reviewed_at": "",
+      "ai_review_method": "",
+      "ai_review_model": "",
+      "ai_review_comment": ""
     },
     {
       "trace_id": "excel-6d35582b",
@@ -207,6 +237,11 @@
           "品質"
         ],
         "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
         "_source": {
           "file_name": "sample_input.xlsx",
           "sheet_name": "検証項目",
@@ -218,7 +253,12 @@
       "review_method": "",
       "reviewed_at": "",
       "review_comment": "",
-      "exclusion_reason": ""
+      "exclusion_reason": "",
+      "ai_reviewed": false,
+      "ai_reviewed_at": "",
+      "ai_review_method": "",
+      "ai_review_model": "",
+      "ai_review_comment": ""
     },
     {
       "trace_id": "excel-41284b83",
@@ -249,6 +289,11 @@
         "review_status": "unreviewed",
         "tags": [],
         "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
         "_source": {
           "file_name": "sample_input.xlsx",
           "sheet_name": "検証項目",
@@ -260,8 +305,18 @@
       "review_method": "",
       "reviewed_at": "",
       "review_comment": "",
-      "exclusion_reason": ""
+      "exclusion_reason": "",
+      "ai_reviewed": false,
+      "ai_reviewed_at": "",
+      "ai_review_method": "",
+      "ai_review_model": "",
+      "ai_review_comment": ""
     }
   ],
-  "id_scheme": "stable-excel-row-uid-v2"
+  "id_scheme": "stable-excel-row-uid-v2",
+  "tag_vocabulary": {
+    "vocabulary_id": "trace-domain-ja",
+    "vocabulary_version": "1.0.0",
+    "vocabulary_sha256": "4602f1c47116ab18e39a53bfe38c8d753dae61a8806674672c9638a0a0f4305f"
+  }
 }

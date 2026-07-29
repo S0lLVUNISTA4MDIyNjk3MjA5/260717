@@ -7235,8 +7235,8 @@ function v12State(obj){
     Object.values(s.sections).forEach(e=>{if(e && e.id){e.previous_id ||= e.id;delete e.id;}});
     s.id_scheme_version = V12_ID_SCHEME;
   }
-  s.tag_vocabulary_id ||= "spec-domain-ja";
-  s.tag_vocabulary_version ||= "1.0";
+  s.tag_vocabulary_id ||= SHARED_TAG_VOCABULARY_DEFAULT.vocabulary_id;
+  s.tag_vocabulary_version ||= SHARED_TAG_VOCABULARY_DEFAULT.vocabulary_version;
   return s;
 }
 
