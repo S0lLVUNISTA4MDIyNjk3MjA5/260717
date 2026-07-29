@@ -54,17 +54,17 @@ const EXPECTED_LICENSE_FILES = [
   { manifestKey: 'tiny_segmenter', field: 'original_notice_file', shaField: 'original_notice_sha256', dest: 'tiny-segmenter-original-notice.txt' },
   { manifestKey: 'tiny_segmenter', field: 'original_license_file', shaField: 'original_license_sha256', dest: 'tiny-segmenter-original-BSD-3-Clause.txt' },
 ];
-const EXPECTED_DOC_FILES = ['README_ja.md', 'KNOWN_LIMITATIONS.md', 'THIRD_PARTY_LICENSES.md'];
+const EXPECTED_DOC_FILES = ['README_ja.md', 'KNOWN_LIMITATIONS.md', 'THIRD_PARTY_LICENSES.md', 'BROWSER_VALIDATION_REPORT.md'];
 
 const EXPECTED_RELATIVE_FILES = new Set([
   OUTPUT_HTML_NAME,
-  'README_ja.md', 'KNOWN_LIMITATIONS.md', 'THIRD_PARTY_LICENSES.md',
+  ...EXPECTED_DOC_FILES,
   'SHA256SUMS.txt',
   ...EXPECTED_SELF_AUTHORED_RUNTIME.map(e => `runtime/${e.dest}`),
   ...Object.values(EXPECTED_VENDOR_RUNTIME_DEST).map(d => `runtime/${d}`),
   ...EXPECTED_LICENSE_FILES.map(e => `licenses/${e.dest}`),
 ]);
-const EXPECTED_TOTAL_FILE_COUNT = 22; // 21 covered by SHA256SUMS.txt + SHA256SUMS.txt itself
+const EXPECTED_TOTAL_FILE_COUNT = 23; // 22 covered by SHA256SUMS.txt + SHA256SUMS.txt itself
 
 // Path-leakage allowlist: substrings that are legitimate content (e.g.
 // explanatory text about the environment) rather than a real leaked path.
@@ -148,7 +148,7 @@ function main() {
   const docFiles = relFiles.filter(f => EXPECTED_DOC_FILES.includes(f.rel));
   check('runtime/ has exactly 12 files', runtimeFiles.length === 12, `found ${runtimeFiles.length}`);
   check('licenses/ has exactly 5 files', licenseFiles.length === 5, `found ${licenseFiles.length}`);
-  check('doc files present: exactly 3', docFiles.length === 3, `found ${docFiles.length}`);
+  check('doc files present: exactly 4', docFiles.length === 4, `found ${docFiles.length}`);
   check('HTML file name matches expected exactly', actualRelSet.has(OUTPUT_HTML_NAME));
 
   // ── file kind checks ──
@@ -218,7 +218,7 @@ function main() {
     });
     check('every SHA256SUMS.txt line parses (hash + 2-space + path)', parsed.every(Boolean));
     const relsInSums = parsed.filter(Boolean).map(p => p.rel);
-    check('SHA256SUMS.txt covers exactly 21 files', relsInSums.length === 21, `found ${relsInSums.length}`);
+    check('SHA256SUMS.txt covers exactly 22 files', relsInSums.length === 22, `found ${relsInSums.length}`);
     check('SHA256SUMS.txt does not list itself', !relsInSums.includes('SHA256SUMS.txt'));
     const dupSums = relsInSums.filter((r, i) => relsInSums.indexOf(r) !== i);
     check('no duplicate entries in SHA256SUMS.txt', dupSums.length === 0, dupSums.join(', '));
@@ -236,7 +236,7 @@ function main() {
       const actual = sha256(fs.readFileSync(filePath));
       if (actual !== p.sha) mismatchCount++;
     }
-    check('all 21 recomputed SHA-256 values match SHA256SUMS.txt', mismatchCount === 0, `${mismatchCount} mismatch(es)`);
+    check('all 22 recomputed SHA-256 values match SHA256SUMS.txt', mismatchCount === 0, `${mismatchCount} mismatch(es)`);
   }
 
   // ── byte-identity against repo source-of-truth ──

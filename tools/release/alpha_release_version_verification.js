@@ -125,6 +125,7 @@ function main() {
     ['README_ja.md', `# JSON A/B トレース照合ツール ${EXPECTED_VERSION}`],
     ['KNOWN_LIMITATIONS.md', `既知の制限事項 — ${EXPECTED_VERSION}`],
     ['THIRD_PARTY_LICENSES.md', null], // version not asserted in header text; presence of file checked below
+    ['BROWSER_VALIDATION_REPORT.md', `# ブラウザ評価票 — ${EXPECTED_VERSION}`],
   ];
   for (const [name, expectedSubstring] of docChecks) {
     const p = path.join(DIST_DIR, name);

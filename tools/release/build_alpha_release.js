@@ -110,7 +110,7 @@ const LICENSE_FILES = [
   { manifestKey: 'tiny_segmenter', field: 'original_license_file', dest: 'tiny-segmenter-original-BSD-3-Clause.txt' },
 ];
 
-const DOC_FILES = ['README_ja.md', 'KNOWN_LIMITATIONS.md', 'THIRD_PARTY_LICENSES.md'];
+const DOC_FILES = ['README_ja.md', 'KNOWN_LIMITATIONS.md', 'THIRD_PARTY_LICENSES.md', 'BROWSER_VALIDATION_REPORT.md'];
 
 // Exact <script src="..."> attribute value -> new local runtime/ relative path.
 // One entry per of the 12 runtime files; build fails if any doesn't match exactly once.

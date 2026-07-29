@@ -17,8 +17,24 @@
 - stale(古い)状態のセッションからは正式出力できません。
 - identity mismatch(識別子不一致)状態からは正式出力できません。
 - 大規模データではブラウザの処理性能の影響を受けます。
-- 対応ブラウザ(Chrome/Edge)以外での動作は未検証です。
 
 ## 対象範囲の補足
 
 上記のうち「数量値/property mapping/interval semantics/comparison modeの訂正」「訂正後の下流再計算」「review sessionの保存・再読込」「複数レビュアー監査履歴」「同時編集」は、B-4b(レビュー済みprojectionの読み取り専用表示と正式エクスポート)の設計時点から一貫して対象外と定められている機能です。将来必要になった場合は、本α版とは別の変更として設計・実装されます。
+
+## 実ブラウザ検証
+
+本α版はPlaywright同梱Chromiumで自動検証しています。
+
+実Google Chromeおよび実Microsoft Edgeについては、α版リリース前の個別検証を実施していません。ブラウザ固有のファイル保存、file://制約、表示差異が残る可能性があります。
+
+Chrome／Edgeで次の問題が発生した場合は利用を中止してください。
+
+- HTMLをfile://で起動できない
+- ナレッジグラフが表示されない
+- JSON／Excelを保存できない
+- console errorが発生する
+- stale状態でも正式保存できる
+- ChromeとEdgeで出力内容が異なる
+
+問題を確認した場合は、同梱の`BROWSER_VALIDATION_REPORT.md`を使って報告してください。

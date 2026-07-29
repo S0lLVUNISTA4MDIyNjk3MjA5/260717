@@ -7,19 +7,48 @@
 
 α版の詳しい制限事項は、同梱の`KNOWN_LIMITATIONS.md`を必ず参照してください。
 
+## α版利用条件
+
+本α版は次の利用者にのみ提供してください。
+
+- 限定された評価担当者
+- 不具合報告が可能な利用者
+- 正式業務へ直接使用しない利用者
+- 出力結果を人間が再確認できる利用者
+
+次の用途には使用しないでください。
+
+- 正式な設計承認
+- 顧客への正式成果物提出
+- 安全性判断の唯一の根拠
+- 本番業務への無監督導入
+
 ## 対応環境
 
-- Windows
-- Google Chrome
-- Microsoft Edge
+本α版はPlaywright同梱Chromiumで検証しています。Google ChromeおよびMicrosoft Edgeは、同じChromium系ブラウザですが、本α版のリリース前には実ブラウザでの個別検証を実施していません。
 
-リリース試験で使用したChromeおよびEdgeの版数は、`alpha_release_report.md`に記録します。現段階では厳密な最小バージョンを断定していません。
+**検証済み環境:**
+- Linux
+- Playwright同梱Chromium
+
+**限定評価対象(α版利用者による評価を想定。個別事前検証は未実施):**
+- Windows版Google Chrome
+- Windows版Microsoft Edge
+
+**未検証:**
+- Firefox
+- Safari
+- モバイルブラウザ
+
+実際に使用したChromiumの実行ファイル・版数は`alpha_release_report.md`に記録します。
+
+Chrome／Edgeで問題が発生した場合は、正式な設計判断や成果物作成を中止し、ブラウザ名・版数・OS・操作手順・画面メッセージを添えて報告してください（同梱の`BROWSER_VALIDATION_REPORT.md`をご利用ください）。「Chromium系ブラウザなので確実に動作する」という保証はありません。
 
 ## 起動方法
 
 1. ZIPを展開する
 2. フォルダ構成を変更しない(`runtime/`フォルダの内容を移動・削除しない)
-3. `json_ab_trace_matching_tool_v12.2.0-alpha.1.html`をChromeまたはEdgeで開く
+3. `json_ab_trace_matching_tool_v12.2.0-alpha.1.html`をブラウザで開く(対応環境は上記を参照)
 
 `runtime/`フォルダの中身が欠けていると、ナレッジグラフ・Excel保存・日本語分かち書き・数量比較レビュー機能が正しく動作しません。ZIP展開時のフォルダ構成をそのまま保ってください。
 
