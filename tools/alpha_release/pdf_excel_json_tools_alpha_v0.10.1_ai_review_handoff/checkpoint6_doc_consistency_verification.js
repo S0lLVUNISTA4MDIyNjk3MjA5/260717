@@ -160,6 +160,16 @@ function implementationAlignmentChecks() {
   check('excel_tool/KNOWN_LIMITATIONS.mdの見出しがv0.10.1-alpha', excelKl.split('\n')[0].includes('v0.10.1-alpha'));
   check('pdf_tool/KNOWN_LIMITATIONS.mdがtrace-domain-jaに言及', pdfKl.includes('trace-domain-ja') || pdfKl.includes('shared/tag_vocabulary.json'));
   check('excel_tool/KNOWN_LIMITATIONS.mdがtrace-domain-jaに言及', excelKl.includes('trace-domain-ja') || excelKl.includes('shared/tag_vocabulary.json'));
+
+  // "外部networkリクエスト0件"のような集約表現が、attempt(試行)とsuccess(成立)を
+  // 混同したまま提示されていないこと -- SMOKE_TEST_REPORT.mdは両者を別の行として
+  // 明記しなければならない(Checkpoint 6 REQUEST CHANGESで指摘された点)。
+  const smoke = readText(DOCS['SMOKE_TEST_REPORT.md']);
+  check('SMOKE_TEST_REPORT.mdが"external network attempts"と"successful external network"を別項目として明記',
+    /external network attempts/.test(smoke) && /successful external network/.test(smoke));
+  check('SMOKE_TEST_REPORT.mdが想定外/想定内のconsole errorを区別して明記',
+    /console error（想定外/.test(smoke) && /console error（想定内/.test(smoke));
+  check('SMOKE_TEST_REPORT.mdが試験対象commitを明記', /- commit: `[0-9a-f]{7,40}`/.test(smoke));
 }
 
 // ── THREE_TOOL_COMPATIBILITY_REPORT.mdが「完全互換」を断定していない ──

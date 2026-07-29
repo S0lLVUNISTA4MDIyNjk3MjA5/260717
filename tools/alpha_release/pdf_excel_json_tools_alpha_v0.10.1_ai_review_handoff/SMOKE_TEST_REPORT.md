@@ -1,10 +1,10 @@
 # SMOKE_TEST_REPORT — PDF／Excel → JSON 変換 α版 v0.10.1-alpha
 
-実行日時: 2026-07-29T13:44:15.539Z
+実行日時: 2026-07-29T20:47:27.757Z
 
 ## 試験対象
 
-- commit: `9e9044bee5d388c1f8feac8736e761bf4fcac112`（作業ツリーに未commitの変更あり）
+- commit: `ffa152eea81696a97739f12701ecd11d851da2ab`（作業ツリーに未commitの変更あり）
 - PDF HTML: `pdf_tool/spec_to_json_conversion_tool_alpha_v0.10.1.html`
 - Excel HTML: `excel_tool/excel_to_json_conversion_tool_alpha_v0.10.1.html`
 
@@ -17,46 +17,63 @@
 - 起動方式: `file://`（ZIP展開後、同梱`vendor`フォルダとの相対位置関係を維持した状態）
 - 外部networkリクエストは全てのテストで`page.route`により実行時に監視・遮断した状態で実施（CDN等へ実際に到達できるかではなく、遮断状態でツールが動作を継続できるかを確認）
 
+## 全体サマリ（Network / Error 分類）
+
+個々のシナリオ表の「外部network attempt 0件」は、そのシナリオ単体での試行回数が0件という
+意味であり、実行全体でのnetwork試行が常に0件という意味ではありません（OCR未対応の
+抽出不能PDFシナリオでは、想定どおり1件の試行が発生します）。attempt数とsuccess数を
+混同しないよう、以下に全シナリオを通算した数値を明示します。
+
+- external network attempts（全シナリオ合計）: 1件
+  - PDF: sample_input_unextractable.pdf(抽出不能): 1件（https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js）
+- successful external network（実際に接続が成立した外部通信）: 0件
+  （構造上100%保証: 本試験は全シナリオで`page.route('**/*', ...)`により外部リクエストを
+  検出と同時に`route.abort()`で即時遮断しており、接続が成立する経路は存在しません）
+- pageerror: 0件
+- console error（想定外・製品由来）: 0件
+- console error（想定内・診断/遮断由来）: 1件
+  - PDF: sample_input_unextractable.pdf(抽出不能): Failed to load resource: net::ERR_FAILED
+
 ## 試験結果サマリ
 
 | 領域 | 試験項目 | 結果 |
 |---|---|---|
 | PDF | PDF変換: sample_input.pdf(構造化) | PASS |
-| PDF | sample_input.pdf(構造化): 外部networkリクエスト0件 | PASS |
+| PDF | sample_input.pdf(構造化): 外部network attempt 0件 | PASS |
 | PDF | sample_input.pdf(構造化): pageerror 0件 | PASS |
 | PDF | sample_input.pdf(構造化): console error 0件 | PASS |
 | PDF | PDF変換: sample_input_table.pdf(表) | PASS |
-| PDF | sample_input_table.pdf(表): 外部networkリクエスト0件 | PASS |
+| PDF | sample_input_table.pdf(表): 外部network attempt 0件 | PASS |
 | PDF | sample_input_table.pdf(表): pageerror 0件 | PASS |
 | PDF | sample_input_table.pdf(表): console error 0件 | PASS |
 | PDF | PDF変換: sample_input_unextractable.pdf(抽出不能) | PASS |
-| PDF | sample_input_unextractable.pdf(抽出不能): OCR CDNへの想定内の外部リクエスト試行1件(遮断済み) | PASS |
+| PDF | sample_input_unextractable.pdf(抽出不能): OCR CDNへの外部request attempt 1件(route.abortで遮断・成功接続0件) | PASS |
 | PDF | sample_input_unextractable.pdf(抽出不能): pageerror 0件 | PASS |
 | PDF | sample_input_unextractable.pdf(抽出不能): 想定外のconsole errorが0件(遮断による1件のFailed to load resourceのみ許容) | PASS |
 | PDF | AI入力JSON保存: records配列が存在し1件以上 | PASS |
-| PDF | AI入力JSON保存: 外部networkリクエスト0件 | PASS |
+| PDF | AI入力JSON保存: 外部network attempt 0件 | PASS |
 | PDF | AI連携: pageerror 0件 | PASS |
 | PDF | AI連携: console error 0件 | PASS |
 | PDF | quantity sidecar: 照合用JSON+数量注釈JSONの2ファイルが1操作で生成される | PASS |
-| PDF | quantity sidecar: 外部networkリクエスト0件 | PASS |
+| PDF | quantity sidecar: 外部network attempt 0件 | PASS |
 | PDF | quantity sidecar: pageerror 0件 | PASS |
 | PDF | quantity sidecar: console error 0件 | PASS |
-| PDF | 共通タグ辞書読込: 外部networkリクエスト0件 | PASS |
+| PDF | 共通タグ辞書読込: 外部network attempt 0件 | PASS |
 | PDF | 共通タグ辞書読込: pageerror 0件 | PASS |
 | PDF | 共通タグ辞書読込: console error 0件 | PASS |
 | Excel | Excel変換: sample_input.xlsx | PASS |
-| Excel | Excel変換: 外部networkリクエスト0件 | PASS |
+| Excel | Excel変換: 外部network attempt 0件 | PASS |
 | Excel | Excel変換: pageerror 0件 | PASS |
 | Excel | Excel変換: console error 0件 | PASS |
 | Excel | AI入力JSON保存: records配列が存在し1件以上 | PASS |
-| Excel | AI入力JSON保存: 外部networkリクエスト0件 | PASS |
+| Excel | AI入力JSON保存: 外部network attempt 0件 | PASS |
 | Excel | AI連携: pageerror 0件 | PASS |
 | Excel | AI連携: console error 0件 | PASS |
 | Excel | quantity sidecar: 照合用JSON+数量注釈JSONの2ファイルが1操作で生成される | PASS |
-| Excel | quantity sidecar: 外部networkリクエスト0件 | PASS |
+| Excel | quantity sidecar: 外部network attempt 0件 | PASS |
 | Excel | quantity sidecar: pageerror 0件 | PASS |
 | Excel | quantity sidecar: console error 0件 | PASS |
-| Excel | 共通タグ辞書読込: 外部networkリクエスト0件 | PASS |
+| Excel | 共通タグ辞書読込: 外部network attempt 0件 | PASS |
 | Excel | 共通タグ辞書読込: pageerror 0件 | PASS |
 | Excel | 共通タグ辞書読込: console error 0件 | PASS |
 
