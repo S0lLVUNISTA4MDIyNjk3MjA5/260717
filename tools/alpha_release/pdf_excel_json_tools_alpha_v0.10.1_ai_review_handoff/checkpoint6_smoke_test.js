@@ -32,13 +32,17 @@ const results = []; // { area, name, ok, detail }
 function record(area, name, ok, detail) { results.push({ area, name, ok: !!ok, detail }); }
 
 // ── Aggregate network/error evidence, kept distinct from the per-scenario
-//    PASS/FAIL checks above. "外部networkリクエスト0件" in a per-scenario
-//    check means that SCENARIO made 0 attempts; it does not mean the whole
-//    run made 0 attempts (the OCR-fallback scenario deliberately makes 1,
-//    expected, blocked one). Collapsing "0 attempts in most scenarios" and
-//    "0 successful connections everywhere" into a single blanket "外部
-//    networkリクエスト0件" claim in the report's summary prose was flagged
-//    as misleading -- this aggregate makes attempt-vs-success explicit. ──
+//    PASS/FAIL checks above. Before Checkpoint 7 (offline hardening), the
+//    unextractable-PDF scenario deliberately made 1 expected, blocked CDN
+//    attempt (Tesseract.js OCR fallback), and collapsing "0 attempts in
+//    most scenarios" with "0 successful connections everywhere" into a
+//    single blanket "外部networkリクエスト0件" claim in the report's
+//    summary prose was flagged as misleading. Checkpoint 7 removed that
+//    attempt entirely (loadTesseractJs() now rejects locally without ever
+//    touching the network), so every scenario -- including the
+//    unextractable-PDF one -- now genuinely makes 0 attempts. This
+//    aggregate is kept as permanent regression evidence that the total
+//    stays at 0, not just each individual scenario. ──
 const GLOBAL = {
   networkAttempts: [], // { scenario, url }
   pageErrors: [], // { scenario, message }
@@ -104,29 +108,24 @@ async function testPdf(browser, tempDir) {
       if (expectedSuccess) {
         await page.waitForFunction(() => typeof data !== 'undefined' && !!data, null, { timeout: 20000 });
       } else {
-        await page.waitForTimeout(3000); // OCR fallback attempt + failure toast
+        await page.waitForTimeout(3000); // local "OCR unsupported" failure toast, no network involved
       }
     });
+    // Checkpoint 7 (offline hardening): loadTesseractJs() no longer inserts
+    // a <script src="https://cdn..."> tag at all -- it rejects immediately,
+    // locally, with no network attempt. So the unextractable-PDF scenario
+    // now expects the SAME 0-attempt/0-error bar as the successful ones,
+    // not the previously-accepted "1 expected blocked CDN attempt".
     record(area, `PDF変換: ${label}`, true, `外部request attempt=${externalRequests.length}件`);
-    if (expectedSuccess) {
-      record(area, `${label}: 外部network attempt 0件`, externalRequests.length === 0, externalRequests);
-    } else {
-      record(area, `${label}: OCR CDNへの外部request attempt 1件(route.abortで遮断・成功接続0件)`, externalRequests.length === 1, externalRequests);
-    }
+    record(area, `${label}: 外部network attempt 0件`, externalRequests.length === 0, externalRequests);
     record(area, `${label}: pageerror 0件`, pageErrors.length === 0, pageErrors);
-    const isExpectedOcrConsole = m => /Failed to load resource/.test(m);
-    if (expectedSuccess) {
-      record(area, `${label}: console error 0件`, consoleErrors.length === 0, consoleErrors);
-    } else {
-      // 遮断したTesseract CDNリクエスト分の"Failed to load resource"が
-      // ブラウザ自身のconsoleに1件出ることは、外部リクエストを実際に
-      // 遮断したことの結果であって不具合ではない(KNOWN_LIMITATIONS.md参照)。
-      const unexpectedConsoleErrors = consoleErrors.filter(m => !isExpectedOcrConsole(m));
-      record(area, `${label}: 想定外のconsole errorが0件(遮断による1件のFailed to load resourceのみ許容)`,
-        unexpectedConsoleErrors.length === 0, consoleErrors);
+    record(area, `${label}: console error 0件`, consoleErrors.length === 0, consoleErrors);
+    if (!expectedSuccess) {
+      const dataStillUndefined = await page.evaluate(() => typeof data === 'undefined' || !data);
+      record(area, `${label}: OCR未対応PDFで偽の変換成功データを生成しない`, dataStillUndefined, dataStillUndefined);
     }
     trackNetwork(`PDF: ${label}`, externalRequests);
-    trackErrors(`PDF: ${label}`, pageErrors, consoleErrors, expectedSuccess ? null : isExpectedOcrConsole);
+    trackErrors(`PDF: ${label}`, pageErrors, consoleErrors);
     await page.close();
   }
 
@@ -316,9 +315,9 @@ function buildReportMarkdown(env) {
   lines.push('## 全体サマリ（Network / Error 分類）');
   lines.push('');
   lines.push('個々のシナリオ表の「外部network attempt 0件」は、そのシナリオ単体での試行回数が0件という');
-  lines.push('意味であり、実行全体でのnetwork試行が常に0件という意味ではありません（OCR未対応の');
-  lines.push('抽出不能PDFシナリオでは、想定どおり1件の試行が発生します）。attempt数とsuccess数を');
-  lines.push('混同しないよう、以下に全シナリオを通算した数値を明示します。');
+  lines.push('意味です。Checkpoint 7（offline hardening）でOCR CDN fallback経路自体を無効化した');
+  lines.push('ため、抽出不能PDFシナリオを含む全シナリオで試行回数が0件になっています。attempt数と');
+  lines.push('success数を混同しないよう、以下に全シナリオを通算した数値を明示します。');
   lines.push('');
   lines.push(`- external network attempts（全シナリオ合計）: ${env.totalNetworkAttempts}件`);
   for (const [scenario, urls] of env.networkAttemptsByScenario) {

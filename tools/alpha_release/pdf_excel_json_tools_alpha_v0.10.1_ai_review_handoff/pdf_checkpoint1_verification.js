@@ -102,8 +102,14 @@ async function main() {
   // other vendor/sample files (libraries, sample_input*.pdf) remain
   // untouched byte-for-byte copies and are still checked here.
   compareDirsByteParity(path.join(V0100_PDF_TOOL_DIR, 'vendor'), path.join(TOOL_DIR, 'vendor'), 'v0.10.0↔v0.10.1 pdf_tool/vendor byte parity');
+  // samples/README.md is documentation, not a sample input or a golden
+  // expected-output fixture. Checkpoint 7 (offline hardening) updated its
+  // description of the unextractable-PDF scenario to match the new
+  // 0-external-request OCR-fallback behavior; keeping it byte-identical to
+  // v0.10.0 baseline would mean shipping a description of the OLD (CDN
+  // fallback) behavior alongside the NEW (locally-rejected) behavior.
   compareDirsByteParity(path.join(V0100_PDF_TOOL_DIR, 'samples'), path.join(TOOL_DIR, 'samples'), 'v0.10.0↔v0.10.1 pdf_tool/samples byte parity',
-    ['sample_expected_normal.json', 'sample_expected_table.json']);
+    ['sample_expected_normal.json', 'sample_expected_table.json', 'README.md']);
 
   const tempDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'pdf-v0101-cp1-'));
   const browser = await chromium.launch();

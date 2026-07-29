@@ -2911,21 +2911,20 @@ function loadPdfJs(){
 
 /*
   PDF.jsで文字マップを取得できないPDF向けのOCRフォールバック。
-  実案件PDFは変更できない前提のため、テキスト抽出が不足した場合はページを画像化して
-  ブラウザ内OCR（Tesseract.js）で行テキストを復元する。
+  母体ツールは実行時にCDN(Tesseract.js)から読み込む構成だったが、本α版はOCRを
+  対応対象外として明示的に許容しており(KNOWN_LIMITATIONS.md参照)、Tesseract.jsは
+  意図的に同梱していない。Checkpoint 7(offline hardening)より前は、この関数が
+  実際にCDNへスクリプトタグを挿入して接続を試み、失敗してから「OCR未対応」を
+  示していた。これは「CDNへ接続して失敗したらOCR未対応扱い」という経路であり、
+  実行環境がオンラインであれば外部へ実接続してしまう。α版を外部CDN依存0件の
+  配布物として扱うため、CDNへは最初から一切接続せず、即座にOCR未対応として
+  扱う。
 */
-const TESSERACT_CDN = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
 const OCR_LANG = "jpn+eng";
 
 function loadTesseractJs(){
   if(window.Tesseract) return Promise.resolve();
-  return new Promise((resolve, reject)=>{
-    const s = document.createElement("script");
-    s.src = TESSERACT_CDN;
-    s.onload = ()=>resolve();
-    s.onerror = ()=>reject(new Error("OCRエンジン（Tesseract.js）の読み込みに失敗しました。インターネット接続を確認してください。"));
-    document.head.appendChild(s);
-  });
+  return Promise.reject(new Error("OCR（Tesseract.js）はこのα版では未対応です。テキスト層からの抽出のみに対応しています。"));
 }
 
 async function openPdfJsDocument(buf){
@@ -3107,7 +3106,7 @@ async function extractPdf(file){
     return {text, pages: doc.numPages, totalChars, method:"pdfjs-text"};
   });
   if(hasEnoughExtractedText(res)) return res;
-  toast("PDF.jsのテキスト抽出が不足したため、PDFは変更せずOCRに切り替えます。");
+  toast("PDF.jsのテキスト抽出が不足しています。本α版はOCR未対応のため、PDFは変更せず生成を中止します。");
   return extractPdfTextWithOcr(buf);
 }
 
@@ -3374,7 +3373,7 @@ async function extractPdfLayout(file){
     return {pages, numPages: doc.numPages, totalChars, method:"pdfjs-text"};
   });
   if(hasEnoughExtractedText(res)) return res;
-  toast("PDF.jsのテキスト抽出が不足したため、PDFは変更せずOCRに切り替えます。");
+  toast("PDF.jsのテキスト抽出が不足しています。本α版はOCR未対応のため、PDFは変更せず生成を中止します。");
   return extractPdfLayoutWithOcr(buf);
 }
 

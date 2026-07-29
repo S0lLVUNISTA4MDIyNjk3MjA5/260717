@@ -1,10 +1,10 @@
 # SMOKE_TEST_REPORT — PDF／Excel → JSON 変換 α版 v0.10.1-alpha
 
-実行日時: 2026-07-29T20:47:27.757Z
+実行日時: 2026-07-29T21:14:58.615Z
 
 ## 試験対象
 
-- commit: `ffa152eea81696a97739f12701ecd11d851da2ab`（作業ツリーに未commitの変更あり）
+- commit: `b3ff0e46620c994b36a412276a24b58264dac472`（作業ツリーに未commitの変更あり）
 - PDF HTML: `pdf_tool/spec_to_json_conversion_tool_alpha_v0.10.1.html`
 - Excel HTML: `excel_tool/excel_to_json_conversion_tool_alpha_v0.10.1.html`
 
@@ -20,19 +20,17 @@
 ## 全体サマリ（Network / Error 分類）
 
 個々のシナリオ表の「外部network attempt 0件」は、そのシナリオ単体での試行回数が0件という
-意味であり、実行全体でのnetwork試行が常に0件という意味ではありません（OCR未対応の
-抽出不能PDFシナリオでは、想定どおり1件の試行が発生します）。attempt数とsuccess数を
-混同しないよう、以下に全シナリオを通算した数値を明示します。
+意味です。Checkpoint 7（offline hardening）でOCR CDN fallback経路自体を無効化した
+ため、抽出不能PDFシナリオを含む全シナリオで試行回数が0件になっています。attempt数と
+success数を混同しないよう、以下に全シナリオを通算した数値を明示します。
 
-- external network attempts（全シナリオ合計）: 1件
-  - PDF: sample_input_unextractable.pdf(抽出不能): 1件（https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js）
+- external network attempts（全シナリオ合計）: 0件
 - successful external network（実際に接続が成立した外部通信）: 0件
   （構造上100%保証: 本試験は全シナリオで`page.route('**/*', ...)`により外部リクエストを
   検出と同時に`route.abort()`で即時遮断しており、接続が成立する経路は存在しません）
 - pageerror: 0件
 - console error（想定外・製品由来）: 0件
-- console error（想定内・診断/遮断由来）: 1件
-  - PDF: sample_input_unextractable.pdf(抽出不能): Failed to load resource: net::ERR_FAILED
+- console error（想定内・診断/遮断由来）: 0件
 
 ## 試験結果サマリ
 
@@ -47,9 +45,10 @@
 | PDF | sample_input_table.pdf(表): pageerror 0件 | PASS |
 | PDF | sample_input_table.pdf(表): console error 0件 | PASS |
 | PDF | PDF変換: sample_input_unextractable.pdf(抽出不能) | PASS |
-| PDF | sample_input_unextractable.pdf(抽出不能): OCR CDNへの外部request attempt 1件(route.abortで遮断・成功接続0件) | PASS |
+| PDF | sample_input_unextractable.pdf(抽出不能): 外部network attempt 0件 | PASS |
 | PDF | sample_input_unextractable.pdf(抽出不能): pageerror 0件 | PASS |
-| PDF | sample_input_unextractable.pdf(抽出不能): 想定外のconsole errorが0件(遮断による1件のFailed to load resourceのみ許容) | PASS |
+| PDF | sample_input_unextractable.pdf(抽出不能): console error 0件 | PASS |
+| PDF | sample_input_unextractable.pdf(抽出不能): OCR未対応PDFで偽の変換成功データを生成しない | PASS |
 | PDF | AI入力JSON保存: records配列が存在し1件以上 | PASS |
 | PDF | AI入力JSON保存: 外部network attempt 0件 | PASS |
 | PDF | AI連携: pageerror 0件 | PASS |
@@ -77,7 +76,7 @@
 | Excel | 共通タグ辞書読込: pageerror 0件 | PASS |
 | Excel | 共通タグ辞書読込: console error 0件 | PASS |
 
-合計 38件中 38件成功（PDF 23件、Excel 15件の実assertion。「PASS」は個々のassertion結果であり、まとめて1件として記載しているものではありません）
+合計 39件中 39件成功（PDF 24件、Excel 15件の実assertion。「PASS」は個々のassertion結果であり、まとめて1件として記載しているものではありません）
 
 ## 深い機能検証との関係
 
