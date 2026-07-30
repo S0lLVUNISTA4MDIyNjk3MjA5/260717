@@ -370,7 +370,32 @@ function buildReportMarkdown(env) {
   return lines.join('\n');
 }
 
+// ── CLI args. Default is non-destructive: the tracked SMOKE_TEST_REPORT.md
+//    is never touched unless --write-report is passed explicitly, or
+//    --report-out <path> redirects the generated report to an arbitrary
+//    (typically temp) file instead. This exists because a "full regression"
+//    run (checkpoint6_doc_consistency_verification.js) re-executes this
+//    script for real, and an unconditional writeFileSync() to the tracked
+//    report -- carrying a fresh new Date().toISOString() every time --
+//    silently invalidated an already-verified release ZIP's byte content
+//    after the fact (Post-Merge Release Gate finding on PR #7). ──
+function parseArgs(argv) {
+  const args = { writeReport: false, reportOut: null };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--write-report') { args.writeReport = true; }
+    else if (a === '--report-out') { args.reportOut = argv[++i]; }
+    else if (a.startsWith('--report-out=')) { args.reportOut = a.slice('--report-out='.length); }
+    else { throw new Error(`unknown argument: ${a}`); }
+  }
+  if (args.writeReport && args.reportOut) {
+    throw new Error('--write-report and --report-out are mutually exclusive');
+  }
+  return args;
+}
+
 async function main() {
+  const args = parseArgs(process.argv.slice(2));
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cp6-smoke-'));
   const browser = await chromium.launch();
   let err = null;
@@ -428,9 +453,18 @@ async function main() {
   }
   console.log(`\n合計 ${total}件中 ${passed}件成功`);
 
-  const reportPath = path.join(ROOT, 'SMOKE_TEST_REPORT.md');
-  fs.writeFileSync(reportPath, buildReportMarkdown(env));
-  console.log(`\n-> ${reportPath} を実行結果から生成しました。`);
+  const trackedReportPath = path.join(ROOT, 'SMOKE_TEST_REPORT.md');
+  const reportMarkdown = buildReportMarkdown(env);
+  if (args.reportOut) {
+    fs.writeFileSync(args.reportOut, reportMarkdown);
+    console.log(`\n-> ${args.reportOut} へ実行結果を出力しました(--report-out; tracked ${trackedReportPath} は変更していません)。`);
+  } else if (args.writeReport) {
+    fs.writeFileSync(trackedReportPath, reportMarkdown);
+    console.log(`\n-> ${trackedReportPath} を実行結果から生成しました(--write-report)。`);
+  } else {
+    console.log(`\n-> tracked ${trackedReportPath} は変更していません(デフォルトは非破壊)。`
+      + ` 更新するには --write-report、一時ファイルへの出力には --report-out <path> を指定してください。`);
+  }
 
   if (err) {
     console.error('\n=== 実行が例外で中断しました ===');

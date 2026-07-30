@@ -15,12 +15,29 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
 const ROOT = __dirname;
 const checks = [];
 function check(name, cond, detail) { checks.push({ name, ok: !!cond, detail }); }
 function readText(p) { return fs.readFileSync(p, 'utf8'); }
+function sha256File(p) { return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'); }
+function gitStatusPorcelain() { return execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).trim(); }
+// ── tools/alpha_release/dist/ is checkpoint7_package_verification.js's
+//    intentional untracked build output (never committed). Every "is the
+//    tree clean" regression check in this release pipeline must tolerate
+//    that one untracked path and nothing else, so a check runs against
+//    the pipeline as it's actually used (dist/ present or absent) instead
+//    of only passing in an artificially pristine checkout. ──
+function gitStatusPorcelainExcludingDist() {
+  return gitStatusPorcelain()
+    .split('\n')
+    .filter(Boolean)
+    .filter(line => !/^\?\? tools\/alpha_release\/dist\/$/.test(line))
+    .join('\n');
+}
 
 const DOCS = {
   'README.md': path.join(ROOT, 'README.md'),
@@ -186,6 +203,31 @@ function noOverclaimChecks() {
   check('THREE_TOOL_COMPATIBILITY_REPORT.mdが照合ツール側の未実装事項(AI metadata UI/vocabulary診断)を明記', report.includes('未実装') && report.includes('AI metadata') && report.includes('vocabulary'));
 }
 
+// ── Permanent regression: checkpoint6_smoke_test.js's DEFAULT invocation
+//    (no flags) must never touch the tracked SMOKE_TEST_REPORT.md. Proven
+//    by hashing the tracked file before and after a real default run.
+//    This is the direct regression test for the Post-Merge Release Gate
+//    finding on PR #7, where an unconditional writeFileSync() in the smoke
+//    test silently invalidated an already-verified release ZIP. ──
+function checkSmokeTestDefaultIsNonDestructive() {
+  const trackedReportPath = path.join(ROOT, 'SMOKE_TEST_REPORT.md');
+  const before = sha256File(trackedReportPath);
+  let output = '', ok = false;
+  try {
+    output = execFileSync('node', [path.join(ROOT, 'checkpoint6_smoke_test.js')], { cwd: ROOT, timeout: 300000, encoding: 'utf8', env: process.env });
+    ok = true;
+  } catch (e) {
+    output = (e.stdout || '') + (e.stderr || '');
+    ok = false;
+  }
+  const after = sha256File(trackedReportPath);
+  check(
+    'checkpoint6_smoke_test.js: 引数なしのデフォルト実行はtracked SMOKE_TEST_REPORT.mdを変更しない(SHA-256一致)',
+    ok && before === after,
+    { before, after, executionOk: ok, tail: ok ? undefined : output.slice(-800) }
+  );
+}
+
 function runRegressionSuites() {
   const suites = [
     'pdf_checkpoint1_verification.js',
@@ -198,14 +240,26 @@ function runRegressionSuites() {
   ];
   for (const suite of suites) {
     const suitePath = path.join(ROOT, suite);
+    // checkpoint6_smoke_test.js must run for real here (it's the actual
+    // functional regression), but its report output is redirected to a
+    // scratch temp file via --report-out so this "regression suite" run
+    // never mutates the tracked SMOKE_TEST_REPORT.md as a side effect --
+    // that mutation is exactly what invalidated an already-verified
+    // release ZIP after PR #7's merge (Post-Merge Release Gate finding).
+    const isSmokeTest = suite === 'checkpoint6_smoke_test.js';
+    const scratchReportPath = isSmokeTest
+      ? path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cp6-smoke-regression-')), 'SMOKE_TEST_REPORT.scratch.md')
+      : null;
+    const extraArgs = isSmokeTest ? ['--report-out', scratchReportPath] : [];
     let output = '', ok = false;
     try {
-      output = execFileSync('node', [suitePath], { cwd: ROOT, timeout: 300000, encoding: 'utf8', env: process.env });
+      output = execFileSync('node', [suitePath, ...extraArgs], { cwd: ROOT, timeout: 300000, encoding: 'utf8', env: process.env });
       ok = true;
     } catch (e) {
       output = (e.stdout || '') + (e.stderr || '');
       ok = false;
     }
+    if (scratchReportPath) fs.rmSync(path.dirname(scratchReportPath), { recursive: true, force: true });
     const m = output.match(/合計\s*(\d+)件中\s*(\d+)件成功/);
     if (ok && m && m[1] === m[2]) {
       check(`回帰: ${suite} が全件成功`, true, `${m[2]}/${m[1]}`);
@@ -213,6 +267,7 @@ function runRegressionSuites() {
       check(`回帰: ${suite} が全件成功`, false, m ? `${m[2]}/${m[1]}` : output.slice(-800));
     }
   }
+  check('回帰スイート一式の実行後、git status --porcelainがclean(dist/の意図したuntracked出力以外0件)', gitStatusPorcelainExcludingDist().length === 0, gitStatusPorcelainExcludingDist());
 }
 
 function report() {
@@ -233,6 +288,7 @@ function main() {
   versionAndVocabularyContradictionChecks();
   implementationAlignmentChecks();
   noOverclaimChecks();
+  checkSmokeTestDefaultIsNonDestructive();
   runRegressionSuites();
   report();
 }

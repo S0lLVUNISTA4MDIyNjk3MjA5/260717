@@ -74,6 +74,22 @@ const PDF_URL_ALLOWLIST = new Set([
 const checks = [];
 function check(name, cond, detail) { const c = { name, ok: !!cond, detail }; checks.push(c); return c; }
 
+// ── The repository root, used to prove this verification script itself
+//    never mutates any tracked file as a side effect (Post-Merge Release
+//    Gate finding on PR #7: checkpoint6_smoke_test.js used to do exactly
+//    that to SMOKE_TEST_REPORT.md). tools/alpha_release/dist/ is this
+//    script's own intentional untracked build output and is the one
+//    permitted exception. ──
+const REPO_ROOT = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: ROOT, encoding: 'utf8' }).trim();
+function gitStatusPorcelainOfRepo() { return execFileSync('git', ['status', '--porcelain'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim(); }
+function gitStatusPorcelainOfRepoExcludingDist() {
+  return gitStatusPorcelainOfRepo()
+    .split('\n')
+    .filter(Boolean)
+    .filter(line => !/^\?\? tools\/alpha_release\/dist\/$/.test(line))
+    .join('\n');
+}
+
 function sha256File(p) { return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'); }
 function sha256Text(t) { return crypto.createHash('sha256').update(t, 'utf8').digest('hex'); }
 
@@ -381,6 +397,12 @@ function main() {
     check('起動時: 古いdist ZIPを削除(存在しない)', !fs.existsSync(DIST_ZIP_PATH));
     check('起動時: 古いdist .sha256を削除(存在しない)', !fs.existsSync(DIST_SHA_PATH));
 
+    // ── Baseline captured AFTER removeStaleDistArtifacts(), excluding
+    //    dist/, so this snapshot is stable regardless of whether dist/
+    //    happens to be an empty directory (git does not report those as
+    //    untracked at all) or still holds a stale file at process start. ──
+    const gitBefore = gitStatusPorcelainOfRepoExcludingDist();
+
     const expectedManifest = loadExpectedManifest();
     check(`承認済みmanifest(${MANIFEST_PATH.split('/').pop()})を読み込み(218件)`, expectedManifest.length === 218, expectedManifest.length);
 
@@ -392,15 +414,18 @@ function main() {
     // ── Real pipeline ──
     const real = runRealPipeline(tempBase, expectedManifest);
 
+    // ── Permanent regression, gating: this entire verification pipeline
+    //    (mutation tests + real build, all via isolated temp staging
+    //    copies) must never modify any file the repo already tracks.
+    //    Compared against the pre-write dist/ state, so it is evaluated
+    //    before the dist/ write decision below and can itself gate it. ──
+    const gitAfterPipeline = gitStatusPorcelainOfRepoExcludingDist();
+    check('検証パイプライン実行後(dist書込み前)、git status --porcelainが実行前と完全一致(dist/除き、tracked変更0件)',
+      gitAfterPipeline === gitBefore, { gitBefore, gitAfterPipeline });
+
     const total = checks.length;
     const passed = checks.filter(c => c.ok).length;
     const allPassed = passed === total;
-
-    console.log('=== Checkpoint 7 package verification 結果 ===');
-    for (const c of checks) {
-      console.log(`[${c.ok ? 'PASS' : 'FAIL'}] ${c.name}${c.detail !== undefined ? ` :: ${JSON.stringify(c.detail)}` : ''}`);
-    }
-    console.log(`\n合計 ${total}件中 ${passed}件成功`);
 
     // ── Fail-closed release gate: dist/ is written IF AND ONLY IF every
     //    check in this run passed. A partial/failed run leaves dist/
@@ -409,6 +434,27 @@ function main() {
       fs.mkdirSync(DIST_DIR, { recursive: true });
       fs.copyFileSync(real.zipBPath, DIST_ZIP_PATH);
       fs.writeFileSync(DIST_SHA_PATH, `${real.zipBSha}  ${ZIP_NAME}\n`);
+    }
+
+    // ── Permanent regression, diagnostic: after the dist/ write decision,
+    //    the only permitted change anywhere in the repo working tree is
+    //    the intentional dist/ZIP+.sha256 write itself. Necessarily
+    //    evaluated after that write, so it cannot gate it -- it is a
+    //    canary for "did packaging leave anything else behind". ──
+    const cleanAfterWrite = gitStatusPorcelainOfRepoExcludingDist();
+    check('package build後、git status --porcelainがdist/の意図したuntracked出力以外0件',
+      cleanAfterWrite.length === 0, cleanAfterWrite);
+
+    const finalTotal = checks.length;
+    const finalPassed = checks.filter(c => c.ok).length;
+
+    console.log('=== Checkpoint 7 package verification 結果 ===');
+    for (const c of checks) {
+      console.log(`[${c.ok ? 'PASS' : 'FAIL'}] ${c.name}${c.detail !== undefined ? ` :: ${JSON.stringify(c.detail)}` : ''}`);
+    }
+    console.log(`\n合計 ${finalTotal}件中 ${finalPassed}件成功`);
+
+    if (allPassed) {
       console.log('\n=== サマリ指標 ===');
       console.log(`配布物総ファイル数: ${real.fileCount}`);
       console.log(`SHA256SUMS対象: ${real.sumsLines.length}`);
@@ -419,7 +465,7 @@ function main() {
       console.error('\n=== 検証にFAILがあるため、dist/へは何も書き込みません(fail-closed) ===');
     }
 
-    if (!allPassed) process.exitCode = 1;
+    if (finalPassed !== finalTotal) process.exitCode = 1;
   } finally {
     fs.rmSync(tempBase, { recursive: true, force: true });
   }
