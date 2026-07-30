@@ -5,7 +5,7 @@
  *
  * Stages the actual end-user distribution (README.md, SMOKE_TEST_REPORT.md,
  * THREE_TOOL_COMPATIBILITY_REPORT.md, SHA256SUMS.txt, pdf_tool/, excel_tool/,
- * shared/ -- NOT the checkpoint*.js/*.py verification scripts, which are
+ * shared/, manuals/ -- NOT the checkpoint*.js/*.py verification scripts, which are
  * this repo's own QA harness, not part of the shipped alpha), verifies its
  * structure against an approved recursive manifest, builds the final ZIP
  * twice independently from two separately re-staged copies, confirms the
@@ -25,7 +25,10 @@
  *      pdf_tool/debug_dump.json) would sail through undetected. Fixed:
  *      the recursive path list is compared against an approved manifest
  *      file (checkpoint7_expected_manifest.txt, sibling to this handoff
- *      directory) covering all 218 expected paths exactly.
+ *      directory) covering every expected path exactly. The expected count
+ *      is always read from that manifest file's own line count -- never
+ *      hardcoded here -- so adding an approved file (e.g. manuals/) only
+ *      requires updating the manifest, not this script's assertions.
  *   3. The PDF external-URL check only recognized the 2 already-known,
  *      already-fixed CDN patterns (Tesseract/embedding), so a brand new
  *      unknown runtime reference would not be caught. Fixed: every
@@ -56,7 +59,17 @@ const DIST_DIR = path.join(ALPHA_RELEASE_DIR, 'dist');
 const DIST_ZIP_PATH = path.join(DIST_DIR, ZIP_NAME);
 const DIST_SHA_PATH = path.join(DIST_DIR, ZIP_NAME + '.sha256');
 
-const EXPECTED_TOP_LEVEL = ['README.md', 'SMOKE_TEST_REPORT.md', 'THREE_TOOL_COMPATIBILITY_REPORT.md', 'SHA256SUMS.txt', 'pdf_tool', 'excel_tool', 'shared'];
+const EXPECTED_TOP_LEVEL = ['README.md', 'SMOKE_TEST_REPORT.md', 'THREE_TOOL_COMPATIBILITY_REPORT.md', 'SHA256SUMS.txt', 'pdf_tool', 'excel_tool', 'shared', 'manuals'];
+
+// Detailed operation manual PDFs added to manuals/. Content is authored and
+// approved outside this script (a separate editorial process); this script
+// only verifies the files exist, are non-empty, and are structurally valid
+// PDFs (signature + trailing EOF marker) -- it never inspects or asserts on
+// their content, and never generates them.
+const REQUIRED_MANUAL_PDF_FILES = [
+  'manuals/pdf_to_json_tool_detailed_operation_manual_v0.10.1_alpha.pdf',
+  'manuals/excel_to_json_tool_detailed_operation_manual_v0.10.1_alpha.pdf',
+];
 
 // Fixed, exact-match allowlist of URLs that legitimately appear in the PDF
 // tool's HTML but are never dereferenced by our code at runtime (an XML
@@ -178,7 +191,7 @@ function computeStructureResults(dirLabel, dir, expectedManifest) {
   const expectedSorted = [...expectedManifest].sort();
   const onlyInActual = actualSorted.filter(p => !expectedSorted.includes(p));
   const onlyInExpected = expectedSorted.filter(p => !actualSorted.includes(p));
-  c('再帰的ファイル一覧が承認済みmanifest(218件)と完全一致',
+  c(`再帰的ファイル一覧が承認済みmanifest(${expectedSorted.length}件)と完全一致`,
     onlyInActual.length === 0 && onlyInExpected.length === 0,
     { onlyInActual, onlyInExpected, actualCount: actualSorted.length, expectedCount: expectedSorted.length });
 
@@ -217,6 +230,19 @@ function computeStructureResults(dirLabel, dir, expectedManifest) {
   if (fs.existsSync(excelHtmlPath)) {
     const excelHtml = fs.readFileSync(excelHtmlPath, 'utf8');
     c('Excel: HTML中にhttps?://参照が存在しない', !/https?:\/\//.test(excelHtml));
+  }
+
+  // 詳細操作説明書PDF(manuals/)は内容非検査 -- 実在・非空・PDF構造のみをfail-closedで確認する。
+  for (const rel of REQUIRED_MANUAL_PDF_FILES) {
+    const abs = path.join(dir, rel);
+    const exists = fs.existsSync(abs);
+    c(`${rel}: ファイルが存在する`, exists);
+    if (!exists) continue;
+    const buf = fs.readFileSync(abs);
+    c(`${rel}: サイズ > 0`, buf.length > 0, buf.length);
+    c(`${rel}: %PDF-シグネチャ`, buf.subarray(0, 5).toString('latin1') === '%PDF-', buf.subarray(0, 8).toString('latin1'));
+    const tail = buf.subarray(Math.max(0, buf.length - 2048)).toString('latin1');
+    c(`${rel}: 末尾付近に%%EOFマーカーを含む`, tail.includes('%%EOF'));
   }
 
   const docPattern = /`([A-Za-z0-9_.\/-]+\.(?:md|json|txt))`/g;
@@ -404,7 +430,7 @@ function main() {
     const gitBefore = gitStatusPorcelainOfRepoExcludingDist();
 
     const expectedManifest = loadExpectedManifest();
-    check(`承認済みmanifest(${MANIFEST_PATH.split('/').pop()})を読み込み(218件)`, expectedManifest.length === 218, expectedManifest.length);
+    check(`承認済みmanifest(${MANIFEST_PATH.split('/').pop()})を読み込み(${expectedManifest.length}件)`, expectedManifest.length > 0, expectedManifest.length);
 
     // ── Mutation self-tests, BEFORE the real build, using their own
     //    isolated staging copies -- must never touch dist/. ──

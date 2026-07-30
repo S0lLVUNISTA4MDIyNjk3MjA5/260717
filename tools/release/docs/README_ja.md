@@ -7,6 +7,11 @@
 
 α版の詳しい制限事項は、同梱の`KNOWN_LIMITATIONS.md`を必ず参照してください。
 
+## 詳細操作説明書
+
+画面別・機能別の詳細な操作手順は、同梱の
+`trace_matching_tool_detailed_operation_manual_v12.2.0_alpha.1.pdf`を参照してください。
+
 ## α版利用条件
 
 本α版は次の利用者にのみ提供してください。

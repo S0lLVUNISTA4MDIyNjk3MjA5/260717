@@ -64,7 +64,7 @@ const EXPECTED_LICENSE_FILES = [
   { manifestKey: 'tiny_segmenter', field: 'original_notice_file', shaField: 'original_notice_sha256', dest: 'tiny-segmenter-original-notice.txt' },
   { manifestKey: 'tiny_segmenter', field: 'original_license_file', shaField: 'original_license_sha256', dest: 'tiny-segmenter-original-BSD-3-Clause.txt' },
 ];
-const EXPECTED_DOC_FILES = ['README_ja.md', 'KNOWN_LIMITATIONS.md', 'THIRD_PARTY_LICENSES.md', 'BROWSER_VALIDATION_REPORT.md'];
+const EXPECTED_DOC_FILES = ['README_ja.md', 'KNOWN_LIMITATIONS.md', 'THIRD_PARTY_LICENSES.md', 'BROWSER_VALIDATION_REPORT.md', 'trace_matching_tool_detailed_operation_manual_v12.2.0_alpha.1.pdf'];
 
 const EXPECTED_RELATIVE_FILES = new Set([
   OUTPUT_HTML_NAME,
@@ -74,7 +74,12 @@ const EXPECTED_RELATIVE_FILES = new Set([
   ...Object.values(EXPECTED_VENDOR_RUNTIME_DEST).map(d => `runtime/${d}`),
   ...EXPECTED_LICENSE_FILES.map(e => `licenses/${e.dest}`),
 ]);
-const EXPECTED_TOTAL_FILE_COUNT = 23; // 22 covered by SHA256SUMS.txt + SHA256SUMS.txt itself
+// Derived, never hardcoded: total file count is whatever EXPECTED_RELATIVE_FILES
+// actually contains, so adding an approved doc (e.g. the detailed operation
+// manual PDF) only requires updating EXPECTED_DOC_FILES above, not this count.
+const EXPECTED_TOTAL_FILE_COUNT = EXPECTED_RELATIVE_FILES.size;
+// SHA256SUMS.txt covers every expected file except itself.
+const EXPECTED_SUMS_COUNT = EXPECTED_RELATIVE_FILES.size - 1;
 
 // Path-leakage allowlist: substrings that are legitimate content (e.g.
 // explanatory text about the environment) rather than a real leaked path.
@@ -158,7 +163,7 @@ function main() {
   const docFiles = relFiles.filter(f => EXPECTED_DOC_FILES.includes(f.rel));
   check('runtime/ has exactly 12 files', runtimeFiles.length === 12, `found ${runtimeFiles.length}`);
   check('licenses/ has exactly 5 files', licenseFiles.length === 5, `found ${licenseFiles.length}`);
-  check('doc files present: exactly 4', docFiles.length === 4, `found ${docFiles.length}`);
+  check(`doc files present: exactly ${EXPECTED_DOC_FILES.length}`, docFiles.length === EXPECTED_DOC_FILES.length, `found ${docFiles.length}`);
   check('HTML file name matches expected exactly', actualRelSet.has(OUTPUT_HTML_NAME));
 
   // ── file kind checks ──
@@ -228,7 +233,7 @@ function main() {
     });
     check('every SHA256SUMS.txt line parses (hash + 2-space + path)', parsed.every(Boolean));
     const relsInSums = parsed.filter(Boolean).map(p => p.rel);
-    check('SHA256SUMS.txt covers exactly 22 files', relsInSums.length === 22, `found ${relsInSums.length}`);
+    check(`SHA256SUMS.txt covers exactly ${EXPECTED_SUMS_COUNT} files`, relsInSums.length === EXPECTED_SUMS_COUNT, `found ${relsInSums.length}`);
     check('SHA256SUMS.txt does not list itself', !relsInSums.includes('SHA256SUMS.txt'));
     const dupSums = relsInSums.filter((r, i) => relsInSums.indexOf(r) !== i);
     check('no duplicate entries in SHA256SUMS.txt', dupSums.length === 0, dupSums.join(', '));
@@ -246,7 +251,7 @@ function main() {
       const actual = sha256(fs.readFileSync(filePath));
       if (actual !== p.sha) mismatchCount++;
     }
-    check('all 22 recomputed SHA-256 values match SHA256SUMS.txt', mismatchCount === 0, `${mismatchCount} mismatch(es)`);
+    check(`all ${EXPECTED_SUMS_COUNT} recomputed SHA-256 values match SHA256SUMS.txt`, mismatchCount === 0, `${mismatchCount} mismatch(es)`);
   }
 
   // ── byte-identity against repo source-of-truth ──
