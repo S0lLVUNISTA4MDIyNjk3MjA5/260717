@@ -1,0 +1,2866 @@
+/* quantity-annotation/1.0-rc1 strict binding core.
+ * Browser/Node shared. This phase validates and binds sources only; it does not
+ * generate quantity pairs, numeric comparisons, or satisfaction judgements.
+ */
+(function(root, factory) {
+  const api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  if (root) root.QuantitySidecarBinding = api;
+})(typeof globalThis !== 'undefined' ? globalThis : this, function() {
+  'use strict';
+
+  const SCHEMA_VERSION = 'quantity-annotation/1.0-rc1';
+  // Compatibility is intentionally an allow-list of complete tuples. Add a new
+  // entry only after cross-version evidence shows the tuple is safe to consume.
+  const SUPPORTED_RULESETS = Object.freeze([
+    Object.freeze({
+      quantity_extraction:'v2.14',
+      semantics_rules:'v2.19',
+      auto_applicable_thresholds:Object.freeze({ modeConfidence:0.4, margin:0.2, propertyConfidence:0.7 })
+    })
+  ]);
+
+  function isObject(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
+
+  function annotationSchema(explicitSchema) {
+    if (explicitSchema) return explicitSchema;
+    if (globalThis.QuantityAnnotationSchemaV1) return globalThis.QuantityAnnotationSchemaV1;
+    if (typeof module === 'object' && module.exports && typeof require === 'function') {
+      return require('./design_notes/quantity_annotation_schema_v1.json');
+    }
+    throw new Error('正本quantity_annotation_schema_v1.jsonを読み込めません。');
+  }
+
+  // The same supported-keyword validator as json_schema_minivalidator.js, used
+  // against the generated browser copy of the canonical JSON Schema.
+  function resolveRef(root, ref) {
+    if (!ref.startsWith('#/')) throw new Error(`未対応の$ref: ${ref}`);
+    let node = root;
+    for (const segment of ref.slice(2).split('/')) {
+      node = node[segment];
+      if (node === undefined) throw new Error(`$refの解決に失敗しました: ${ref}`);
+    }
+    return node;
+  }
+
+  function schemaType(value) {
+    if (value === null) return 'null';
+    if (Array.isArray(value)) return 'array';
+    if (Number.isInteger(value)) return 'integer';
+    return typeof value;
+  }
+
+  function typeMatches(expected, value) {
+    const actual = schemaType(value);
+    const one = exp => exp === 'number' ? (actual === 'number' || actual === 'integer') : actual === exp;
+    return Array.isArray(expected) ? expected.some(one) : one(expected);
+  }
+
+  function validateSchemaNode(schema, value, path, root, errors) {
+    if (schema.$ref) { validateSchemaNode(resolveRef(root, schema.$ref), value, path, root, errors); return; }
+    if (schema.oneOf) {
+      const branches = schema.oneOf.map(sub => { const e = []; validateSchemaNode(sub, value, path, root, e); return e; });
+      if (!branches.some(e => e.length === 0)) errors.push(`${path}: oneOfのいずれの分岐にも一致しない`);
+      return;
+    }
+    if (schema.const !== undefined && value !== schema.const) errors.push(`${path}: const不一致`);
+    if (schema.enum !== undefined && !schema.enum.includes(value)) errors.push(`${path}: enum不一致`);
+    if (schema.type !== undefined && !typeMatches(schema.type, value)) {
+      errors.push(`${path}: type不一致 (期待値=${schema.type}, 実際=${schemaType(value)})`);
+      return;
+    }
+    if (typeof value === 'string') {
+      if (schema.pattern !== undefined && !new RegExp(schema.pattern).test(value)) errors.push(`${path}: pattern不一致`);
+      if (schema.minLength !== undefined && value.length < schema.minLength) errors.push(`${path}: minLength未満`);
+    }
+    if (typeof value === 'number') {
+      if (schema.minimum !== undefined && value < schema.minimum) errors.push(`${path}: minimum未満`);
+      if (schema.maximum !== undefined && value > schema.maximum) errors.push(`${path}: maximum超過`);
+    }
+    if (Array.isArray(value) && schema.items) value.forEach((item, i) => validateSchemaNode(schema.items, item, `${path}[${i}]`, root, errors));
+    if (isObject(value)) {
+      // 【レビュー修正、重大(移植コピー同期)】json_schema_minivalidator.jsのown-property修正
+      // (`key in value`はプロトタイプ継承チェーンも辿るため、Object.create(既存オブジェクト)や
+      // constructor/toString等の予約名フィールドを誤って受理し得る)を、本ファイル内の移植コピー
+      // (browser向けrc1 Schema検証)へも同期する。hasOwn()は本ファイル下部で既に定義済み
+      // (関数宣言のためこの位置からも参照可能)。
+      for (const key of (schema.required || [])) if (!hasOwn(value, key)) errors.push(`${path}: 必須フィールド不足: ${key}`);
+      for (const [key, child] of Object.entries(schema.properties || {})) if (hasOwn(value, key)) validateSchemaNode(child, value[key], `${path}.${key}`, root, errors);
+      if (schema.additionalProperties === false && schema.properties) {
+        for (const key of Object.keys(value)) if (!hasOwn(schema.properties, key)) errors.push(`${path}: 未定義フィールド(additionalProperties:false): ${key}`);
+      }
+    }
+  }
+
+  function validateAnnotationSchema(doc, explicitSchema) {
+    const schema = annotationSchema(explicitSchema);
+    const errors = [];
+    validateSchemaNode(schema, doc, '$', schema, errors);
+    return { valid:errors.length === 0, errors };
+  }
+
+  function sameRuleset(actual, supported) {
+    const a = actual?.auto_applicable_thresholds;
+    const s = supported.auto_applicable_thresholds;
+    return actual?.quantity_extraction === supported.quantity_extraction
+      && actual?.semantics_rules === supported.semantics_rules
+      && a?.modeConfidence === s.modeConfidence
+      && a?.margin === s.margin
+      && a?.propertyConfidence === s.propertyConfidence;
+  }
+
+  function validateRulesetCompatibility(actual) {
+    const supported = SUPPORTED_RULESETS.some(entry => sameRuleset(actual, entry));
+    return { supported, actual, supported_rulesets:SUPPORTED_RULESETS };
+  }
+
+  function normalize(value) {
+    return String(value == null ? '' : value).normalize('NFKC').replace(/\r\n?/g, '\n')
+      .split('\n').map(line => line.replace(/[ \t]+$/g, '')).join('\n').replace(/[ \t]+/g, ' ').trim();
+  }
+
+  function canonicalValue(value) {
+    if (Array.isArray(value)) return value.map(canonicalValue);
+    if (isObject(value)) return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalValue(value[key])]));
+    return value;
+  }
+
+  function canonicalJson(value) { return JSON.stringify(canonicalValue(value)); }
+
+  async function sha256(value) {
+    const text = String(value);
+    if (typeof process !== 'undefined' && process.versions?.node && typeof require === 'function') return require('crypto').createHash('sha256').update(text, 'utf8').digest('hex');
+    if (!globalThis.crypto?.subtle) throw new Error('SHA-256を利用できません。');
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function hashParts(namespace, parts) { return sha256([namespace, ...parts.map(normalize)].join(String.fromCharCode(0))); }
+
+  function traceRecords(trace) {
+    if (Array.isArray(trace?._trace_records)) return trace._trace_records;
+    if (Array.isArray(trace)) return trace;
+    return null;
+  }
+
+  function duplicateIds(records) {
+    const seen = new Set(), duplicates = new Set();
+    (records || []).forEach(record => {
+      const id = typeof record?.trace_id === 'string' ? record.trace_id : '';
+      if (!id || seen.has(id)) duplicates.add(id || '(missing)');
+      seen.add(id);
+    });
+    return [...duplicates];
+  }
+
+  async function computeDatasetSignature(records) {
+    const duplicates = duplicateIds(records);
+    if (duplicates.length) throw new Error(`trace_idが重複しています: ${duplicates.join(', ')}`);
+    const sorted = [...records].sort((a, b) => String(a.trace_id).localeCompare(String(b.trace_id)));
+    return 'QA-SHA256:' + await hashParts('dataset-signature-v1', [canonicalJson(sorted)]);
+  }
+
+  async function computeRecordContentHash(record) {
+    let input;
+    if (Object.prototype.hasOwnProperty.call(record || {}, 'source_raw_text')) {
+      input = { trace_id:record.trace_id, source_raw_text:record.source_raw_text, tags:record.tags || [] };
+    } else if (Object.prototype.hasOwnProperty.call(record || {}, 'source_record')) {
+      input = { trace_id:record.trace_id, source_record:record.source_record, source_record_display:record.source_record_display || null, tags:record.tags || [], source_row:record.source_row };
+    } else throw new Error(`content_hash対象を判別できません: ${record?.trace_id || '(trace_idなし)'}`);
+    return hashParts('content-hash-v1', [canonicalJson(input)]);
+  }
+
+  function pathMappingIssues(record) {
+    return (record?.source_record_display_unresolved || []).filter(issue => issue?.reason === 'path_mapping_unsupported');
+  }
+
+  function diagnostic(code, side, detail, traceId, severity = 'error') {
+    return { code, side, severity, trace_id:traceId || null, detail:String(detail || '') };
+  }
+
+  function isReady(diagnostics) { return !diagnostics.some(item => item.severity === 'error'); }
+
+  function deepFreeze(value) {
+    if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value;
+    Object.freeze(value);
+    Object.values(value).forEach(deepFreeze);
+    return value;
+  }
+
+  // bindingへ埋め込む元trace record・sidecarレコードを不変スナップショット化する。
+  // 参照のまま埋め込むと、bind()呼び出し後に呼び出し側が元のtrace/annotationオブジェクトを
+  // 変更した場合、binding内の値も連動して変わってしまう(content_hash検証をすり抜けて
+  // 検証済みでない内容が下流(generatePropertyResolutions()等)へ渡ることになる、とレビューで
+  // 指摘された)。structuredClone()で複製し、再帰的にfreezeすることで、埋め込み後の
+  // 外部からの変更(意図的・偶発的いずれも)を構造的に防ぐ。
+  function snapshotValue(value) {
+    if (value === null || value === undefined) return value;
+    return deepFreeze(structuredClone(value));
+  }
+
+  // 【round3レビュー修正、重大1: TOCTOU】旧実装はcomputeDatasetSignature()/computeRecordContentHash()
+  // というawaitを挟む非同期検証を先に行い、その後(bindings.push()の直前)になって初めて
+  // snapshotValue()でrecord/annotationを複製していた。awaitで一度制御を手放している間に
+  // 呼び出し側が元のtrace/annotationオブジェクトを書き換えれば、「検証に使ったデータ」と
+  // 「bindingへ埋め込まれるデータ」が食い違いうる(検証はhash計算時点の内容に対して行われるが、
+  // 埋め込みはその後の――場合によっては書き換え後の――内容になる)、とレビューで指摘された。
+  // 修正: trace/annotationを、最初のawaitより前に同期的にスナップショット化し、以後は
+  // 一切元のtrace/annotationへ触れず、このスナップショットだけを検証・埋め込み双方に使う。
+  // これにより「schema検証・signature計算・content hash計算・binding生成」はすべて同一の
+  // 不変な複製に対して行われることになり、以前のように後段でrecordごとsnapshotValue()する
+  // 必要もなくなる(スナップショット済みツリーの部分木は既に不変なため)。
+  async function bindSide(trace, annotation, expectedSide) {
+    const diagnostics = [], notAnalyzed = [];
+    const records = traceRecords(trace);
+    if (!records) return blocked(expectedSide, [diagnostic('missing_trace_records', expectedSide, '_trace_records配列がありません')]);
+    if (!annotation) return blocked(expectedSide, [diagnostic('missing_sidecar', expectedSide, '数量注釈sidecarが選択されていません')]);
+
+    const snapTrace = snapshotValue(trace);
+    const snapAnnotation = snapshotValue(annotation);
+    const snapRecords = traceRecords(snapTrace);
+
+    const schema = validateAnnotationSchema(snapAnnotation);
+    if (!schema.valid) return blocked(expectedSide, schema.errors.map(error => diagnostic('schema_invalid', expectedSide, error)));
+    if (snapAnnotation.side !== expectedSide) return blocked(expectedSide, [diagnostic('source_mismatch', expectedSide, `side=${snapAnnotation.side}、期待値=${expectedSide}`)]);
+
+    const ruleset = validateRulesetCompatibility(snapAnnotation.ruleset_version);
+    if (!ruleset.supported) {
+      return blocked(expectedSide, [diagnostic('ruleset_mismatch', expectedSide, `非対応ruleset: ${canonicalJson(snapAnnotation.ruleset_version)} / 対応: ${canonicalJson(SUPPORTED_RULESETS)}`)]);
+    }
+
+    const traceDuplicates = duplicateIds(snapRecords);
+    const annotationDuplicates = duplicateIds(snapAnnotation.records);
+    traceDuplicates.forEach(id => diagnostics.push(diagnostic('duplicate_trace_id', expectedSide, `元trace内で重複: ${id}`, id)));
+    annotationDuplicates.forEach(id => diagnostics.push(diagnostic('duplicate_annotation_id', expectedSide, `sidecar内で重複: ${id}`, id)));
+    if (diagnostics.length) return blocked(expectedSide, diagnostics);
+
+    const signature = await computeDatasetSignature(snapRecords);
+    if (signature !== snapAnnotation.dataset_signature) return blocked(expectedSide, [diagnostic('source_mismatch', expectedSide, `dataset_signature不一致 (expected=${signature}, actual=${snapAnnotation.dataset_signature})`)], signature);
+
+    const annotationById = new Map(snapAnnotation.records.map(record => [record.trace_id, record]));
+    const traceById = new Map(snapRecords.map(record => [record.trace_id, record]));
+    const bindings = [];
+    for (const record of snapRecords) {
+      const sideRecord = annotationById.get(record.trace_id);
+      if (!sideRecord) {
+        diagnostics.push(diagnostic('missing_annotation', expectedSide, '該当するsidecarレコードがありません', record.trace_id, 'warning'));
+        notAnalyzed.push({ trace_id:record.trace_id, side:expectedSide, reason_code:'no_annotation', detail:'quantity-annotation側に該当trace_idがありません' });
+        bindings.push({ trace_id:record.trace_id, status:'missing', annotation:null, record });
+        continue;
+      }
+      let actualHash;
+      try { actualHash = await computeRecordContentHash(record); }
+      catch (error) {
+        diagnostics.push(diagnostic('content_hash_unverifiable', expectedSide, error.message, record.trace_id));
+        bindings.push({ trace_id:record.trace_id, status:'unparsed', annotation:null, record });
+        continue;
+      }
+      if (actualHash !== sideRecord.content_hash) {
+        diagnostics.push(diagnostic('stale_annotation', expectedSide, `content_hash不一致 (expected=${actualHash}, actual=${sideRecord.content_hash})`, record.trace_id));
+        bindings.push({ trace_id:record.trace_id, status:'stale_annotation', annotation:null, record });
+        continue;
+      }
+      const unsupported = pathMappingIssues(record);
+      if (unsupported.length) {
+        diagnostics.push(diagnostic('path_mapping_unsupported', expectedSide, `${unsupported.length}件のパス形式列マッピングを解析できません`, record.trace_id));
+        bindings.push({ trace_id:record.trace_id, status:'unparsed', annotation:null, record });
+        continue;
+      }
+      // record・annotationはどちらも、関数冒頭で作った不変スナップショット(snapTrace/snapAnnotation)の
+      // 部分木であり、既にdeepFreeze済みである。個別に再度snapshotValue()する必要はない。
+      bindings.push({ trace_id:record.trace_id, status:'bound', annotation:sideRecord, record });
+    }
+    for (const sideRecord of snapAnnotation.records) {
+      if (!traceById.has(sideRecord.trace_id)) diagnostics.push(diagnostic('missing_trace', expectedSide, 'sidecarのtrace_idに対応する元レコードがありません', sideRecord.trace_id));
+    }
+    // 【round3レビュー修正、重大2】戻り値全体(ruleset_version・bindings配列・各binding要素・
+    // diagnostics・not_analyzedを含む)をdeepFreeze()する。旧実装はrecord/annotationという
+    // 末端の値だけをsnapshotValue()していたが、それを包むbinding要素自体・bindings配列・
+    // ruleset_version(以前はannotationへの生参照のままだった)・戻り値オブジェクト自体は
+    // 可変のままだったため、呼び出し後に外側から書き換え可能だった、と指摘された。
+    return deepFreeze({ side:expectedSide, ready:isReady(diagnostics), source_trace_file:snapAnnotation.source_trace_file,
+      dataset_signature:signature, ruleset_version:snapAnnotation.ruleset_version,
+      bindings, diagnostics, not_analyzed:notAnalyzed, candidate_records:[], satisfaction_judgements:[] });
+  }
+
+  // 【B-3aレビュー修正】B-3(generateTraceComparisonRecordSet())が正式artifactの
+  // provenance.sourceへ転記するsource_trace_fileを、bindSide()の成功結果へ加算的に保持する。
+  // 以前はsnapAnnotation.source_trace_file(quantity-annotationスキーマの必須フィールド、
+  // 既にvalidateAnnotationSchema()で非空文字列として検証済み)がbindSide()の戻り値へ一切
+  // 転記されず、bindingだけを信頼入力とするB-3から参照できなかった。blocked()側は
+  // 文書全体が結合されない経路のため、常にnullとする(B-3はready:trueの結果からのみ
+  // provenanceを組み立てるため、ここが参照されることはない)。
+  function blocked(side, diagnostics, signature) {
+    return deepFreeze({ side, ready:false, source_trace_file:null, dataset_signature:signature || null, ruleset_version:null, bindings:[], diagnostics,
+      not_analyzed:[], candidate_records:[], satisfaction_judgements:[] });
+  }
+
+  // 【round3レビュー修正、重大1】requirement側をawaitし終えてからactual側のbindSide()を
+  // 開始する旧実装は、requirement側の非同期処理が続いている間、actual側の入力がまだ
+  // スナップショット化されておらず、その間に呼び出し側がactual側の元データを書き換える
+  // 余地があった、と指摘された。bindSide()は今や引数を最初のawaitより前に同期的に
+  // スナップショット化するため、両方のPromiseを個別にawaitせず同時に発生させ、
+  // Promise.all()でまとめて待つだけで、双方とも呼び出し直後の状態が確定するようになる。
+  async function bindInputPair({ requirementTrace, requirementAnnotation, actualTrace, actualAnnotation }) {
+    const requirementPromise = bindSide(requirementTrace, requirementAnnotation, 'requirement');
+    const actualPromise = bindSide(actualTrace, actualAnnotation, 'actual');
+    const [requirement, actual] = await Promise.all([requirementPromise, actualPromise]);
+    return deepFreeze({ schema_version:'quantity-binding/phase-b1', ready:requirement.ready && actual.ready, requirement, actual,
+      diagnostics:[...requirement.diagnostics, ...actual.diagnostics], not_analyzed:[...requirement.not_analyzed, ...actual.not_analyzed],
+      comparison_candidates:[], satisfaction_judgements:[] });
+  }
+
+  function relationRefs(row) {
+    return { requirement_trace_id:row?.requirement_trace_id || null, actual_trace_id:row?.actual_trace_id || null,
+      matcher_a_id:row?.matcher_a_id || row?.A_ID || row?.['A_ID'] || null,
+      matcher_b_id:row?.matcher_b_id || row?.B_ID || row?.['B_ID'] || null };
+  }
+
+  // ── Phase B-2: 次元候補生成（3.4節 段階1のみ）。段階2以降（設計特性候補・条件候補・
+  // comparisonMode導出）は未実装のまま。同次元・異次元とも数量IDの全直積を作らず、
+  // 次元バケットとして返す。段階2以降はcandidate_bucketsを逐次走査して絞り込む。 ──
+
+  function bindingAnalysesByTraceId(sideResult) {
+    const map = new Map();
+    (sideResult?.bindings || []).forEach(binding => {
+      if (binding.status === 'bound' && binding.annotation) map.set(binding.trace_id, binding.annotation.analyses || []);
+    });
+    return map;
+  }
+
+  // 「sidecar内で」の重複検知は側ごとに独立させる。要求側sidecarと実仕様側sidecarは別ファイルであり、
+  // quantity_idは内容由来のハッシュのため、別ファイル同士がたまたま同じ値を持つことは
+  // データ破損の兆候ではない（各ファイル内で一意であればよい）。
+  function duplicateQuantityIds(analysesByTrace) {
+    const seen = new Set(), duplicates = new Set();
+    for (const analyses of analysesByTrace.values()) {
+      for (const analysis of analyses) {
+        const id = analysis?.quantity_id;
+        if (!id) continue;
+        if (seen.has(id)) duplicates.add(id);
+        seen.add(id);
+      }
+    }
+    return [...duplicates];
+  }
+
+  function dimensionOf(analysis) {
+    const value = analysis?.quantity?.unit?.dimension;
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  function groupByDimension(entries) {
+    const map = new Map();
+    entries.forEach(({ quantity_id, dimension }) => {
+      if (!map.has(dimension)) map.set(dimension, []);
+      map.get(dimension).push(quantity_id);
+    });
+    return map;
+  }
+
+  function dimensionSideIndex(analysesByTrace, side) {
+    const byTrace = new Map();
+    for (const [traceId, analyses] of [...analysesByTrace.entries()].sort(([a], [b]) => String(a).localeCompare(String(b)))) {
+      const usable = [];
+      const unavailable = [];
+      for (const analysis of [...analyses].sort((a, b) => String(a?.quantity_id || '').localeCompare(String(b?.quantity_id || '')))) {
+        const dimension = dimensionOf(analysis);
+        if (!dimension) {
+          unavailable.push({ side, trace_id:traceId, quantity_id:analysis?.quantity_id || null,
+            reason_code:'dimension_unavailable', detail:'quantity.unit.dimensionが空です' });
+        } else {
+          usable.push({ quantity_id:analysis.quantity_id, dimension });
+        }
+      }
+      byTrace.set(traceId, { byDimension:groupByDimension(usable), unavailable });
+    }
+    return byTrace;
+  }
+
+  function blockedDimensionResult(diagnostics) {
+    return { ready:false, candidates:[], candidate_buckets:[], candidate_bucket_count:0, candidate_count:0,
+      candidates_materialized:false, not_analyzed:[], excluded_pair_count:0, diagnostics };
+  }
+
+  function generateDimensionCandidates({ binding, relations }) {
+    if (!binding || !binding.ready) {
+      return blockedDimensionResult([{ code:'binding_not_ready', severity:'error', detail:'quantity_sidecar_binding_core.bindInputPair()がready:falseのため次元候補を生成できません' }]);
+    }
+
+    const reqAnalysesByTrace = bindingAnalysesByTraceId(binding.requirement);
+    const actAnalysesByTrace = bindingAnalysesByTraceId(binding.actual);
+
+    // 【必須修正3】sidecar内でquantity_idが重複した場合は、候補生成全体をここで停止する。
+    const reqDuplicateIds = duplicateQuantityIds(reqAnalysesByTrace);
+    const actDuplicateIds = duplicateQuantityIds(actAnalysesByTrace);
+    if (reqDuplicateIds.length || actDuplicateIds.length) {
+      const diagnostics = [
+        ...reqDuplicateIds.map(id => ({ code:'duplicate_quantity_id', severity:'error', side:'requirement', quantity_id:id, detail:'要求側sidecar内でquantity_idが重複しています' })),
+        ...actDuplicateIds.map(id => ({ code:'duplicate_quantity_id', severity:'error', side:'actual', quantity_id:id, detail:'実仕様側sidecar内でquantity_idが重複しています' })),
+      ];
+      return blockedDimensionResult(diagnostics);
+    }
+
+    const diagnostics = [];
+    const notAnalyzed = [];
+    const candidateBuckets = [];
+    let candidateCount = 0;
+    let excludedPairCount = 0;
+
+    // dimension索引と欠落情報はsidecar/trace単位で一度だけ構築する。照合行ループ内で
+    // analysesを再走査しないため、同じtraceが複数相手と関係しても欠落診断は増殖しない。
+    const reqDimensionIndex = dimensionSideIndex(reqAnalysesByTrace, 'requirement');
+    const actDimensionIndex = dimensionSideIndex(actAnalysesByTrace, 'actual');
+    const emittedUnavailable = new Set();
+    const emitUnavailable = entry => {
+      const key = JSON.stringify([entry.side, entry.trace_id, entry.quantity_id, entry.reason_code]);
+      if (emittedUnavailable.has(key)) return;
+      emittedUnavailable.add(key);
+      notAnalyzed.push(entry);
+      diagnostics.push({ code:'dimension_unavailable', severity:'warning', side:entry.side,
+        trace_id:entry.trace_id, quantity_id:entry.quantity_id });
+    };
+
+    // 【必須修正2】同一の要求trace_id+実仕様trace_idを持つ照合行が複数存在する場合、
+    // どちらの照合行を採用すべきか自明でないため、いずれからも候補を生成しない。
+    const relationKey = row => JSON.stringify([row.requirement_trace_id, row.actual_trace_id]);
+    const relationCounts = new Map();
+    const relationByKey = new Map();
+    (relations || []).forEach(row => {
+      if (!row?.requirement_trace_id || !row?.actual_trace_id) return; // A未対応/B未参照はペア自体が存在しない
+      const key = relationKey(row);
+      relationCounts.set(key, (relationCounts.get(key) || 0) + 1);
+      if (!relationByKey.has(key)) relationByKey.set(key, row);
+    });
+    const duplicateRelationKeys = new Set([...relationCounts.entries()].filter(([, count]) => count > 1).map(([key]) => key));
+    duplicateRelationKeys.forEach(key => {
+      const row = relationByKey.get(key);
+      diagnostics.push({ code:'duplicate_relation_pair', severity:'warning', requirement_trace_id:row.requirement_trace_id, actual_trace_id:row.actual_trace_id,
+        detail:'同一の要求trace_id+実仕様trace_idを持つ照合行が複数存在するため、いずれからも候補を生成しません' });
+    });
+
+    for (const row of (relations || [])) {
+      if (!row?.requirement_trace_id || !row?.actual_trace_id) continue;
+      if (duplicateRelationKeys.has(relationKey(row))) continue;
+
+      const reqTraceIndex = reqDimensionIndex.get(row.requirement_trace_id);
+      const actTraceIndex = actDimensionIndex.get(row.actual_trace_id);
+      if (!reqTraceIndex || !actTraceIndex) continue; // 未結合(missing/stale/unparsed)は対象外
+      reqTraceIndex.unavailable.forEach(emitUnavailable);
+      actTraceIndex.unavailable.forEach(emitUnavailable);
+      const reqByDim = reqTraceIndex.byDimension;
+      const actByDim = actTraceIndex.byDimension;
+      if (!reqByDim.size || !actByDim.size) continue;
+
+      for (const [reqDim, reqIds] of reqByDim) {
+        for (const [actDim, actIds] of actByDim) {
+          if (reqDim === actDim) {
+            const pairCount = reqIds.length * actIds.length;
+            candidateCount += pairCount;
+            candidateBuckets.push({
+              requirement_quantity_ids:reqIds, actual_quantity_ids:actIds,
+              candidate_pair_count:pairCount, dimension:reqDim,
+              requirement_trace_id:row.requirement_trace_id, actual_trace_id:row.actual_trace_id,
+              matcher_a_id:row.matcher_a_id ?? null, matcher_b_id:row.matcher_b_id ?? null,
+            });
+          } else {
+            // 【必須修正1】異次元の組み合わせは、個々のペアをnot_analyzedへ展開せず、
+            // 次元バケット単位で1件の圧縮監査記録にする(20×20なら400件ではなく1件)。
+            const pairCount = reqIds.length * actIds.length;
+            excludedPairCount += pairCount;
+            notAnalyzed.push({
+              reason_code:'dimension_mismatch',
+              requirement_quantity_ids:reqIds, actual_quantity_ids:actIds,
+              requirement_dimension:reqDim, actual_dimension:actDim,
+              excluded_pair_count:pairCount,
+              requirement_trace_id:row.requirement_trace_id, actual_trace_id:row.actual_trace_id,
+              matcher_a_id:row.matcher_a_id ?? null, matcher_b_id:row.matcher_b_id ?? null,
+            });
+          }
+        }
+      }
+    }
+
+    return { ready:isReady(diagnostics), candidates:[], candidate_buckets:candidateBuckets,
+      candidate_bucket_count:candidateBuckets.length, candidate_count:candidateCount,
+      candidates_materialized:false, not_analyzed:notAnalyzed, excluded_pair_count:excludedPairCount, diagnostics };
+  }
+
+  // quantity-annotation/1.0-rc1: 概念候補生成ライブラリ(移植、semantic_mapping_prototype.jsの
+  // marginOf()・hasOpposingEvidence()・CONCEPT_DICTIONARY・generatePropertyCandidates()から
+  // 一字一句移植。乖離検出はquantity_annotation_ported_lib_check.jsで行う。改変禁止、
+  // 移植元を直接編集してから再度移植すること)
+  function marginOf(candidates) {
+    if (!candidates || candidates.length === 0) return 0;
+    if (candidates.length === 1) return candidates[0].confidence;
+    return candidates[0].confidence - candidates[1].confidence;
+  }
+  function hasOpposingEvidence(candidates) {
+    const top = candidates?.[0];
+    return !!(top && top.evidence.some(e => e.effect === 'opposes'));
+  }
+
+  const CONCEPT_DICTIONARY = [
+    {
+      concept_id: 'environment.ambient_operating_temperature',
+      label: '周囲使用温度',
+      expected_dimension: 'temperature',
+      keywords: ['周囲温度', '使用温度', '運転温度'],
+      tags: ['使用温度'],
+    },
+    {
+      concept_id: 'performance.cooling_capacity',
+      label: '冷房能力',
+      expected_dimension: 'power',
+      keywords: ['冷房能力', '冷却能力'],
+      tags: ['冷房能力'],
+    },
+    {
+      concept_id: 'power_supply.voltage',
+      label: '電源電圧',
+      expected_dimension: 'voltage',
+      keywords: ['電源電圧', '定格電圧', '電源'],
+      tags: ['電源電圧'],
+    },
+    {
+      concept_id: 'power_supply.frequency',
+      label: '周波数',
+      expected_dimension: 'frequency',
+      keywords: ['周波数'],
+      tags: ['周波数'],
+    },
+    {
+      concept_id: 'acoustics.operating_noise',
+      label: '運転騒音',
+      expected_dimension: 'sound_pressure_level',
+      keywords: ['騒音値', '運転騒音', '騒音'],
+      tags: ['騒音'],
+    },
+    {
+      concept_id: 'maintenance.access_space',
+      label: '保守作業スペース',
+      expected_dimension: 'length',
+      keywords: ['保守作業スペース', '保守スペース', '保守'],
+      tags: ['保守性'],
+    },
+  ];
+
+  // ── 概念候補の生成: unit.dimension一致 + 周辺語一致 + タグ一致を独立した根拠として積み上げる ──
+  function generatePropertyCandidates(quantity, ctx) {
+    const nearbyText = ctx.nearbyText || '';
+    const tags = ctx.tags || [];
+    const candidates = [];
+    for (const concept of CONCEPT_DICTIONARY) {
+      let score = 0;
+      const evidence = [];
+      if (quantity.unit.dimension === concept.expected_dimension) {
+        score += 0.4;
+        evidence.push(`単位次元一致: ${quantity.unit.dimension}`);
+      }
+      const kwHit = concept.keywords.find(k => nearbyText.includes(k));
+      if (kwHit) {
+        score += 0.35;
+        evidence.push(`周辺語: ${kwHit}`);
+      }
+      const tagHit = concept.tags.find(t => tags.includes(t));
+      if (tagHit) {
+        score += 0.25;
+        evidence.push(`タグ: ${tagHit}`);
+      }
+      if (score > 0) {
+        candidates.push({ concept_id: concept.concept_id, label: concept.label, confidence: Math.min(0.99, score), evidence });
+      }
+    }
+    candidates.sort((a, b) => b.confidence - a.confidence);
+    return candidates;
+  }
+  // ── quantity-annotation/1.0-rc1: 概念候補生成ライブラリ(移植)ここまで ──
+
+  // ── Phase B-2.2a: 数量ごとのproperty候補生成・解決状態の正規化。段階1
+  // (generateDimensionCandidates())とは独立に、bindInputPair()で結合済みのanalysesだけを対象に、
+  // 数量1件につきちょうど1回generatePropertyCandidates()を評価する(relationをまたいで再計算しない。
+  // 呼び出し側はrelationループの中でside+quantity_idをキーにこの結果を引くだけでよい)。
+  // concept間の結合・除外バケット化・数値比較・comparisonMode導出・充足判定はまだ行わない
+  // (3.4節 段階2b以降、B-2.2a完了・レビュー承認後に着手する)。
+
+  const PROPERTY_MANAGEMENT_FIELD_NAMES = new Set([
+    'tags', 'unregistered_tags', 'review_status', 'review_method', 'reviewed_at', 'review_comment',
+    'exclusion_reason', 'trace_id', 'content_hash', 'stable_uid', 'stable_key',
+  ]);
+
+  function isPropertyManagementField(key) {
+    const k = String(key);
+    if (PROPERTY_MANAGEMENT_FIELD_NAMES.has(k)) return true;
+    return /^(No|ID|行番号)$/i.test(k) || /_id$/i.test(k) || /_hash$/i.test(k);
+  }
+
+  // PDF側(source_raw_text)はその段落・文自体をnearbyTextとする(数量自身がその文の一部であり、
+  // 除外すべき「他列」という概念が存在しないため、これは意図した設計のまま)。Excel側
+  // (source_record)は、数量が入っている列自体ではなく同じ行の他列(例:「設計項目」列の
+  // "冷房能力")が概念の主な手がかりになるため、管理列に加えて**その行に存在する全ての
+  // 数量所在列**(quantitySourceFields、その行の全analysisのsource_field集合)を除外して
+  // 連結する。当初は対象数量自身の列だけを除外していたが、同じ行に複数の数量が別の列に
+  // 存在する場合、ある数量の解決に「別の数量自身の値」が周辺語として混入してしまう
+  // (例: 検討結果A列の数量を解決する際、検討結果B列の値に別の概念のキーワードが
+  // 偶然含まれていると、検討結果A自身とは無関係な概念候補が競合として現れてしまう)、
+  // とレビューで指摘された。対象列を含めたまま全列を連結すると、同じ行の複数数量すべてが
+  // 互いの値を周辺語として共有してしまい、generateIntervalSemanticsCandidates()用nearbyTextで
+  // 一度発生した列見出し・他セル漏れ込みと同種の取り違えを起こしうる。
+  // generateIntervalSemanticsCandidates()用のnearbyText(対象セル自身のみに限定。
+  // shadow_mode_integration_design.md 2.3節の訂正で、列見出し・他列の値をinterval_semantics
+  // 候補へ混ぜてはいけないと確定した)とは別の用途であり、この関数はもっぱら概念(property)
+  // 候補生成専用として意図的に別定義にしている。
+  function nearbyTextForRecord(record, quantitySourceFields) {
+    if (typeof record?.source_raw_text === 'string') return record.source_raw_text;
+    if (record?.source_record && typeof record.source_record === 'object' && !Array.isArray(record.source_record)) {
+      return Object.entries(record.source_record)
+        .filter(([key]) => !quantitySourceFields.has(key) && !isPropertyManagementField(key))
+        .map(([, value]) => (typeof value === 'string' || typeof value === 'number') ? String(value) : '')
+        .filter(Boolean)
+        .join(' / ');
+    }
+    return '';
+  }
+
+  // bindSide()がbindings[]へ埋め込んだ元trace record(content_hash検証済み、bindSide()の
+  // 修正でstatus:'bound'エントリへrecordを直接持たせるようにした)を、trace_idをキーに引く。
+  // 呼び出し側が別途trace引数を渡す必要をなくし、Phase B-1で確定した厳密結合を迂回できない
+  // ようにする(レビューで、bindingとは別のtraceを渡せてしまう=Phase B-1の検証を迂回できる、
+  // 取り違えたtraceを渡せる、trace引数を省略しても静かに空文脈で候補生成が続く、という
+  // 3つの具体的な迂回経路を指摘された)。
+  function boundRecordsByTraceId(sideResult) {
+    const map = new Map();
+    (sideResult?.bindings || []).forEach(binding => {
+      if (binding.status === 'bound' && binding.record) map.set(binding.trace_id, binding.record);
+    });
+    return map;
+  }
+
+  // resolved: 最上位候補の確信度がruleset.auto_applicable_thresholds.propertyConfidence以上、
+  // かつmarginOf()がthresholds.margin以上(次点候補との差が十分)。候補が1件のみの場合は
+  // marginOf()がその候補自身のconfidenceを返すため、実質propertyConfidence判定だけで決まる
+  // (弱い1件だけの候補を安易にresolvedにしないための、既存の2つの閾値の組み合わせ)。
+  // unavailable: 候補が1件もない。
+  // ambiguous: 候補はあるがresolvedの条件を満たさない(確信度不足、または次点との僅差)。
+  // 新しい閾値は発明せず、既存のruleset(AUTO_APPLICABLE_THRESHOLDS由来のmargin・
+  // propertyConfidence)をそのまま使う(shadow_mode_integration_design.md 7節のmarginOf()
+  // パターンをproperty_candidatesへ適用する、という元の設計をそのまま踏襲)。
+  function resolvePropertyStatus(candidates, thresholds) {
+    if (!candidates.length) return 'unavailable';
+    const top = candidates[0];
+    const margin = marginOf(candidates);
+    if (top.confidence >= thresholds.propertyConfidence && margin >= thresholds.margin) return 'resolved';
+    return 'ambiguous';
+  }
+
+  // binding.diagnostics/binding.not_analyzed(Phase B-1が既に保持しているpath_mapping_unsupported・
+  // stale_annotation・no_annotation等、side・trace_idを含む具体的な診断)を、この関数独自の
+  // binding_not_ready等のマーカーで置き換えず、必ず引き継ぐ(レビューで、ready:false時に元診断が
+  // 消え「なぜ結合できないのか」という具体情報が失われると指摘された)。
+  function blockedPropertyResult(diagnostics, binding) {
+    return { ready:false, resolutions:[],
+      diagnostics:[...diagnostics, ...(binding?.diagnostics || [])],
+      not_analyzed:[...(binding?.not_analyzed || [])] };
+  }
+
+  function generatePropertyResolutions({ binding }) {
+    if (!binding || !binding.ready) {
+      return blockedPropertyResult([{ code:'binding_not_ready', severity:'error',
+        detail:'quantity_sidecar_binding_core.bindInputPair()がready:falseのためproperty候補を生成できません' }], binding);
+    }
+    // 両側とも同じ検証済みrulesetを共有している前提(bindSide()がSUPPORTED_RULESETSとの
+    // 完全一致を要求しているため、ready:trueならrequirement/actual双方の閾値は同一のはず)。
+    // 念のため一方が欠けていても他方から解決できるようフォールバックする。
+    const thresholds = binding.requirement?.ruleset_version?.auto_applicable_thresholds
+      || binding.actual?.ruleset_version?.auto_applicable_thresholds;
+    if (!thresholds) {
+      return blockedPropertyResult([{ code:'ruleset_thresholds_unavailable', severity:'error',
+        detail:'auto_applicable_thresholds(margin/propertyConfidence)を解決できません' }], binding);
+    }
+
+    // 【必須修正】段階1(generateDimensionCandidates())が既に持つsidecar内quantity_id重複検査を、
+    // B-2.2a単独でも独立して実行する。generatePropertyResolutions()は公開関数として単独で
+    // 呼び出せるため、「段階1が先に呼ばれて止まるから安全」という前提に依存してはいけない、
+    // とレビューで指摘された。
+    const reqAnalysesByTrace = bindingAnalysesByTraceId(binding.requirement);
+    const actAnalysesByTrace = bindingAnalysesByTraceId(binding.actual);
+    const reqDuplicateIds = duplicateQuantityIds(reqAnalysesByTrace);
+    const actDuplicateIds = duplicateQuantityIds(actAnalysesByTrace);
+    if (reqDuplicateIds.length || actDuplicateIds.length) {
+      return blockedPropertyResult([
+        ...reqDuplicateIds.map(id => ({ code:'duplicate_quantity_id', severity:'error', side:'requirement', quantity_id:id, detail:'要求側sidecar内でquantity_idが重複しています' })),
+        ...actDuplicateIds.map(id => ({ code:'duplicate_quantity_id', severity:'error', side:'actual', quantity_id:id, detail:'実仕様側sidecar内でquantity_idが重複しています' })),
+      ], binding);
+    }
+
+    const reqRecordsByTrace = boundRecordsByTraceId(binding.requirement);
+    const actRecordsByTrace = boundRecordsByTraceId(binding.actual);
+
+    // 【必須修正】bound状態のtrace_idに対応する元trace recordがbinding内に見つからない場合
+    // (bindSide()経由で正しく生成されたbindingでは起こらないはずだが、手動構築したbinding等の
+    // データ不整合に対する防御)、空文脈へ静かにフォールバックせずfail closedする、と指摘された。
+    const missingRecordDiagnostics = [];
+    const checkMissingRecords = (analysesByTrace, recordsByTrace, side) => {
+      for (const traceId of analysesByTrace.keys()) {
+        if (!recordsByTrace.has(traceId)) {
+          missingRecordDiagnostics.push({ code:'bound_record_missing', severity:'error', side, trace_id:traceId,
+            detail:'bound状態のtrace_idに対応する元trace recordがbinding内に見つかりません' });
+        }
+      }
+    };
+    checkMissingRecords(reqAnalysesByTrace, reqRecordsByTrace, 'requirement');
+    checkMissingRecords(actAnalysesByTrace, actRecordsByTrace, 'actual');
+    if (missingRecordDiagnostics.length) return blockedPropertyResult(missingRecordDiagnostics, binding);
+
+    const resolutions = [];
+    const process = (analysesByTrace, recordsByTrace, side) => {
+      for (const [traceId, analyses] of [...analysesByTrace.entries()].sort(([a], [b]) => String(a).localeCompare(String(b)))) {
+        const record = recordsByTrace.get(traceId);
+        // 【必須修正】その行(trace)に存在する全analysisのsource_fieldを、対象数量自身の列だけで
+        // なく丸ごと除外集合にする(1行に複数の数量があるケースでの数量間の文脈漏れ込み防止)。
+        const quantitySourceFields = new Set(analyses.map(a => a?.source_field).filter(Boolean));
+        const ctx = { nearbyText:nearbyTextForRecord(record, quantitySourceFields), tags:record?.tags || [] };
+        for (const analysis of [...analyses].sort((a, b) => String(a?.quantity_id || '').localeCompare(String(b?.quantity_id || '')))) {
+          const candidates = generatePropertyCandidates(analysis.quantity, ctx);
+          const status = resolvePropertyStatus(candidates, thresholds);
+          resolutions.push({
+            side, trace_id:traceId, quantity_id:analysis.quantity_id, status,
+            concept_id: status === 'resolved' ? candidates[0].concept_id : null,
+            candidates,
+          });
+        }
+      }
+    };
+    process(reqAnalysesByTrace, reqRecordsByTrace, 'requirement');
+    process(actAnalysesByTrace, actRecordsByTrace, 'actual');
+
+    // 【必須修正】正常終了時もbinding.diagnostics/not_analyzed(missing_annotation等のwarning、
+    // no_annotation等)を引き継ぐ。以前はready:true時に常にdiagnostics:[]を返しており、
+    // Phase B-1が既に検出していた警告・未解析情報が呼び出し側から見えなくなっていた、と
+    // 指摘された。
+    return { ready:true, resolutions,
+      diagnostics:[...(binding.diagnostics || [])], not_analyzed:[...(binding.not_analyzed || [])] };
+  }
+
+  // ── Phase B-2.2b: 段階1(次元一致バケット)と段階2a(数量ごとのproperty解決)の結果を突き合わせ、
+  // concept_idが一致する数量ペアだけをcomparison候補として生成する(3.4節 段階2)。1つの
+  // candidate_bucketsバケット内であっても数量ID数は無制限(200×200のような合成データも既存の
+  // 次元候補回帰テストで確認済み)であるため、段階1と同様に個々のペアを総当たりで評価せず、
+  // concept_idごとのグルーピングと候補上限で組み合わせ爆発を避ける。数値比較・comparisonMode
+  // 導出・充足判定はまだ行わない(3.4節 段階3以降、未着手のまま)。
+  //
+  // 【round1レビュー修正、重大1: 全直積の中間生成】初回実装は`reqIds.length×actIds.length`の
+  // ペアを配列へ一度すべて生成してからslice()していたため、candidateLimitを超えた分も含めて
+  // O(バケット内数量数の2乗)のメモリ・時間を消費していた(200×200なら40,000件、5,000×5,000なら
+  // 2,500万件を先に作ってから大半を捨てる)。これは段階1が防いだはずの組み合わせ爆発の再発であり、
+  // 「全直積を中間配列として生成しない」という3.4節の契約に反する。修正: 直積を配列化せず、
+  // ソート済みID列を二重ループで走査しながら上限に達した時点で即座に打ち切る(下記
+  // emitConceptGroupCandidates())。
+  const DEFAULT_COMPARISON_CANDIDATE_LIMIT = 50;
+  // 【round1レビュー修正、重大2 → round2レビューで「全体上限の判定材料」自体が誤りと訂正】
+  // per-group上限(candidateLimit)だけでは、バケット数・concept数が多いケースで合計候補数が
+  // 際限なく積み上がりうる(candidateLimitは「1つの(bucket,concept_id)組あたりの上限」であり、
+  // 全体の上限ではないと指摘された)。round1では全体の合計にも別途上限(totalCandidateLimit)を
+  // 設けたが、その判定に使っていたのは「各グループをcandidateLimitで切り詰めた後」の実現候補数
+  // だった。これでは(a) 1グループだけでcandidateLimitを超える巨大な入力が複数集まると、
+  // 切り詰め後もなお大量の候補オブジェクトを生成してから最後に全破棄することになり性能保護に
+  // ならない、(b) 多数の小さなグループ(例: 100グループ×潜在100件をcandidateLimit=1で切り詰め)
+  // では実現後の合計(100件)が小さく見えるため、真の潜在合計(10,000件)が大きくてもtotalCandidateLimit
+  // を回避できてしまう、という2つの穴が残る、とround2レビューで指摘された。修正: 判定対象を
+  // 「切り詰め前の潜在ペア数(reqIds.length×actIds.length)を全グループにわたって合計した値」に
+  // 変更し、候補オブジェクトを1件も生成しない段階(Pass 1)でこの合計とtotalCandidateLimitを
+  // 比較するようにした(詳細はgenerateComparisonCandidates()本体のコメントを参照)。既定値も
+  // 「実現候補数の上限」から「潜在ペア数合計の上限」へ意味が変わったことに合わせて500→2000へ
+  // 引き上げた。
+  // 【round3レビュー修正、重大1: 上限を2種類に分離】round2の`totalCandidateLimit`は「切り詰め前の
+  // 潜在ペア数合計」を判定材料にしたが、上限値自体をMAX_SAFE_TOTAL_CANDIDATE_LIMIT=10,000,000まで
+  // 許容していたため、たとえば1,000グループ×各グループの潜在1万件・candidateLimit=10,000・
+  // totalCandidateLimit=10,000,000のような設定では、潜在合計チェックは通過するがPass 2で
+  // 実際に1,000万件のcomparison candidateオブジェクトを実体化できてしまう、と指摘された。
+  // 「探索空間(潜在ペア数)の大きさ」と「実際にメモリへ載せる候補オブジェクト数」は別の量であり、
+  // 別々の上限で守る必要がある。修正:
+  // - `totalCandidateLimit`: 実体化見込み件数(Σ min(potentialPairCount_i, candidateLimit)、
+  //   =Pass 2が実際に生成するオブジェクト数の上限)の上限。実際にメモリへ載る量を直接制限するため、
+  //   上限値自体も1レコードあたりの上限(candidateLimit)と同程度の桁に抑える
+  //   (MAX_SAFE_TOTAL_CANDIDATE_LIMIT、後述)。
+  // - `totalPotentialPairLimit`(新設): 切り詰め前の潜在ペア数合計の上限。Pass 1の集計自体は
+  //   バケット数×concept数に比例するだけの軽い加算処理であり、この上限を大きくしても
+  //   組み合わせ爆発には繋がらないため、大きめの値を許容する。
+  const DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT = 2000;
+  const DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT = 2000000;
+  const MAX_SAFE_CANDIDATE_LIMIT = 10000;
+  // 【round4レビュー修正、中3】totalCandidateLimitの検証上限は実際にメモリへ載り、UIへ表示
+  // されうる候補オブジェクト数を直接制限する。ブラウザでの実測(ヒープ・テーブル描画等)による
+  // 検証がまだできていないため、round3で設定した100,000は根拠なく大きすぎると指摘された。
+  // Playwright等での実測が済むまでは、より保守的な10,000を上限とする。
+  const MAX_SAFE_TOTAL_CANDIDATE_LIMIT = 10000;
+  // totalPotentialPairLimitはPass 1の軽い集計(乗算・加算のみ、オブジェクト生成なし)にしか
+  // 使われないため、totalCandidateLimitより大幅に大きい上限を許容してよい。
+  const MAX_SAFE_TOTAL_POTENTIAL_PAIR_LIMIT = 1000000000;
+
+  function isSafeLimit(value, max = MAX_SAFE_CANDIDATE_LIMIT) { return Number.isSafeInteger(value) && value >= 1 && value <= max; }
+
+  function resolutionLookup(propertyResult) {
+    const map = new Map();
+    (propertyResult?.resolutions || []).forEach(r => map.set(`${r.side}:${r.quantity_id}`, r));
+    return map;
+  }
+
+  // quantityIds(1バケット・1side分)を、B-2.2aの解決結果に基づき「resolved」はconcept_idごとの
+  // Mapへ、それ以外(ambiguous/unavailable、および対応する解決結果自体が見つからない防御的ケース)は
+  // unresolvedへ振り分ける。generatePropertyCandidates()自体はここでは一切呼び出さない
+  // (呼び出し側が1回だけ計算したgeneratePropertyResolutions()の結果をMap参照するだけ)。
+  function groupResolvedByConcept(quantityIds, side, resolutionByKey, unresolved) {
+    const byConcept = new Map();
+    for (const id of quantityIds) {
+      const resolution = resolutionByKey.get(`${side}:${id}`);
+      if (!resolution) { unresolved.push({ quantity_id:id, status:'missing_resolution' }); continue; }
+      if (resolution.status !== 'resolved') { unresolved.push({ quantity_id:id, status:resolution.status }); continue; }
+      if (!byConcept.has(resolution.concept_id)) byConcept.set(resolution.concept_id, []);
+      byConcept.get(resolution.concept_id).push(id);
+    }
+    return byConcept;
+  }
+
+  // 【round4レビュー修正、重大1: confidence降順ソートを撤廃】旧実装は切り詰め時の順序基準として
+  // reqIds/actIds全体をconfidence降順(同点はquantity_id昇順)へ複製・ソートしていた。しかし
+  // (a) 1つのbound record内の全analysisがnearbyText/tagsを共有するため、同一バケット・同一side・
+  // 同一conceptの候補間でconfidenceが実際に異なることは構造的に起こらず(常にconfidence同点)、
+  // このソートは実質的にquantity_id昇順ソートと同じ結果しか生まないこと、(b) それにもかかわらず
+  // candidateLimitの大きさに関わらずreqIds/actIds全体(たとえば片側50万件)を毎回複製・O(N log N)
+  // ソートしており、totalCandidateLimit(実体化見込み件数の上限)がこの複製・ソート自体のコストを
+  // 一切制限できていなかった、と指摘された(candidateLimit=50に抑えても、その前に50万要素の
+  // 配列を複製・全件ソートしてしまう)。さらに、stage 1(generateDimensionCandidates()の
+  // dimensionSideIndex())が既にanalysesをquantity_id昇順でソート済みであり、bucket.
+  // requirement_quantity_ids/actual_quantity_idsはその順序を保ったまま届く。つまりreqIds/actIds
+  // は呼び出し時点で既にquantity_id昇順ソート済みであり、独自にソートし直す必要が最初からなかった。
+  // 修正: ソートを撤廃し、reqIds/actIdsをそのまま(既にソート済みの状態のまま)二重ループで
+  // 走査し、candidateLimitに達した時点で即座に打ち切る。これによりこの関数の計算量は
+  // O(candidateLimit)にとどまり、reqIds/actIdsの実際の長さに一切依存しなくなる。
+  function emitConceptGroupCandidates(reqIds, actIds, conceptId, bucket, candidateLimit, comparisonCandidates) {
+    let emitted = 0;
+    outer:
+    for (const reqId of reqIds) {
+      for (const actId of actIds) {
+        if (emitted >= candidateLimit) break outer;
+        comparisonCandidates.push({
+          requirement_quantity_id:reqId, actual_quantity_id:actId, concept_id:conceptId, dimension:bucket.dimension,
+          requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
+          matcher_a_id:bucket.matcher_a_id ?? null, matcher_b_id:bucket.matcher_b_id ?? null,
+        });
+        emitted++;
+      }
+    }
+    return emitted;
+  }
+
+  // 【round1レビュー修正、重大3】binding.diagnostics/not_analyzedを常に引き継ぐ。初回実装は
+  // binding.ready===falseの早期returnでbindingそのものをblockedComparisonResult()へ渡しておらず、
+  // path_mapping_unsupported・source_mismatch・stale_annotation・ruleset_mismatch等、Phase B-1が
+  // side・trace_id付きで検出済みの具体的な診断が消えていた(B-2.2aで一度修正したのと同じ欠陥の
+  // 再発、と指摘された)。修正: bindingを必ず受け取り、dimensionResult/propertyResultが
+  // まだ存在しない段階の早期returnでも、binding.diagnostics/not_analyzedだけは必ず引き継ぐ。
+  function blockedComparisonResult(diagnostics, binding, dimensionResult, propertyResult) {
+    return { ready:false, comparison_candidates:[], candidate_count:0, result_complete:false,
+      diagnostics:[...diagnostics, ...(binding?.diagnostics || []), ...(dimensionResult?.diagnostics || []), ...(propertyResult?.diagnostics || [])],
+      not_analyzed:[...(binding?.not_analyzed || []), ...(dimensionResult?.not_analyzed || []), ...(propertyResult?.not_analyzed || [])] };
+  }
+
+  function generateComparisonCandidates({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    // 【round1レビュー修正、中】candidateLimit/totalCandidateLimit/totalPotentialPairLimitを
+    // 未検証のまま算術・比較へ使うと、負数・非整数・NaN・Infinity・文字列等で誤動作しうる
+    // (呼び出し側がInfinity等を渡すだけで上限機構そのものを無効化できてしまう、と指摘された)。
+    // それぞれ1以上・各自の安全な整数上限以下であることを検証し、不正ならfail closedする。
+    if (!isSafeLimit(candidateLimit)) {
+      return blockedComparisonResult([{ code:'candidate_limit_invalid', severity:'error',
+        detail:`candidateLimitは1以上${MAX_SAFE_CANDIDATE_LIMIT}以下の安全な整数である必要があります(実際=${JSON.stringify(candidateLimit)})` }], binding, null, null);
+    }
+    if (!isSafeLimit(totalCandidateLimit, MAX_SAFE_TOTAL_CANDIDATE_LIMIT)) {
+      return blockedComparisonResult([{ code:'total_candidate_limit_invalid', severity:'error',
+        detail:`totalCandidateLimitは1以上${MAX_SAFE_TOTAL_CANDIDATE_LIMIT}以下の安全な整数である必要があります(実際=${JSON.stringify(totalCandidateLimit)})` }], binding, null, null);
+    }
+    if (!isSafeLimit(totalPotentialPairLimit, MAX_SAFE_TOTAL_POTENTIAL_PAIR_LIMIT)) {
+      return blockedComparisonResult([{ code:'total_potential_pair_limit_invalid', severity:'error',
+        detail:`totalPotentialPairLimitは1以上${MAX_SAFE_TOTAL_POTENTIAL_PAIR_LIMIT}以下の安全な整数である必要があります(実際=${JSON.stringify(totalPotentialPairLimit)})` }], binding, null, null);
+    }
+    if (!binding || !binding.ready) {
+      return blockedComparisonResult([{ code:'binding_not_ready', severity:'error',
+        detail:'quantity_sidecar_binding_core.bindInputPair()がready:falseのため比較候補を生成できません' }], binding, null, null);
+    }
+    // dimensionResult/propertyResultを呼び出し側からの別引数として受け取らず、必ずこの関数の
+    // 内部で同じbindingから1回ずつ計算する(B-2.2a round1で見つかった、bindingとは別に渡された
+    // 検証済みデータが実際のbindingと食い違いうる、という欠陥クラスをここで再発させないための
+    // 意図的な設計判断。詳細はshadow_mode_integration_design.md 3.4節の訂正を参照)。
+    const dimensionResult = generateDimensionCandidates({ binding, relations });
+    if (!dimensionResult.ready) {
+      return blockedComparisonResult([{ code:'dimension_candidates_not_ready', severity:'error',
+        detail:'generateDimensionCandidates()がready:falseのため比較候補を生成できません' }], binding, dimensionResult, null);
+    }
+    const propertyResult = generatePropertyResolutions({ binding });
+    if (!propertyResult.ready) {
+      return blockedComparisonResult([{ code:'property_resolutions_not_ready', severity:'error',
+        detail:'generatePropertyResolutions()がready:falseのため比較候補を生成できません' }], binding, dimensionResult, propertyResult);
+    }
+
+    const resolutionByKey = resolutionLookup(propertyResult);
+    const notAnalyzed = [];
+    const diagnostics = [];
+
+    // ── 【round2/round3レビュー修正、重大1・重大2・重大3】Pass 1: 候補オブジェクトを1件も
+    // 生成せず、concept一致するグループの記述子(reqIds/actIds/potentialPairCount)だけを集める。
+    // potentialPairCountはreqIds.length×actIds.lengthの乗算のみで、直積そのものは走査・生成
+    // しないため、この段階の計算量はO(バケット数×concept数)にとどまる(バケット内の数量数が
+    // どれだけ大きくても定数時間)。
+    // 【round3レビュー修正、重大2】さらに、潜在ペア数合計(totalPotentialPairCount)・実体化見込み
+    // 件数合計(totalMaterializedUpperBound、=Σ min(potentialPairCount_i, candidateLimit)、
+    // Pass 2が実際に生成するオブジェクト数の上限)のいずれかが対応する上限を超えた時点で、
+    // バケットの走査そのものを即座に打ち切る(labeled break)。round2の実装は全バケットを
+    // 走査し終えてからまとめて判定していたため、上限超過が確定した後も残りすべてのバケットに
+    // ついて数量ID再走査・conceptグルーピング・記述子の蓄積・not_analyzed生成を続けており、
+    // 無駄な走査が残っていた、と指摘された。 ──
+    // 【round4レビュー修正、重大2】バケットの走査順がdimensionResult.candidate_buckets(=relations
+    // 引数の配列順をそのまま引き継ぐ)に依存していたため、同じrelations集合でも配列順を変えるだけで
+    // 「どのグループまで走査したか」「打ち切り時点の観測値」「打ち切りに巻き込まれたグループ」が
+    // 変わってしまっていた、と指摘された。修正: Pass 1へ入る前に、requirement_trace_id→
+    // actual_trace_id→dimensionの安定キーでバケットを並べ替える。これにより、同じrelations集合
+    // であれば入力順に関わらず常に同じバケットが先に走査され、早期打ち切りの結果(打ち切り時点の
+    // 観測値・巻き込まれたグループ)が再現可能になる。
+    const sortedBuckets = [...dimensionResult.candidate_buckets].sort((a, b) => {
+      const byReq = String(a.requirement_trace_id).localeCompare(String(b.requirement_trace_id));
+      if (byReq !== 0) return byReq;
+      const byAct = String(a.actual_trace_id).localeCompare(String(b.actual_trace_id));
+      if (byAct !== 0) return byAct;
+      return String(a.dimension).localeCompare(String(b.dimension));
+    });
+
+    const groupDescriptors = [];
+    let totalPotentialPairCount = 0;
+    let totalMaterializedUpperBound = 0;
+    let limitExceededKinds = null; // ['materialized'] / ['potential'] / ['materialized','potential'] / null(未超過)
+    let processedBucketCount = 0;
+
+    bucketScan:
+    for (const bucket of sortedBuckets) {
+      processedBucketCount++;
+      const reqUnresolved = [];
+      const actUnresolved = [];
+      const reqByConcept = groupResolvedByConcept(bucket.requirement_quantity_ids, 'requirement', resolutionByKey, reqUnresolved);
+      const actByConcept = groupResolvedByConcept(bucket.actual_quantity_ids, 'actual', resolutionByKey, actUnresolved);
+
+      const emitUnresolved = (list, side) => {
+        const byStatus = new Map();
+        list.forEach(({ quantity_id, status }) => {
+          if (!byStatus.has(status)) byStatus.set(status, []);
+          byStatus.get(status).push(quantity_id);
+        });
+        for (const [status, ids] of byStatus) {
+          notAnalyzed.push({ reason_code:'property_unresolved', side, status, quantity_ids:[...ids].sort(),
+            requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
+            matcher_a_id:bucket.matcher_a_id ?? null, matcher_b_id:bucket.matcher_b_id ?? null });
+        }
+      };
+      emitUnresolved(reqUnresolved, 'requirement');
+      emitUnresolved(actUnresolved, 'actual');
+
+      const allConceptIds = [...new Set([...reqByConcept.keys(), ...actByConcept.keys()])].sort();
+      for (const conceptId of allConceptIds) {
+        const reqIds = reqByConcept.get(conceptId);
+        const actIds = actByConcept.get(conceptId);
+        if (reqIds && actIds) {
+          const potentialPairCount = reqIds.length * actIds.length;
+          const materializedUpperBound = Math.min(potentialPairCount, candidateLimit);
+          totalPotentialPairCount += potentialPairCount;
+          totalMaterializedUpperBound += materializedUpperBound;
+          groupDescriptors.push({ reqIds, actIds, conceptId, bucket, potentialPairCount });
+          // 【round4レビュー修正、中1】両方の上限を同じ加算後にそれぞれ独立して評価し、
+          // 同時に超過した場合は両方のkindを記録する(片方だけ記録すると診断が不完全になる、
+          // と指摘された)。
+          const exceededKinds = [];
+          if (totalMaterializedUpperBound > totalCandidateLimit) exceededKinds.push('materialized');
+          if (totalPotentialPairCount > totalPotentialPairLimit) exceededKinds.push('potential');
+          if (exceededKinds.length) { limitExceededKinds = exceededKinds; break bucketScan; }
+        } else if (reqIds) {
+          notAnalyzed.push({ reason_code:'concept_mismatch', side:'requirement', concept_id:conceptId, quantity_ids:[...reqIds].sort(),
+            requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
+            matcher_a_id:bucket.matcher_a_id ?? null, matcher_b_id:bucket.matcher_b_id ?? null });
+        } else if (actIds) {
+          notAnalyzed.push({ reason_code:'concept_mismatch', side:'actual', concept_id:conceptId, quantity_ids:[...actIds].sort(),
+            requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
+            matcher_a_id:bucket.matcher_a_id ?? null, matcher_b_id:bucket.matcher_b_id ?? null });
+        }
+      }
+    }
+
+    // ── いずれかの上限を超えた場合、候補オブジェクトを1件も生成せずfail closedする(どのグループ
+    // 由来の候補を残すかという恣意的な判断を避けるため)。バケット走査自体を打ち切っているため、
+    // groupDescriptorsには走査済みのバケット分しか含まれない(=以後のバケットの潜在ペア数は
+    // 合計に反映されていないが、既に上限超過が確定しているため計算する必要がない)。
+    // 【round3レビュー修正、中1】この経路では実際には1件も候補を生成していないため、
+    // 「切り詰めました」「超過分を除外しました」という(部分的に成功したかのような)表現は
+    // 事実と一致しない、と指摘された。修正: 走査済みの各グループのうち、per-group上限を
+    // 超えていた(=生成していれば切り詰められていたはずの)ものは、`candidate_limit_exceeded`
+    // (実際に切り詰めが起きた場合専用のreason_code)ではなく`candidate_limit_would_exceed`
+    // (実体化していれば超過していたはずという仮定の監査記録)として、`materialized_pair_count:0`
+    // を明示して記録する。diagnostics配列への個別warning追加は行わない(全体のerror診断1件で
+    // 十分であり、実体化していないのに「切り詰めた」というwarningを積み増すと事実と食い違うため)。 ──
+    if (limitExceededKinds) {
+      groupDescriptors.forEach(({ conceptId, bucket, potentialPairCount }) => {
+        if (potentialPairCount > candidateLimit) {
+          notAnalyzed.push({ reason_code:'candidate_limit_would_exceed', concept_id:conceptId,
+            requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
+            matcher_a_id:bucket.matcher_a_id ?? null, matcher_b_id:bucket.matcher_b_id ?? null,
+            potential_pair_count:potentialPairCount, candidate_limit:candidateLimit, materialized_pair_count:0 });
+        }
+      });
+      // 【round4レビュー修正、重大2】observed_*_at_stopという名前で、これが「入力全体の合計」では
+      // なく「バケット走査を打ち切った時点までの部分集計」であることをフィールド名自体で明示する
+      // (旧`total_potential_pair_count`等の名前は、あたかも入力全体の総計であるかのように誤解
+      // されうる、と指摘された)。unscanned_bucket_countが0でない限り、これらは部分集計である。
+      const limitNames = limitExceededKinds.map(kind => kind === 'materialized' ? 'totalCandidateLimit' : 'totalPotentialPairLimit');
+      const unscannedBucketCount = sortedBuckets.length - processedBucketCount;
+      diagnostics.push({ code:'total_candidate_limit_exceeded', severity:'error',
+        detail:`比較候補の累計(バケット走査を打ち切った時点の値。実体化見込み=${totalMaterializedUpperBound}、潜在=${totalPotentialPairCount})が${limitNames.join('・')}を超えたため、候補を1件も生成せず停止しました(走査済み${processedBucketCount}/${sortedBuckets.length}バケット、未走査${unscannedBucketCount}バケット)` });
+      notAnalyzed.push({ reason_code:'total_candidate_limit_exceeded', limit_kinds:limitExceededKinds,
+        observed_potential_pair_count_at_stop:totalPotentialPairCount,
+        observed_materialized_upper_bound_at_stop:totalMaterializedUpperBound,
+        total_candidate_limit:totalCandidateLimit, total_potential_pair_limit:totalPotentialPairLimit,
+        processed_bucket_count:processedBucketCount, total_bucket_count:sortedBuckets.length,
+        unscanned_bucket_count:unscannedBucketCount });
+      const combinedDiagnostics = [...(dimensionResult.diagnostics || []), ...(propertyResult.diagnostics || []), ...diagnostics];
+      return { ready:isReady(combinedDiagnostics), comparison_candidates:[], candidate_count:0, result_complete:false,
+        diagnostics:combinedDiagnostics,
+        not_analyzed:[...(dimensionResult.not_analyzed || []), ...(propertyResult.not_analyzed || []), ...notAnalyzed] };
+    }
+
+    // ── Pass 2: 潜在合計がtotalCandidateLimit以内であることを確認できたので、ここで初めて
+    // 実際の候補オブジェクトを生成する(1グループあたりcandidateLimit件まで)。 ──
+    const comparisonCandidates = [];
+    let anyGroupTruncated = false;
+    for (const { reqIds, actIds, conceptId, bucket, potentialPairCount } of groupDescriptors) {
+      const emitted = emitConceptGroupCandidates(reqIds, actIds, conceptId, bucket, candidateLimit, comparisonCandidates);
+      if (potentialPairCount > emitted) {
+        anyGroupTruncated = true;
+        const excludedCount = potentialPairCount - emitted;
+        diagnostics.push({ code:'candidate_limit_exceeded', severity:'warning', concept_id:conceptId,
+          requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
+          detail:`候補上限(${candidateLimit})を超えたため、超過分(${excludedCount}件)を切り詰めました` });
+        notAnalyzed.push({ reason_code:'candidate_limit_exceeded', concept_id:conceptId,
+          requirement_trace_id:bucket.requirement_trace_id, actual_trace_id:bucket.actual_trace_id,
+          matcher_a_id:bucket.matcher_a_id ?? null, matcher_b_id:bucket.matcher_b_id ?? null,
+          excluded_pair_count:excludedCount });
+      }
+    }
+
+    // ── 【round2レビュー修正、重大2】per-group上限による切り詰めは、3.4節6番が元々想定していた
+    // 「打ち切りと、打ち切ったこと自体を診断情報に残す」という設計のまま維持する(1件の異常な
+    // レコードのために比較実行全体を止めると、他の無関係な正常レコードの結果まで失われてしまう
+    // ため。レビューでも「完全にfail closedする方が単純で安全」としつつ、「result_complete:falseを
+    // 追加し後段が不完全候補集合を確定結果として扱わない契約にする」という代替案自体は認めていた)。
+    // ただし、打ち切りが発生した=候補集合が完全ではないことを、diagnostics/not_analyzedを
+    // 読まなくても機械的に検知できるよう、result_completeフィールドを新設した。段階3以降
+    // (条件候補の整合・comparisonMode導出・数値比較)が実装される際は、result_complete===falseの
+    // 結果を確定結果として扱わない契約とする。 ──
+    const combinedDiagnostics = [...(dimensionResult.diagnostics || []), ...(propertyResult.diagnostics || []), ...diagnostics];
+    return { ready:isReady(combinedDiagnostics), comparison_candidates:comparisonCandidates,
+      candidate_count:comparisonCandidates.length, result_complete:!anyGroupTruncated, diagnostics:combinedDiagnostics,
+      not_analyzed:[...(dimensionResult.not_analyzed || []), ...(propertyResult.not_analyzed || []), ...notAnalyzed] };
+  }
+
+  // ── Phase B-2.3a 段階1: 数量ごとのinterval_semantics_candidates解決。この候補配列自体は
+  // Phase A抽出時に既に計算されbindSide()が埋め込んだ不変ツリーの一部として届いており
+  // (quantity_annotation_schema_v1.json 2.3節、analysis.interval_semantics_candidates)、
+  // ここで再生成はしない(generatePropertyResolutions()がconcept候補をgeneratePropertyCandidates()
+  // で毎回再計算するのとは対照的。区間意味候補は既存の語彙・スコアリング規則に基づき
+  // Phase Aで既に確定しているため、比較段階が担うのは既存候補の閾値判定による正規化だけである)。
+  // comparisonMode導出(deriveComparisonModeCandidate())・数値比較・区間比較・充足判定は
+  // 本段階では一切行わない(3.4節 段階3以降、未着手のまま)。 ──
+
+  // 【レビュー修正、中1】interval_semantics_candidatesの`value`はJSON Schema上は任意の非空文字列
+  // であり(quantity_annotation_schema_v1.json、enum制約なし)、resolveConditionStatus()が
+  // confidence/marginだけで判定すると、ruleset v2.19が実際には生成し得ない未知の文字列や、
+  // 「候補が弱い場合の受け皿」でしかない'unknown'自体が、たまたま高いconfidenceを持つ形で
+  // 格納された場合にresolvedへ昇格してしまう(COMPARISON_MODE_DERIVATION_TABLE・
+  // deriveComparisonModeCandidate()は'unknown'を明示的に導出対象から除外する契約であり、
+  // 「resolvedかつvalue:'unknown'」は下流の契約と矛盾する)。ruleset v2.19の
+  // REQUIREMENT_SEMANTICS_RULES・ACTUAL_SEMANTICS_RULES・CONDITION_SEMANTICS_RULES
+  // (semantic_mapping_prototype.js 83-213行目)が実際に生成しうるvalueの全体をallowlist化し、
+  // 'unknown'(常設の受け皿、実際の意味区分ではない)を含め、この集合に無い値は最上位候補で
+  // あってもresolvedにしない(曖昧候補を推測で一意化しないのと同じ理由で、未知語を推測で
+  // 「使える値」と扱わない)。ルール自体を変更した場合はこの集合も追随して更新すること
+  // (quantity_condition_candidate_verification.jsに、既知の全語彙がresolved可能であることを
+  // 確認する回帰テストがある)。
+  const KNOWN_CONDITION_SEMANTICS_VALUES = new Set([
+    'required_capability_domain', 'acceptable_region', 'achieved_point', 'capability_domain',
+    'outcome_range', 'guaranteed_minimum', 'guaranteed_maximum', 'aggregated_representative_value',
+    'test_condition',
+  ]);
+
+  // resolvePropertyStatus()と同型だが、閾値はpropertyConfidenceではなくmodeConfidenceを使う
+  // (AUTO_APPLICABLE_THRESHOLDSはproperty候補とinterval_semantics候補とで確信度閾値を
+  // 別々に持ち、margin閾値だけを共有する設計になっている。semantic_mapping_prototype.js
+  // evaluateAutoApplicable()参照)。resolved: 最上位候補がKNOWN_CONDITION_SEMANTICS_VALUES
+  // に含まれる既知の値であり、かつconfidenceがmodeConfidence以上、かつmarginOf()がmargin以上。
+  // unavailable: 候補が0件(スキーマ上は空配列も許容されるため防御的に扱うが、
+  // generateIntervalSemanticsCandidates()は常にunknownの受け皿候補を含めるため実運用では
+  // 起こらない見込み)。ambiguous: それ以外(confidence/margin不足、または最上位候補が
+  // 'unknown'・未知語のいずれか)。新しい閾値は発明しない。
+  function resolveConditionStatus(candidates, thresholds) {
+    if (!candidates.length) return 'unavailable';
+    const top = candidates[0];
+    if (!KNOWN_CONDITION_SEMANTICS_VALUES.has(top.value)) return 'ambiguous';
+    const margin = marginOf(candidates);
+    if (top.confidence >= thresholds.modeConfidence && margin >= thresholds.margin) return 'resolved';
+    return 'ambiguous';
+  }
+
+  // interval_semantics_candidatesはPhase Aのscoresemantics()がconfidence降順で生成する契約だが
+  // (semantic_mapping_prototype.js scoreSemantics()末尾の.sort())、JSON Schemaはこの順序を
+  // 強制していない。resolveConditionStatus()の正しさは「先頭要素が最上位候補である」ことに
+  // 依存するため、外部データの順序をそのまま信頼せず、ここで確信度降順に並べ直してから使う
+  // (元の配列は不変スナップショットの一部のため複製してからソートする)。
+  // 【レビュー修正、中2】confidenceが同点の候補同士は、単純な.sort()では入力配列内の元の順序
+  // (=sidecar生成側の実装依存、呼び出し側からは非決定的に見える)がそのまま保たれてしまう
+  // (Array.prototype.sortは安定ソートのため)。判定結果(status/value)自体はconfidenceの値だけで
+  // 決まり同点候補の順序には依存しないが、resolutions[].candidatesという監査用の出力配列の
+  // 順序が入力順に依存すると、スナップショット比較等での再現性を損なう。value昇順を
+  // 決定的なtie-breakとして追加する。
+  function sortedByConfidenceDesc(candidates) {
+    return [...candidates].sort((a, b) => (b.confidence - a.confidence) || String(a.value).localeCompare(String(b.value)));
+  }
+
+  // 【レビュー修正、重大1】interval_semantics_candidatesはJSON Schema上、配列サイズに上限がない
+  // (maxItems未設定)。既知語彙(KNOWN_CONDITION_SEMANTICS_VALUES、9種)+unknownの受け皿を
+  // 前提にすれば実際に生成される候補数はせいぜい10件程度だが、スキーマはこれを保証しないため、
+  // スキーマ上有効なsidecarへ1数量あたり極端に大きな候補配列を格納できてしまう。この検査を
+  // 経ないままsortedByConfidenceDesc()で複製・全件ソートすると、B-2.2bが直積生成に対して
+  // 行った組み合わせ爆発対策と同種の、未対策な計算コストが生じる。上限検査は複製・ソートより
+  // 前に行い、超過時はready:falseで即座に停止する(1件の異常な数量のために結合全体の信頼性が
+  // 疑わしくなるため、B-2.2bのcandidateLimitのような部分的切り詰めではなく、
+  // duplicate_quantity_id等と同じ「構造的な入力異常」として扱う)。
+  const MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY = 64;
+
+  // 【レビュー修正、修正順3】interval_semantics_candidates内で同じvalueが複数回現れることは、
+  // 正しい生成元(semantic_mapping_prototype.jsのscoreSemantics()、valueごとにMapで集約するため
+  // 構造的に重複しない)では起こらない契約になっている。それでもスキーマ自体はこれを禁止して
+  // いないため、値の重複自体を「本来ありえない=信頼できない入力」の兆候として検査し、
+  // 上限検査と同じ理由でfail closedする(件数・重複のいずれも、複製・ソート前の軽い1回走査で
+  // 検査できるため、性能への影響はない)。
+  function validateIntervalSemanticsCandidates(analysesByTrace, side, diagnostics) {
+    for (const [traceId, analyses] of analysesByTrace) {
+      for (const analysis of analyses) {
+        const candidates = analysis.interval_semantics_candidates || [];
+        if (candidates.length > MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY) {
+          diagnostics.push({ code:'condition_candidate_limit_exceeded', severity:'error', side, trace_id:traceId, quantity_id:analysis.quantity_id,
+            observed_count:candidates.length, limit:MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY,
+            detail:`interval_semantics_candidatesの件数(${candidates.length})が上限(${MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY})を超えています` });
+          continue; // 上限超過が確定した配列を、重複検査のためだけにさらに全走査しない
+        }
+        const seen = new Set();
+        for (const candidate of candidates) {
+          if (seen.has(candidate.value)) {
+            diagnostics.push({ code:'condition_candidate_duplicate_value', severity:'error', side, trace_id:traceId, quantity_id:analysis.quantity_id,
+              value:candidate.value, detail:`interval_semantics_candidates内でvalue"${candidate.value}"が重複しています` });
+          }
+          seen.add(candidate.value);
+        }
+      }
+    }
+  }
+
+  function blockedConditionResult(diagnostics, binding) {
+    return { ready:false, resolutions:[],
+      diagnostics:[...diagnostics, ...(binding?.diagnostics || [])],
+      not_analyzed:[...(binding?.not_analyzed || [])] };
+  }
+
+  function generateConditionResolutions({ binding }) {
+    if (!binding || !binding.ready) {
+      return blockedConditionResult([{ code:'binding_not_ready', severity:'error',
+        detail:'quantity_sidecar_binding_core.bindInputPair()がready:falseのため条件候補を解決できません' }], binding);
+    }
+    const thresholds = binding.requirement?.ruleset_version?.auto_applicable_thresholds
+      || binding.actual?.ruleset_version?.auto_applicable_thresholds;
+    if (!thresholds) {
+      return blockedConditionResult([{ code:'ruleset_thresholds_unavailable', severity:'error',
+        detail:'auto_applicable_thresholds(modeConfidence/margin)を解決できません' }], binding);
+    }
+
+    // 段階1(generateDimensionCandidates())・B-2.2a(generatePropertyResolutions())と同じく、
+    // sidecar内quantity_id重複検査をこの関数単独でも独立して実行する(公開関数として単独で
+    // 呼び出せるため、「他の関数が先に呼ばれて止まるから安全」という前提に依存しない)。
+    const reqAnalysesByTrace = bindingAnalysesByTraceId(binding.requirement);
+    const actAnalysesByTrace = bindingAnalysesByTraceId(binding.actual);
+    const reqDuplicateIds = duplicateQuantityIds(reqAnalysesByTrace);
+    const actDuplicateIds = duplicateQuantityIds(actAnalysesByTrace);
+    if (reqDuplicateIds.length || actDuplicateIds.length) {
+      return blockedConditionResult([
+        ...reqDuplicateIds.map(id => ({ code:'duplicate_quantity_id', severity:'error', side:'requirement', quantity_id:id, detail:'要求側sidecar内でquantity_idが重複しています' })),
+        ...actDuplicateIds.map(id => ({ code:'duplicate_quantity_id', severity:'error', side:'actual', quantity_id:id, detail:'実仕様側sidecar内でquantity_idが重複しています' })),
+      ], binding);
+    }
+
+    // 【レビュー修正、重大1・修正順3】複製・ソートより前に、件数上限・value重複を検査する。
+    const validationDiagnostics = [];
+    validateIntervalSemanticsCandidates(reqAnalysesByTrace, 'requirement', validationDiagnostics);
+    validateIntervalSemanticsCandidates(actAnalysesByTrace, 'actual', validationDiagnostics);
+    if (validationDiagnostics.length) return blockedConditionResult(validationDiagnostics, binding);
+
+    const resolutions = [];
+    const process = (analysesByTrace, side) => {
+      for (const [traceId, analyses] of [...analysesByTrace.entries()].sort(([a], [b]) => String(a).localeCompare(String(b)))) {
+        for (const analysis of [...analyses].sort((a, b) => String(a?.quantity_id || '').localeCompare(String(b?.quantity_id || '')))) {
+          const candidates = sortedByConfidenceDesc(analysis.interval_semantics_candidates || []);
+          const status = resolveConditionStatus(candidates, thresholds);
+          // 【レビュー修正、重大2】status/valueの2フィールドだけでは、下流(将来のcomparisonMode
+          // 自動適用判定、semantic_mapping_prototype.js evaluateAutoApplicable()参照)が安全性
+          // 判断に使うmargin・否定根拠の有無が失われる。resolutionは既にcandidates(evidence込み)
+          // を保持しているため導出は可能だが、都度導出させず、evaluateAutoApplicable()が
+          // 実際に必要とする形のまま明示フィールドとして保持する
+          // (evaluateAutoApplicable()自体が使うextractionWarningsCountは、interval_semantics
+          // 候補とは無関係なanalysis.quantity.extraction.warnings由来のため、この関数の関心事
+          // ではなく含めない。下流はbinding経由で直接参照できる)。
+          resolutions.push({
+            side, trace_id:traceId, quantity_id:analysis.quantity_id, status,
+            value: status === 'resolved' ? candidates[0].value : null,
+            top_confidence: candidates.length ? candidates[0].confidence : null,
+            margin: marginOf(candidates),
+            has_opposing_evidence: hasOpposingEvidence(candidates),
+            candidates,
+          });
+        }
+      }
+    };
+    process(reqAnalysesByTrace, 'requirement');
+    process(actAnalysesByTrace, 'actual');
+
+    // B-2.2a generatePropertyResolutions()と同じく、binding.diagnostics/not_analyzed
+    // (path_mapping_unsupported・stale_annotation・no_annotation等)を正常終了時も引き継ぐ。
+    return { ready:true, resolutions,
+      diagnostics:[...(binding.diagnostics || [])], not_analyzed:[...(binding.not_analyzed || [])] };
+  }
+
+  // ── Phase B-2.3a 段階2: B-2.2b比較候補へ両側(requirement/actual)の条件解決結果を付加する。
+  // comparisonResult/conditionResultは呼び出し側から別引数として受け取らず、必ずこの関数の
+  // 内部で同じbindingから計算する(B-2.2a round1・B-2.2b全体で確立した「検証済み結果を
+  // 呼び出し側から別途受け取らない」設計をここでも踏襲する。呼び出し側が実際のbindingとは
+  // 食い違うcomparisonResultを渡せてしまう迂回経路を最初から塞ぐ)。
+  //
+  // レビューで明示された必須要件: comparisonResult.ready !== trueまたは
+  // comparisonResult.result_complete !== trueの場合は必ずfail closedする(B-2.2b承認時に
+  // 「段階3以降の関数はresult_complete===trueを要求し、これを段階3の最初の回帰テストとして
+  // 固定すべき」と指摘された契約を、この最初の段階3関数で実装する)。
+  //
+  // comparisonMode導出・単位変換・数値比較・区間比較・充足判定はまだ行わない。 ──
+
+  function conditionResolutionLookup(conditionResult) {
+    const map = new Map();
+    (conditionResult?.resolutions || []).forEach(r => map.set(`${r.side}:${r.quantity_id}`, r));
+    return map;
+  }
+
+  // comparisonResult.diagnostics/not_analyzedとconditionResult.diagnostics/not_analyzedは、
+  // どちらも内部でbinding.diagnostics/not_analyzedを引き継いでいる(前者はgeneratePropertyResolutions()
+  // 経由、後者はgenerateConditionResolutions()自身)。単純に連結すると同じbinding由来の診断が
+  // 二重に現れるため、内容一致(canonicalJson)で重複除去してから返す。
+  function dedupeByCanonicalJson(items) {
+    const seen = new Set();
+    const result = [];
+    for (const item of items) {
+      const key = canonicalJson(item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(item);
+    }
+    return result;
+  }
+
+  function blockedConditionAnnotatedResult(diagnostics, binding, comparisonResult, conditionResult) {
+    return { ready:false, comparison_candidates:[], candidate_count:0, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(binding?.diagnostics || []), ...(comparisonResult?.diagnostics || []), ...(conditionResult?.diagnostics || [])]),
+      not_analyzed:dedupeByCanonicalJson([...(binding?.not_analyzed || []), ...(comparisonResult?.not_analyzed || []), ...(conditionResult?.not_analyzed || [])]) };
+  }
+
+  function generateConditionAnnotatedComparisonCandidates({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    const comparisonResult = generateComparisonCandidates({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (comparisonResult.ready !== true || comparisonResult.result_complete !== true) {
+      return blockedConditionAnnotatedResult([{ code:'comparison_candidates_not_ready_or_incomplete', severity:'error',
+        detail:`generateComparisonCandidates()がready=${JSON.stringify(comparisonResult.ready)}、result_complete=${JSON.stringify(comparisonResult.result_complete)}のため条件付き比較候補を生成できません(段階3以降はready===trueかつresult_complete===trueを要求してfail closedする契約)` }],
+        binding, comparisonResult, null);
+    }
+
+    const conditionResult = generateConditionResolutions({ binding });
+    if (conditionResult.ready !== true) {
+      return blockedConditionAnnotatedResult([{ code:'condition_resolutions_not_ready', severity:'error',
+        detail:'generateConditionResolutions()がready:falseのため条件付き比較候補を生成できません' }],
+        binding, comparisonResult, conditionResult);
+    }
+
+    const conditionByKey = conditionResolutionLookup(conditionResult);
+    // 段階1はbindingに結合済みの全数量を漏れなく処理するため、comparisonResult.comparison_candidates
+    // が参照するquantity_idは構造上すべて段階1の結果に存在するはずである。それでも「渡された
+    // データを無条件に信頼しない」という原則により、対応する条件解決結果が見つからない場合は
+    // 静かに既定値へフォールバックせず、fail closedする(generatePropertyResolutions()の
+    // bound_record_missing検査と同じ防御パターン)。
+    const missingConditionDiagnostics = [];
+    const annotated = comparisonResult.comparison_candidates.map(candidate => {
+      const reqCondition = conditionByKey.get(`requirement:${candidate.requirement_quantity_id}`);
+      const actCondition = conditionByKey.get(`actual:${candidate.actual_quantity_id}`);
+      if (!reqCondition || !actCondition) {
+        missingConditionDiagnostics.push({ code:'condition_resolution_missing', severity:'error',
+          requirement_quantity_id:candidate.requirement_quantity_id, actual_quantity_id:candidate.actual_quantity_id,
+          detail:'比較候補のquantity_idに対応する条件解決結果が見つかりません' });
+        return null;
+      }
+      // 【レビュー修正、重大2】status/valueの2フィールドだけを付加すると、後段の安全判定
+      // (margin・否定根拠の有無)に必要な情報が失われる(generateConditionResolutions()の
+      // コメント参照)。候補・evidence配列を丸ごとペア数分複製すると重くなるため、
+      // evaluateAutoApplicable()が実際に必要とするスカラー値(top_confidence・margin・
+      // has_opposing_evidence)だけを既存のstatus/valueと同じ扁平フィールドとして付加する。
+      return { ...candidate,
+        requirement_condition_status:reqCondition.status, requirement_condition_value:reqCondition.value,
+        requirement_condition_top_confidence:reqCondition.top_confidence, requirement_condition_margin:reqCondition.margin,
+        requirement_condition_has_opposing_evidence:reqCondition.has_opposing_evidence,
+        actual_condition_status:actCondition.status, actual_condition_value:actCondition.value,
+        actual_condition_top_confidence:actCondition.top_confidence, actual_condition_margin:actCondition.margin,
+        actual_condition_has_opposing_evidence:actCondition.has_opposing_evidence };
+    });
+    if (missingConditionDiagnostics.length) {
+      return blockedConditionAnnotatedResult(missingConditionDiagnostics, binding, comparisonResult, conditionResult);
+    }
+
+    return { ready:true, comparison_candidates:annotated, candidate_count:annotated.length, result_complete:true,
+      diagnostics:dedupeByCanonicalJson([...comparisonResult.diagnostics, ...conditionResult.diagnostics]),
+      not_analyzed:dedupeByCanonicalJson([...comparisonResult.not_analyzed, ...conditionResult.not_analyzed]) };
+  }
+
+  // ── Phase B-2.3b: 段階3-3。両側とも条件が`resolved`の比較候補について、固定の対応表
+  // (COMPARISON_MODE_DERIVATION_TABLE、semantic_mapping_prototype.jsから一字一句移植)から
+  // comparison mode候補を導出するだけの段階。単位変換・数値比較・区間包含判定・
+  // auto applicability・充足判定はまだ行わない(3.4節 段階4以降、未着手のまま)。
+  // quantity-annotation/1.0-rc1: comparisonMode導出ライブラリ(移植、semantic_mapping_prototype.jsの
+  // COMPARISON_MODE_DERIVATION_TABLEから一字一句移植。乖離検出はquantity_annotation_ported_lib_check.js
+  // で行う。改変禁止、移植元を直接編集してから再度移植すること。required_capability_domain×achieved_point
+  // が意図的に対応表から除外されていることに注意: 単一の達成点は、要求された能力領域全体をカバーした
+  // 証明にはならないため、v2.10で安全側の判断として除外された)
+  const COMPARISON_MODE_DERIVATION_TABLE = [
+    { requirement: 'acceptable_region', actual: 'achieved_point', mode: 'point_in_region' },
+    { requirement: 'required_capability_domain', actual: 'capability_domain', mode: 'actual_covers_requirement' },
+    { requirement: 'acceptable_region', actual: 'outcome_range', mode: 'requirement_covers_actual' },
+    { requirement: 'acceptable_region', actual: 'guaranteed_minimum', mode: 'requirement_covers_actual' },
+    { requirement: 'acceptable_region', actual: 'guaranteed_maximum', mode: 'requirement_covers_actual' },
+  ];
+  // ── quantity-annotation/1.0-rc1: comparisonMode導出ライブラリ(移植)ここまで ──
+  // 【レビュー修正、重大1】上記の移植ブロックは乖離検出(移植元とのバイト一致)のため素の配列の
+  // ままにしているが、そのままではObject.freeze({...})によるAPI全体の凍結(このファイル末尾)は
+  // 戻り値オブジェクト自身だけを凍結する浅い凍結であり、その配列・各entryオブジェクトまでは
+  // 凍結されない。呼び出し側がexportされたCOMPARISON_MODE_DERIVATION_TABLEへ直接push()・
+  // 要素の再代入を行うと、generateComparisonModeCandidates()は同じ配列をfind()で参照している
+  // ため、実行時にその変更がそのまま反映されてしまう——具体的には、安全側の理由で意図的に
+  // 除外したrequired_capability_domain×achieved_pointを呼び出し側が実行時に復活させられる、
+  // と指摘された。修正: 移植ブロック自体(乖離検出対象)は改変せず、ポート直後にこの配列と
+  // 各entryを凍結する(bindSide()のdeepFreeze()と同じ「一度作った不変ツリーを外部から
+  // 書き換えさせない」原則をここでも適用する)。
+  COMPARISON_MODE_DERIVATION_TABLE.forEach(Object.freeze);
+  Object.freeze(COMPARISON_MODE_DERIVATION_TABLE);
+
+  function blockedComparisonModeResult(diagnostics, binding, conditionAnnotatedResult) {
+    return { ready:false, comparison_mode_candidates:[], candidate_count:0, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(binding?.diagnostics || []), ...(conditionAnnotatedResult?.diagnostics || [])]),
+      not_analyzed:dedupeByCanonicalJson([...(binding?.not_analyzed || []), ...(conditionAnnotatedResult?.not_analyzed || [])]) };
+  }
+
+  function generateComparisonModeCandidates({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    // conditionAnnotatedResultは呼び出し側から別引数として受け取らず、必ずこの関数の内部で
+    // 同じbindingから計算する(B-2.2a round1以来一貫した設計方針)。
+    const conditionAnnotatedResult = generateConditionAnnotatedComparisonCandidates({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (conditionAnnotatedResult.ready !== true || conditionAnnotatedResult.result_complete !== true) {
+      return blockedComparisonModeResult([{ code:'condition_annotated_candidates_not_ready_or_incomplete', severity:'error',
+        detail:`generateConditionAnnotatedComparisonCandidates()がready=${JSON.stringify(conditionAnnotatedResult.ready)}、result_complete=${JSON.stringify(conditionAnnotatedResult.result_complete)}のためcomparison mode候補を生成できません(段階3以降はready===trueかつresult_complete===trueを要求してfail closedする契約)` }],
+        binding, conditionAnnotatedResult);
+    }
+
+    const notAnalyzed = [];
+    const comparisonModeCandidates = [];
+    for (const candidate of conditionAnnotatedResult.comparison_candidates) {
+      // 【レビュー修正、中1】status/value/opposing_evidence/参照IDだけでは、not_analyzedへ
+      // 送られた理由が「confidence不足」なのか「次点候補とのmargin不足」なのかをこの結果だけ
+      // からは判別できない(B-2.3a側で別途generateConditionResolutions()を再実行すれば分かるが、
+      // B-2.3bの監査出力単体で追跡できるべき、と指摘された)。B-2.3aが既にcondition annotated
+      // candidateへ保持しているtop_confidence/marginをそのまま引き継ぐ(新たな計算は発生しない)。
+      const auditBase = {
+        requirement_quantity_id:candidate.requirement_quantity_id, actual_quantity_id:candidate.actual_quantity_id,
+        requirement_condition_status:candidate.requirement_condition_status, actual_condition_status:candidate.actual_condition_status,
+        requirement_condition_value:candidate.requirement_condition_value, actual_condition_value:candidate.actual_condition_value,
+        requirement_condition_top_confidence:candidate.requirement_condition_top_confidence,
+        requirement_condition_margin:candidate.requirement_condition_margin,
+        actual_condition_top_confidence:candidate.actual_condition_top_confidence,
+        actual_condition_margin:candidate.actual_condition_margin,
+        requirement_condition_has_opposing_evidence:candidate.requirement_condition_has_opposing_evidence,
+        actual_condition_has_opposing_evidence:candidate.actual_condition_has_opposing_evidence,
+        concept_id:candidate.concept_id, dimension:candidate.dimension,
+        requirement_trace_id:candidate.requirement_trace_id, actual_trace_id:candidate.actual_trace_id,
+        matcher_a_id:candidate.matcher_a_id ?? null, matcher_b_id:candidate.matcher_b_id ?? null,
+      };
+      // 両側resolvedでなければ推測しない(ambiguous/unavailableいずれも対象外)。
+      if (candidate.requirement_condition_status !== 'resolved' || candidate.actual_condition_status !== 'resolved') {
+        notAnalyzed.push({ reason_code:'condition_unresolved', ...auditBase });
+        continue;
+      }
+      // 両側resolvedでも、どちらかに否定根拠(effect:'opposes')があれば自動導出へ進めない。
+      // auto applicability自体はまだ実装しないため、候補を生成した上でauto_applicable:falseを
+      // 付ける案ではなく、最も安全な「候補生成せず保留」を選ぶ(レビューで明示的に指示された方針)。
+      if (candidate.requirement_condition_has_opposing_evidence === true || candidate.actual_condition_has_opposing_evidence === true) {
+        notAnalyzed.push({ reason_code:'condition_opposing_evidence', ...auditBase });
+        continue;
+      }
+      // 固定表に無い組み合わせは推測でmodeを生成しない。requirement_condition_value/
+      // actual_condition_valueは、この時点で両側ともstatus:'resolved'であることが確定して
+      // いるため、KNOWN_CONDITION_SEMANTICS_VALUESに含まれる既知の値であり'unknown'では
+      // あり得ない(resolveConditionStatus()の契約により'unknown'はresolvedにならない)。
+      const entry = COMPARISON_MODE_DERIVATION_TABLE.find(e => e.requirement === candidate.requirement_condition_value && e.actual === candidate.actual_condition_value);
+      if (!entry) {
+        notAnalyzed.push({ reason_code:'comparison_mode_unavailable', ...auditBase });
+        continue;
+      }
+      comparisonModeCandidates.push({
+        ...candidate,
+        comparison_mode_candidate: entry.mode,
+        comparison_mode_confidence: Math.min(candidate.requirement_condition_top_confidence, candidate.actual_condition_top_confidence),
+        derived_from: { requirement_condition_value:candidate.requirement_condition_value, actual_condition_value:candidate.actual_condition_value },
+      });
+    }
+
+    return { ready:true, comparison_mode_candidates:comparisonModeCandidates, candidate_count:comparisonModeCandidates.length, result_complete:true,
+      diagnostics: conditionAnnotatedResult.diagnostics,
+      not_analyzed: [...conditionAnnotatedResult.not_analyzed, ...notAnalyzed] };
+  }
+
+  // ── Phase B-2.4a: 段階4の最初の部分。comparison mode候補について単位互換性を判定し、
+  // 必要な変換方法を「計画」として記録するだけの段階。数量値・区間境界へは一切変換を
+  // 適用しない(lower/upper/alternatives内の値は不変のまま)。数値比較・区間包含判定・
+  // gap計算・auto applicability・充足判定はまだ行わない(3.4節 段階4の残り、未着手のまま)。
+  // 既存のquantity_extraction_prototype.jsのcoverageGap()は、canonical単位が異なるだけで
+  // 比較不能にした上で数値比較・充足判定まで一気に進む設計であり、単位互換性判定だけを
+  // 切り出したこの段階とは責務が異なるため、呼び出さない。 ──
+
+  // quantity-annotation/1.0-rc1: 単位互換性判定・変換計画生成ライブラリ(移植、
+  // unit_conversion_rules_prototype.jsから一字一句移植。乖離検出はquantity_annotation_ported_lib_check.js
+  // で行う。改変禁止、移植元を直接編集してから再度移植すること。【レビュー指摘、中1】
+  // classifyUnitConversion()はbindingを経由せず任意のunitオブジェクトを受け取れる純粋関数であり、
+  // 当初は「公開APIはbinding経由のみ」という信頼境界を守るため非公開の実装詳細としてのみ使う
+  // 方針だった。【レビュー指摘、重大1(B-3cレビュー5巡目)】trace_comparison_record_set_validator.js
+  // のsemantic validatorが、record内の監査値(unit_conversion_plan/正規化済み数量値/幾何比較結果/
+  // signed delta)をraw analysisの入力から独立に再計算して照合する必要があり、この関数(および
+  // 後述のapplyLinearConversion/comparePointInRegion/compareIntervalCoverage)を再実装せず再利用
+  // する以外に方法がないため、ファイル末尾の公開APIへ追加した(binding経由のみという制約は
+  // production生成フロー(generateTraceComparisonRecordSet()等)の入口を増やさないためのものであり、
+  // 生成済みartifactを検証するだけのvalidatorがこれらの純粋関数を直接呼ぶことは、production
+  // フロー自体の信頼境界を広げない)。Pa/kPa/MPa間の変換計算・重大1の既知単位検証は
+  // unit_conversion_rules_prototype.js自身の回帰テストで検証し、generateUnitConversionPlans()
+  // 自体の配線(fail closedゲート・quantity参照・監査フィールド伝播)は、
+  // quantity_unit_conversion_plan_verification.jsが到達可能なpower/kW(canonical単位1種類のみ)
+  // 経由のend-to-endテストで別途検証する)
+  const KNOWN_CANONICAL_UNITS_BY_DIMENSION = {
+    temperature: { degC: true },
+    power: { kW: true },
+    voltage: { V: true },
+    frequency: { Hz: true },
+    sound_pressure_level: { 'dB(A)': true },
+    length: { mm: true },
+    pressure: { Pa: true, kPa: true, MPa: true },
+    apparent_power: { kVA: true },
+  };
+  Object.values(KNOWN_CANONICAL_UNITS_BY_DIMENSION).forEach(Object.freeze);
+  Object.freeze(KNOWN_CANONICAL_UNITS_BY_DIMENSION);
+
+  // UNIT_DEFSの各standard_refが実際に参照するのはJIS Z 8203ではなくJIS Z 8000規格群(全12部、
+  // quantity_extraction_prototype.js 90-101行目参照)であり、pressureはJIS Z 8000-4(力学)に
+  // 分類される。pressure(Pa/kPa/MPa)だけが同一dimension内に複数のcanonical単位を持つため、
+  // 非identity変換は現時点ではpressureだけで十分である。基準単位はPa(倍率1)とする。
+  const LINEAR_UNIT_SCALE_TO_BASE = {
+    pressure: { Pa: 1, kPa: 1000, MPa: 1000000 },
+  };
+  Object.values(LINEAR_UNIT_SCALE_TO_BASE).forEach(Object.freeze);
+  Object.freeze(LINEAR_UNIT_SCALE_TO_BASE);
+
+  // 【レビュー指摘、重大1(2巡目)】KNOWN_CANONICAL_UNITS_BY_DIMENSION/LINEAR_UNIT_SCALE_TO_BASEは
+  // 通常のJavaScriptオブジェクトリテラルであり、Object.prototypeを継承する。`obj[key]`の真偽値
+  // 判定や`key in obj`は継承プロパティ('toString'・'constructor'・'hasOwnProperty'等)にもtrueを
+  // 返すため、修正前の実装ではこれらのプロパティ名をcanonical/dimensionとして渡すと「登録済み
+  // 単位」であるかのように扱われ、identity計画(canonical同士が同名文字列で一致)や、pressureで
+  // 異なる継承キー同士(例: 'toString'×'constructor')を指定するとscaleTable[canonical]が関数
+  // オブジェクトになり、除算結果がNaNのlinear_scale計画を生成してしまうことを実際に確認した
+  // (Object.freeze()はプロパティの追加・変更を防ぐが、継承プロパティ自体を除去したり
+  // Object.prototypeを凍結したりはしない)。own propertyだけを認めるhasOwn()に置き換える。
+  function hasOwn(object, key) {
+    return Object.prototype.hasOwnProperty.call(object, key);
+  }
+
+  // unit.canonical/unit.dimensionが非空文字列で、かつKNOWN_CANONICAL_UNITS_BY_DIMENSIONに
+  // 実在する(dimension, canonical)の組(own propertyとして)であることを確認する。
+  function isKnownUnit(unit) {
+    if (!unit || typeof unit.canonical !== 'string' || unit.canonical.length === 0
+      || typeof unit.dimension !== 'string' || unit.dimension.length === 0) {
+      return false;
+    }
+    if (!hasOwn(KNOWN_CANONICAL_UNITS_BY_DIMENSION, unit.dimension)) return false;
+    return hasOwn(KNOWN_CANONICAL_UNITS_BY_DIMENSION[unit.dimension], unit.canonical);
+  }
+
+  // 戻り値のoutcome: 'plan'(変換計画を生成、`plan`フィールドを持つ)／'unsupported'(推測せず
+  // not_analyzedへ送る対象、`reason_code`を持つ)／'inconsistent'(呼び出し側がfail closedすべき
+  // 構造的矛盾、`reason_code`を持つ)。
+  function classifyUnitConversion(requirementUnit, actualUnit) {
+    if (!isKnownUnit(requirementUnit) || !isKnownUnit(actualUnit)) {
+      return { outcome:'unsupported', reason_code:'unit_metadata_unsupported',
+        requirement_unit_dimension:requirementUnit?.dimension ?? null, actual_unit_dimension:actualUnit?.dimension ?? null,
+        requirement_unit_canonical:requirementUnit?.canonical ?? null, actual_unit_canonical:actualUnit?.canonical ?? null };
+    }
+    if (requirementUnit.dimension !== actualUnit.dimension) {
+      return { outcome:'inconsistent', reason_code:'unit_dimension_inconsistent',
+        requirement_unit_dimension:requirementUnit.dimension, actual_unit_dimension:actualUnit.dimension };
+    }
+    if (requirementUnit.canonical === actualUnit.canonical) {
+      return { outcome:'plan', plan:{ conversion_required:false, conversion_operation:'identity',
+        source_unit:actualUnit.canonical, target_unit:requirementUnit.canonical, factor:1, offset:0 } };
+    }
+    const scaleTable = LINEAR_UNIT_SCALE_TO_BASE[requirementUnit.dimension];
+    if (!scaleTable || !hasOwn(scaleTable, requirementUnit.canonical) || !hasOwn(scaleTable, actualUnit.canonical)) {
+      return { outcome:'unsupported', reason_code:'unit_conversion_unsupported',
+        requirement_unit_canonical:requirementUnit.canonical, actual_unit_canonical:actualUnit.canonical };
+    }
+    // 実仕様側の単位を要求側の単位へ変換する計画を、常にactual→requirement方向で生成する
+    // (将来、差分値や判定結果を要求仕様の単位で表示できるようにするための固定方向)。
+    const factor = scaleTable[actualUnit.canonical] / scaleTable[requirementUnit.canonical];
+    // 【レビュー指摘、重大1(2巡目)、最後の防御】hasOwn()検査により継承プロパティ経由での
+    // 数値以外の混入は塞いだが、念のため計算結果自体が有限数であることも確認する(この表の値は
+    // 常に正の有限数のため、ここに到達するのは万一のデータ不整合時のみのはずである)。
+    if (!Number.isFinite(factor)) {
+      return { outcome:'unsupported', reason_code:'unit_conversion_invalid_factor',
+        requirement_unit_canonical:requirementUnit.canonical, actual_unit_canonical:actualUnit.canonical };
+    }
+    return { outcome:'plan', plan:{ conversion_required:true, conversion_operation:'linear_scale',
+      source_side:'actual', source_canonical_unit:actualUnit.canonical,
+      target_side:'requirement', target_canonical_unit:requirementUnit.canonical,
+      dimension:requirementUnit.dimension, factor, offset:0 } };
+  }
+
+  // 【レビュー指摘、重大1】JSON Schema(quantity_annotation_schema_v1.json)は`interval.lower/upper`の
+  // `value`をtype:'number'としてしか検証せず、`Number.isFinite()`は検査しない(独自validatorの
+  // typeMatches()もtypeof value==='number'相当のみで、NaN/Infinityはどちらもtypeof 'number'を
+  // 満たすため素通りする)。`alternatives.options`にいたっては要素の型自体が未検証(`{type:'array'}`
+  // のみでitemsが無い)。そのため、options:[null, '5', {}, true, NaN, Infinity]のような値も
+  // スキーマ検証(validateAnnotationSchema())を通過し、bindingへ結合されうることを実際に再現して
+  // 確認した(JSON.parse()されたテキストからは通常NaN/Infinityは生じないが、この関数はbinding経由で
+  // 渡された値をそのまま信頼する契約にはできない——プログラム的に構築されたsidecarや、将来の
+  // 抽出ツール側のバグが非数値を混入させる経路を塞ぐため)。型・有限性は変換の前後どちらでも
+  // 検査する(前:入力自体が不正、後:有限入力同士の演算がオーバーフローしてInfinityになる場合)。
+  function isFiniteNumber(value) {
+    return typeof value === 'number' && Number.isFinite(value);
+  }
+
+  // 【レビュー指摘、中1(3巡目)】interval境界の`inclusive`がbooleanかは未検証だった(`value`の
+  // 有限性しか見ていなかった)。`{value:5}`(inclusive欠落)や`inclusive:'false'`(文字列)も
+  // 通過し、変換結果へそのまま複製されることを確認した。後続の点判定・境界包含判定はinclusiveが
+  // booleanである前提のため、own propertyとしての存在とboolean型を確認する。
+  function isValidBound(bound) {
+    return bound !== null && typeof bound === 'object' && !Array.isArray(bound)
+      && Object.prototype.hasOwnProperty.call(bound, 'value') && Object.prototype.hasOwnProperty.call(bound, 'inclusive')
+      && isFiniteNumber(bound.value) && typeof bound.inclusive === 'boolean';
+  }
+
+  // 【レビュー指摘、重大3】`alternatives.options`はJSON Schema上サイズ上限(maxItems)が無い。
+  // 正常な抽出器(quantity_extraction_prototype.js 297行目)が生成する並列値は常に2要素だが、
+  // スキーマ自体はこれを保証しない。件数検査より前に`.map()`で全件複製すると、
+  // B-2.2b/B-2.3aで対策した組み合わせ爆発と同種の、入力サイズに比例した未対策コストが生じる。
+  // interval_semantics_candidatesの上限(MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY、64)と
+  // 同じ値を踏襲する。
+  const MAX_ALTERNATIVE_VALUES_PER_QUANTITY = 64;
+
+  // 数量値(kind:'interval'|'alternatives')が、変換の有無によらず後続処理で安全に扱える構造で
+  // あることを検証する(型・有限性・件数上限・非空性のみ。値の変換は行わない)。変換対象のactual側
+  // だけでなく、変換をそもそも適用しない(既に要求単位の)requirement側にも同じ検証を適用する
+  // 【レビュー指摘、重大2】(この段階の出力は後続の数値比較の入力になるため、両側とも比較可能な
+  // 数値構造であることをここで確定させる)。
+  // 【レビュー指摘、中1】この関数は独立ライブラリからexportされる純粋関数であり、任意入力を
+  // 受け取りうる。quantityValue自体がnull/undefined/非オブジェクト(配列を含む)の場合に
+  // `quantityValue.kind`へアクセスして例外を投げるのではなく、判別可能な`unsupported`を返す。
+  function validateQuantityValueStructure(quantityValue) {
+    if (!quantityValue || typeof quantityValue !== 'object' || Array.isArray(quantityValue)) {
+      return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+    }
+    if (quantityValue.kind === 'interval') {
+      if (quantityValue.lower !== null && !isValidBound(quantityValue.lower)) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+      if (quantityValue.upper !== null && !isValidBound(quantityValue.upper)) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+      // 両側nullは値情報が無い(空のalternativesと同じ扱い、下記参照)。
+      if (quantityValue.lower === null && quantityValue.upper === null) {
+        return { outcome:'unsupported', reason_code:'quantity_value_empty' };
+      }
+      // 【レビュー指摘、重大1(3巡目)】lower>upper、またはlower===upperかつ片側でも排他的境界は
+      // 数学的に空集合であり、既存の比較正本(quantity_extraction_prototype.jsのisEmptyInterval()、
+      // 458-463行目)と同じ判定基準をここでも適用する。JSON Schemaは各境界のvalueの型しか検証せず
+      // lower/upperの大小関係は保証しないため、実際に[10,5]・[5,5)がoutcome:'ok'を通過することを
+      // 確認した上で修正した。
+      if (quantityValue.lower && quantityValue.upper) {
+        if (quantityValue.lower.value > quantityValue.upper.value) return { outcome:'unsupported', reason_code:'quantity_value_empty' };
+        if (quantityValue.lower.value === quantityValue.upper.value && !(quantityValue.lower.inclusive && quantityValue.upper.inclusive)) {
+          return { outcome:'unsupported', reason_code:'quantity_value_empty' };
+        }
+      }
+      return { outcome:'ok' };
+    }
+    if (quantityValue.kind === 'alternatives') {
+      if (!Array.isArray(quantityValue.options)) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+      if (quantityValue.options.length === 0) return { outcome:'unsupported', reason_code:'quantity_value_empty' };
+      // 件数上限検査を、要素へ触れるいかなる走査よりも前に行う(重大3)。
+      if (quantityValue.options.length > MAX_ALTERNATIVE_VALUES_PER_QUANTITY) {
+        return { outcome:'unsupported', reason_code:'quantity_value_limit_exceeded',
+          observed_count:quantityValue.options.length, limit:MAX_ALTERNATIVE_VALUES_PER_QUANTITY };
+      }
+      // 【レビュー指摘、中3(3巡目)】プログラム的に構築された配列は`.every()`/`.map()`自体を
+      // 上書きされている可能性があり(`Array.isArray()`はtrueのまま)、その場合メソッド呼び出しが
+      // 例外を投げることを実際に確認した。件数上限(64)が小さいため、添字ループで検証する。
+      for (let i = 0; i < quantityValue.options.length; i++) {
+        if (!isFiniteNumber(quantityValue.options[i])) return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+      }
+      // 【レビュー指摘、中2(3巡目)】selection_semanticsもJSON Schema契約(非空文字列)どおりに
+      // 検証する。数値変換自体には影響しないが、正規化ビューを元Schemaより弱い構造にしないため。
+      if (typeof quantityValue.selection_semantics !== 'string' || quantityValue.selection_semantics.length === 0) {
+        return { outcome:'unsupported', reason_code:'quantity_value_invalid' };
+      }
+      return { outcome:'ok' };
+    }
+    // kindが'interval'/'alternatives'のいずれでもない場合(防御的分岐。quantity-annotationの
+    // JSON Schemaはkindをこの2値の判別可能な共用体としてのみ許可しており、bindSide()はスキーマ
+    // 検証に失敗した文書全体をbindしない(fail closed)ため、bindingを経由して渡されるkindが
+    // この2値以外になることは構造的に起こらないはずである。それでも、他の防御的分岐
+    // (unit_plan_quantity_missing等)と同じ理由で、万一の不整合に備えて推測せず弾く)。
+    return { outcome:'unsupported', reason_code:'quantity_value_kind_unsupported' };
+  }
+
+  // Phase B-2.4b: classifyUnitConversion()が返す計画(`factor`/`offset`)を、数量値
+  // (`quantity_extraction_prototype.js`が生成するkind:'interval'|'alternatives'の
+  // どちらか)の複製へ適用し、要求側の単位で表した新しい数量値を返す。引数のquantityValue
+  // 自体は一切変更しない(常に新しいオブジェクトを返す。identity計画(factor:1, offset:0)の
+  // 場合でも同じ経路を通り、値が同じでも別オブジェクトを返す——呼び出し側が「複製されている」
+  // という契約に依存できるようにするため)。区間の`lower`/`upper`がnull(片側無限)の場合は
+  // 変換せずnullのまま返す(値が存在しないものを変換できないため)。
+  // 戻り値のoutcome: 'converted'(変換成功、`value`フィールドを持つ)／'unsupported'(推測せず
+  // not_analyzedへ送る対象、`reason_code`を持つ)。
+  // 【レビュー指摘、中1】この関数は独立ライブラリからexportされる純粋関数であり、coreの正常経路
+  // ではclassifyUnitConversion()が返す(常に有限・正の)factorしか渡らないが、`plan`自体は
+  // 呼び出し側から任意に構築できるため、`plan`自体がnull/undefined/非オブジェクトでないこと・
+  // `factor`/`offset`が有限数であること・`factor`が正数であることも変換前に確認する(負のfactorは
+  // lower/upperの入れ替えが必要になるが現在は未対応のため、推測せず拒否する。現在の登録データ
+  // (Pa/kPa/MPa)はすべて正のfactorのため、coreの正常経路ではこの分岐へは構造的に到達しないはず
+  // である)。
+  function applyLinearConversion(quantityValue, plan) {
+    if (!plan || typeof plan !== 'object' || Array.isArray(plan)
+      || !isFiniteNumber(plan.factor) || !isFiniteNumber(plan.offset) || plan.factor <= 0) {
+      return { outcome:'unsupported', reason_code:'quantity_conversion_plan_invalid' };
+    }
+    const structureCheck = validateQuantityValueStructure(quantityValue);
+    if (structureCheck.outcome !== 'ok') return structureCheck;
+
+    const convert = value => value * plan.factor + plan.offset;
+    if (quantityValue.kind === 'interval') {
+      // 【レビュー指摘、重大(6巡目)】変換前に正の幅(lower<upper)があった区間は、変換後も
+      // inclusiveの組み合わせに関係なく幅を保っていなければならない。修正前は空区間判定
+      // (lower>upper、または同値かつ片側以上排他的)しか見ておらず、両側inclusiveのまま
+      // 同値へ潰れるケース(例: Number.MIN_VALUE付近の区間がfactor:1e-6で[0,0]へ潰れる)を
+      // 通過させてしまうことを実際に確認した。変換前に幅があったかを先に記録しておく。
+      const hadPositiveWidth = !!(quantityValue.lower && quantityValue.upper && quantityValue.lower.value < quantityValue.upper.value);
+      const lower = quantityValue.lower ? { value:convert(quantityValue.lower.value), inclusive:quantityValue.lower.inclusive } : null;
+      const upper = quantityValue.upper ? { value:convert(quantityValue.upper.value), inclusive:quantityValue.upper.inclusive } : null;
+      // 変換後の値も有限数であることを確認する(入力は有限でも、演算結果がNumber.MAX_VALUEを
+      // 超えてInfinityへオーバーフローしうるため)。
+      if ((lower && !isFiniteNumber(lower.value)) || (upper && !isFiniteNumber(upper.value))) {
+        return { outcome:'unsupported', reason_code:'quantity_conversion_non_finite' };
+      }
+      // 幅を失った(lower>=upperになった)場合はinclusiveを問わず精度損失として拒否する。
+      // 変換前と同じ空区間判定(isEmptyInterval()基準)も残す(hadPositiveWidth===falseでも
+      // lower>upperや同値排他的境界は依然として空集合のため)。真の点([5,5]等、
+      // hadPositiveWidth===false)は値・inclusiveとも変化しないため誤って拒否されない。
+      if (lower && upper && ((hadPositiveWidth && lower.value >= upper.value)
+        || lower.value > upper.value || (lower.value === upper.value && !(lower.inclusive && upper.inclusive)))) {
+        return { outcome:'unsupported', reason_code:'quantity_conversion_precision_loss' };
+      }
+      return { outcome:'converted', value:{ kind:'interval', lower, upper } };
+    }
+    // kind === 'alternatives'(validateQuantityValueStructure()が既に件数・入力の有限性を確認済み)。
+    // 添字ループで新しい配列へ格納する(中3、上書きされた.map()/.every()に依存しない)。
+    // 【レビュー指摘、中(6巡目)】異なる入力値が変換後に同じ値へ潰れる(精度損失で区別不能になる)
+    // ケースも同様に拒否する。元から同値だったoptionsの重複自体は禁止しない契約のため、
+    // 変換後の値をキーに「最初に生成した元の値」だけを記録し、以後別の元の値が同じ変換後の値に
+    // 一致したら拒否する(件数上限が64件のためMapのコストは無視できる)。
+    const options = [];
+    const sourceByConverted = new Map();
+    for (let i = 0; i < quantityValue.options.length; i++) {
+      const source = quantityValue.options[i];
+      const converted = convert(source);
+      if (!isFiniteNumber(converted)) return { outcome:'unsupported', reason_code:'quantity_conversion_non_finite' };
+      if (sourceByConverted.has(converted) && sourceByConverted.get(converted) !== source) {
+        return { outcome:'unsupported', reason_code:'quantity_conversion_precision_loss' };
+      }
+      sourceByConverted.set(converted, source);
+      options.push(converted);
+    }
+    return { outcome:'converted', value:{ kind:'alternatives', options, selection_semantics:quantityValue.selection_semantics } };
+  }
+  // ── quantity-annotation/1.0-rc1: 単位互換性判定・変換計画生成ライブラリ(移植)ここまで ──
+
+  // quantity_idをキーに、bindingへ結合済みのanalysisを1件引く(段階1のbindingAnalysesByTraceId()
+  // がtrace_id単位で索引化するのに対し、この段階はcomparison mode候補が持つ
+  // requirement_quantity_id/actual_quantity_idから直接analysisを引く必要があるため、
+  // quantity_id単位で別途索引化する)。上流(段階1〜3-3)が既にsidecar内quantity_id重複を
+  // 検査済みのため、ここで重複キーの上書きが起こることは構造的にない。
+  function analysisByQuantityId(sideResult) {
+    const map = new Map();
+    (sideResult?.bindings || []).forEach(binding => {
+      if (binding.status === 'bound' && binding.annotation) {
+        (binding.annotation.analyses || []).forEach(analysis => {
+          if (analysis?.quantity_id) map.set(analysis.quantity_id, analysis);
+        });
+      }
+    });
+    return map;
+  }
+
+  function blockedUnitConversionPlanResult(diagnostics, binding, modeResult) {
+    return { ready:false, unit_conversion_plans:[], candidate_count:0, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(binding?.diagnostics || []), ...(modeResult?.diagnostics || [])]),
+      not_analyzed:dedupeByCanonicalJson([...(binding?.not_analyzed || []), ...(modeResult?.not_analyzed || [])]) };
+  }
+
+  function generateUnitConversionPlans({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    // modeResultは呼び出し側から別引数として受け取らず、必ずこの関数の内部で同じbindingから
+    // 計算する(B-2.2a round1以来一貫した設計方針)。
+    const modeResult = generateComparisonModeCandidates({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (modeResult.ready !== true || modeResult.result_complete !== true) {
+      return blockedUnitConversionPlanResult([{ code:'comparison_mode_candidates_not_ready_or_incomplete', severity:'error',
+        detail:`generateComparisonModeCandidates()がready=${JSON.stringify(modeResult.ready)}、result_complete=${JSON.stringify(modeResult.result_complete)}のため単位変換計画を生成できません(段階3以降はready===trueかつresult_complete===trueを要求してfail closedする契約)` }],
+        binding, modeResult);
+    }
+
+    const reqAnalysisById = analysisByQuantityId(binding.requirement);
+    const actAnalysisById = analysisByQuantityId(binding.actual);
+
+    // 段階1: 対応するquantityがbinding内に見つからない候補が1件でもあれば、部分的に続行せず
+    // 呼び出し全体をfail closedする(analysisやquantity情報を外部引数として受け取れるAPIには
+    // せず、必ずbindingから再参照するという設計方針を守った上での、防御的な整合性検査)。
+    const missingDiagnostics = [];
+    for (const candidate of modeResult.comparison_mode_candidates) {
+      if (!reqAnalysisById.has(candidate.requirement_quantity_id) || !actAnalysisById.has(candidate.actual_quantity_id)) {
+        missingDiagnostics.push({ code:'unit_plan_quantity_missing', severity:'error',
+          requirement_quantity_id:candidate.requirement_quantity_id, actual_quantity_id:candidate.actual_quantity_id,
+          detail:'comparison mode候補のquantity_idに対応するanalysisがbinding内に見つかりません' });
+      }
+    }
+    if (missingDiagnostics.length) return blockedUnitConversionPlanResult(missingDiagnostics, binding, modeResult);
+
+    // 段階2: 単位metadata・分類を1件ずつ確定する(曖昧な組み合わせを推測せず、既知の単位定義・
+    // 固定の線形変換表だけを使う。lower/upper/alternativesの値・区間境界には一切触れない)。
+    const classified = modeResult.comparison_mode_candidates.map(candidate => ({
+      candidate,
+      outcome: classifyUnitConversion(
+        reqAnalysisById.get(candidate.requirement_quantity_id)?.quantity?.unit,
+        actAnalysisById.get(candidate.actual_quantity_id)?.quantity?.unit,
+      ),
+    }));
+
+    // 段階3: dimensionが一致しない('inconsistent')候補が1件でもあれば呼び出し全体をfail closed
+    // する。通常はここに到達しないはずである(段階1のconcept/dimension絞り込みにより、同じ
+    // 次元同士でなければcomparison候補自体が生成されない)。到達した場合、上流結果とquantity
+    // 実体が矛盾しているという構造的な異常を意味するため、個々の候補を静かに除外するのでは
+    // なく、fail closedする。
+    const dimensionInconsistentDiagnostics = classified
+      .filter(({ outcome }) => outcome.outcome === 'inconsistent')
+      .map(({ candidate, outcome }) => ({
+        code:'unit_dimension_inconsistent', severity:'error',
+        requirement_quantity_id:candidate.requirement_quantity_id, actual_quantity_id:candidate.actual_quantity_id,
+        concept_id:candidate.concept_id, dimension:candidate.dimension,
+        requirement_unit_dimension:outcome.requirement_unit_dimension, actual_unit_dimension:outcome.actual_unit_dimension,
+        requirement_trace_id:candidate.requirement_trace_id, actual_trace_id:candidate.actual_trace_id,
+        matcher_a_id:candidate.matcher_a_id ?? null, matcher_b_id:candidate.matcher_b_id ?? null,
+        detail:'comparison mode候補の両側でunit.dimensionが一致しません(上流のdimension/concept絞り込みと矛盾するデータ)' }));
+    if (dimensionInconsistentDiagnostics.length) return blockedUnitConversionPlanResult(dimensionInconsistentDiagnostics, binding, modeResult);
+
+    // 段階4: 残りの候補を分類結果どおりnot_analyzed/計画へ振り分ける。
+    // 【レビュー修正、中3】not_analyzedへ送る監査記録は、quantity/trace/matcher参照ID・
+    // concept_id/dimensionだけでなく、candidate(段階3-3のcomparison mode候補)が既に保持している
+    // 両側のcondition status/value/top_confidence/margin/opposing_evidence、
+    // comparison_mode_candidate/comparison_mode_confidence/derived_fromもすべて引き継ぐ
+    // (単位が未対応というだけで、それ以前の段階の判断根拠が失われないようにする。候補配列や
+    // evidenceを丸ごと複製するわけではなく、candidate自体は既に扁平なスカラーオブジェクトの
+    // ため、スプレッドしてもコストは小さい)。
+    const notAnalyzed = [];
+    const unitConversionPlans = [];
+    for (const { candidate, outcome } of classified) {
+      if (outcome.outcome === 'unsupported') {
+        notAnalyzed.push({ reason_code:outcome.reason_code, ...candidate,
+          ...(outcome.requirement_unit_dimension !== undefined ? { requirement_unit_dimension:outcome.requirement_unit_dimension, actual_unit_dimension:outcome.actual_unit_dimension } : {}),
+          ...(outcome.requirement_unit_canonical !== undefined ? { requirement_unit_canonical:outcome.requirement_unit_canonical, actual_unit_canonical:outcome.actual_unit_canonical } : {}) });
+        continue;
+      }
+      unitConversionPlans.push({ ...candidate, unit_conversion_plan:outcome.plan });
+    }
+
+    return { ready:true, unit_conversion_plans:unitConversionPlans, candidate_count:unitConversionPlans.length, result_complete:true,
+      diagnostics: modeResult.diagnostics,
+      not_analyzed: [...modeResult.not_analyzed, ...notAnalyzed] };
+  }
+
+  function blockedNormalizedQuantityViewResult(diagnostics, planResult) {
+    return { ready:false, normalized_quantity_views:[], candidate_count:0, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(planResult?.diagnostics || [])]),
+      not_analyzed:dedupeByCanonicalJson(planResult?.not_analyzed || []) };
+  }
+
+  // Phase B-2.4b: 段階4の後半として、generateUnitConversionPlans()の各計画を実仕様側の数量値の
+  // 複製へ適用し、要求側の単位で表した正規化ビューを生成する。数値比較・区間包含判定・
+  // gap計算・auto applicability・充足判定はこの段階でも一切行わない(範囲外、B-2.4bはあくまで
+  // 「複製を要求単位へ変換するだけ」の段階)。planResultは呼び出し側から別引数として受け取らず、
+  // 必ずこの関数の内部で同じbinding/relationsから計算する(B-2.2a round1以来一貫した設計方針)。
+  function generateNormalizedQuantityViews({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    const planResult = generateUnitConversionPlans({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (planResult.ready !== true || planResult.result_complete !== true) {
+      return blockedNormalizedQuantityViewResult([{ code:'unit_conversion_plans_not_ready_or_incomplete', severity:'error',
+        detail:`generateUnitConversionPlans()がready=${JSON.stringify(planResult.ready)}、result_complete=${JSON.stringify(planResult.result_complete)}のため正規化ビューを生成できません(段階3以降と同じくready===trueかつresult_complete===trueを要求してfail closedする契約)` }],
+        planResult);
+    }
+
+    // quantity値そのものはunit_conversion_plansが保持していないため、binding内のanalysisを
+    // (generateUnitConversionPlans()の内部と同様に)quantity_id単位で再度索引化して取得する。
+    // 別引数として渡された値やunit_conversion_plans以外の中間結果は受け取らず、常にbindingから
+    // 再計算する(B-2.2a round1以来の設計方針の踏襲)。
+    const reqAnalysisById = analysisByQuantityId(binding.requirement);
+    const actAnalysisById = analysisByQuantityId(binding.actual);
+
+    // 段階1: 対応するquantityがbinding内に見つからない計画が1件でもあれば、部分的に続行せず
+    // 呼び出し全体をfail closedする(unit_plan_quantity_missingと同じ位置づけの防御的検査。
+    // planResultは同じbindingから直前に同期的に計算したばかりであり、その間にbindingが変化する
+    // 余地は無い(binding自体が既にdeepFreeze済みで、この関数はawaitを挟まない)ため、構造的には
+    // 到達不能なはずである)。
+    const missingDiagnostics = [];
+    for (const entry of planResult.unit_conversion_plans) {
+      if (!reqAnalysisById.has(entry.requirement_quantity_id) || !actAnalysisById.has(entry.actual_quantity_id)) {
+        missingDiagnostics.push({ code:'normalized_view_quantity_missing', severity:'error',
+          requirement_quantity_id:entry.requirement_quantity_id, actual_quantity_id:entry.actual_quantity_id,
+          detail:'単位変換計画のquantity_idに対応するanalysisがbinding内に見つかりません' });
+      }
+    }
+    if (missingDiagnostics.length) return blockedNormalizedQuantityViewResult(missingDiagnostics, planResult);
+
+    // 段階2: 各計画について、要求側・実仕様側の数量値がともに後続の数値比較に耐える構造
+    // (型・有限性・件数上限)であることを確認してからapplyLinearConversion()を適用する
+    // 【レビュー修正、重大2】。要求側は変換自体を行わないが、この段階の出力(正規化ビュー)は
+    // 後続の数値比較の入力になるため、変換を経ない要求側も同じ基準で検証しておく必要がある。
+    // いずれかの側が不正な場合、推測せず該当候補だけをnot_analyzedへ回す(呼び出し全体は
+    // 止めない。単位metadataの不備と同じ「個々の候補だけを除外する」扱い。`side`フィールドで
+    // どちら側の異常かを明示する)。
+    const notAnalyzed = [];
+    const normalizedQuantityViews = [];
+    for (const entry of planResult.unit_conversion_plans) {
+      const requirementQuantityValue = reqAnalysisById.get(entry.requirement_quantity_id).quantity.quantity;
+      const actualQuantityValueOriginal = actAnalysisById.get(entry.actual_quantity_id).quantity.quantity;
+
+      const requirementCheck = validateQuantityValueStructure(requirementQuantityValue);
+      if (requirementCheck.outcome !== 'ok') {
+        notAnalyzed.push({ reason_code:requirementCheck.reason_code, side:'requirement', ...entry,
+          ...(requirementCheck.observed_count !== undefined ? { observed_count:requirementCheck.observed_count, limit:requirementCheck.limit } : {}) });
+        continue;
+      }
+
+      const actualConversion = applyLinearConversion(actualQuantityValueOriginal, entry.unit_conversion_plan);
+      if (actualConversion.outcome !== 'converted') {
+        notAnalyzed.push({ reason_code:actualConversion.reason_code, side:'actual', ...entry,
+          ...(actualConversion.observed_count !== undefined ? { observed_count:actualConversion.observed_count, limit:actualConversion.limit } : {}) });
+        continue;
+      }
+      const actualQuantityValueNormalized = actualConversion.value;
+      normalizedQuantityViews.push({ ...entry,
+        requirement_quantity_value: requirementQuantityValue,
+        actual_quantity_value_original: actualQuantityValueOriginal,
+        actual_quantity_value_normalized: actualQuantityValueNormalized });
+    }
+
+    return { ready:true, normalized_quantity_views:normalizedQuantityViews, candidate_count:normalizedQuantityViews.length, result_complete:true,
+      diagnostics: planResult.diagnostics,
+      not_analyzed: [...planResult.not_analyzed, ...notAnalyzed] };
+  }
+
+  // ── numeric-comparison-rules/1.0: 幾何学的関係判定ライブラリ(移植)ここから ──
+  // numeric_comparison_rules_prototype.jsから一字一句移植。改変禁止、移植元を直接編集してから
+  // 再度移植すること。
+  function isGenuinePoint(q) {
+    return !!(q.lower && q.upper && q.lower.value === q.upper.value && q.lower.inclusive && q.upper.inclusive);
+  }
+
+  // outer側の区間がinner側の区間を覆っているか(inner ⊆ outer)を判定する共通ロジック。
+  // actual_covers_requirement(outer=actual, inner=requirement)にも
+  // requirement_covers_actual(outer=requirement, inner=actual)にも同じ形で使う。
+  function coversLower(outer, inner) {
+    // inner.lowerがnull(下限なし=負の無限大まで広がる)場合、outerがそれを覆うには
+    // outer.lowerもnullでなければならない(外部レビュー指摘。v2.6は無条件でtrueを返しており、
+    // 要求[12,+∞)を実仕様[0,20]が誤って充足していると判定していた)。
+    if (!inner.lower) return !outer.lower;
+    if (!outer.lower) return true;
+    if (outer.lower.value < inner.lower.value) return true;
+    if (outer.lower.value > inner.lower.value) return false;
+    return outer.lower.inclusive || !inner.lower.inclusive;
+  }
+  function coversUpper(outer, inner) {
+    // 上限側も同様。inner.upperがnull(上限なし=正の無限大まで広がる)場合、
+    // outerがそれを覆うにはouter.upperもnullでなければならない。
+    if (!inner.upper) return !outer.upper;
+    if (!outer.upper) return true;
+    if (outer.upper.value > inner.upper.value) return true;
+    if (outer.upper.value < inner.upper.value) return false;
+    return outer.upper.inclusive || !inner.upper.inclusive;
+  }
+  // ── quantity_extraction_prototype.js(467-492行目)からの移植ここまで ──
+
+  // requirementInterval(要求範囲)に対し、actualPointInterval(kind:'interval'で表現された
+  // 実仕様側の点、B-2.4bの単位正規化済み)が真の点であるかを確認したうえで、requirementInterval
+  // の範囲内にあるかを判定する。actualPointIntervalが真の点でない場合は幾何比較そのものが
+  // 無意味なため、outcome:'unsupported'を返す(呼び出し側でnot_analyzedへ回す想定)。
+  function isPlainObject(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function comparePointInRegion(requirementInterval, actualPointInterval) {
+    if (!isPlainObject(requirementInterval) || !isPlainObject(actualPointInterval)) {
+      return { outcome:'unsupported', reason_code:'geometric_comparison_input_invalid' };
+    }
+    if (!isGenuinePoint(actualPointInterval)) {
+      return { outcome:'unsupported', reason_code:'point_in_region_actual_not_point' };
+    }
+    const v = actualPointInterval.lower.value;
+    const lowerHolds = !requirementInterval.lower || v > requirementInterval.lower.value
+      || (v === requirementInterval.lower.value && requirementInterval.lower.inclusive);
+    const upperHolds = !requirementInterval.upper || v < requirementInterval.upper.value
+      || (v === requirementInterval.upper.value && requirementInterval.upper.inclusive);
+    const lowerBoundaryMismatch = !!(requirementInterval.lower && v === requirementInterval.lower.value && !requirementInterval.lower.inclusive);
+    const upperBoundaryMismatch = !!(requirementInterval.upper && v === requirementInterval.upper.value && !requirementInterval.upper.inclusive);
+    return {
+      outcome:'compared',
+      result: {
+        relation_type: 'point_in_region',
+        outer_side: null,
+        inner_side: null,
+        geometric_relation_holds: lowerHolds && upperHolds,
+        lower_check: { holds:lowerHolds, boundary_mismatch:lowerBoundaryMismatch },
+        upper_check: { holds:upperHolds, boundary_mismatch:upperBoundaryMismatch },
+      },
+    };
+  }
+
+  // outerInterval(actual_covers_requirementならactual、requirement_covers_actualならrequirement)
+  // がinnerInterval(逆側)を覆っているか(inner ⊆ outer)を判定する。どちらがouter/innerかは
+  // この関数の外側(呼び出し側、comparison_mode_candidateに応じたrequirement/actualの割り当て)で
+  // 決定する——この関数自体はrequirement/actualの意味を一切知らない、純粋な幾何判定。
+  function compareIntervalCoverage(outerInterval, innerInterval) {
+    if (!isPlainObject(outerInterval) || !isPlainObject(innerInterval)) {
+      return { outcome:'unsupported', reason_code:'geometric_comparison_input_invalid' };
+    }
+    const lowerHolds = coversLower(outerInterval, innerInterval);
+    const upperHolds = coversUpper(outerInterval, innerInterval);
+    const lowerBoundaryMismatch = !!(innerInterval.lower && outerInterval.lower
+      && innerInterval.lower.value === outerInterval.lower.value && innerInterval.lower.inclusive && !outerInterval.lower.inclusive);
+    const upperBoundaryMismatch = !!(innerInterval.upper && outerInterval.upper
+      && innerInterval.upper.value === outerInterval.upper.value && innerInterval.upper.inclusive && !outerInterval.upper.inclusive);
+    return {
+      outcome:'compared',
+      result: {
+        relation_type: 'outer_covers_inner',
+        geometric_relation_holds: lowerHolds && upperHolds,
+        lower_check: { holds:lowerHolds, boundary_mismatch:lowerBoundaryMismatch },
+        upper_check: { holds:upperHolds, boundary_mismatch:upperBoundaryMismatch },
+      },
+    };
+  }
+  // ── numeric-comparison-rules/1.0: 幾何学的関係判定ライブラリ(移植)ここまで ──
+
+  const KNOWN_COMPARISON_MODES = ['point_in_region', 'actual_covers_requirement', 'requirement_covers_actual'];
+
+  function blockedNumericComparisonResult(diagnostics, viewResult) {
+    return { ready:false, numeric_comparison_results:[], candidate_count:0, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(viewResult?.diagnostics || [])]),
+      not_analyzed:dedupeByCanonicalJson(viewResult?.not_analyzed || []) };
+  }
+
+  // Phase B-2.5: 段階4の最後の部分として、正規化ビュー(B-2.4b)の各要素について、
+  // comparison_mode_candidate(段階3-3で確定済み)を前提とした幾何学的関係だけを計算する。
+  // 自動適用可否・confidenceによるゲーティング・最終的な充足判定はこの段階では行わない
+  // (`satisfied`という名前のフィールドは一切出力しない)。viewResultは呼び出し側から別引数
+  // として受け取らず、必ずこの関数の内部で同じbinding/relationsから計算する
+  // (B-2.2a round1以来一貫した設計方針)。
+  function generateNumericComparisonResults({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    const viewResult = generateNormalizedQuantityViews({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (viewResult.ready !== true || viewResult.result_complete !== true) {
+      return blockedNumericComparisonResult([{ code:'normalized_quantity_views_not_ready_or_incomplete', severity:'error',
+        detail:`generateNormalizedQuantityViews()がready=${JSON.stringify(viewResult.ready)}、result_complete=${JSON.stringify(viewResult.result_complete)}のため数値比較を実行できません(段階3以降と同じくready===trueかつresult_complete===trueを要求してfail closedする契約)` }],
+        viewResult);
+    }
+
+    // 段階1: comparison_mode_candidateが既知の3値(段階3-3のCOMPARISON_MODE_DERIVATION_TABLEが
+    // 生成しうる値)以外の場合、個々の候補を静かに除外するのではなく呼び出し全体をfail closed
+    // する(上流結果とこの段階の契約が矛盾しているという構造的異常を意味するため、
+    // unit_dimension_inconsistentと同じ位置づけ)。
+    const modeDiagnostics = [];
+    for (const view of viewResult.normalized_quantity_views) {
+      if (!KNOWN_COMPARISON_MODES.includes(view.comparison_mode_candidate)) {
+        modeDiagnostics.push({ code:'numeric_comparison_mode_unsupported', severity:'error',
+          requirement_quantity_id:view.requirement_quantity_id, actual_quantity_id:view.actual_quantity_id,
+          comparison_mode_candidate:view.comparison_mode_candidate,
+          detail:'comparison_mode_candidateが既知の3値(point_in_region/actual_covers_requirement/requirement_covers_actual)のいずれでもありません' });
+      }
+    }
+    if (modeDiagnostics.length) return blockedNumericComparisonResult(modeDiagnostics, viewResult);
+
+    // 段階2(防御的): requirement_quantity_value/actual_quantity_value_normalizedは
+    // generateNormalizedQuantityViews()が既に構造検証・精度損失検査を済ませているため、
+    // ここへ到達する時点で常にkind:'interval'|'alternatives'のいずれかとして整形済みのはずである。
+    // 【レビュー指摘、重大2】以前はkind!=='interval'を無条件でスキップしており、'alternatives'
+    // だけでなく未知・欠落したkindも同じ経路で静かに見逃していた。既存の完全な構造検査
+    // (validateQuantityValueStructure()、'interval'/'alternatives'/それ以外を判別可能に検証する)
+    // を再利用し、side別にoutcome!=='ok'であれば呼び出し全体をfail closedする。
+    const invariantDiagnostics = [];
+    for (const view of viewResult.normalized_quantity_views) {
+      for (const [side, qv] of [['requirement', view.requirement_quantity_value], ['actual', view.actual_quantity_value_normalized]]) {
+        const structureCheck = validateQuantityValueStructure(qv);
+        if (structureCheck.outcome !== 'ok') {
+          invariantDiagnostics.push({ code:'numeric_comparison_input_invariant_violation', severity:'error',
+            requirement_quantity_id:view.requirement_quantity_id, actual_quantity_id:view.actual_quantity_id, side,
+            upstream_reason_code:structureCheck.reason_code,
+            detail:'正規化ビューの数量値構造がB-2.4bの保証に違反しています' });
+        }
+      }
+    }
+    if (invariantDiagnostics.length) return blockedNumericComparisonResult(invariantDiagnostics, viewResult);
+
+    // 段階3: kind:'alternatives'は選択意味論(selection_semantics)の解釈が未設計のため、
+    // 比較不能としてnot_analyzedへ送る(推測しない、coverageGap()と同じ保守的な扱い)。
+    // 段階4: point_in_regionはactualが真の点であることを要求する。真の点でなければ
+    // not_analyzedへ送る(推測しない)。
+    // 段階5: 幾何比較を実行し、requirement/actual基準のsigned deltaを付加する。
+    const notAnalyzed = [];
+    const numericComparisonResults = [];
+    for (const view of viewResult.normalized_quantity_views) {
+      const reqQv = view.requirement_quantity_value;
+      const actQv = view.actual_quantity_value_normalized;
+      // 【レビュー指摘、重大2】上のinvariant検査が既にkindを'interval'/'alternatives'の
+      // いずれかであると保証しているため、ここでは'alternatives'(選択意味論が未設計で
+      // 比較不能)だけを明示的に判定する('interval'以外という否定形では判定しない)。
+      if (reqQv.kind === 'alternatives' || actQv.kind === 'alternatives') {
+        notAnalyzed.push({ reason_code:'quantity_comparison_kind_unsupported', ...view,
+          requirement_quantity_kind:reqQv.kind, actual_quantity_kind:actQv.kind });
+        continue;
+      }
+
+      const mode = view.comparison_mode_candidate;
+      let comparison;
+      let outerSide = null;
+      let innerSide = null;
+      if (mode === 'point_in_region') {
+        comparison = comparePointInRegion(reqQv, actQv);
+      } else if (mode === 'actual_covers_requirement') {
+        comparison = compareIntervalCoverage(actQv, reqQv);
+        outerSide = 'actual'; innerSide = 'requirement';
+      } else {
+        comparison = compareIntervalCoverage(reqQv, actQv);
+        outerSide = 'requirement'; innerSide = 'actual';
+      }
+      if (comparison.outcome !== 'compared') {
+        notAnalyzed.push({ reason_code:comparison.reason_code, ...view });
+        continue;
+      }
+
+      // signed_boundary_deltasは、outer/innerに関わらず常にrequirement/actualの実値から
+      // 直接計算する固定式(3モードとも同一。point_in_regionではactual.lower===actual.upper===
+      // 点の値のため、この式が自然にpointInRegionResult()相当の距離計算と一致する)。
+      // 【レビュー指摘、重大1】各境界値が個別に有限であることはB-2.4bが保証するが、大きさの
+      // 異なる区間同士の減算結果まで有限である保証はない(例: 1e308 - (-1e308) === Infinity)。
+      // nullは「この境界が存在しない」という別の意味を持つため、非有限をnullへ置き換えず、
+      // 候補ごとnot_analyzedへ送る(推測しない)。
+      const lowerDelta = (reqQv.lower && actQv.lower) ? actQv.lower.value - reqQv.lower.value : null;
+      const upperDelta = (reqQv.upper && actQv.upper) ? reqQv.upper.value - actQv.upper.value : null;
+      const lowerDeltaNonFinite = lowerDelta !== null && !Number.isFinite(lowerDelta);
+      const upperDeltaNonFinite = upperDelta !== null && !Number.isFinite(upperDelta);
+      if (lowerDeltaNonFinite || upperDeltaNonFinite) {
+        notAnalyzed.push({ reason_code:'numeric_comparison_delta_non_finite', ...view,
+          comparison_mode_candidate:mode,
+          lower_delta_non_finite:lowerDeltaNonFinite, upper_delta_non_finite:upperDeltaNonFinite });
+        continue;
+      }
+      const signedBoundaryDeltas = {
+        lower_actual_minus_requirement: lowerDelta,
+        upper_requirement_minus_actual: upperDelta,
+      };
+      numericComparisonResults.push({ ...view,
+        numeric_comparison: {
+          comparison_mode: mode,
+          relation_type: comparison.result.relation_type,
+          outer_side: outerSide,
+          inner_side: innerSide,
+          geometric_relation_holds: comparison.result.geometric_relation_holds,
+          lower_check: comparison.result.lower_check,
+          upper_check: comparison.result.upper_check,
+          signed_boundary_deltas: signedBoundaryDeltas,
+        } });
+    }
+
+    return { ready:true, numeric_comparison_results:numericComparisonResults, candidate_count:numericComparisonResults.length, result_complete:true,
+      diagnostics: viewResult.diagnostics,
+      not_analyzed: [...viewResult.not_analyzed, ...notAnalyzed] };
+  }
+
+  function blockedAutoApplicabilityResult(diagnostics, numericResult) {
+    return { ready:false, auto_applicability_results:[], candidate_count:0, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(numericResult?.diagnostics || [])]),
+      not_analyzed:dedupeByCanonicalJson(numericResult?.not_analyzed || []) };
+  }
+
+  // Phase B-2.6a: 段階4の最後の部分として、B-2.5が算出済みのgeometric_relation_holdsを一切
+  // 変更せず、その候補を自動判定へ使ってよいか(auto_applicable)だけを決定する。
+  //
+  // 【設計方針、レビュー確定】comparison_mode_confidence・requirement/actual側condition
+  // margin・opposing evidence・property confidenceの5基準は、B-2.2b(generatePropertyResolutions()の
+  // resolvePropertyStatus())・B-2.3a(generateConditionResolutions()のresolveConditionStatus())・
+  // B-2.3b(generateComparisonModeCandidates())が既にresolved判定のゲートとして適用済みであり、
+  // numeric_comparison_resultsへ到達した候補はこの5基準を構造的に満たしている。したがって
+  // このB-2.6aでは、これらを「基準未達なら自動判定不可」という通常の判定条件としては扱わず、
+  // 「基準を満たしているはずという上流契約のinvariant」として再検証する。違反時は個々の候補を
+  // auto_applicable:falseにするのではなく、呼び出し全体をfail closedする(パイプラインの不整合を
+  // 「正常な要確認候補」として隠さないため)。現行rulesetにおいて、正常経路でauto_applicableを
+  // falseにし得る実効条件は抽出警告件数(analysis.quantity.extraction.warnings)だけである
+  // (この値はどの段階でもまだ検査されていない、B-2.6aで初めて参照する値)。
+  //
+  // 新しい閾値は導入しない。既存のauto_applicable_thresholds(modeConfidence/margin/
+  // propertyConfidence)をそのまま再利用する(原型のevaluateAutoApplicable()自身が「検証用
+  // パラメータ、実データでの再調整が必要」と明記しており、根拠なく厳格化しないため)。
+  function generateAutoApplicabilityResults({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    const numericResult = generateNumericComparisonResults({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (numericResult.ready !== true || numericResult.result_complete !== true) {
+      return blockedAutoApplicabilityResult([{ code:'numeric_comparison_results_not_ready_or_incomplete', severity:'error',
+        detail:`generateNumericComparisonResults()がready=${JSON.stringify(numericResult.ready)}、result_complete=${JSON.stringify(numericResult.result_complete)}のため自動適用可否を判定できません(段階3以降と同じくready===trueかつresult_complete===trueを要求してfail closedする契約)` }],
+        numericResult);
+    }
+
+    // 段階1(防御的): requirement側とactual側のruleset_versionが完全一致することを要求する。
+    // 現在のSUPPORTED_RULESETSは1タプルのみのため両側は常に一致するが、将来複数タプルが
+    // 追加された場合、bindSide()は各側を個別にSUPPORTED_RULESETSと照合するだけで、両側が
+    // 互いに同じタプルであることまでは検証しない。異なるタプル同士がrequirement側の閾値だけで
+    // 判定される事故を防ぐため、ここで両側の完全一致を要求する(sameRuleset()を、
+    // SUPPORTED_RULESETSとの照合ではなく両側同士の照合に転用する)。
+    // 【レビュー修正、重大】sameRuleset()は両側の値を===で突き合わせるだけで、値自体の型・値域は
+    // 検証しない。両側を同じ不正値(文字列閾値・負の閾値等)へ揃えると、一致検査は通過したまま
+    // 後続の閾値比較(`<`/`>=`)が暗黙の数値変換で成立してしまう(condition top confidenceで
+    // 修正した文字列問題と同種の欠陥)。validateRulesetCompatibility()はSUPPORTED_RULESETSとの
+    // 完全一致(数値として定義された既知タプル)を要求するため、まず両側それぞれを既知の対応
+    // タプルとして検証してから、両側の一致を確認する。
+    const reqRuleset = binding.requirement?.ruleset_version;
+    const actRuleset = binding.actual?.ruleset_version;
+    const reqCompatibility = validateRulesetCompatibility(reqRuleset);
+    const actCompatibility = validateRulesetCompatibility(actRuleset);
+    if (reqCompatibility.supported !== true || actCompatibility.supported !== true) {
+      return blockedAutoApplicabilityResult([{ code:'auto_applicability_ruleset_unsupported', severity:'error',
+        requirement_ruleset_version: reqRuleset ?? null, actual_ruleset_version: actRuleset ?? null,
+        detail:'requirement側またはactual側のruleset_versionが対応済み完全タプルではありません' }],
+        numericResult);
+    }
+    if (!sameRuleset(reqRuleset, actRuleset)) {
+      return blockedAutoApplicabilityResult([{ code:'auto_applicability_ruleset_inconsistent', severity:'error',
+        requirement_ruleset_version: reqRuleset, actual_ruleset_version: actRuleset,
+        detail:'requirement側とactual側のruleset_version(auto_applicable_thresholds含む)が一致しません' }],
+        numericResult);
+    }
+    const thresholds = reqRuleset.auto_applicable_thresholds;
+
+    // 段階2: property resolutionを同じbindingから同期的に再計算し、(side, quantity_id)で
+    // 索引化する(B-2.4a/bのanalysisByQuantityId()と同じ「別引数として受け取らず必ず
+    // bindingから再計算する」設計方針)。
+    const propertyResult = generatePropertyResolutions({ binding });
+    const propertyResolutionByKey = new Map();
+    for (const r of propertyResult.resolutions) propertyResolutionByKey.set(`${r.side}:${r.quantity_id}`, r);
+    const reqAnalysisById = analysisByQuantityId(binding.requirement);
+    const actAnalysisById = analysisByQuantityId(binding.actual);
+
+    const inRange01 = value => isFiniteNumber(value) && value >= 0 && value <= 1;
+
+    const upstreamGateDiagnostics = [];
+    const extractionInputDiagnostics = [];
+    const prepared = [];
+
+    for (const entry of numericResult.numeric_comparison_results) {
+      const failedInvariants = [];
+      const refIds = { requirement_quantity_id:entry.requirement_quantity_id, actual_quantity_id:entry.actual_quantity_id };
+
+      // --- comparison_mode_confidence: 値域・requirement/actual top_confidenceからの導出式・閾値 ---
+      // 【レビュー修正、重大】Math.min()は文字列を暗黙的に数値変換するため
+      // (Math.min('0.9','0.9') === 0.9)、requirement_condition_top_confidence/
+      // actual_condition_top_confidence自体を個別に検証しないまま導出式の一致だけを見ると、
+      // 両側が文字列"0.9"でもcomparison_mode_confidence(数値0.9)と一致してしまい、
+      // このinvariant検査をすり抜ける。派生式を計算する前に、2つの入力自体を個別に検証する。
+      const requirementTopConfidence = entry.requirement_condition_top_confidence;
+      const actualTopConfidence = entry.actual_condition_top_confidence;
+      if (!isFiniteNumber(requirementTopConfidence)) failedInvariants.push('requirement_condition_top_confidence_not_finite_number');
+      else if (requirementTopConfidence < 0 || requirementTopConfidence > 1) failedInvariants.push('requirement_condition_top_confidence_out_of_range');
+      if (!isFiniteNumber(actualTopConfidence)) failedInvariants.push('actual_condition_top_confidence_not_finite_number');
+      else if (actualTopConfidence < 0 || actualTopConfidence > 1) failedInvariants.push('actual_condition_top_confidence_out_of_range');
+
+      const modeConfidence = entry.comparison_mode_confidence;
+      if (!inRange01(modeConfidence)) {
+        failedInvariants.push('comparison_mode_confidence_out_of_range');
+      } else if (inRange01(requirementTopConfidence) && inRange01(actualTopConfidence)) {
+        if (modeConfidence !== Math.min(requirementTopConfidence, actualTopConfidence)) {
+          failedInvariants.push('comparison_mode_confidence_derivation_mismatch');
+        } else if (modeConfidence < thresholds.modeConfidence) {
+          failedInvariants.push('comparison_mode_confidence_below_threshold');
+        }
+      }
+
+      // --- requirement/actual側condition margin: 値域・閾値 ---
+      for (const [label, value] of [['requirement', entry.requirement_condition_margin], ['actual', entry.actual_condition_margin]]) {
+        if (!inRange01(value)) failedInvariants.push(`${label}_condition_margin_out_of_range`);
+        else if (value < thresholds.margin) failedInvariants.push(`${label}_condition_margin_below_threshold`);
+      }
+
+      // --- requirement/actual側opposing evidence: 型・値 ---
+      for (const [label, value] of [
+        ['requirement', entry.requirement_condition_has_opposing_evidence], ['actual', entry.actual_condition_has_opposing_evidence]]) {
+        if (typeof value !== 'boolean') failedInvariants.push(`${label}_condition_has_opposing_evidence_not_boolean`);
+        else if (value === true) failedInvariants.push(`${label}_condition_has_opposing_evidence_true`);
+      }
+
+      // --- requirement/actual側property resolution: 存在・resolved状態・concept_id整合・confidence値域 ---
+      const propertyTopConfidenceBySide = {};
+      for (const [label, quantityId] of [['requirement', entry.requirement_quantity_id], ['actual', entry.actual_quantity_id]]) {
+        const resolution = propertyResolutionByKey.get(`${label}:${quantityId}`);
+        if (!resolution) { failedInvariants.push(`${label}_property_resolution_missing`); continue; }
+        if (resolution.status !== 'resolved') { failedInvariants.push(`${label}_property_resolution_not_resolved`); continue; }
+        if (resolution.concept_id !== entry.concept_id || resolution.candidates[0]?.concept_id !== entry.concept_id) {
+          failedInvariants.push(`${label}_property_resolution_concept_id_mismatch`); continue;
+        }
+        const topConfidence = resolution.candidates[0]?.confidence;
+        if (!inRange01(topConfidence)) { failedInvariants.push(`${label}_property_top_confidence_out_of_range`); continue; }
+        propertyTopConfidenceBySide[label] = topConfidence;
+      }
+      let propertyConfidence = null;
+      if ('requirement' in propertyTopConfidenceBySide && 'actual' in propertyTopConfidenceBySide) {
+        propertyConfidence = Math.min(propertyTopConfidenceBySide.requirement, propertyTopConfidenceBySide.actual);
+        if (propertyConfidence < thresholds.propertyConfidence) failedInvariants.push('property_confidence_below_threshold');
+      }
+
+      if (failedInvariants.length) {
+        upstreamGateDiagnostics.push({ code:'auto_applicability_upstream_gate_invariant_violation', severity:'error',
+          failed_invariants:failedInvariants, ...refIds,
+          detail:'B-2.2b/B-2.3a/B-2.3bが既に通過済みのはずの信頼度・margin・否定根拠・property解決の前提が崩れています' });
+      }
+
+      // --- requirement/actual側抽出警告件数: analysis存在・warnings配列妥当性(B-2.6aで初めて参照) ---
+      const extractionWarningsCountBySide = {};
+      for (const [label, quantityId, analysisById] of [
+        ['requirement', entry.requirement_quantity_id, reqAnalysisById], ['actual', entry.actual_quantity_id, actAnalysisById]]) {
+        const analysis = analysisById.get(quantityId);
+        if (!analysis) { extractionInputDiagnostics.push({ code:'auto_applicability_extraction_input_invariant_violation', severity:'error',
+          side:label, ...refIds, detail:'候補のquantity_idに対応するanalysisがbinding内に見つかりません' }); continue; }
+        const warnings = analysis.quantity?.extraction?.warnings;
+        if (!Array.isArray(warnings)) { extractionInputDiagnostics.push({ code:'auto_applicability_extraction_input_invariant_violation', severity:'error',
+          side:label, ...refIds, detail:'analysis.quantity.extraction.warningsが配列ではありません(警告0件と解釈しない)' }); continue; }
+        extractionWarningsCountBySide[label] = warnings.length;
+      }
+
+      prepared.push({ entry, modeConfidence, propertyTopConfidenceBySide, propertyConfidence, extractionWarningsCountBySide });
+    }
+
+    if (upstreamGateDiagnostics.length) return blockedAutoApplicabilityResult(upstreamGateDiagnostics, numericResult);
+    if (extractionInputDiagnostics.length) return blockedAutoApplicabilityResult(extractionInputDiagnostics, numericResult);
+
+    // 段階3: ここまでで上流ゲートのinvariantは全候補で成立しているため、正常経路で
+    // auto_applicableを左右する実効条件は抽出警告件数だけになる(設計方針コメント参照)。
+    const autoApplicabilityResults = prepared.map(({ entry, modeConfidence, propertyTopConfidenceBySide, propertyConfidence, extractionWarningsCountBySide }) => {
+      const requirementExtractionWarningsCount = extractionWarningsCountBySide.requirement;
+      const actualExtractionWarningsCount = extractionWarningsCountBySide.actual;
+      const extractionWarningsAbsent = requirementExtractionWarningsCount === 0 && actualExtractionWarningsCount === 0;
+      return { ...entry,
+        auto_applicability: {
+          auto_applicable: extractionWarningsAbsent,
+          basis: {
+            requirement_extraction_warnings_count: requirementExtractionWarningsCount,
+            actual_extraction_warnings_count: actualExtractionWarningsCount,
+            extraction_warnings_count: requirementExtractionWarningsCount + actualExtractionWarningsCount,
+            extraction_warnings_absent: extractionWarningsAbsent,
+            comparison_mode_confidence: modeConfidence,
+            comparison_mode_confidence_meets_threshold: modeConfidence >= thresholds.modeConfidence,
+            requirement_condition_margin: entry.requirement_condition_margin,
+            requirement_condition_margin_meets_threshold: entry.requirement_condition_margin >= thresholds.margin,
+            actual_condition_margin: entry.actual_condition_margin,
+            actual_condition_margin_meets_threshold: entry.actual_condition_margin >= thresholds.margin,
+            requirement_condition_has_opposing_evidence: entry.requirement_condition_has_opposing_evidence,
+            actual_condition_has_opposing_evidence: entry.actual_condition_has_opposing_evidence,
+            opposing_evidence_absent: !entry.requirement_condition_has_opposing_evidence && !entry.actual_condition_has_opposing_evidence,
+            requirement_property_top_confidence: propertyTopConfidenceBySide.requirement,
+            actual_property_top_confidence: propertyTopConfidenceBySide.actual,
+            property_confidence: propertyConfidence,
+            property_confidence_meets_threshold: propertyConfidence >= thresholds.propertyConfidence,
+          },
+        } };
+    });
+
+    return { ready:true, auto_applicability_results:autoApplicabilityResults, candidate_count:autoApplicabilityResults.length, result_complete:true,
+      auto_applicability_policy: {
+        ruleset_version: { quantity_extraction:reqRuleset.quantity_extraction, semantics_rules:reqRuleset.semantics_rules },
+        thresholds: { modeConfidence:thresholds.modeConfidence, margin:thresholds.margin, propertyConfidence:thresholds.propertyConfidence },
+      },
+      diagnostics: numericResult.diagnostics,
+      not_analyzed: numericResult.not_analyzed };
+  }
+
+  function blockedAutomaticJudgementResult(diagnostics, autoResult) {
+    return { ready:false, automatic_judgement_results:[], candidate_count:0, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(autoResult?.diagnostics || [])]),
+      not_analyzed:dedupeByCanonicalJson(autoResult?.not_analyzed || []) };
+  }
+
+  // Phase B-2.6b: 3.4節 段階4の最後の部分として、B-2.6aが分析した各候補(auto_applicable済み)を
+  // 'satisfied'/'not_satisfied'/'needs_confirmation'の3状態へ排他的に分類する、パイプラインに
+  // よる自動判定(人間による確定ではない)。
+  //
+  // 【設計方針、レビュー確定】この段階が生成する判定は「最終」ではなく「自動」であり、
+  // 人間確認済みと混同されてはならない(原型設計はconfirmedとauto_applicableを明確に分離して
+  // おり、自動適用されてもconfirmedにはならない)。出力配列名を`automatic_judgement_results`とし、
+  // 各要素の`automatic_judgement`に`judgement_source:'automatic_pipeline'`・`human_confirmed:false`を
+  // 明示する。将来人間確認機能を追加する場合も、この自動判定結果を書き換えず、別フィールドまたは
+  // 別段階で確認結果を追加できる構造にする。
+  //
+  // 【設計方針、レビュー確定】`not_analyzed`は候補単位とは限らない別の監査ストリームである
+  // (例: dimension_mismatchはバケット単位に圧縮され`excluded_pair_count`で複数候補を表す)。
+  // そのため「表示されうる候補は4状態のうちちょうど1つ」という契約は成立しない。正しくは、
+  // B-2.6aが分析した候補(auto_applicability_results)だけを3状態へ排他的に分類し、
+  // `not_analyzed`はB-2.5/B-2.6aから一切変更せずそのまま引き継ぐ、別ストリームとして扱う。
+  //
+  // 判定式(auto_applicable:falseは幾何結果の真偽に関わらず必ずneeds_confirmation):
+  //   !auto_applicable            → needs_confirmation / satisfied:null
+  //   auto_applicable && holds    → satisfied           / satisfied:true
+  //   auto_applicable && !holds   → not_satisfied        / satisfied:false
+  function generateAutomaticJudgementResults({ binding, relations,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    const autoResult = generateAutoApplicabilityResults({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (autoResult.ready !== true || autoResult.result_complete !== true) {
+      return blockedAutomaticJudgementResult([{ code:'automatic_judgement_source_not_ready_or_incomplete', severity:'error',
+        detail:`generateAutoApplicabilityResults()がready=${JSON.stringify(autoResult.ready)}、result_complete=${JSON.stringify(autoResult.result_complete)}のため自動判定を生成できません(段階3以降と同じくready===trueかつresult_complete===trueを要求してfail closedする契約)` }],
+        autoResult);
+    }
+
+    // 段階1(防御的): auto_applicable/geometric_relation_holdsが構造上期待される位置にboolean値として
+    // 存在することを検証する。同一binding/relationsを同期的に再計算するだけの構造上、通常到達
+    // 不能なはずだが、B-2.5/B-2.6aと同じ慣行として、個々の候補ではなく呼び出し全体をfail closedする。
+    const invariantDiagnostics = [];
+    for (const entry of autoResult.auto_applicability_results) {
+      const failedInvariants = [];
+      if (!entry || typeof entry !== 'object' || !entry.auto_applicability || typeof entry.auto_applicability !== 'object'
+        || typeof entry.auto_applicability.auto_applicable !== 'boolean') {
+        failedInvariants.push('auto_applicable_not_boolean');
+      }
+      if (!entry || typeof entry !== 'object' || !entry.numeric_comparison || typeof entry.numeric_comparison !== 'object'
+        || typeof entry.numeric_comparison.geometric_relation_holds !== 'boolean') {
+        failedInvariants.push('geometric_relation_holds_not_boolean');
+      }
+      if (failedInvariants.length) {
+        invariantDiagnostics.push({ code:'final_judgement_input_invariant_violation', severity:'error',
+          failed_invariants:failedInvariants,
+          requirement_quantity_id: entry?.requirement_quantity_id, actual_quantity_id: entry?.actual_quantity_id });
+      }
+    }
+    if (invariantDiagnostics.length) return blockedAutomaticJudgementResult(invariantDiagnostics, autoResult);
+
+    // 段階2: 3状態への排他的分類。
+    const automaticJudgementResults = autoResult.auto_applicability_results.map(entry => {
+      const autoApplicable = entry.auto_applicability.auto_applicable;
+      const geometricRelationHolds = entry.numeric_comparison.geometric_relation_holds;
+      let state;
+      let satisfied;
+      if (!autoApplicable) { state = 'needs_confirmation'; satisfied = null; }
+      else if (geometricRelationHolds) { state = 'satisfied'; satisfied = true; }
+      else { state = 'not_satisfied'; satisfied = false; }
+      return { ...entry,
+        automatic_judgement: { state, satisfied, judgement_source:'automatic_pipeline', human_confirmed:false } };
+    });
+
+    return { ready:true, automatic_judgement_results:automaticJudgementResults, candidate_count:automaticJudgementResults.length, result_complete:true,
+      auto_applicability_policy: autoResult.auto_applicability_policy,
+      diagnostics: autoResult.diagnostics,
+      not_analyzed: autoResult.not_analyzed };
+  }
+
+  // ── Phase B-3b: trace-comparison/1.0-rc2 正式レコード組み立て(pure。幾何比較・
+  // auto applicability・自動判定の再計算は一切行わない。写像・ID生成・provenance集約・
+  // 初期review状態の付加・not_analyzedの保持のみ) ──
+
+  const TRACE_COMPARISON_SCHEMA_VERSION = 'trace-comparison/1.0-rc2';
+  const CANONICAL_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+  const QUANTITY_ID_PATTERN = /^q-[0-9a-f]{32}$/;
+  const DATASET_SIGNATURE_PATTERN = /^QA-SHA256:[0-9a-f]{64}$/;
+
+  function isNonEmptyString(value) { return typeof value === 'string' && value.length > 0; }
+
+  function isCanonicalTimestamp(value) {
+    if (!isNonEmptyString(value) || !CANONICAL_TIMESTAMP_PATTERN.test(value)) return false;
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+  }
+
+  // UTF-8バイト長のnetstring([length]:[value],)。呼び出し側が非空stringであることを事前に
+  // 検証してから渡す契約(このヘルパー自体はString(value)による暗黙変換を型検査の代わりに
+  // 使わない、B-3aレビューで明示された契約)。trace_id/matcher_idは元trace由来の任意文字列で
+  // 区切り文字の衝突を排除できないため、単純な"::"連結ではなくこの方式を使う。
+  function encodeUtf8Netstring(value) {
+    const byteLength = new TextEncoder().encode(value).length;
+    return `${byteLength}:${value},`;
+  }
+
+  // relations行から関係性metadata(4参照IDとは別経路で後から組み合わせない、同じrowから
+  // 原子的に取得する)。既存relationRefs()と対になるヘルパー。
+  // 【レビュー修正、重大2】以前はmatch_confidenceがnumber型でなければ無条件にnullへ変換して
+  // いた(不正入力の黙示的な補正、文字列'invalid'等がエラーにならずnullへ潰れていた)。
+  // ここでは一切型変換・値検証をせず、null/undefinedだけをnullへそろえて生の値を保持する
+  // (undefined/nullは「値なし」で同じ意味だが、それ以外の値は変換せずvalidateRelationshipMetadata()
+  // で検証する)。
+  function relationshipRefs(row) {
+    return {
+      source: row?.source ?? null,
+      match_method: row?.match_method ?? null,
+      match_confidence: row?.match_confidence ?? null,
+      review_category: row?.review_category ?? null,
+      linked_at: row?.linked_at ?? null,
+    };
+  }
+
+  // relationship metadataの値域・型を検証する。source両方に共通の型検査(null許容)と、
+  // source==='matching_engine'の場合だけ追加で必須項目を要求する(reviewer確定方針)。
+  function validateRelationshipMetadata(relationship) {
+    const issues = [];
+    if (relationship.source !== 'matching_engine' && relationship.source !== 'manual') issues.push('source_invalid');
+    if (relationship.match_method !== null && !isNonEmptyString(relationship.match_method)) issues.push('match_method_invalid');
+    if (relationship.match_confidence !== null
+      && !(isFiniteNumber(relationship.match_confidence) && relationship.match_confidence >= 0 && relationship.match_confidence <= 1)) issues.push('match_confidence_invalid');
+    if (relationship.review_category !== null && !isNonEmptyString(relationship.review_category)) issues.push('review_category_invalid');
+    if (relationship.linked_at !== null && !isCanonicalTimestamp(relationship.linked_at)) issues.push('linked_at_invalid');
+    if (relationship.source === 'matching_engine') {
+      if (relationship.match_method === null) issues.push('match_method_missing');
+      if (relationship.match_confidence === null) issues.push('match_confidence_missing');
+      if (relationship.review_category === null) issues.push('review_category_missing');
+    }
+    return issues;
+  }
+
+  function blockedTraceComparisonResult(diagnostics, judgementResult) {
+    return { ready:false, result_complete:false,
+      diagnostics:dedupeByCanonicalJson([...diagnostics, ...(judgementResult?.diagnostics || [])]),
+      record_set:null };
+  }
+
+  // side単位で、quantity_idごとの生analysis・record単位content_hash・trace_id・source_rowを
+  // 1回の走査で取得する(B-2.4a由来のanalysisByQuantityId()を拡張し、B-3の正式artifactに
+  // 必要な監査情報を同じ走査で追加取得する)。単純なMap.set()による後勝ち上書きを禁止し、
+  // 同一side内でquantity_idが重複した場合はfail closedする。
+  function analysisContextByQuantityId(sideResult) {
+    const map = new Map();
+    const diagnostics = [];
+    (sideResult?.bindings || []).forEach(b => {
+      if (b.status !== 'bound' || !b.annotation) return;
+      const contentHash = b.annotation.content_hash;
+      const sourceRow = b.record?.source_row;
+      (b.annotation.analyses || []).forEach(analysis => {
+        if (!analysis?.quantity_id) return;
+        if (map.has(analysis.quantity_id)) {
+          diagnostics.push({ code:'trace_comparison_analysis_context_duplicate', severity:'error',
+            quantity_id:analysis.quantity_id, detail:'同一side内でquantity_idが重複するanalysis contextが見つかりました' });
+          return;
+        }
+        map.set(analysis.quantity_id, { trace_id:b.trace_id, quantity_id:analysis.quantity_id, content_hash:contentHash,
+          analysis, source_row: sourceRow !== undefined ? sourceRow : null });
+      });
+    });
+    return { ok:diagnostics.length === 0, map, diagnostics };
+  }
+
+  // (side + quantity_id)単位でproperty resolutionを索引化する。同じくMap.set()による
+  // 後勝ち上書きを禁止する。
+  function propertyResolutionByKey(propertyResult) {
+    const map = new Map();
+    const diagnostics = [];
+    (propertyResult?.resolutions || []).forEach(r => {
+      const key = `${r.side}:${r.quantity_id}`;
+      if (map.has(key)) {
+        diagnostics.push({ code:'trace_comparison_mapping_resolution_duplicate', severity:'error',
+          side:r.side, quantity_id:r.quantity_id, detail:'同一side内でquantity_idが重複するproperty resolutionが見つかりました' });
+        return;
+      }
+      map.set(key, r);
+    });
+    return { ok:diagnostics.length === 0, map, diagnostics };
+  }
+
+  // relations行を1回走査し、4参照ID(relationRefs())とrelationship metadata(relationshipRefs())を
+  // 同じ行から原子的に取得してrelation_keyで索引化する。同一keyが複数行ある場合、metadataが
+  // canonical JSON上同一ならduplicate、異なればconflictとして区別し、いずれか一方だけを
+  // 全体fail closedの理由コードとして記録する(両方を同時に生成しない)。
+  // 【レビュー修正、重大3】以前は4参照IDが非空文字列でない行を診断なしで読み飛ばしており、
+  // 該当する候補が1件もない場合(dimension_mismatch等でnot_analyzedへ回った場合)、不正な
+  // relation行が一切検出されずready:trueのまま通過していた(「必須4参照ID欠落は全体fail closed」
+  // という契約に反する)。すべてのrelation行を、対応する候補の有無に関わらずこの索引構築時点で
+  // 検証する(4参照IDの型・relationship metadataの値域とも)。
+  function relationContextByKey(relations) {
+    const map = new Map();
+    const diagnostics = [];
+    (relations || []).forEach(row => {
+      const refs = relationRefs(row);
+      if (!isNonEmptyString(refs.requirement_trace_id) || !isNonEmptyString(refs.actual_trace_id)
+        || !isNonEmptyString(refs.matcher_a_id) || !isNonEmptyString(refs.matcher_b_id)) {
+        diagnostics.push({ code:'trace_comparison_input_invariant_violation', severity:'error',
+          failed_invariants:['relation_reference_id_invalid'],
+          requirement_trace_id:refs.requirement_trace_id, actual_trace_id:refs.actual_trace_id,
+          matcher_a_id:refs.matcher_a_id, matcher_b_id:refs.matcher_b_id });
+        return;
+      }
+      const relationship = relationshipRefs(row);
+      const relationshipIssues = validateRelationshipMetadata(relationship);
+      if (relationshipIssues.length) {
+        diagnostics.push({ code:'trace_comparison_relationship_metadata_invalid', severity:'error',
+          failed_invariants:relationshipIssues,
+          requirement_trace_id:refs.requirement_trace_id, actual_trace_id:refs.actual_trace_id,
+          matcher_a_id:refs.matcher_a_id, matcher_b_id:refs.matcher_b_id });
+        return;
+      }
+      const key = encodeUtf8Netstring(refs.requirement_trace_id) + encodeUtf8Netstring(refs.actual_trace_id)
+        + encodeUtf8Netstring(refs.matcher_a_id) + encodeUtf8Netstring(refs.matcher_b_id);
+      if (map.has(key)) {
+        const sameContent = canonicalJson(map.get(key).relationship) === canonicalJson(relationship);
+        diagnostics.push({ code: sameContent ? 'trace_comparison_relationship_duplicate' : 'trace_comparison_relationship_conflict',
+          severity:'error', requirement_trace_id:refs.requirement_trace_id, actual_trace_id:refs.actual_trace_id,
+          matcher_a_id:refs.matcher_a_id, matcher_b_id:refs.matcher_b_id,
+          detail: sameContent ? '同一relation_keyの行が複数あります(内容は同一)' : '同一relation_keyの行が複数あり、relationship metadataが競合しています' });
+        return;
+      }
+      map.set(key, { refs, relationship });
+    });
+    return { ok:diagnostics.length === 0, map, diagnostics };
+  }
+
+  function initialReviewTarget(status) { return { status, reviewer:null, reviewed_at:null, verdict:null, note:null }; }
+
+  // 【レビュー修正、重大(B-3cレビュー)】区切り文字連結によるソートキー衝突を避けるため、
+  // 6フィールドを1つずつ順に比較する(区切り文字を一切使わない)。trace_comparison_record_set_
+  // validator.js(B-3c)のsemantic validatorも、comparisonsの安定順検証にこの関数をそのまま
+  // 再利用する(同じ比較契約を別実装で複製しない)。
+  function compareText(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
+  function compareComparisonRecords(a, b) {
+    const fieldsA = [a.requirement_ref.trace_id, a.actual_ref.trace_id, a.requirement_ref.quantity_id, a.actual_ref.quantity_id,
+      a.requirement_ref.matcher_id, a.actual_ref.matcher_id];
+    const fieldsB = [b.requirement_ref.trace_id, b.actual_ref.trace_id, b.requirement_ref.quantity_id, b.actual_ref.quantity_id,
+      b.requirement_ref.matcher_id, b.actual_ref.matcher_id];
+    for (let i = 0; i < fieldsA.length; i++) {
+      const result = compareText(fieldsA[i], fieldsB[i]);
+      if (result !== 0) return result;
+    }
+    return 0;
+  }
+
+  function generateTraceComparisonRecordSet({ binding, relations, generatedAt, generator, displayContext,
+    candidateLimit = DEFAULT_COMPARISON_CANDIDATE_LIMIT, totalCandidateLimit = DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT,
+    totalPotentialPairLimit = DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT }) {
+    // 段階1: 呼び出し側供給metadataの検証(pure関数契約。内部でnew Date()を呼ばない)。
+    const metadataDiagnostics = [];
+    if (!isCanonicalTimestamp(generatedAt)) {
+      metadataDiagnostics.push({ code:'trace_comparison_metadata_invalid', severity:'error',
+        detail:'generatedAtがYYYY-MM-DDTHH:mm:ss.sssZ形式のcanonical UTC timestampではありません' });
+    }
+    // 【レビュー修正、重大(B-3cレビュー)】generator/displayContextのproducer受理条件をrc2 Schemaの
+    // additionalProperties:falseと一致させる。配列はtypeof==='object'を通過してしまうため、
+    // Array.isArray()で明示的に除外してからObject.keys()で余分なキーを検査する。
+    const generatorIsObject = generator !== null && typeof generator === 'object' && !Array.isArray(generator);
+    const generatorKeys = generatorIsObject ? Object.keys(generator) : null;
+    const generatorValid = generatorIsObject && generatorKeys.length === 2 && generatorKeys.includes('tool') && generatorKeys.includes('version')
+      && isNonEmptyString(generator.tool) && isNonEmptyString(generator.version);
+    if (!generatorValid) {
+      metadataDiagnostics.push({ code:'trace_comparison_metadata_invalid', severity:'error',
+        detail:'generatorはtool/versionの2キーのみ(ともに非空文字列)を持つ非配列オブジェクトである必要があります(余分なキーは拒否)' });
+    }
+    const displayContextIsObject = displayContext !== null && displayContext !== undefined && typeof displayContext === 'object' && !Array.isArray(displayContext);
+    const displayContextKeys = displayContextIsObject ? Object.keys(displayContext) : null;
+    const displayContextValid = displayContext === null || displayContext === undefined
+      || (displayContextIsObject && displayContextKeys.length === 1 && displayContextKeys[0] === 'matching_dataset_signature'
+        && isNonEmptyString(displayContext.matching_dataset_signature));
+    if (!displayContextValid) {
+      metadataDiagnostics.push({ code:'trace_comparison_metadata_invalid', severity:'error',
+        detail:'displayContextはnull、またはmatching_dataset_signature(非空文字列)のみを持つ非配列オブジェクトである必要があります' });
+    }
+    if (metadataDiagnostics.length) return blockedTraceComparisonResult(metadataDiagnostics, null);
+
+    // 段階2: B-2.6bを内部で再計算する(外部から中間結果を受け取らない、B-2.2a以来の設計方針)。
+    const judgementResult = generateAutomaticJudgementResults({ binding, relations, candidateLimit, totalCandidateLimit, totalPotentialPairLimit });
+    if (judgementResult.ready !== true || judgementResult.result_complete !== true) {
+      return blockedTraceComparisonResult([{ code:'automatic_judgement_results_not_ready_or_incomplete', severity:'error',
+        detail:`generateAutomaticJudgementResults()がready=${JSON.stringify(judgementResult.ready)}、result_complete=${JSON.stringify(judgementResult.result_complete)}のため正式レコードを組み立てられません` }],
+        judgementResult);
+    }
+
+    // 段階3: provenance(source_trace_file・dataset_signature・ruleset_version)の検証。
+    const provenanceDiagnostics = [];
+    const reqSide = binding.requirement, actSide = binding.actual;
+    if (!isNonEmptyString(reqSide?.source_trace_file) || !isNonEmptyString(actSide?.source_trace_file)) {
+      provenanceDiagnostics.push({ code:'trace_comparison_provenance_missing', severity:'error',
+        detail:'requirement側またはactual側のsource_trace_fileが欠落しています' });
+    }
+    if (!DATASET_SIGNATURE_PATTERN.test(reqSide?.dataset_signature || '') || !DATASET_SIGNATURE_PATTERN.test(actSide?.dataset_signature || '')) {
+      provenanceDiagnostics.push({ code:'trace_comparison_provenance_missing', severity:'error',
+        detail:'requirement側またはactual側のdataset_signatureが"QA-SHA256:"+64桁16進の形式ではありません' });
+    }
+    const rulesetVersion = reqSide?.ruleset_version;
+    if (!rulesetVersion || !isNonEmptyString(rulesetVersion.quantity_extraction) || !isNonEmptyString(rulesetVersion.semantics_rules)
+      || !rulesetVersion.auto_applicable_thresholds || !isFiniteNumber(rulesetVersion.auto_applicable_thresholds.modeConfidence)
+      || !isFiniteNumber(rulesetVersion.auto_applicable_thresholds.margin) || !isFiniteNumber(rulesetVersion.auto_applicable_thresholds.propertyConfidence)) {
+      provenanceDiagnostics.push({ code:'trace_comparison_provenance_missing', severity:'error',
+        detail:'ruleset_versionが完全なタプル(quantity_extraction/semantics_rules/auto_applicable_thresholdsの3閾値)ではありません' });
+    }
+    if (provenanceDiagnostics.length) return blockedTraceComparisonResult(provenanceDiagnostics, judgementResult);
+
+    // 段階4: 索引の構築(analysis context・property resolution・relation context)。
+    const reqContext = analysisContextByQuantityId(reqSide);
+    const actContext = analysisContextByQuantityId(actSide);
+    const propertyResult = generatePropertyResolutions({ binding });
+    const propertyByKey = propertyResolutionByKey(propertyResult);
+    const relationByKey = relationContextByKey(relations);
+    const indexDiagnostics = [...reqContext.diagnostics, ...actContext.diagnostics, ...propertyByKey.diagnostics, ...relationByKey.diagnostics];
+    if (indexDiagnostics.length) return blockedTraceComparisonResult(indexDiagnostics, judgementResult);
+
+    // 段階5: 候補ごとの検証・写像。
+    const entryDiagnostics = [];
+    const quantityPairIdsSeen = new Set();
+    const comparisonRecordsById = new Map();
+    const records = [];
+
+    for (const entry of judgementResult.automatic_judgement_results) {
+      const failedInvariants = [];
+      const refIds = { requirement_quantity_id:entry.requirement_quantity_id, actual_quantity_id:entry.actual_quantity_id };
+
+      // --- 自動判定構造の境界防御(再導出ではなく、正式artifactへ転記する直前の検証) ---
+      if (typeof entry.auto_applicability?.auto_applicable !== 'boolean') failedInvariants.push('auto_applicable_not_boolean');
+      if (typeof entry.numeric_comparison?.geometric_relation_holds !== 'boolean') failedInvariants.push('geometric_relation_holds_not_boolean');
+      const state = entry.automatic_judgement?.state;
+      const satisfied = entry.automatic_judgement?.satisfied;
+      if (!['satisfied', 'not_satisfied', 'needs_confirmation'].includes(state)) failedInvariants.push('automatic_judgement_state_invalid');
+      else if (state === 'satisfied' && satisfied !== true) failedInvariants.push('automatic_judgement_satisfied_mismatch');
+      else if (state === 'not_satisfied' && satisfied !== false) failedInvariants.push('automatic_judgement_satisfied_mismatch');
+      else if (state === 'needs_confirmation' && satisfied !== null) failedInvariants.push('automatic_judgement_satisfied_mismatch');
+      if (entry.automatic_judgement?.judgement_source !== 'automatic_pipeline') failedInvariants.push('judgement_source_invalid');
+      if (entry.automatic_judgement?.human_confirmed !== false) failedInvariants.push('human_confirmed_invalid');
+
+      // --- 4参照IDが非空文字列であること(String()による暗黙変換をID生成前に禁止する) ---
+      for (const [label, value] of [['requirement_trace_id', entry.requirement_trace_id], ['actual_trace_id', entry.actual_trace_id],
+        ['matcher_a_id', entry.matcher_a_id], ['matcher_b_id', entry.matcher_b_id]]) {
+        if (!isNonEmptyString(value)) failedInvariants.push(`${label}_not_string`);
+      }
+      if (failedInvariants.length) {
+        entryDiagnostics.push({ code:'trace_comparison_input_invariant_violation', severity:'error', failed_invariants:failedInvariants, ...refIds });
+        continue;
+      }
+
+      // --- quantity_id形式 ---
+      const idFormatInvalid = [];
+      if (!QUANTITY_ID_PATTERN.test(entry.requirement_quantity_id)) idFormatInvalid.push('requirement_quantity_id');
+      if (!QUANTITY_ID_PATTERN.test(entry.actual_quantity_id)) idFormatInvalid.push('actual_quantity_id');
+      if (idFormatInvalid.length) {
+        entryDiagnostics.push({ code:'trace_comparison_quantity_id_invalid', severity:'error', invalid_fields:idFormatInvalid, ...refIds });
+        continue;
+      }
+
+      // --- analysis context ---
+      const reqAnalysisContext = reqContext.map.get(entry.requirement_quantity_id);
+      const actAnalysisContext = actContext.map.get(entry.actual_quantity_id);
+      const contextIssues = [];
+      for (const [label, context, expectedTraceId] of [
+        ['requirement', reqAnalysisContext, entry.requirement_trace_id], ['actual', actAnalysisContext, entry.actual_trace_id]]) {
+        if (!context) { contextIssues.push(`${label}_context_missing`); continue; }
+        if (context.trace_id !== expectedTraceId) contextIssues.push(`${label}_context_trace_id_mismatch`);
+        if (!isNonEmptyString(context.content_hash) || !/^[0-9a-f]{64}$/.test(context.content_hash)) contextIssues.push(`${label}_content_hash_invalid`);
+        if (context.source_row !== null && !(Number.isSafeInteger(context.source_row) && context.source_row > 0)) contextIssues.push(`${label}_source_row_invalid`);
+      }
+      if (contextIssues.length) {
+        entryDiagnostics.push({ code:'trace_comparison_analysis_context_missing', severity:'error', failed_invariants:contextIssues, ...refIds });
+        continue;
+      }
+
+      // --- property resolution(両側resolved・concept_id整合・basisとのtop_confidence整合) ---
+      const reqResolution = propertyByKey.map.get(`requirement:${entry.requirement_quantity_id}`);
+      const actResolution = propertyByKey.map.get(`actual:${entry.actual_quantity_id}`);
+      if (!reqResolution || !actResolution) {
+        entryDiagnostics.push({ code:'trace_comparison_mapping_resolution_missing', severity:'error', ...refIds });
+        continue;
+      }
+      const mappingInvariants = [];
+      const resolutionBySide = { requirement:reqResolution, actual:actResolution };
+      const topConfidenceBySide = {};
+      const marginBySide = {};
+      for (const side of ['requirement', 'actual']) {
+        const resolution = resolutionBySide[side];
+        if (resolution.status !== 'resolved') { mappingInvariants.push(`${side}_resolution_not_resolved`); continue; }
+        if (resolution.concept_id !== entry.concept_id || resolution.candidates?.[0]?.concept_id !== entry.concept_id) {
+          mappingInvariants.push(`${side}_resolution_concept_id_mismatch`); continue;
+        }
+        topConfidenceBySide[side] = resolution.candidates[0].confidence;
+        marginBySide[side] = marginOf(resolution.candidates);
+      }
+      if (topConfidenceBySide.requirement !== entry.auto_applicability.basis.requirement_property_top_confidence) mappingInvariants.push('requirement_top_confidence_basis_mismatch');
+      if (topConfidenceBySide.actual !== entry.auto_applicability.basis.actual_property_top_confidence) mappingInvariants.push('actual_top_confidence_basis_mismatch');
+      if (mappingInvariants.length) {
+        entryDiagnostics.push({ code:'trace_comparison_mapping_invariant_violation', severity:'error', failed_invariants:mappingInvariants, ...refIds });
+        continue;
+      }
+
+      // --- relationship ---
+      const relationKey = encodeUtf8Netstring(entry.requirement_trace_id) + encodeUtf8Netstring(entry.actual_trace_id)
+        + encodeUtf8Netstring(entry.matcher_a_id) + encodeUtf8Netstring(entry.matcher_b_id);
+      // relationByKey.map内のエントリは、relationContextByKey()の索引構築時点で既に
+      // 4参照IDの型・relationship metadataの値域を検証済み(重大2・重大3修正)であるため、
+      // ここでは対応するrelation行が見つかるかどうかだけを確認すればよい。
+      const relationContext = relationByKey.map.get(relationKey);
+      if (!relationContext) {
+        entryDiagnostics.push({ code:'trace_comparison_relationship_metadata_missing', severity:'error', ...refIds });
+        continue;
+      }
+
+      // --- ID生成・重複検査 ---
+      const quantityPairId = entry.requirement_quantity_id + '::' + entry.actual_quantity_id;
+      const comparisonId = 'cmp-v1:' + encodeUtf8Netstring(entry.requirement_trace_id) + encodeUtf8Netstring(entry.actual_trace_id)
+        + encodeUtf8Netstring(quantityPairId);
+      if (quantityPairIdsSeen.has(quantityPairId)) {
+        entryDiagnostics.push({ code:'trace_comparison_quantity_pair_id_duplicate', severity:'error', quantity_pair_id:quantityPairId, ...refIds });
+        continue;
+      }
+      quantityPairIdsSeen.add(quantityPairId);
+
+      const record = {
+        comparison_id: comparisonId, quantity_pair_id: quantityPairId,
+        requirement_ref: { trace_id:entry.requirement_trace_id, matcher_id:entry.matcher_a_id, quantity_id:entry.requirement_quantity_id },
+        actual_ref: { trace_id:entry.actual_trace_id, matcher_id:entry.matcher_b_id, quantity_id:entry.actual_quantity_id,
+          ...(actAnalysisContext.source_row !== null ? { source_row:actAnalysisContext.source_row } : {}) },
+        relationship: relationContext.relationship,
+        requirement_analysis: { ...reqAnalysisContext.analysis, content_hash:reqAnalysisContext.content_hash },
+        actual_analysis: { ...actAnalysisContext.analysis, content_hash:actAnalysisContext.content_hash },
+        mapping: {
+          status: 'resolved', selected_concept_id: entry.concept_id, dimension: entry.dimension,
+          requirement_resolution: { status:'resolved', concept_id:reqResolution.concept_id,
+            top_confidence:topConfidenceBySide.requirement, margin:marginBySide.requirement,
+            candidates:reqResolution.candidates, source:'generatePropertyResolutions' },
+          actual_resolution: { status:'resolved', concept_id:actResolution.concept_id,
+            top_confidence:topConfidenceBySide.actual, margin:marginBySide.actual,
+            candidates:actResolution.candidates, source:'generatePropertyResolutions' },
+        },
+        comparison_input: {
+          requirement_quantity_value: entry.requirement_quantity_value,
+          actual_quantity_value_original: entry.actual_quantity_value_original,
+          actual_quantity_value_normalized: entry.actual_quantity_value_normalized,
+          unit_conversion_plan: entry.unit_conversion_plan,
+          interval_semantics_resolution: {
+            requirement: { status:entry.requirement_condition_status, value:entry.requirement_condition_value,
+              top_confidence:entry.requirement_condition_top_confidence, margin:entry.requirement_condition_margin,
+              has_opposing_evidence:entry.requirement_condition_has_opposing_evidence },
+            actual: { status:entry.actual_condition_status, value:entry.actual_condition_value,
+              top_confidence:entry.actual_condition_top_confidence, margin:entry.actual_condition_margin,
+              has_opposing_evidence:entry.actual_condition_has_opposing_evidence },
+          },
+          comparison_mode: { value:entry.comparison_mode_candidate, confidence:entry.comparison_mode_confidence, derived_from:entry.derived_from },
+        },
+        numeric_comparison: entry.numeric_comparison,
+        auto_applicability: entry.auto_applicability,
+        automatic_judgement: entry.automatic_judgement,
+        review: {
+          quantity_extraction: initialReviewTarget('unreviewed'),
+          property_mapping: initialReviewTarget('unreviewed'),
+          interval_semantics: initialReviewTarget('unreviewed'),
+          comparison_mode: initialReviewTarget('unreviewed'),
+          satisfaction: initialReviewTarget('not_eligible'),
+        },
+      };
+
+      const recordJson = canonicalJson(record);
+      if (comparisonRecordsById.has(comparisonId)) {
+        const sameContent = comparisonRecordsById.get(comparisonId) === recordJson;
+        entryDiagnostics.push({ code: sameContent ? 'trace_comparison_id_duplicate' : 'trace_comparison_id_content_conflict',
+          severity:'error', comparison_id:comparisonId, ...refIds });
+        continue;
+      }
+      comparisonRecordsById.set(comparisonId, recordJson);
+      records.push(record);
+    }
+
+    if (entryDiagnostics.length) return blockedTraceComparisonResult(entryDiagnostics, judgementResult);
+
+    // 段階6: comparisonsを安定キーで並べ替える(relations入力順に依存させない)。
+    // 【レビュー修正、重大(B-3cレビュー)】trace_id/matcher_idは任意の外部文字列で区切り文字を
+    // 含まないという保証がないため、単純な区切り文字連結(NUL文字等)で1本のキー文字列を作ると、
+    // 異なる6要素タプルが同じ連結文字列になり得る(安定ソートでは衝突時に入力順が残るため、
+    // relations入力順非依存という契約が崩れる)。区切り文字を使わず、フィールドを1つずつ
+    // 順に比較する。
+    records.sort(compareComparisonRecords);
+
+    const recordSetDraft = {
+      schema_version: TRACE_COMPARISON_SCHEMA_VERSION,
+      generated_at: generatedAt, generator,
+      source: { requirement_trace_file:reqSide.source_trace_file, actual_trace_file:actSide.source_trace_file },
+      provenance: {
+        hash_algorithm:'SHA-256', id_hash_algorithm:'SHA-256/128',
+        id_contracts: { quantity_id:'SHA-256/128', quantity_pair_id:'quantity-id-double-colon-v1', comparison_id:'utf8-netstring-v1' },
+        normalization: 'v12-normalize-v1',
+        requirement_dataset_signature: reqSide.dataset_signature, actual_dataset_signature: actSide.dataset_signature,
+        ruleset_version: rulesetVersion,
+      },
+      display_context: displayContext ?? null,
+      diagnostics: judgementResult.diagnostics,
+      not_analyzed: judgementResult.not_analyzed,
+      comparisons: records,
+    };
+
+    return snapshotValue({ ready:true, result_complete:true, diagnostics:judgementResult.diagnostics, record_set:recordSetDraft });
+  }
+
+  return Object.freeze({ SCHEMA_VERSION, SUPPORTED_RULESETS, validateAnnotationSchema, validateRulesetCompatibility,
+    canonicalValue, canonicalJson, normalize, hashParts, rawSha256Utf8:sha256,
+    computeDatasetSignature, computeRecordContentHash,
+    traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates,
+    CONCEPT_DICTIONARY, generatePropertyCandidates, generatePropertyResolutions,
+    DEFAULT_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT,
+    generateComparisonCandidates, generateConditionResolutions, generateConditionAnnotatedComparisonCandidates,
+    COMPARISON_MODE_DERIVATION_TABLE, generateComparisonModeCandidates,
+    KNOWN_CANONICAL_UNITS_BY_DIMENSION, LINEAR_UNIT_SCALE_TO_BASE, generateUnitConversionPlans,
+    generateNormalizedQuantityViews, generateNumericComparisonResults, generateAutoApplicabilityResults,
+    generateAutomaticJudgementResults, generateTraceComparisonRecordSet, compareComparisonRecords,
+    // 【レビュー指摘、重大1(B-3cレビュー5巡目)】trace_comparison_record_set_validator.jsのsemantic
+    // validatorが、record内の監査値をraw analysisの入力から独立に再計算して照合するために必要な
+    // 純粋関数。別実装を複製せず、生成に使ったのと同じ関数をそのまま検証にも再利用する。
+    classifyUnitConversion, applyLinearConversion, comparePointInRegion, compareIntervalCoverage,
+    // 【レビュー指摘、重大2(B-3cレビュー6巡目)】validateQuantityValueStructure()も同じ理由(semantic
+    // validatorが幾何比較の再計算前にrequirement/actual双方の数量構造をproducerと同じ基準で検証する
+    // 必要がある)でexportする。MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY(中、6巡目)は
+    // interval_semantics_candidatesの件数上限をvalidator側でも同じ値で再検証するための定数export
+    // (magic numberの複製を避ける)。
+    validateQuantityValueStructure, MAX_INTERVAL_SEMANTICS_CANDIDATES_PER_QUANTITY });
+});

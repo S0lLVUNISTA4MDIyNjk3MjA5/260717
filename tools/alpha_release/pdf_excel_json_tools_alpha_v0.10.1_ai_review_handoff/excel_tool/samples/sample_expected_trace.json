@@ -1,0 +1,322 @@
+{
+  "file_name": "sample_input.xlsx",
+  "chapter_number": "TRACE",
+  "chapter_title": "sample_input",
+  "trace_format": "excel-row-trace-v1",
+  "schema_version": "1.1",
+  "generated_at": "2026-07-29T12:22:18.546Z",
+  "generator": {
+    "name": "Excel → JSON 変換・確認ツール",
+    "version": "2.0.8"
+  },
+  "source": {
+    "file_name": "sample_input.xlsx",
+    "sheet_name": "検証項目",
+    "profile_name": "照合用JSON（Excel行単位）",
+    "profile_version": "1.0"
+  },
+  "tag_policy": {
+    "mode": "controlled",
+    "vocabulary_id": "trace-domain-ja",
+    "tag_vocabulary_version": "1.0.0",
+    "allow_free_input": false,
+    "allowed_tags": [
+      "安全",
+      "性能",
+      "機能",
+      "品質",
+      "インターフェース",
+      "製造",
+      "検査",
+      "保守"
+    ],
+    "tag_aliases": {}
+  },
+  "statistics": {
+    "records": 5,
+    "tagged_records": 2,
+    "unregistered_tags": 0,
+    "reviewed_records": 0,
+    "excluded_records": 0
+  },
+  "_trace_adapter": {
+    "kind": "excel_row_export",
+    "source_file": "sample_input.xlsx",
+    "source_sheet": "検証項目",
+    "record_count": 5,
+    "generated_at": "2026-07-29T12:22:18.546Z"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "excel-4a2cb18e",
+      "parent_id": "sheet-c104c788",
+      "trace_title": "1",
+      "trace_text": "地震時の転倒防止に関する安全対策を確認する",
+      "trace_content": [
+        "地震時の転倒防止に関する安全対策を確認する"
+      ],
+      "trace_category": "構造",
+      "trace_key_text": "sample_input.xlsx 検証項目 構造 1 地震時の転倒防止に関する安全対策を確認する",
+      "source_file": "sample_input.xlsx",
+      "source_sheet": "検証項目",
+      "source_row": 2,
+      "source_path": "$._trace_records[0]",
+      "source_section_id": "sheet-c104c788",
+      "source_section_title": "検証項目",
+      "block_type": "excel_row",
+      "tags": [],
+      "unregistered_tags": [],
+      "review_status": "unreviewed",
+      "source_record": {
+        "No": 1,
+        "分類": "構造",
+        "項目": "柱脚接合部の耐震安全性検証",
+        "内容": "地震時の転倒防止に関する安全対策を確認する",
+        "備考": "初回測定",
+        "review_status": "unreviewed",
+        "tags": [
+          "安全"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "sample_input.xlsx",
+          "sheet_name": "検証項目",
+          "excel_row": 2
+        }
+      },
+      "stable_uid": "xrow-80deac69",
+      "content_hash": "f24eb10d",
+      "review_method": "",
+      "reviewed_at": "",
+      "review_comment": "",
+      "exclusion_reason": "",
+      "ai_reviewed": false,
+      "ai_reviewed_at": "",
+      "ai_review_method": "",
+      "ai_review_model": "",
+      "ai_review_comment": ""
+    },
+    {
+      "trace_id": "excel-9eb7a988",
+      "parent_id": "sheet-c104c788",
+      "trace_title": "2",
+      "trace_text": "圧縮強度を確認する",
+      "trace_content": [
+        "圧縮強度を確認する"
+      ],
+      "trace_category": "構造",
+      "trace_key_text": "sample_input.xlsx 検証項目 構造 2 圧縮強度を確認する",
+      "source_file": "sample_input.xlsx",
+      "source_sheet": "検証項目",
+      "source_row": 3,
+      "source_path": "$._trace_records[1]",
+      "source_section_id": "sheet-c104c788",
+      "source_section_title": "検証項目",
+      "block_type": "excel_row",
+      "tags": [],
+      "unregistered_tags": [],
+      "review_status": "unreviewed",
+      "source_record": {
+        "No": 2,
+        "分類": "構造",
+        "項目": "柱脚接合部の耐力確認",
+        "内容": "圧縮強度を確認する",
+        "備考": "再測定予定",
+        "review_status": "unreviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "sample_input.xlsx",
+          "sheet_name": "検証項目",
+          "excel_row": 3
+        }
+      },
+      "stable_uid": "xrow-ec626cf3",
+      "content_hash": "8ddf1924",
+      "review_method": "",
+      "reviewed_at": "",
+      "review_comment": "",
+      "exclusion_reason": "",
+      "ai_reviewed": false,
+      "ai_reviewed_at": "",
+      "ai_review_method": "",
+      "ai_review_model": "",
+      "ai_review_comment": ""
+    },
+    {
+      "trace_id": "excel-db27b0ce",
+      "parent_id": "sheet-c104c788",
+      "trace_title": "3",
+      "trace_text": "3 / 設備 / 換気設備の風量確認 / 特記なし",
+      "trace_content": [
+        "3 / 設備 / 換気設備の風量確認 / 特記なし"
+      ],
+      "trace_category": "設備",
+      "trace_key_text": "sample_input.xlsx 検証項目 設備 3 3 / 設備 / 換気設備の風量確認 / 特記なし",
+      "source_file": "sample_input.xlsx",
+      "source_sheet": "検証項目",
+      "source_row": 4,
+      "source_path": "$._trace_records[2]",
+      "source_section_id": "sheet-c104c788",
+      "source_section_title": "検証項目",
+      "block_type": "excel_row",
+      "tags": [],
+      "unregistered_tags": [],
+      "review_status": "unreviewed",
+      "source_record": {
+        "No": 3,
+        "分類": "設備",
+        "項目": "換気設備の風量確認",
+        "内容": "",
+        "備考": "特記なし",
+        "review_status": "unreviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "sample_input.xlsx",
+          "sheet_name": "検証項目",
+          "excel_row": 4
+        }
+      },
+      "stable_uid": "xrow-8927936d",
+      "content_hash": "2f164b5c",
+      "review_method": "",
+      "reviewed_at": "",
+      "review_comment": "",
+      "exclusion_reason": "",
+      "ai_reviewed": false,
+      "ai_reviewed_at": "",
+      "ai_review_method": "",
+      "ai_review_model": "",
+      "ai_review_comment": ""
+    },
+    {
+      "trace_id": "excel-6d35582b",
+      "parent_id": "sheet-c104c788",
+      "trace_title": "4",
+      "trace_text": "配管の接続部の耐久性を確認する",
+      "trace_content": [
+        "配管の接続部の耐久性を確認する"
+      ],
+      "trace_category": "設備",
+      "trace_key_text": "sample_input.xlsx 検証項目 設備 4 配管の接続部の耐久性を確認する",
+      "source_file": "sample_input.xlsx",
+      "source_sheet": "検証項目",
+      "source_row": 5,
+      "source_path": "$._trace_records[3]",
+      "source_section_id": "sheet-c104c788",
+      "source_section_title": "検証項目",
+      "block_type": "excel_row",
+      "tags": [],
+      "unregistered_tags": [],
+      "review_status": "unreviewed",
+      "source_record": {
+        "No": 4,
+        "分類": "設備",
+        "項目": "給水圧力の確認",
+        "内容": "配管の接続部の耐久性を確認する",
+        "備考": "",
+        "review_status": "unreviewed",
+        "tags": [
+          "インターフェース",
+          "品質"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "sample_input.xlsx",
+          "sheet_name": "検証項目",
+          "excel_row": 5
+        }
+      },
+      "stable_uid": "xrow-e3392533",
+      "content_hash": "ace4b7ce",
+      "review_method": "",
+      "reviewed_at": "",
+      "review_comment": "",
+      "exclusion_reason": "",
+      "ai_reviewed": false,
+      "ai_reviewed_at": "",
+      "ai_review_method": "",
+      "ai_review_model": "",
+      "ai_review_comment": ""
+    },
+    {
+      "trace_id": "excel-41284b83",
+      "parent_id": "sheet-c104c788",
+      "trace_title": "5",
+      "trace_text": "絶縁抵抗値が基準値以上であることを確認する",
+      "trace_content": [
+        "絶縁抵抗値が基準値以上であることを確認する"
+      ],
+      "trace_category": "電気",
+      "trace_key_text": "sample_input.xlsx 検証項目 電気 5 絶縁抵抗値が基準値以上であることを確認する",
+      "source_file": "sample_input.xlsx",
+      "source_sheet": "検証項目",
+      "source_row": 6,
+      "source_path": "$._trace_records[4]",
+      "source_section_id": "sheet-c104c788",
+      "source_section_title": "検証項目",
+      "block_type": "excel_row",
+      "tags": [],
+      "unregistered_tags": [],
+      "review_status": "unreviewed",
+      "source_record": {
+        "No": 5,
+        "分類": "電気",
+        "項目": "分電盤の絶縁抵抗測定",
+        "内容": "絶縁抵抗値が基準値以上であることを確認する",
+        "備考": "測定値記録",
+        "review_status": "unreviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "sample_input.xlsx",
+          "sheet_name": "検証項目",
+          "excel_row": 6
+        }
+      },
+      "stable_uid": "xrow-52bcec09",
+      "content_hash": "f6900c9a",
+      "review_method": "",
+      "reviewed_at": "",
+      "review_comment": "",
+      "exclusion_reason": "",
+      "ai_reviewed": false,
+      "ai_reviewed_at": "",
+      "ai_review_method": "",
+      "ai_review_model": "",
+      "ai_review_comment": ""
+    }
+  ],
+  "id_scheme": "stable-excel-row-uid-v2",
+  "tag_vocabulary": {
+    "vocabulary_id": "trace-domain-ja",
+    "vocabulary_version": "1.0.0",
+    "vocabulary_sha256": "4602f1c47116ab18e39a53bfe38c8d753dae61a8806674672c9638a0a0f4305f"
+  }
+}
