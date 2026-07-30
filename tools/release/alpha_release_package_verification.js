@@ -66,6 +66,17 @@ const EXPECTED_LICENSE_FILES = [
 ];
 const EXPECTED_DOC_FILES = ['README_ja.md', 'KNOWN_LIMITATIONS.md', 'THIRD_PARTY_LICENSES.md', 'BROWSER_VALIDATION_REPORT.md', 'trace_matching_tool_detailed_operation_manual_v12.2.0_alpha.1.pdf'];
 
+// Chain-of-custody for the detailed operation manual: its content is
+// authored and approved outside this repo's build/verify pipeline (a
+// separate editorial process). Pinning the approved SHA-256 here and
+// checking it against tools/release/docs/ (the pipeline's own source of
+// truth for docs) closes the gap that a byte-identical-to-source check
+// alone cannot: byte-identity only proves dist/ matches whatever is
+// currently checked into docs/, not that docs/ still holds the reviewed
+// PDF and not some other structurally-valid PDF swapped in later.
+const APPROVED_TRACE_MATCHING_MANUAL_SHA256 = '5bd4b71071c44377c573df34a969706e9d9af629a05c1f58aaffac6928e61660';
+const TRACE_MATCHING_MANUAL_NAME = 'trace_matching_tool_detailed_operation_manual_v12.2.0_alpha.1.pdf';
+
 const EXPECTED_RELATIVE_FILES = new Set([
   OUTPUT_HTML_NAME,
   ...EXPECTED_DOC_FILES,
@@ -142,7 +153,34 @@ function isTextLikeFile(rel) {
   return /\.(html|md|txt|json|js)$/i.test(rel);
 }
 
+// ── Mutation self-test: a manual PDF whose content was swapped for a
+//    different, still-structurally-valid PDF (correct %PDF- signature,
+//    trailing %%EOF, non-zero size) must still be rejected by the approved-
+//    SHA-256 check. Proves that PDF-structural-validity alone cannot
+//    substitute for the chain-of-custody check -- purely in-memory, touches
+//    no file on disk. ──
+function mutationTest_ManualPdfContentSwap() {
+  const srcPath = path.join(DOCS_DIR, TRACE_MATCHING_MANUAL_NAME);
+  let original;
+  try { original = fs.readFileSync(srcPath); } catch (e) {
+    check('mutation: manual PDF content-swap self-test could run (source readable)', false, String(e));
+    return;
+  }
+  const mutated = Buffer.from(original);
+  const mutateOffset = Math.floor(mutated.length / 2);
+  mutated[mutateOffset] = mutated[mutateOffset] ^ 0xff;
+  const mutatedSha = sha256(mutated);
+  check('mutation: manual PDFの内容を1byte変更(構造上は正常PDFのまま)した場合、承認済みSHA検査がFAILする',
+    mutatedSha !== APPROVED_TRACE_MATCHING_MANUAL_SHA256,
+    `approved=${APPROVED_TRACE_MATCHING_MANUAL_SHA256} mutated=${mutatedSha}`);
+  const stillHasSignature = mutated.subarray(0, 5).toString('latin1') === '%PDF-';
+  const stillHasEof = mutated.subarray(Math.max(0, mutated.length - 2048)).toString('latin1').includes('%%EOF');
+  check('mutation Cの入力は引き続き構造的に正常なPDFである(%PDF-/%%EOFは維持、SHA不一致のみで検出)',
+    stillHasSignature && stillHasEof);
+}
+
 function main() {
+  mutationTest_ManualPdfContentSwap();
   check('dist output directory exists', fs.existsSync(OUTPUT_DIR), OUTPUT_DIR);
   if (!fs.existsSync(OUTPUT_DIR)) { report(); process.exitCode = 1; return; }
 
@@ -281,6 +319,18 @@ function main() {
     let identical = false;
     try { identical = fs.readFileSync(srcPath).equals(fs.readFileSync(distPath)); } catch (e) { identical = false; }
     check(`doc file byte-identical to tools/release/docs/: ${name}`, identical);
+  }
+
+  // ── Manual chain-of-custody: approved SHA-256 -> tools/release/docs/
+  //    source -> dist/ (byte-identical check above already closes the
+  //    source->dist link, so this closes approved->source). ──
+  {
+    const srcPath = path.join(DOCS_DIR, TRACE_MATCHING_MANUAL_NAME);
+    let actualSha = null;
+    try { actualSha = sha256(fs.readFileSync(srcPath)); } catch (e) { actualSha = null; }
+    check(`manual PDF SHA-256 matches approved value (chain-of-custody): ${TRACE_MATCHING_MANUAL_NAME}`,
+      actualSha === APPROVED_TRACE_MATCHING_MANUAL_SHA256,
+      `approved=${APPROVED_TRACE_MATCHING_MANUAL_SHA256} actual=${actualSha}`);
   }
 
   report();

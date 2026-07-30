@@ -62,14 +62,21 @@ const DIST_SHA_PATH = path.join(DIST_DIR, ZIP_NAME + '.sha256');
 const EXPECTED_TOP_LEVEL = ['README.md', 'SMOKE_TEST_REPORT.md', 'THREE_TOOL_COMPATIBILITY_REPORT.md', 'SHA256SUMS.txt', 'pdf_tool', 'excel_tool', 'shared', 'manuals'];
 
 // Detailed operation manual PDFs added to manuals/. Content is authored and
-// approved outside this script (a separate editorial process); this script
-// only verifies the files exist, are non-empty, and are structurally valid
-// PDFs (signature + trailing EOF marker) -- it never inspects or asserts on
-// their content, and never generates them.
-const REQUIRED_MANUAL_PDF_FILES = [
-  'manuals/pdf_to_json_tool_detailed_operation_manual_v0.10.1_alpha.pdf',
-  'manuals/excel_to_json_tool_detailed_operation_manual_v0.10.1_alpha.pdf',
-];
+// approved outside this script (a separate editorial process). This script
+// verifies structural validity (signature + trailing EOF marker) AND, more
+// importantly, that each file's SHA-256 matches the value approved for that
+// manual below -- so a byte-for-byte swap for any other structurally-valid
+// PDF (including one with the same filename and size) is caught, not just a
+// missing/empty/malformed file. Approved SHA-256s are updated only when a
+// newly-reviewed manual PDF supersedes the previous one.
+const APPROVED_MANUALS = {
+  'manuals/pdf_to_json_tool_detailed_operation_manual_v0.10.1_alpha.pdf':
+    '332463eda4e9bc5aef79fa48d9a5816c84e8f7d37d9b549dfab62ef0ac2ae1f1',
+  'manuals/excel_to_json_tool_detailed_operation_manual_v0.10.1_alpha.pdf':
+    '933b0af43a927003e6346d9934cdb4072d623b49a6a2891e9f6e4c55e02b70f9',
+};
+const REQUIRED_MANUAL_PDF_FILES = Object.keys(APPROVED_MANUALS);
+
 
 // Fixed, exact-match allowlist of URLs that legitimately appear in the PDF
 // tool's HTML but are never dereferenced by our code at runtime (an XML
@@ -243,6 +250,8 @@ function computeStructureResults(dirLabel, dir, expectedManifest) {
     c(`${rel}: %PDF-シグネチャ`, buf.subarray(0, 5).toString('latin1') === '%PDF-', buf.subarray(0, 8).toString('latin1'));
     const tail = buf.subarray(Math.max(0, buf.length - 2048)).toString('latin1');
     c(`${rel}: 末尾付近に%%EOFマーカーを含む`, tail.includes('%%EOF'));
+    const actualSha = sha256File(abs);
+    c(`${rel}: SHA-256が承認済み値と一致(chain-of-custody)`, actualSha === APPROVED_MANUALS[rel], { approved: APPROVED_MANUALS[rel], actual: actualSha });
   }
 
   const docPattern = /`([A-Za-z0-9_.\/-]+\.(?:md|json|txt))`/g;
@@ -352,6 +361,41 @@ function mutationTest_UnknownPdfUrl(tempBase) {
   check('mutation B実行後もdist .sha256は書き込まれていない', !fs.existsSync(DIST_SHA_PATH));
 }
 
+// ── Mutation self-test C: a manual PDF whose content was swapped for a
+//    different, still-structurally-valid PDF (correct %PDF- signature,
+//    trailing %%EOF, non-zero size, same filename) must still be rejected,
+//    because its SHA-256 no longer matches the approved value. Proves that
+//    structural validity alone (gaps identified in review: exists/size>0/
+//    %PDF-/%%EOF) is not sufcient to guarantee "this is the reviewed PDF",
+//    and that the SHA-256 chain-of-custody check actually closes that gap. ──
+function mutationTest_ManualPdfContentSwap(tempBase, expectedManifest) {
+  const dir = path.join(tempBase, 'mutation-manual-swap');
+  stageDistribution(dir);
+  const [rel] = REQUIRED_MANUAL_PDF_FILES;
+  const abs = path.join(dir, rel);
+  const original = fs.readFileSync(abs);
+  // Flip one content byte while keeping this a well-formed PDF: the file
+  // still starts with "%PDF-" and still ends with "%%EOF" (both anchors are
+  // well before/after the mutated offset), so every structural check (exists,
+  // size>0, %PDF- signature, trailing %%EOF) still passes -- only the
+  // approved-SHA check is exercised by this mutation.
+  const mutated = Buffer.from(original);
+  const mutateOffset = Math.floor(mutated.length / 2);
+  mutated[mutateOffset] = mutated[mutateOffset] ^ 0xff;
+  fs.writeFileSync(abs, mutated);
+  generateSha256Sums(dir);
+  const { results } = computeStructureResults('mutation:manual-swap', dir, expectedManifest);
+  const shaResult = results.find(r => r.name.includes(`${rel}: SHA-256が承認済み値と一致`));
+  const sigResult = results.find(r => r.name.includes(`${rel}: %PDF-シグネチャ`));
+  const eofResult = results.find(r => r.name.includes(`${rel}: 末尾付近に%%EOFマーカーを含む`));
+  check('mutation: manual PDFの内容を1byte変更(構造上は正常PDFのまま)した場合、承認済みSHA検査がFAILする',
+    shaResult && shaResult.ok === false, shaResult && shaResult.detail);
+  check('mutation Cの入力は引き続き構造的に正常なPDFである(%PDF-/%%EOFは維持、SHA不一致のみで検出)',
+    sigResult && sigResult.ok === true && eofResult && eofResult.ok === true);
+  check('mutation C実行後もdist ZIPは書き込まれていない', !fs.existsSync(DIST_ZIP_PATH));
+  check('mutation C実行後もdist .sha256は書き込まれていない', !fs.existsSync(DIST_SHA_PATH));
+}
+
 function runRealPipeline(tempBase, expectedManifest) {
   const stagingDir = path.join(tempBase, 'staging');
   const zipAPath = path.join(tempBase, 'buildA', ZIP_NAME);
@@ -436,6 +480,7 @@ function main() {
     //    isolated staging copies -- must never touch dist/. ──
     mutationTest_UnexpectedNestedFile(tempBase, expectedManifest);
     mutationTest_UnknownPdfUrl(tempBase);
+    mutationTest_ManualPdfContentSwap(tempBase, expectedManifest);
 
     // ── Real pipeline ──
     const real = runRealPipeline(tempBase, expectedManifest);
