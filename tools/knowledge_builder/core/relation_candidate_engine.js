@@ -4,6 +4,12 @@
  * of scope for this checkpoint, per explicit evaluation-scope decision) and any
  * concept-based property resolution. Produces `lifecycle:"candidate"` edges only -
  * never auto-promotes to "active".
+ *
+ * relation_type is always "related_to" (not "satisfied_by"/"implemented_by"/
+ * "verified_by"): tag overlap + text similarity alone can show "these two items look
+ * related", not "the requirement is satisfied". The stronger relation_types stay
+ * reserved for a later phase that adds Quantity compatibility / Property Resolution /
+ * Semantic reasoning and can promote/reclassify a related_to candidate accordingly.
  */
 (function(root, factory) {
   const api = factory();
@@ -57,7 +63,7 @@
    * @param {number} [opts.minScore=0.12]
    * @param {number} [opts.maxCandidatesPerSource=3]
    * @param {string} opts.generatedAt  canonical UTC timestamp
-   * @param {Set<string>} [opts.existingPairKeys]  既存edgeの`${source}|${target}|semantic|satisfied_by`集合(再生成時の重複防止)
+   * @param {Set<string>} [opts.existingPairKeys]  既存edgeの`${source}|${target}|semantic|related_to`集合(再生成時の重複防止)
    */
   async function generateCandidates(sourceNodes, targetNodes, opts) {
     const minScore = opts.minScore ?? 0.12;
@@ -81,7 +87,7 @@
       scored.sort((a, b) => b.score - a.score);
 
       for (const item of scored.slice(0, maxPerSource)) {
-        const pairKey = `${source.node_id}|${item.target.node_id}|semantic|satisfied_by`;
+        const pairKey = `${source.node_id}|${item.target.node_id}|semantic|related_to`;
         if (existing.has(pairKey)) continue;
 
         const features = [];
@@ -89,13 +95,13 @@
         features.push({ feature: 'text_similarity', detail: { score: Math.round(item.textSim * 1000) / 1000 }, effect: item.textSim >= minScore ? 'supports' : 'opposes' });
         if (!features.length) continue;
 
-        const eid = await edgeId(source.node_id, item.target.node_id, 'semantic', 'satisfied_by');
+        const eid = await edgeId(source.node_id, item.target.node_id, 'semantic', 'related_to');
         const edge = {
           edge_id: eid,
           source_node_id: source.node_id,
           target_node_id: item.target.node_id,
           relation_category: 'semantic',
-          relation_type: 'satisfied_by',
+          relation_type: 'related_to',
           lifecycle: 'candidate',
           confidence: Math.round(item.score * 1000) / 1000,
           evidence: { matching_profile_id: 'mp-alpha0.1-textsim-tagoverlap', features },

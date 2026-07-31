@@ -77,15 +77,6 @@
     };
   }
 
-  // 構造Node(document/section)は既存export形式に対応するTraceRecordを持たないため、
-  // 内部一貫性のためだけに合成recordを作りcomputeRecordContentHash()へ通す。
-  // これは既存Sidecarとのbinding互換性を主張するものではない(§10.2は
-  // 内容Nodeのみをマッピング対象とする)。
-  function syntheticStructuralRecord(producer, traceId, label) {
-    if (producer === 'pdf') return { trace_id: traceId, source_raw_text: String(label || ''), tags: [] };
-    return { trace_id: traceId, source_record: { title: String(label || '') }, source_record_display: null, tags: [], source_row: 0 };
-  }
-
   function structuralVerbatim(producer, label) {
     if (producer === 'pdf') return { source_raw_text: String(label || '') };
     return { source_record: { title: String(label || '') }, source_record_display: null, source_row: 0 };
@@ -142,7 +133,6 @@
     const edges = [];
 
     // document node (root)
-    const docTraceId = `doc:${fileName}`;
     const docLocator = documentLocator(producer, fileName);
     const docNodeId = await nodeId(sourceDocId, docLocator);
     const docLabel = String(traceJson.chapter_title || fileName);
@@ -159,7 +149,10 @@
       provenance: { source_document_id: sourceDocId, producer, locator: docLocator, verbatim: structuralVerbatim(producer, docLabel), extensions: {} },
       revision: { content_revision: 1, knowledge_hash: null, updated_by: { type: 'ai', id: 'trace-json-adapter' }, updated_at: opts.ingestedAt },
       review: DEFAULT_REVIEW(),
-      export_binding: { trace_id: docTraceId, content_hash: await computeRecordContentHash(syntheticStructuralRecord(producer, docTraceId, docLabel)) },
+      // 構造Node(document)は既存export形式に対応するTraceRecordを持たない。
+      // export_bindingをnullにすることで、legacy Sidecar互換を持つ内容Nodeとは
+      // 明確に区別する(既存binding互換であるかのように誤認されないようにするため)。
+      export_binding: null,
       confidence: 1.0,
       extensions: {}
     });
@@ -188,7 +181,8 @@
           provenance: { source_document_id: sourceDocId, producer, locator: secLocator, verbatim: structuralVerbatim(producer, label), extensions: {} },
           revision: { content_revision: 1, knowledge_hash: null, updated_by: { type: 'ai', id: 'trace-json-adapter' }, updated_at: opts.ingestedAt },
           review: DEFAULT_REVIEW(),
-          export_binding: { trace_id: sectionOriginalId, content_hash: await computeRecordContentHash(syntheticStructuralRecord(producer, sectionOriginalId, label)) },
+          // section Nodeも同様にexport_binding:null(既存TraceRecordSetに対応レコードがない)。
+          export_binding: null,
           confidence: 1.0,
           extensions: {}
         });

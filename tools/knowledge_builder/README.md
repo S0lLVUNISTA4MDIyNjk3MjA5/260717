@@ -11,12 +11,12 @@
 
 含むもの:
 
-1. PDF/Excel投入 — 既存PDF/Excelツールが出力した trace JSON（`_trace_records[]`を持つ既存形式）
-   を読み込む。**PDF/Excelの解析自体は再実装していません**。既存ツールで一度エクスポートした
-   JSONファイルをこのツールへ読み込ませてください。
+1. 既存Trace JSON投入(PDF/Excel構造化JSON) — 既存PDF/Excelツールが出力した trace JSON
+   （`_trace_records[]`を持つ既存形式）を読み込む。**PDF/Excelの解析自体は追加していません**。
+   既存ツールで一度エクスポートしたJSONファイルをこのツールへ読み込ませてください。
 2. Node生成 — Trace JSON Adapter が document/section/内容Node（requirement/design_item）を生成
 3. Node一覧・修正 — node_type / 本文(text) / タグの編集
-4. Relation Candidate生成 — タグ一致・文字列類似度に基づく semantic candidate edge の生成
+4. Relation Candidate生成 — 既存タグの一致・文字列類似度に基づく semantic candidate edge の生成
 5. Edge採用/削除 — candidateをactive/rejectedへ
 6. Relation一覧 — Edgeの根拠(evidence)・信頼度・stale状態の確認
 7. 簡易Knowledge Graph — SVGによる読み取り専用の可視化
@@ -25,12 +25,26 @@
 意図的に含まないもの(次段階以降の課題):
 
 - Ontologyに基づくnode_type/relation_type自動判定(現状は文書役割による既定値＋人手修正)
-- `related_to`/`implemented_by`/`verified_by`を含む完全なRelation語彙の自動生成
-  (このα0.1は `satisfied_by`(semantic)と`contains`(structural)のみ自動生成する)
+- Quantity compatibility / Property Resolution / Semantic reasoningを統合したrelation_type
+  自動分類。このα0.1は`related_to`(semantic)と`contains`(structural)のみ自動生成する。
+  タグ一致・文字列類似度だけでは「関係がありそう」までしか判定できず「要求を満足している」
+  とまでは判定できないため、`satisfied_by`/`implemented_by`/`verified_by`への分類・昇格は
+  それらの判定要素を追加した後段のCheckpointへ持ち越す
 - AI Agentによる自律編集
 - 完全なQuantity統合(数量抽出との連携。`quantities`は常に空配列)
+- 自動Semantic Tagging(Knowledge Builder自身によるタグ自動生成)。今回は既存Trace JSONの
+  タグをKnowledge Nodeへ引き継いでいるのみで、タグそのものはKnowledge Builderが生成した
+  ものではない。自動Semantic Taggingは次Checkpoint以降の評価対象とする
 - Human/AIレビュー確定(`review.human`/`review.ai`)のUI(内部engineには実装済み。
   `core/knowledge_store.js`の`reviewHuman`/`reviewAI`参照。UIへの露出は評価結果を見てから)
+
+### Structural Node(document/section)とlegacy Trace互換性
+
+`document`/`section`のStructural Nodeは既存TraceRecordSetに対応するレコードを持たない
+(既存Exportは内容行のみを`_trace_records[]`として持ち、章/節そのものは別レコードにならない)。
+これらのNodeは**`export_binding: null`**として生成され、既存Sidecar/照合ツールとのbinding
+互換性を一切主張しない。`export_binding`が非nullの値を持つのは、既存TraceRecordの
+`trace_id`/`content_hash`をそのまま引き継ぐ内容Node（requirement/design_item等）のみ。
 
 ## 使い方
 
@@ -49,11 +63,15 @@
 ## 評価していただきたい観点
 
 - Node粒度は適切か(段落単位・行単位が細かすぎる/粗すぎることはないか)
-- 自動生成されたタグは有用か
-- Relation Candidateは妥当か(明らかに無関係なペアが多すぎないか)
-- Edgeのevidence(根拠)は理解できるか(「なぜこの候補が出たか」が読み取れるか)
-- 編集操作は最小限か(本文修正・種別変更・タグ追加削除で十分か、他に必要な操作はあるか)
+- Node編集操作は最小限か(本文修正・種別変更・タグ追加削除で十分か、他に必要な操作はあるか)
+- 既存タグを用いたRelation Candidateは妥当か(明らかに無関係なペアが多すぎないか)
+- Edge evidence(根拠)は理解できるか(「なぜこの候補が出たか」が読み取れるか)
+- Candidate採用/却下操作は使いやすいか
+- Relation一覧は見やすいか
 - Knowledge Graphは設計理解の助けになるか
+
+自動Semantic Tagging(Knowledge Builder自身によるタグ自動生成)は今回のα0.1に含まれない
+ため評価対象外。次Checkpoint以降で別途評価する。
 
 ## 内部構成
 

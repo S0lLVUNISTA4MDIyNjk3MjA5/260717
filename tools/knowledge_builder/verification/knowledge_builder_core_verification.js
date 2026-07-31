@@ -51,10 +51,22 @@ async function main() {
   const uniqueSectionsB = new Set(traceB._trace_records.map(r => r.source_section_id)).size;
   assert(resultB.nodes.length === traceB._trace_records.length + 1 + uniqueSectionsB, 'JSON_B: content nodes + document + section nodes');
 
+  // ---- 1b. Structural Node(document/section)はexport_binding:null(legacy Trace非互換を明示) ----
+  for (const result of [resultA, resultB]) {
+    for (const node of result.nodes) {
+      if (node.node_type === 'document' || node.node_type === 'section') {
+        assert(node.export_binding === null, `${node.node_type} Node(${node.node_id})はexport_binding===null`);
+      } else {
+        assert(node.export_binding !== null && typeof node.export_binding.content_hash === 'string',
+          `内容Node(${node.node_type}, ${node.node_id})はexport_bindingを持つ(legacy Trace互換)`);
+      }
+    }
+  }
+
   // ---- 2. §6.1.1 losslessness: provenance.verbatim から既存hash入力を再構成できる ----
   const { computeRecordContentHash } = IdHash;
   for (const record of traceA._trace_records) {
-    const node = resultA.nodes.find(n => n.export_binding.trace_id === record.trace_id);
+    const node = resultA.nodes.find(n => n.export_binding?.trace_id === record.trace_id);
     assert(!!node, `JSON_A record ${record.trace_id} に対応するKnowledge Nodeが生成される`);
     const directHash = await computeRecordContentHash(record);
     const reconstructed = { trace_id: node.export_binding.trace_id, source_raw_text: node.provenance.verbatim.source_raw_text, tags: node.tags };
@@ -63,7 +75,7 @@ async function main() {
     assert(reconstructedHash === directHash, `[pdf] ${record.trace_id}: verbatimからの再構成hashが既存hashと一致(losslessness)`);
   }
   for (const record of traceB._trace_records) {
-    const node = resultB.nodes.find(n => n.export_binding.trace_id === record.trace_id);
+    const node = resultB.nodes.find(n => n.export_binding?.trace_id === record.trace_id);
     assert(!!node, `JSON_B record ${record.trace_id} に対応するKnowledge Nodeが生成される`);
     const directHash = await computeRecordContentHash(record);
     const reconstructed = {
@@ -99,7 +111,7 @@ async function main() {
   });
   assert(candidates.length > 0, 'temperature関連のCandidate Edgeが少なくとも1件生成される');
   assert(candidates.every(e => e.lifecycle === 'candidate'), '生成直後は全てlifecycle=candidate');
-  assert(candidates.every(e => e.relation_category === 'semantic' && e.relation_type === 'satisfied_by'), 'candidateはsemantic/satisfied_by');
+  assert(candidates.every(e => e.relation_category === 'semantic' && e.relation_type === 'related_to'), 'candidateはsemantic/related_to(タグ一致・文字列類似度だけではsatisfied_by等の強い関係は主張しない)');
   assert(candidates.every(e => e.evidence.features.length >= 1), '全candidateにevidence.featuresが1件以上ある');
 
   const tempCandidate = candidates.find(e => {

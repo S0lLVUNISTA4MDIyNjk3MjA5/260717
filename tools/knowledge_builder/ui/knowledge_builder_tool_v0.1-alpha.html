@@ -51,12 +51,13 @@
 </header>
 <div class="banner">
   これは<strong>限定評価用の動作物</strong>です。正式な設計判断・成果物提出には使用しないでください。
-  評価目的: Node粒度・自動タグ・Relation候補の妥当性・Edge根拠のわかりやすさ・編集操作の最小性・Knowledge Graphの有用性の確認。
+  評価目的: Node粒度・Node編集操作・既存タグを用いたRelation Candidateの妥当性・Edge evidenceの理解しやすさ・
+  Candidate採用/却下操作・Relation一覧・Knowledge Graphの有用性の確認。
 </div>
 <main>
 
 <section class="panel" id="ingestPanel">
-  <h2>1. PDF/Excel投入（既存ツールが出力したtrace JSONを読み込みます）</h2>
+  <h2>1. 既存Trace JSON投入（PDF/Excel構造化JSON。既存ツールが出力したtrace JSONを読み込みます）</h2>
   <div class="row">
     <div class="field">
       <label>文書A（requirement側。既存PDF/Excelツールが出力した *_trace_v1_3.json 等）</label>
@@ -203,7 +204,7 @@ function contentNodes() {
 
 function nodeLabel(node) {
   const side = node.provenance.source_document_id === docAId ? 'A' : (node.provenance.source_document_id === docBId ? 'B' : '?');
-  return `[${side}] ${node.title || node.export_binding.trace_id}`;
+  return `[${side}] ${node.title || (node.export_binding ? node.export_binding.trace_id : node.node_id)}`;
 }
 
 function renderNodeTable() {
@@ -265,7 +266,10 @@ function renderNodeTable() {
 
     const tdSrc = document.createElement('td');
     const loc = node.provenance.locator;
-    tdSrc.innerHTML = `<code class="small">${esc(node.export_binding.trace_id)}</code><br><span class="muted" style="font-size:10px;">${esc(loc.kind === 'pdf' ? `p.${loc.page ?? '-'} ${loc.section_title ?? ''}` : `${loc.sheet ?? ''} row${loc.row ?? ''}`)}</span>`;
+    const idLine = node.export_binding
+      ? `<code class="small">${esc(node.export_binding.trace_id)}</code>`
+      : `<span class="muted" style="font-size:10px;">(構造Node・legacy Trace非互換)</span>`;
+    tdSrc.innerHTML = `${idLine}<br><span class="muted" style="font-size:10px;">${esc(loc.kind === 'pdf' ? `p.${loc.page ?? '-'} ${loc.section_title ?? ''}` : `${loc.sheet ?? ''} row${loc.row ?? ''}`)}</span>`;
     tr.appendChild(tdSrc);
 
     tbody.appendChild(tr);

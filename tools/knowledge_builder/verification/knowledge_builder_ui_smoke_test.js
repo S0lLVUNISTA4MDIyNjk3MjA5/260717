@@ -50,6 +50,8 @@ async function main() {
   await page.check('#showStructural');
   const withStructuralCount = await page.$$eval('#nodeTableBody tr', rows => rows.length);
   assert(withStructuralCount > contentRowCount, '構造Node表示ONで行数が増える(document/section)');
+  const structuralNonCompatCount = await page.locator('#nodeTableBody td', { hasText: '構造Node・legacy Trace非互換' }).count();
+  assert(structuralNonCompatCount > 0, '構造Node(document/section)は「legacy Trace非互換」と明示表示される(export_binding:null)');
   await page.uncheck('#showStructural');
 
   // Node修正: 1件目のtextareaを編集してchangeイベントを発火
@@ -79,6 +81,11 @@ async function main() {
 
   const firstBadge = await page.locator('#edgeTableBody tr').first().locator('.badge-candidate').count();
   assert(firstBadge > 0, '生成直後のEdgeはcandidateバッジで表示される');
+
+  const relatedToRowCount = await page.locator('#edgeTableBody tr td', { hasText: 'related_to' }).count();
+  assert(relatedToRowCount > 0, 'Candidateのrelation_typeはrelated_to(satisfied_by等の未検証の強い関係を主張しない)');
+  const satisfiedByRowCount = await page.locator('#edgeTableBody tr td', { hasText: 'satisfied_by' }).count();
+  assert(satisfiedByRowCount === 0, 'このα0.1はsatisfied_byを自動生成しない');
 
   // Edge採用
   await page.locator('#edgeTableBody tr').first().locator('button', { hasText: '採用' }).click();

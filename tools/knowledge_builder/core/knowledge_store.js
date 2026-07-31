@@ -144,6 +144,9 @@
   }
 
   async function recomputeExportContentHash(node) {
+    // 構造Node(export_binding===null)は既存TraceRecordSetに対応レコードを持たず、
+    // legacy binding互換を主張しない(§7.1追加確認事項)。再計算対象外として無視する。
+    if (!node.export_binding) return null;
     node.export_binding.content_hash = await computeRecordContentHash(reconstructRecordForExportHash(node));
     return node.export_binding.content_hash;
   }
