@@ -12,6 +12,8 @@ excel_tool/samples/sample_input.xlsx
 excel_tool/vendor/VENDOR_NOTICE.md
 excel_tool/vendor/xlsx-LICENSE.txt
 excel_tool/vendor/xlsx.full.min.js
+manuals/excel_to_json_tool_detailed_operation_manual_v0.10.1_alpha.pdf
+manuals/pdf_to_json_tool_detailed_operation_manual_v0.10.1_alpha.pdf
 pdf_tool/KNOWN_LIMITATIONS.md
 pdf_tool/samples/README.md
 pdf_tool/samples/compare_expected.py

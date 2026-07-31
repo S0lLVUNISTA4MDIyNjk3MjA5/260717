@@ -5,7 +5,7 @@
  *
  * Stages the actual end-user distribution (README.md, SMOKE_TEST_REPORT.md,
  * THREE_TOOL_COMPATIBILITY_REPORT.md, SHA256SUMS.txt, pdf_tool/, excel_tool/,
- * shared/ -- NOT the checkpoint*.js/*.py verification scripts, which are
+ * shared/, manuals/ -- NOT the checkpoint*.js/*.py verification scripts, which are
  * this repo's own QA harness, not part of the shipped alpha), verifies its
  * structure against an approved recursive manifest, builds the final ZIP
  * twice independently from two separately re-staged copies, confirms the
@@ -25,7 +25,10 @@
  *      pdf_tool/debug_dump.json) would sail through undetected. Fixed:
  *      the recursive path list is compared against an approved manifest
  *      file (checkpoint7_expected_manifest.txt, sibling to this handoff
- *      directory) covering all 218 expected paths exactly.
+ *      directory) covering every expected path exactly. The expected count
+ *      is always read from that manifest file's own line count -- never
+ *      hardcoded here -- so adding an approved file (e.g. manuals/) only
+ *      requires updating the manifest, not this script's assertions.
  *   3. The PDF external-URL check only recognized the 2 already-known,
  *      already-fixed CDN patterns (Tesseract/embedding), so a brand new
  *      unknown runtime reference would not be caught. Fixed: every
@@ -56,7 +59,24 @@ const DIST_DIR = path.join(ALPHA_RELEASE_DIR, 'dist');
 const DIST_ZIP_PATH = path.join(DIST_DIR, ZIP_NAME);
 const DIST_SHA_PATH = path.join(DIST_DIR, ZIP_NAME + '.sha256');
 
-const EXPECTED_TOP_LEVEL = ['README.md', 'SMOKE_TEST_REPORT.md', 'THREE_TOOL_COMPATIBILITY_REPORT.md', 'SHA256SUMS.txt', 'pdf_tool', 'excel_tool', 'shared'];
+const EXPECTED_TOP_LEVEL = ['README.md', 'SMOKE_TEST_REPORT.md', 'THREE_TOOL_COMPATIBILITY_REPORT.md', 'SHA256SUMS.txt', 'pdf_tool', 'excel_tool', 'shared', 'manuals'];
+
+// Detailed operation manual PDFs added to manuals/. Content is authored and
+// approved outside this script (a separate editorial process). This script
+// verifies structural validity (signature + trailing EOF marker) AND, more
+// importantly, that each file's SHA-256 matches the value approved for that
+// manual below -- so a byte-for-byte swap for any other structurally-valid
+// PDF (including one with the same filename and size) is caught, not just a
+// missing/empty/malformed file. Approved SHA-256s are updated only when a
+// newly-reviewed manual PDF supersedes the previous one.
+const APPROVED_MANUALS = {
+  'manuals/pdf_to_json_tool_detailed_operation_manual_v0.10.1_alpha.pdf':
+    '332463eda4e9bc5aef79fa48d9a5816c84e8f7d37d9b549dfab62ef0ac2ae1f1',
+  'manuals/excel_to_json_tool_detailed_operation_manual_v0.10.1_alpha.pdf':
+    '933b0af43a927003e6346d9934cdb4072d623b49a6a2891e9f6e4c55e02b70f9',
+};
+const REQUIRED_MANUAL_PDF_FILES = Object.keys(APPROVED_MANUALS);
+
 
 // Fixed, exact-match allowlist of URLs that legitimately appear in the PDF
 // tool's HTML but are never dereferenced by our code at runtime (an XML
@@ -174,12 +194,15 @@ function computeStructureResults(dirLabel, dir, expectedManifest) {
   c('トップレベルが想定ファイル集合と完全一致', JSON.stringify(topLevel) === JSON.stringify(expectedTop), { actual: topLevel, expected: expectedTop });
 
   // 再帰的manifest完全一致(承認済みcheckpoint7_expected_manifest.txtとの照合)
+  // -- onlyInActual/onlyInExpected は集合差(includes())による診断情報のため、
+  //    manifest側の重複行(多重度)を検出できない。そのため、判定条件そのものは
+  //    ソート済み配列のJSON.stringify比較(要素の多重度まで一致を要求)とする。
   const actualSorted = [...relPaths].sort();
   const expectedSorted = [...expectedManifest].sort();
   const onlyInActual = actualSorted.filter(p => !expectedSorted.includes(p));
   const onlyInExpected = expectedSorted.filter(p => !actualSorted.includes(p));
-  c('再帰的ファイル一覧が承認済みmanifest(218件)と完全一致',
-    onlyInActual.length === 0 && onlyInExpected.length === 0,
+  c(`再帰的ファイル一覧が承認済みmanifest(${expectedSorted.length}件)と完全一致`,
+    JSON.stringify(actualSorted) === JSON.stringify(expectedSorted),
     { onlyInActual, onlyInExpected, actualCount: actualSorted.length, expectedCount: expectedSorted.length });
 
   const emptyFiles = entries.filter(e => !e.symlink && fs.statSync(e.abs).size === 0).map(e => e.relPath);
@@ -217,6 +240,21 @@ function computeStructureResults(dirLabel, dir, expectedManifest) {
   if (fs.existsSync(excelHtmlPath)) {
     const excelHtml = fs.readFileSync(excelHtmlPath, 'utf8');
     c('Excel: HTML中にhttps?://参照が存在しない', !/https?:\/\//.test(excelHtml));
+  }
+
+  // 詳細操作説明書PDF(manuals/)は内容非検査 -- 実在・非空・PDF構造のみをfail-closedで確認する。
+  for (const rel of REQUIRED_MANUAL_PDF_FILES) {
+    const abs = path.join(dir, rel);
+    const exists = fs.existsSync(abs);
+    c(`${rel}: ファイルが存在する`, exists);
+    if (!exists) continue;
+    const buf = fs.readFileSync(abs);
+    c(`${rel}: サイズ > 0`, buf.length > 0, buf.length);
+    c(`${rel}: %PDF-シグネチャ`, buf.subarray(0, 5).toString('latin1') === '%PDF-', buf.subarray(0, 8).toString('latin1'));
+    const tail = buf.subarray(Math.max(0, buf.length - 2048)).toString('latin1');
+    c(`${rel}: 末尾付近に%%EOFマーカーを含む`, tail.includes('%%EOF'));
+    const actualSha = sha256File(abs);
+    c(`${rel}: SHA-256が承認済み値と一致(chain-of-custody)`, actualSha === APPROVED_MANUALS[rel], { approved: APPROVED_MANUALS[rel], actual: actualSha });
   }
 
   const docPattern = /`([A-Za-z0-9_.\/-]+\.(?:md|json|txt))`/g;
@@ -326,6 +364,64 @@ function mutationTest_UnknownPdfUrl(tempBase) {
   check('mutation B実行後もdist .sha256は書き込まれていない', !fs.existsSync(DIST_SHA_PATH));
 }
 
+// ── Mutation self-test C: a manual PDF whose content was swapped for a
+//    different, still-structurally-valid PDF (correct %PDF- signature,
+//    trailing %%EOF, non-zero size, same filename) must still be rejected,
+//    because its SHA-256 no longer matches the approved value. Proves that
+//    structural validity alone (gaps identified in review: exists/size>0/
+//    %PDF-/%%EOF) is not sufcient to guarantee "this is the reviewed PDF",
+//    and that the SHA-256 chain-of-custody check actually closes that gap. ──
+function mutationTest_ManualPdfContentSwap(tempBase, expectedManifest) {
+  const dir = path.join(tempBase, 'mutation-manual-swap');
+  stageDistribution(dir);
+  const [rel] = REQUIRED_MANUAL_PDF_FILES;
+  const abs = path.join(dir, rel);
+  const original = fs.readFileSync(abs);
+  // Flip one content byte while keeping this a well-formed PDF: the file
+  // still starts with "%PDF-" and still ends with "%%EOF" (both anchors are
+  // well before/after the mutated offset), so every structural check (exists,
+  // size>0, %PDF- signature, trailing %%EOF) still passes -- only the
+  // approved-SHA check is exercised by this mutation.
+  const mutated = Buffer.from(original);
+  const mutateOffset = Math.floor(mutated.length / 2);
+  mutated[mutateOffset] = mutated[mutateOffset] ^ 0xff;
+  fs.writeFileSync(abs, mutated);
+  generateSha256Sums(dir);
+  const { results } = computeStructureResults('mutation:manual-swap', dir, expectedManifest);
+  const shaResult = results.find(r => r.name.includes(`${rel}: SHA-256が承認済み値と一致`));
+  const sigResult = results.find(r => r.name.includes(`${rel}: %PDF-シグネチャ`));
+  const eofResult = results.find(r => r.name.includes(`${rel}: 末尾付近に%%EOFマーカーを含む`));
+  check('mutation: manual PDFの内容を1byte変更(構造上は正常PDFのまま)した場合、承認済みSHA検査がFAILする',
+    shaResult && shaResult.ok === false, shaResult && shaResult.detail);
+  check('mutation Cの入力は引き続き構造的に正常なPDFである(%PDF-/%%EOFは維持、SHA不一致のみで検出)',
+    sigResult && sigResult.ok === true && eofResult && eofResult.ok === true);
+  check('mutation C実行後もdist ZIPは書き込まれていない', !fs.existsSync(DIST_ZIP_PATH));
+  check('mutation C実行後もdist .sha256は書き込まれていない', !fs.existsSync(DIST_SHA_PATH));
+}
+
+// ── Mutation self-test D: a manifest with one path duplicated (multiplicity
+//    221 lines / 220 distinct paths) must be rejected, even though the
+//    *set* of paths is unchanged. Proves that removing the old hardcoded
+//    218-count check in favor of deriving everything from the manifest file
+//    did not silently drop multiplicity checking -- the manifest itself
+//    never touches disk here; only an in-memory copy with one entry
+//    duplicated is used. ──
+function mutationTest_DuplicateManifestEntry(tempBase, expectedManifest) {
+  const dir = path.join(tempBase, 'mutation-duplicate-manifest');
+  stageDistribution(dir);
+  generateSha256Sums(dir);
+  const duplicatedManifest = [...expectedManifest, expectedManifest[0]];
+  const manifestDuplicates = duplicatedManifest.filter((p, i) => duplicatedManifest.indexOf(p) !== i);
+  check('mutation: manifestへ既存pathを1行重複追加すると、manifest内重複path検査がFAILする',
+    manifestDuplicates.length > 0, manifestDuplicates);
+  const { results } = computeStructureResults('mutation:duplicate-manifest', dir, duplicatedManifest);
+  const manifestResult = results.find(r => r.name.includes('再帰的ファイル一覧が承認済みmanifest'));
+  check('mutation: manifestへ既存pathを1行重複追加すると、再帰的manifest完全一致検査がFAILする(actual 220件 vs manifest 221行)',
+    manifestResult && manifestResult.ok === false, manifestResult && manifestResult.detail);
+  check('mutation D実行後もdist ZIPは書き込まれていない', !fs.existsSync(DIST_ZIP_PATH));
+  check('mutation D実行後もdist .sha256は書き込まれていない', !fs.existsSync(DIST_SHA_PATH));
+}
+
 function runRealPipeline(tempBase, expectedManifest) {
   const stagingDir = path.join(tempBase, 'staging');
   const zipAPath = path.join(tempBase, 'buildA', ZIP_NAME);
@@ -404,12 +500,20 @@ function main() {
     const gitBefore = gitStatusPorcelainOfRepoExcludingDist();
 
     const expectedManifest = loadExpectedManifest();
-    check(`承認済みmanifest(${MANIFEST_PATH.split('/').pop()})を読み込み(218件)`, expectedManifest.length === 218, expectedManifest.length);
+    check(`承認済みmanifest(${MANIFEST_PATH.split('/').pop()})を読み込み(${expectedManifest.length}件)`, expectedManifest.length > 0, expectedManifest.length);
+    // 218固定checkの撤去(expectedManifest.lengthからの動的算出)により、manifest自身が
+    // 正本になった。しかし再帰一致判定は元々path集合の差分(includes())だけを見ており、
+    // 多重度を見ないため、manifestファイル自身に重複行が紛れ込んでもactual側との
+    // 集合差が0になり得る。ここでmanifestロード直後に独立して多重度を検査する。
+    const manifestDuplicates = expectedManifest.filter((p, i) => expectedManifest.indexOf(p) !== i);
+    check('承認済みmanifest内の重複path 0件', manifestDuplicates.length === 0, manifestDuplicates);
 
     // ── Mutation self-tests, BEFORE the real build, using their own
     //    isolated staging copies -- must never touch dist/. ──
     mutationTest_UnexpectedNestedFile(tempBase, expectedManifest);
     mutationTest_UnknownPdfUrl(tempBase);
+    mutationTest_ManualPdfContentSwap(tempBase, expectedManifest);
+    mutationTest_DuplicateManifestEntry(tempBase, expectedManifest);
 
     // ── Real pipeline ──
     const real = runRealPipeline(tempBase, expectedManifest);

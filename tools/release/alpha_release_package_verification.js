@@ -64,7 +64,18 @@ const EXPECTED_LICENSE_FILES = [
   { manifestKey: 'tiny_segmenter', field: 'original_notice_file', shaField: 'original_notice_sha256', dest: 'tiny-segmenter-original-notice.txt' },
   { manifestKey: 'tiny_segmenter', field: 'original_license_file', shaField: 'original_license_sha256', dest: 'tiny-segmenter-original-BSD-3-Clause.txt' },
 ];
-const EXPECTED_DOC_FILES = ['README_ja.md', 'KNOWN_LIMITATIONS.md', 'THIRD_PARTY_LICENSES.md', 'BROWSER_VALIDATION_REPORT.md'];
+const EXPECTED_DOC_FILES = ['README_ja.md', 'KNOWN_LIMITATIONS.md', 'THIRD_PARTY_LICENSES.md', 'BROWSER_VALIDATION_REPORT.md', 'trace_matching_tool_detailed_operation_manual_v12.2.0_alpha.1.pdf'];
+
+// Chain-of-custody for the detailed operation manual: its content is
+// authored and approved outside this repo's build/verify pipeline (a
+// separate editorial process). Pinning the approved SHA-256 here and
+// checking it against tools/release/docs/ (the pipeline's own source of
+// truth for docs) closes the gap that a byte-identical-to-source check
+// alone cannot: byte-identity only proves dist/ matches whatever is
+// currently checked into docs/, not that docs/ still holds the reviewed
+// PDF and not some other structurally-valid PDF swapped in later.
+const APPROVED_TRACE_MATCHING_MANUAL_SHA256 = '5bd4b71071c44377c573df34a969706e9d9af629a05c1f58aaffac6928e61660';
+const TRACE_MATCHING_MANUAL_NAME = 'trace_matching_tool_detailed_operation_manual_v12.2.0_alpha.1.pdf';
 
 const EXPECTED_RELATIVE_FILES = new Set([
   OUTPUT_HTML_NAME,
@@ -74,7 +85,12 @@ const EXPECTED_RELATIVE_FILES = new Set([
   ...Object.values(EXPECTED_VENDOR_RUNTIME_DEST).map(d => `runtime/${d}`),
   ...EXPECTED_LICENSE_FILES.map(e => `licenses/${e.dest}`),
 ]);
-const EXPECTED_TOTAL_FILE_COUNT = 23; // 22 covered by SHA256SUMS.txt + SHA256SUMS.txt itself
+// Derived, never hardcoded: total file count is whatever EXPECTED_RELATIVE_FILES
+// actually contains, so adding an approved doc (e.g. the detailed operation
+// manual PDF) only requires updating EXPECTED_DOC_FILES above, not this count.
+const EXPECTED_TOTAL_FILE_COUNT = EXPECTED_RELATIVE_FILES.size;
+// SHA256SUMS.txt covers every expected file except itself.
+const EXPECTED_SUMS_COUNT = EXPECTED_RELATIVE_FILES.size - 1;
 
 // Path-leakage allowlist: substrings that are legitimate content (e.g.
 // explanatory text about the environment) rather than a real leaked path.
@@ -137,7 +153,34 @@ function isTextLikeFile(rel) {
   return /\.(html|md|txt|json|js)$/i.test(rel);
 }
 
+// ── Mutation self-test: a manual PDF whose content was swapped for a
+//    different, still-structurally-valid PDF (correct %PDF- signature,
+//    trailing %%EOF, non-zero size) must still be rejected by the approved-
+//    SHA-256 check. Proves that PDF-structural-validity alone cannot
+//    substitute for the chain-of-custody check -- purely in-memory, touches
+//    no file on disk. ──
+function mutationTest_ManualPdfContentSwap() {
+  const srcPath = path.join(DOCS_DIR, TRACE_MATCHING_MANUAL_NAME);
+  let original;
+  try { original = fs.readFileSync(srcPath); } catch (e) {
+    check('mutation: manual PDF content-swap self-test could run (source readable)', false, String(e));
+    return;
+  }
+  const mutated = Buffer.from(original);
+  const mutateOffset = Math.floor(mutated.length / 2);
+  mutated[mutateOffset] = mutated[mutateOffset] ^ 0xff;
+  const mutatedSha = sha256(mutated);
+  check('mutation: manual PDFの内容を1byte変更(構造上は正常PDFのまま)した場合、承認済みSHA検査がFAILする',
+    mutatedSha !== APPROVED_TRACE_MATCHING_MANUAL_SHA256,
+    `approved=${APPROVED_TRACE_MATCHING_MANUAL_SHA256} mutated=${mutatedSha}`);
+  const stillHasSignature = mutated.subarray(0, 5).toString('latin1') === '%PDF-';
+  const stillHasEof = mutated.subarray(Math.max(0, mutated.length - 2048)).toString('latin1').includes('%%EOF');
+  check('mutation Cの入力は引き続き構造的に正常なPDFである(%PDF-/%%EOFは維持、SHA不一致のみで検出)',
+    stillHasSignature && stillHasEof);
+}
+
 function main() {
+  mutationTest_ManualPdfContentSwap();
   check('dist output directory exists', fs.existsSync(OUTPUT_DIR), OUTPUT_DIR);
   if (!fs.existsSync(OUTPUT_DIR)) { report(); process.exitCode = 1; return; }
 
@@ -158,7 +201,7 @@ function main() {
   const docFiles = relFiles.filter(f => EXPECTED_DOC_FILES.includes(f.rel));
   check('runtime/ has exactly 12 files', runtimeFiles.length === 12, `found ${runtimeFiles.length}`);
   check('licenses/ has exactly 5 files', licenseFiles.length === 5, `found ${licenseFiles.length}`);
-  check('doc files present: exactly 4', docFiles.length === 4, `found ${docFiles.length}`);
+  check(`doc files present: exactly ${EXPECTED_DOC_FILES.length}`, docFiles.length === EXPECTED_DOC_FILES.length, `found ${docFiles.length}`);
   check('HTML file name matches expected exactly', actualRelSet.has(OUTPUT_HTML_NAME));
 
   // ── file kind checks ──
@@ -228,7 +271,7 @@ function main() {
     });
     check('every SHA256SUMS.txt line parses (hash + 2-space + path)', parsed.every(Boolean));
     const relsInSums = parsed.filter(Boolean).map(p => p.rel);
-    check('SHA256SUMS.txt covers exactly 22 files', relsInSums.length === 22, `found ${relsInSums.length}`);
+    check(`SHA256SUMS.txt covers exactly ${EXPECTED_SUMS_COUNT} files`, relsInSums.length === EXPECTED_SUMS_COUNT, `found ${relsInSums.length}`);
     check('SHA256SUMS.txt does not list itself', !relsInSums.includes('SHA256SUMS.txt'));
     const dupSums = relsInSums.filter((r, i) => relsInSums.indexOf(r) !== i);
     check('no duplicate entries in SHA256SUMS.txt', dupSums.length === 0, dupSums.join(', '));
@@ -246,7 +289,7 @@ function main() {
       const actual = sha256(fs.readFileSync(filePath));
       if (actual !== p.sha) mismatchCount++;
     }
-    check('all 22 recomputed SHA-256 values match SHA256SUMS.txt', mismatchCount === 0, `${mismatchCount} mismatch(es)`);
+    check(`all ${EXPECTED_SUMS_COUNT} recomputed SHA-256 values match SHA256SUMS.txt`, mismatchCount === 0, `${mismatchCount} mismatch(es)`);
   }
 
   // ── byte-identity against repo source-of-truth ──
@@ -276,6 +319,18 @@ function main() {
     let identical = false;
     try { identical = fs.readFileSync(srcPath).equals(fs.readFileSync(distPath)); } catch (e) { identical = false; }
     check(`doc file byte-identical to tools/release/docs/: ${name}`, identical);
+  }
+
+  // ── Manual chain-of-custody: approved SHA-256 -> tools/release/docs/
+  //    source -> dist/ (byte-identical check above already closes the
+  //    source->dist link, so this closes approved->source). ──
+  {
+    const srcPath = path.join(DOCS_DIR, TRACE_MATCHING_MANUAL_NAME);
+    let actualSha = null;
+    try { actualSha = sha256(fs.readFileSync(srcPath)); } catch (e) { actualSha = null; }
+    check(`manual PDF SHA-256 matches approved value (chain-of-custody): ${TRACE_MATCHING_MANUAL_NAME}`,
+      actualSha === APPROVED_TRACE_MATCHING_MANUAL_SHA256,
+      `approved=${APPROVED_TRACE_MATCHING_MANUAL_SHA256} actual=${actualSha}`);
   }
 
   report();

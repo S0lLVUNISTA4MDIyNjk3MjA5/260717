@@ -11,6 +11,13 @@ Build date: 2026-07-29
 - PDF版: `spec_to_json_conversion_tool_alpha_v0.10.1.html` — **v0.10.1-alpha**
 - Excel版: `excel_to_json_conversion_tool_alpha_v0.10.1.html` — **v0.10.1-alpha**
 
+## 詳細操作説明書
+
+各ツールの画面別・機能別の詳細な操作説明は、以下のPDFを参照してください。
+
+- `manuals/pdf_to_json_tool_detailed_operation_manual_v0.10.1_alpha.pdf` — PDF→JSONツール
+- `manuals/excel_to_json_tool_detailed_operation_manual_v0.10.1_alpha.pdf` — Excel→JSONツール
+
 ## 現行実装の主要機能
 
 - **生成AI連携**: プロンプトコピー、AI入力JSON保存（固定ID・内容ハッシュ・原文・タグ辞書を含む）、
