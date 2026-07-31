@@ -194,12 +194,15 @@ function computeStructureResults(dirLabel, dir, expectedManifest) {
   c('トップレベルが想定ファイル集合と完全一致', JSON.stringify(topLevel) === JSON.stringify(expectedTop), { actual: topLevel, expected: expectedTop });
 
   // 再帰的manifest完全一致(承認済みcheckpoint7_expected_manifest.txtとの照合)
+  // -- onlyInActual/onlyInExpected は集合差(includes())による診断情報のため、
+  //    manifest側の重複行(多重度)を検出できない。そのため、判定条件そのものは
+  //    ソート済み配列のJSON.stringify比較(要素の多重度まで一致を要求)とする。
   const actualSorted = [...relPaths].sort();
   const expectedSorted = [...expectedManifest].sort();
   const onlyInActual = actualSorted.filter(p => !expectedSorted.includes(p));
   const onlyInExpected = expectedSorted.filter(p => !actualSorted.includes(p));
   c(`再帰的ファイル一覧が承認済みmanifest(${expectedSorted.length}件)と完全一致`,
-    onlyInActual.length === 0 && onlyInExpected.length === 0,
+    JSON.stringify(actualSorted) === JSON.stringify(expectedSorted),
     { onlyInActual, onlyInExpected, actualCount: actualSorted.length, expectedCount: expectedSorted.length });
 
   const emptyFiles = entries.filter(e => !e.symlink && fs.statSync(e.abs).size === 0).map(e => e.relPath);
@@ -396,6 +399,29 @@ function mutationTest_ManualPdfContentSwap(tempBase, expectedManifest) {
   check('mutation C実行後もdist .sha256は書き込まれていない', !fs.existsSync(DIST_SHA_PATH));
 }
 
+// ── Mutation self-test D: a manifest with one path duplicated (multiplicity
+//    221 lines / 220 distinct paths) must be rejected, even though the
+//    *set* of paths is unchanged. Proves that removing the old hardcoded
+//    218-count check in favor of deriving everything from the manifest file
+//    did not silently drop multiplicity checking -- the manifest itself
+//    never touches disk here; only an in-memory copy with one entry
+//    duplicated is used. ──
+function mutationTest_DuplicateManifestEntry(tempBase, expectedManifest) {
+  const dir = path.join(tempBase, 'mutation-duplicate-manifest');
+  stageDistribution(dir);
+  generateSha256Sums(dir);
+  const duplicatedManifest = [...expectedManifest, expectedManifest[0]];
+  const manifestDuplicates = duplicatedManifest.filter((p, i) => duplicatedManifest.indexOf(p) !== i);
+  check('mutation: manifestへ既存pathを1行重複追加すると、manifest内重複path検査がFAILする',
+    manifestDuplicates.length > 0, manifestDuplicates);
+  const { results } = computeStructureResults('mutation:duplicate-manifest', dir, duplicatedManifest);
+  const manifestResult = results.find(r => r.name.includes('再帰的ファイル一覧が承認済みmanifest'));
+  check('mutation: manifestへ既存pathを1行重複追加すると、再帰的manifest完全一致検査がFAILする(actual 220件 vs manifest 221行)',
+    manifestResult && manifestResult.ok === false, manifestResult && manifestResult.detail);
+  check('mutation D実行後もdist ZIPは書き込まれていない', !fs.existsSync(DIST_ZIP_PATH));
+  check('mutation D実行後もdist .sha256は書き込まれていない', !fs.existsSync(DIST_SHA_PATH));
+}
+
 function runRealPipeline(tempBase, expectedManifest) {
   const stagingDir = path.join(tempBase, 'staging');
   const zipAPath = path.join(tempBase, 'buildA', ZIP_NAME);
@@ -475,12 +501,19 @@ function main() {
 
     const expectedManifest = loadExpectedManifest();
     check(`承認済みmanifest(${MANIFEST_PATH.split('/').pop()})を読み込み(${expectedManifest.length}件)`, expectedManifest.length > 0, expectedManifest.length);
+    // 218固定checkの撤去(expectedManifest.lengthからの動的算出)により、manifest自身が
+    // 正本になった。しかし再帰一致判定は元々path集合の差分(includes())だけを見ており、
+    // 多重度を見ないため、manifestファイル自身に重複行が紛れ込んでもactual側との
+    // 集合差が0になり得る。ここでmanifestロード直後に独立して多重度を検査する。
+    const manifestDuplicates = expectedManifest.filter((p, i) => expectedManifest.indexOf(p) !== i);
+    check('承認済みmanifest内の重複path 0件', manifestDuplicates.length === 0, manifestDuplicates);
 
     // ── Mutation self-tests, BEFORE the real build, using their own
     //    isolated staging copies -- must never touch dist/. ──
     mutationTest_UnexpectedNestedFile(tempBase, expectedManifest);
     mutationTest_UnknownPdfUrl(tempBase);
     mutationTest_ManualPdfContentSwap(tempBase, expectedManifest);
+    mutationTest_DuplicateManifestEntry(tempBase, expectedManifest);
 
     // ── Real pipeline ──
     const real = runRealPipeline(tempBase, expectedManifest);
