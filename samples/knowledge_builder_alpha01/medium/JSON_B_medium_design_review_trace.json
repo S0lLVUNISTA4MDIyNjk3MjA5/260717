@@ -1,0 +1,4480 @@
+{
+  "file_name": "design_review_medium.xlsx",
+  "trace_format": "chapter-section-trace-v1",
+  "schema_version": "2.0-work",
+  "chapter_number": "TRACE",
+  "chapter_title": "設計検討表（中規模評価サンプル）",
+  "source": {
+    "profile_name": "knowledge-builder-medium-sample"
+  },
+  "tag_policy": {
+    "vocabulary_id": "knowledge-builder-medium-sample",
+    "tag_vocabulary_version": "1.0.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "design-temp-use-range",
+      "parent_id": "sheet-temp-use",
+      "trace_title": "使用時温度条件",
+      "trace_text": "使用温度範囲を0℃~50℃に拡張して設計する。上限45℃相当の負荷試験で動作確認済み。",
+      "trace_content": [
+        "使用温度範囲を0℃~50℃に拡張して設計する。上限45℃相当の負荷試験で動作確認済み。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "設計検討表 使用時温度条件 使用温度範囲を0℃~50℃に拡張して設計する。上限45℃相当の負荷試験で動作確認済み。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "使用時温度条件",
+      "source_row": 2,
+      "source_path": "$._trace_records[0]",
+      "source_section_id": "sheet-temp-use",
+      "source_section_title": "使用時温度条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 1,
+        "分類": "温度",
+        "項目": "使用時温度条件",
+        "内容": "使用温度範囲を0℃~50℃に拡張して設計する。上限45℃相当の負荷試験で動作確認済み。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "温度"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "使用時温度条件",
+          "excel_row": 2
+        }
+      }
+    },
+    {
+      "trace_id": "design-temp-startup",
+      "parent_id": "sheet-temp-use",
+      "trace_title": "使用時温度条件",
+      "trace_text": "低温起動対策としてクランクケースヒータを追加し、始動後4分で定格能力に到達する設計とする。",
+      "trace_content": [
+        "低温起動対策としてクランクケースヒータを追加し、始動後4分で定格能力に到達する設計とする。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "設計検討表 使用時温度条件 低温起動対策としてクランクケースヒータを追加し、始動後4分で定格能力に到達する設計とする。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "使用時温度条件",
+      "source_row": 3,
+      "source_path": "$._trace_records[1]",
+      "source_section_id": "sheet-temp-use",
+      "source_section_title": "使用時温度条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 2,
+        "分類": "温度",
+        "項目": "使用時温度条件",
+        "内容": "低温起動対策としてクランクケースヒータを追加し、始動後4分で定格能力に到達する設計とする。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "温度"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "使用時温度条件",
+          "excel_row": 3
+        }
+      }
+    },
+    {
+      "trace_id": "design-temp-overheat",
+      "parent_id": "sheet-temp-use",
+      "trace_title": "使用時温度条件",
+      "trace_text": "内部温度85℃で警報、95℃で強制停止するサーモスタットを実装する。",
+      "trace_content": [
+        "内部温度85℃で警報、95℃で強制停止するサーモスタットを実装する。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "設計検討表 使用時温度条件 内部温度85℃で警報、95℃で強制停止するサーモスタットを実装する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "使用時温度条件",
+      "source_row": 4,
+      "source_path": "$._trace_records[2]",
+      "source_section_id": "sheet-temp-use",
+      "source_section_title": "使用時温度条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 3,
+        "分類": "温度",
+        "項目": "使用時温度条件",
+        "内容": "内部温度85℃で警報、95℃で強制停止するサーモスタットを実装する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "温度"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "使用時温度条件",
+          "excel_row": 4
+        }
+      }
+    },
+    {
+      "trace_id": "design-temp-ambient-derate",
+      "parent_id": "sheet-temp-use",
+      "trace_title": "使用時温度条件",
+      "trace_text": "外気温45℃超過時は圧縮機回転数を段階的に絞る出力ディレーティング制御を実装する。",
+      "trace_content": [
+        "外気温45℃超過時は圧縮機回転数を段階的に絞る出力ディレーティング制御を実装する。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "設計検討表 使用時温度条件 外気温45℃超過時は圧縮機回転数を段階的に絞る出力ディレーティング制御を実装する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "使用時温度条件",
+      "source_row": 5,
+      "source_path": "$._trace_records[3]",
+      "source_section_id": "sheet-temp-use",
+      "source_section_title": "使用時温度条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 4,
+        "分類": "温度",
+        "項目": "使用時温度条件",
+        "内容": "外気温45℃超過時は圧縮機回転数を段階的に絞る出力ディレーティング制御を実装する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "温度"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "使用時温度条件",
+          "excel_row": 5
+        }
+      }
+    },
+    {
+      "trace_id": "design-temp-sensor-accuracy",
+      "parent_id": "sheet-temp-use",
+      "trace_title": "使用時温度条件",
+      "trace_text": "温度センサは精度±0.3℃品を採用し、要求精度に対し十分な余裕を持たせる。",
+      "trace_content": [
+        "温度センサは精度±0.3℃品を採用し、要求精度に対し十分な余裕を持たせる。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "設計検討表 使用時温度条件 温度センサは精度±0.3℃品を採用し、要求精度に対し十分な余裕を持たせる。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "使用時温度条件",
+      "source_row": 6,
+      "source_path": "$._trace_records[4]",
+      "source_section_id": "sheet-temp-use",
+      "source_section_title": "使用時温度条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 5,
+        "分類": "温度",
+        "項目": "使用時温度条件",
+        "内容": "温度センサは精度±0.3℃品を採用し、要求精度に対し十分な余裕を持たせる。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "温度"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "使用時温度条件",
+          "excel_row": 6
+        }
+      }
+    },
+    {
+      "trace_id": "design-temp-fin-corrosion",
+      "parent_id": "sheet-temp-use",
+      "trace_title": "使用時温度条件",
+      "trace_text": "熱交換器フィンの表面処理を変更し、温度サイクルによる腐食進行を抑制する。",
+      "trace_content": [
+        "熱交換器フィンの表面処理を変更し、温度サイクルによる腐食進行を抑制する。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "設計検討表 使用時温度条件 熱交換器フィンの表面処理を変更し、温度サイクルによる腐食進行を抑制する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "使用時温度条件",
+      "source_row": 7,
+      "source_path": "$._trace_records[5]",
+      "source_section_id": "sheet-temp-use",
+      "source_section_title": "使用時温度条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 6,
+        "分類": "温度",
+        "項目": "使用時温度条件",
+        "内容": "熱交換器フィンの表面処理を変更し、温度サイクルによる腐食進行を抑制する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "温度"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "使用時温度条件",
+          "excel_row": 7
+        }
+      }
+    },
+    {
+      "trace_id": "design-temp-log-interval",
+      "parent_id": "sheet-temp-use",
+      "trace_title": "使用時温度条件",
+      "trace_text": "温度ログの記録間隔を10分から1分へ短縮する。",
+      "trace_content": [
+        "温度ログの記録間隔を10分から1分へ短縮する。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "設計検討表 使用時温度条件 温度ログの記録間隔を10分から1分へ短縮する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "使用時温度条件",
+      "source_row": 8,
+      "source_path": "$._trace_records[6]",
+      "source_section_id": "sheet-temp-use",
+      "source_section_title": "使用時温度条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 7,
+        "分類": "温度",
+        "項目": "使用時温度条件",
+        "内容": "温度ログの記録間隔を10分から1分へ短縮する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "温度"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "使用時温度条件",
+          "excel_row": 8
+        }
+      }
+    },
+    {
+      "trace_id": "design-temp-transport",
+      "parent_id": "sheet-temp-storage",
+      "trace_title": "保管時温度条件",
+      "trace_text": "輸送時温度条件を-30℃~70℃相当まで耐える梱包仕様とする。",
+      "trace_content": [
+        "輸送時温度条件を-30℃~70℃相当まで耐える梱包仕様とする。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "設計検討表 保管時温度条件 輸送時温度条件を-30℃~70℃相当まで耐える梱包仕様とする。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "保管時温度条件",
+      "source_row": 9,
+      "source_path": "$._trace_records[7]",
+      "source_section_id": "sheet-temp-storage",
+      "source_section_title": "保管時温度条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 8,
+        "分類": "温度",
+        "項目": "保管時温度条件",
+        "内容": "輸送時温度条件を-30℃~70℃相当まで耐える梱包仕様とする。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "温度"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "保管時温度条件",
+          "excel_row": 9
+        }
+      }
+    },
+    {
+      "trace_id": "design-temp-storage-range",
+      "parent_id": "sheet-temp-storage",
+      "trace_title": "保管時温度条件",
+      "trace_text": "保管温度条件は-25℃~65℃とし、輸送時の温度変動を考慮したマージンを確保する。",
+      "trace_content": [
+        "保管温度条件は-25℃~65℃とし、輸送時の温度変動を考慮したマージンを確保する。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "設計検討表 保管時温度条件 保管温度条件は-25℃~65℃とし、輸送時の温度変動を考慮したマージンを確保する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "保管時温度条件",
+      "source_row": 10,
+      "source_path": "$._trace_records[8]",
+      "source_section_id": "sheet-temp-storage",
+      "source_section_title": "保管時温度条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 9,
+        "分類": "温度",
+        "項目": "保管時温度条件",
+        "内容": "保管温度条件は-25℃~65℃とし、輸送時の温度変動を考慮したマージンを確保する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "温度"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "保管時温度条件",
+          "excel_row": 10
+        }
+      }
+    },
+    {
+      "trace_id": "design-temp-notag",
+      "parent_id": "sheet-temp-storage",
+      "trace_title": "保管時温度条件",
+      "trace_text": "外気温センサの配線ルートを見直し、ノイズ耐性を向上する。",
+      "trace_content": [
+        "外気温センサの配線ルートを見直し、ノイズ耐性を向上する。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "設計検討表 保管時温度条件 外気温センサの配線ルートを見直し、ノイズ耐性を向上する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "保管時温度条件",
+      "source_row": 11,
+      "source_path": "$._trace_records[9]",
+      "source_section_id": "sheet-temp-storage",
+      "source_section_title": "保管時温度条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 10,
+        "分類": "温度",
+        "項目": "保管時温度条件",
+        "内容": "外気温センサの配線ルートを見直し、ノイズ耐性を向上する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "保管時温度条件",
+          "excel_row": 11
+        }
+      }
+    },
+    {
+      "trace_id": "design-press-water-min",
+      "parent_id": "sheet-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "給水圧力0.3MPa以上で安定動作するようポンプ仕様を選定する。",
+      "trace_content": [
+        "給水圧力0.3MPa以上で安定動作するようポンプ仕様を選定する。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "設計検討表 圧力条件 給水圧力0.3MPa以上で安定動作するようポンプ仕様を選定する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "圧力条件",
+      "source_row": 12,
+      "source_path": "$._trace_records[10]",
+      "source_section_id": "sheet-press-single",
+      "source_section_title": "圧力条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 11,
+        "分類": "圧力",
+        "項目": "圧力条件",
+        "内容": "給水圧力0.3MPa以上で安定動作するようポンプ仕様を選定する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "圧力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "圧力条件",
+          "excel_row": 12
+        }
+      }
+    },
+    {
+      "trace_id": "design-press-water-max",
+      "parent_id": "sheet-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "給水圧力1.0MPa超過時に作動する減圧弁をユニット入口に設置する。",
+      "trace_content": [
+        "給水圧力1.0MPa超過時に作動する減圧弁をユニット入口に設置する。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "設計検討表 圧力条件 給水圧力1.0MPa超過時に作動する減圧弁をユニット入口に設置する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "圧力条件",
+      "source_row": 13,
+      "source_path": "$._trace_records[11]",
+      "source_section_id": "sheet-press-single",
+      "source_section_title": "圧力条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 12,
+        "分類": "圧力",
+        "項目": "圧力条件",
+        "内容": "給水圧力1.0MPa超過時に作動する減圧弁をユニット入口に設置する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "圧力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "圧力条件",
+          "excel_row": 13
+        }
+      }
+    },
+    {
+      "trace_id": "design-press-refrigerant-high",
+      "parent_id": "sheet-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "冷媒回路の設計圧力を4.5MPaとし、安全率を確保する。",
+      "trace_content": [
+        "冷媒回路の設計圧力を4.5MPaとし、安全率を確保する。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "設計検討表 圧力条件 冷媒回路の設計圧力を4.5MPaとし、安全率を確保する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "圧力条件",
+      "source_row": 14,
+      "source_path": "$._trace_records[12]",
+      "source_section_id": "sheet-press-single",
+      "source_section_title": "圧力条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 13,
+        "分類": "圧力",
+        "項目": "圧力条件",
+        "内容": "冷媒回路の設計圧力を4.5MPaとし、安全率を確保する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "圧力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "圧力条件",
+          "excel_row": 14
+        }
+      }
+    },
+    {
+      "trace_id": "design-press-test-hydro",
+      "parent_id": "sheet-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "配管耐圧試験は使用圧力の1.5倍(最大2.25MPa)で実施し、30分間保持する。",
+      "trace_content": [
+        "配管耐圧試験は使用圧力の1.5倍(最大2.25MPa)で実施し、30分間保持する。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "設計検討表 圧力条件 配管耐圧試験は使用圧力の1.5倍(最大2.25MPa)で実施し、30分間保持する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "圧力条件",
+      "source_row": 15,
+      "source_path": "$._trace_records[13]",
+      "source_section_id": "sheet-press-single",
+      "source_section_title": "圧力条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 14,
+        "分類": "圧力",
+        "項目": "圧力条件",
+        "内容": "配管耐圧試験は使用圧力の1.5倍(最大2.25MPa)で実施し、30分間保持する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "圧力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "圧力条件",
+          "excel_row": 15
+        }
+      }
+    },
+    {
+      "trace_id": "design-press-sensor",
+      "parent_id": "sheet-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "圧力センサに応答時間80msの高速品を採用する。",
+      "trace_content": [
+        "圧力センサに応答時間80msの高速品を採用する。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "設計検討表 圧力条件 圧力センサに応答時間80msの高速品を採用する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "圧力条件",
+      "source_row": 16,
+      "source_path": "$._trace_records[14]",
+      "source_section_id": "sheet-press-single",
+      "source_section_title": "圧力条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 15,
+        "分類": "圧力",
+        "項目": "圧力条件",
+        "内容": "圧力センサに応答時間80msの高速品を採用する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "圧力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "圧力条件",
+          "excel_row": 16
+        }
+      }
+    },
+    {
+      "trace_id": "design-press-relief-valve",
+      "parent_id": "sheet-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "冷媒回路出口に設定圧4.3MPaで開放する安全弁を追加する。",
+      "trace_content": [
+        "冷媒回路出口に設定圧4.3MPaで開放する安全弁を追加する。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "設計検討表 圧力条件 冷媒回路出口に設定圧4.3MPaで開放する安全弁を追加する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "圧力条件",
+      "source_row": 17,
+      "source_path": "$._trace_records[15]",
+      "source_section_id": "sheet-press-single",
+      "source_section_title": "圧力条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 16,
+        "分類": "圧力",
+        "項目": "圧力条件",
+        "内容": "冷媒回路出口に設定圧4.3MPaで開放する安全弁を追加する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "圧力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "圧力条件",
+          "excel_row": 17
+        }
+      }
+    },
+    {
+      "trace_id": "design-press-gauge-display",
+      "parent_id": "sheet-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "現地圧力計の表示を従来のアナログからデジタルへ変更する。",
+      "trace_content": [
+        "現地圧力計の表示を従来のアナログからデジタルへ変更する。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "設計検討表 圧力条件 現地圧力計の表示を従来のアナログからデジタルへ変更する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "圧力条件",
+      "source_row": 18,
+      "source_path": "$._trace_records[16]",
+      "source_section_id": "sheet-press-single",
+      "source_section_title": "圧力条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 17,
+        "分類": "圧力",
+        "項目": "圧力条件",
+        "内容": "現地圧力計の表示を従来のアナログからデジタルへ変更する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "圧力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "圧力条件",
+          "excel_row": 18
+        }
+      }
+    },
+    {
+      "trace_id": "design-press-fitting-torque",
+      "parent_id": "sheet-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "配管接続部の締付トルク管理値を見直す。",
+      "trace_content": [
+        "配管接続部の締付トルク管理値を見直す。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "設計検討表 圧力条件 配管接続部の締付トルク管理値を見直す。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "圧力条件",
+      "source_row": 19,
+      "source_path": "$._trace_records[17]",
+      "source_section_id": "sheet-press-single",
+      "source_section_title": "圧力条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 18,
+        "分類": "圧力",
+        "項目": "圧力条件",
+        "内容": "配管接続部の締付トルク管理値を見直す。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "圧力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "圧力条件",
+          "excel_row": 19
+        }
+      }
+    },
+    {
+      "trace_id": "design-press-pipe-material",
+      "parent_id": "sheet-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "配管材質をSUS304へ変更する。",
+      "trace_content": [
+        "配管材質をSUS304へ変更する。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "設計検討表 圧力条件 配管材質をSUS304へ変更する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "圧力条件",
+      "source_row": 20,
+      "source_path": "$._trace_records[18]",
+      "source_section_id": "sheet-press-single",
+      "source_section_title": "圧力条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 19,
+        "分類": "圧力",
+        "項目": "圧力条件",
+        "内容": "配管材質をSUS304へ変更する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "圧力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "圧力条件",
+          "excel_row": 20
+        }
+      }
+    },
+    {
+      "trace_id": "design-press-notag",
+      "parent_id": "sheet-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "圧力容器の刻印表示レイアウトを変更する。",
+      "trace_content": [
+        "圧力容器の刻印表示レイアウトを変更する。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "設計検討表 圧力条件 圧力容器の刻印表示レイアウトを変更する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "圧力条件",
+      "source_row": 21,
+      "source_path": "$._trace_records[19]",
+      "source_section_id": "sheet-press-single",
+      "source_section_title": "圧力条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 20,
+        "分類": "圧力",
+        "項目": "圧力条件",
+        "内容": "圧力容器の刻印表示レイアウトを変更する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "圧力条件",
+          "excel_row": 21
+        }
+      }
+    },
+    {
+      "trace_id": "design-power-voltage",
+      "parent_id": "sheet-power-spec",
+      "trace_title": "電源仕様",
+      "trace_text": "電源部を三相AC200V/220V、50Hz/60Hz両対応の設計とする。",
+      "trace_content": [
+        "電源部を三相AC200V/220V、50Hz/60Hz両対応の設計とする。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "設計検討表 電源仕様 電源部を三相AC200V/220V、50Hz/60Hz両対応の設計とする。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "電源仕様",
+      "source_row": 22,
+      "source_path": "$._trace_records[20]",
+      "source_section_id": "sheet-power-spec",
+      "source_section_title": "電源仕様",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 21,
+        "分類": "電源",
+        "項目": "電源仕様",
+        "内容": "電源部を三相AC200V/220V、50Hz/60Hz両対応の設計とする。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "電源"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "電源仕様",
+          "excel_row": 22
+        }
+      }
+    },
+    {
+      "trace_id": "design-power-inrush",
+      "parent_id": "sheet-power-spec",
+      "trace_title": "電源仕様",
+      "trace_text": "始動回路にソフトスタータを追加し、突入電流を定格の5倍以下に抑制する。",
+      "trace_content": [
+        "始動回路にソフトスタータを追加し、突入電流を定格の5倍以下に抑制する。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "設計検討表 電源仕様 始動回路にソフトスタータを追加し、突入電流を定格の5倍以下に抑制する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "電源仕様",
+      "source_row": 23,
+      "source_path": "$._trace_records[21]",
+      "source_section_id": "sheet-power-spec",
+      "source_section_title": "電源仕様",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 22,
+        "分類": "電源",
+        "項目": "電源仕様",
+        "内容": "始動回路にソフトスタータを追加し、突入電流を定格の5倍以下に抑制する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "電源"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "電源仕様",
+          "excel_row": 23
+        }
+      }
+    },
+    {
+      "trace_id": "design-power-standby",
+      "parent_id": "sheet-power-spec",
+      "trace_title": "電源仕様",
+      "trace_text": "待機時は制御基板を低消費電力モードへ移行させ、消費電力4.2Wを実測する。",
+      "trace_content": [
+        "待機時は制御基板を低消費電力モードへ移行させ、消費電力4.2Wを実測する。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "設計検討表 電源仕様 待機時は制御基板を低消費電力モードへ移行させ、消費電力4.2Wを実測する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "電源仕様",
+      "source_row": 24,
+      "source_path": "$._trace_records[22]",
+      "source_section_id": "sheet-power-spec",
+      "source_section_title": "電源仕様",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 23,
+        "分類": "電源",
+        "項目": "電源仕様",
+        "内容": "待機時は制御基板を低消費電力モードへ移行させ、消費電力4.2Wを実測する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "電源"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "電源仕様",
+          "excel_row": 24
+        }
+      }
+    },
+    {
+      "trace_id": "design-power-restart",
+      "parent_id": "sheet-power-spec",
+      "trace_title": "電源仕様",
+      "trace_text": "停電復帰検知後、自己診断を経て自動的に運転を再開するシーケンスを実装する。",
+      "trace_content": [
+        "停電復帰検知後、自己診断を経て自動的に運転を再開するシーケンスを実装する。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "設計検討表 電源仕様 停電復帰検知後、自己診断を経て自動的に運転を再開するシーケンスを実装する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "電源仕様",
+      "source_row": 25,
+      "source_path": "$._trace_records[23]",
+      "source_section_id": "sheet-power-spec",
+      "source_section_title": "電源仕様",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 24,
+        "分類": "電源",
+        "項目": "電源仕様",
+        "内容": "停電復帰検知後、自己診断を経て自動的に運転を再開するシーケンスを実装する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "電源"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "電源仕様",
+          "excel_row": 25
+        }
+      }
+    },
+    {
+      "trace_id": "design-power-earth",
+      "parent_id": "sheet-power-protect",
+      "trace_title": "電源保護",
+      "trace_text": "筐体にD種接地端子を設け、接地線は最短経路で配線する。",
+      "trace_content": [
+        "筐体にD種接地端子を設け、接地線は最短経路で配線する。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "設計検討表 電源保護 筐体にD種接地端子を設け、接地線は最短経路で配線する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "電源保護",
+      "source_row": 26,
+      "source_path": "$._trace_records[24]",
+      "source_section_id": "sheet-power-protect",
+      "source_section_title": "電源保護",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 25,
+        "分類": "電源",
+        "項目": "電源保護",
+        "内容": "筐体にD種接地端子を設け、接地線は最短経路で配線する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "電源"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "電源保護",
+          "excel_row": 26
+        }
+      }
+    },
+    {
+      "trace_id": "design-power-leak-breaker",
+      "parent_id": "sheet-power-protect",
+      "trace_title": "電源保護",
+      "trace_text": "漏電遮断器(定格感度電流30mA、動作時間0.1秒)を電源入力部に実装する。",
+      "trace_content": [
+        "漏電遮断器(定格感度電流30mA、動作時間0.1秒)を電源入力部に実装する。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "設計検討表 電源保護 漏電遮断器(定格感度電流30mA、動作時間0.1秒)を電源入力部に実装する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "電源保護",
+      "source_row": 27,
+      "source_path": "$._trace_records[25]",
+      "source_section_id": "sheet-power-protect",
+      "source_section_title": "電源保護",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 26,
+        "分類": "電源",
+        "項目": "電源保護",
+        "内容": "漏電遮断器(定格感度電流30mA、動作時間0.1秒)を電源入力部に実装する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "電源"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "電源保護",
+          "excel_row": 27
+        }
+      }
+    },
+    {
+      "trace_id": "design-power-notag",
+      "parent_id": "sheet-power-protect",
+      "trace_title": "電源保護",
+      "trace_text": "電源コードをJIS規格品(長さ2.5m)へ変更する。",
+      "trace_content": [
+        "電源コードをJIS規格品(長さ2.5m)へ変更する。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "設計検討表 電源保護 電源コードをJIS規格品(長さ2.5m)へ変更する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "電源保護",
+      "source_row": 28,
+      "source_path": "$._trace_records[26]",
+      "source_section_id": "sheet-power-protect",
+      "source_section_title": "電源保護",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 27,
+        "分類": "電源",
+        "項目": "電源保護",
+        "内容": "電源コードをJIS規格品(長さ2.5m)へ変更する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "電源保護",
+          "excel_row": 28
+        }
+      }
+    },
+    {
+      "trace_id": "design-power-cable-length",
+      "parent_id": "sheet-power-spec",
+      "trace_title": "電源仕様",
+      "trace_text": "電源コードの結束方法を見直し、施工性を改善する。",
+      "trace_content": [
+        "電源コードの結束方法を見直し、施工性を改善する。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "設計検討表 電源仕様 電源コードの結束方法を見直し、施工性を改善する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "電源仕様",
+      "source_row": 29,
+      "source_path": "$._trace_records[27]",
+      "source_section_id": "sheet-power-spec",
+      "source_section_title": "電源仕様",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 28,
+        "分類": "電源",
+        "項目": "電源仕様",
+        "内容": "電源コードの結束方法を見直し、施工性を改善する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "電源"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "電源仕様",
+          "excel_row": 29
+        }
+      }
+    },
+    {
+      "trace_id": "design-power-connector-type",
+      "parent_id": "sheet-power-protect",
+      "trace_title": "電源保護",
+      "trace_text": "電源コネクタ形状をIEC規格準拠品に統一する。",
+      "trace_content": [
+        "電源コネクタ形状をIEC規格準拠品に統一する。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "設計検討表 電源保護 電源コネクタ形状をIEC規格準拠品に統一する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "電源保護",
+      "source_row": 30,
+      "source_path": "$._trace_records[28]",
+      "source_section_id": "sheet-power-protect",
+      "source_section_title": "電源保護",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 29,
+        "分類": "電源",
+        "項目": "電源保護",
+        "内容": "電源コネクタ形状をIEC規格準拠品に統一する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "電源"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "電源保護",
+          "excel_row": 30
+        }
+      }
+    },
+    {
+      "trace_id": "design-power-fuse-rating",
+      "parent_id": "sheet-power-protect",
+      "trace_title": "電源保護",
+      "trace_text": "内部ヒューズの定格をB種からC種へ変更する。",
+      "trace_content": [
+        "内部ヒューズの定格をB種からC種へ変更する。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "設計検討表 電源保護 内部ヒューズの定格をB種からC種へ変更する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "電源保護",
+      "source_row": 31,
+      "source_path": "$._trace_records[29]",
+      "source_section_id": "sheet-power-protect",
+      "source_section_title": "電源保護",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 30,
+        "分類": "電源",
+        "項目": "電源保護",
+        "内容": "内部ヒューズの定格をB種からC種へ変更する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "電源"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "電源保護",
+          "excel_row": 31
+        }
+      }
+    },
+    {
+      "trace_id": "design-cooling-capacity",
+      "parent_id": "sheet-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "冷房能力12.5kWを確保する熱交換器・圧縮機構成とする。",
+      "trace_content": [
+        "冷房能力12.5kWを確保する熱交換器・圧縮機構成とする。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "設計検討表 冷房性能 冷房能力12.5kWを確保する熱交換器・圧縮機構成とする。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "冷房性能",
+      "source_row": 32,
+      "source_path": "$._trace_records[30]",
+      "source_section_id": "sheet-cooling-single",
+      "source_section_title": "冷房性能",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 31,
+        "分類": "冷房能力",
+        "項目": "冷房性能",
+        "内容": "冷房能力12.5kWを確保する熱交換器・圧縮機構成とする。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "冷房能力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "冷房性能",
+          "excel_row": 32
+        }
+      }
+    },
+    {
+      "trace_id": "design-cooling-derate",
+      "parent_id": "sheet-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "周囲温度40℃条件での能力低下を熱交換器大型化により7%に抑制する。",
+      "trace_content": [
+        "周囲温度40℃条件での能力低下を熱交換器大型化により7%に抑制する。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "設計検討表 冷房性能 周囲温度40℃条件での能力低下を熱交換器大型化により7%に抑制する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "冷房性能",
+      "source_row": 33,
+      "source_path": "$._trace_records[31]",
+      "source_section_id": "sheet-cooling-single",
+      "source_section_title": "冷房性能",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 32,
+        "分類": "冷房能力",
+        "項目": "冷房性能",
+        "内容": "周囲温度40℃条件での能力低下を熱交換器大型化により7%に抑制する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "冷房能力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "冷房性能",
+          "excel_row": 33
+        }
+      }
+    },
+    {
+      "trace_id": "design-cooling-eer",
+      "parent_id": "sheet-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "圧縮機効率改善によりEER3.4を達成する設計とする。",
+      "trace_content": [
+        "圧縮機効率改善によりEER3.4を達成する設計とする。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "設計検討表 冷房性能 圧縮機効率改善によりEER3.4を達成する設計とする。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "冷房性能",
+      "source_row": 34,
+      "source_path": "$._trace_records[32]",
+      "source_section_id": "sheet-cooling-single",
+      "source_section_title": "冷房性能",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 33,
+        "分類": "冷房能力",
+        "項目": "冷房性能",
+        "内容": "圧縮機効率改善によりEER3.4を達成する設計とする。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "冷房能力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "冷房性能",
+          "excel_row": 34
+        }
+      }
+    },
+    {
+      "trace_id": "design-cooling-startup-time",
+      "parent_id": "sheet-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "起動シーケンスを最適化し、定格到達時間8分を実測する。",
+      "trace_content": [
+        "起動シーケンスを最適化し、定格到達時間8分を実測する。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "設計検討表 冷房性能 起動シーケンスを最適化し、定格到達時間8分を実測する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "冷房性能",
+      "source_row": 35,
+      "source_path": "$._trace_records[33]",
+      "source_section_id": "sheet-cooling-single",
+      "source_section_title": "冷房性能",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 34,
+        "分類": "冷房能力",
+        "項目": "冷房性能",
+        "内容": "起動シーケンスを最適化し、定格到達時間8分を実測する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "冷房能力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "冷房性能",
+          "excel_row": 35
+        }
+      }
+    },
+    {
+      "trace_id": "design-cooling-airflow",
+      "parent_id": "sheet-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "吹出風量を仕様値±8%以内に収める送風機設計とする。",
+      "trace_content": [
+        "吹出風量を仕様値±8%以内に収める送風機設計とする。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "設計検討表 冷房性能 吹出風量を仕様値±8%以内に収める送風機設計とする。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "冷房性能",
+      "source_row": 36,
+      "source_path": "$._trace_records[34]",
+      "source_section_id": "sheet-cooling-single",
+      "source_section_title": "冷房性能",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 35,
+        "分類": "冷房能力",
+        "項目": "冷房性能",
+        "内容": "吹出風量を仕様値±8%以内に収める送風機設計とする。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "冷房性能",
+          "excel_row": 36
+        }
+      }
+    },
+    {
+      "trace_id": "design-cooling-restart",
+      "parent_id": "sheet-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "サーモオフ復帰後の再起動待機時間を3分に設定する制御とする。",
+      "trace_content": [
+        "サーモオフ復帰後の再起動待機時間を3分に設定する制御とする。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "設計検討表 冷房性能 サーモオフ復帰後の再起動待機時間を3分に設定する制御とする。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "冷房性能",
+      "source_row": 37,
+      "source_path": "$._trace_records[35]",
+      "source_section_id": "sheet-cooling-single",
+      "source_section_title": "冷房性能",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 36,
+        "分類": "冷房能力",
+        "項目": "冷房性能",
+        "内容": "サーモオフ復帰後の再起動待機時間を3分に設定する制御とする。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "冷房能力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "冷房性能",
+          "excel_row": 37
+        }
+      }
+    },
+    {
+      "trace_id": "design-cooling-filter-clog",
+      "parent_id": "sheet-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "フィルタ目詰まりによる能力低下を検知する機能を追加する。",
+      "trace_content": [
+        "フィルタ目詰まりによる能力低下を検知する機能を追加する。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "設計検討表 冷房性能 フィルタ目詰まりによる能力低下を検知する機能を追加する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "冷房性能",
+      "source_row": 38,
+      "source_path": "$._trace_records[36]",
+      "source_section_id": "sheet-cooling-single",
+      "source_section_title": "冷房性能",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 37,
+        "分類": "冷房能力",
+        "項目": "冷房性能",
+        "内容": "フィルタ目詰まりによる能力低下を検知する機能を追加する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "冷房能力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "冷房性能",
+          "excel_row": 38
+        }
+      }
+    },
+    {
+      "trace_id": "design-cooling-fan-speed",
+      "parent_id": "sheet-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "室外機ファン回転数の制御ロジックを変更する。",
+      "trace_content": [
+        "室外機ファン回転数の制御ロジックを変更する。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "設計検討表 冷房性能 室外機ファン回転数の制御ロジックを変更する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "冷房性能",
+      "source_row": 39,
+      "source_path": "$._trace_records[37]",
+      "source_section_id": "sheet-cooling-single",
+      "source_section_title": "冷房性能",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 38,
+        "分類": "冷房能力",
+        "項目": "冷房性能",
+        "内容": "室外機ファン回転数の制御ロジックを変更する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "冷房能力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "冷房性能",
+          "excel_row": 39
+        }
+      }
+    },
+    {
+      "trace_id": "design-cooling-defrost",
+      "parent_id": "sheet-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "着霜時の能力低下を制御ロジックで補正する。",
+      "trace_content": [
+        "着霜時の能力低下を制御ロジックで補正する。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "設計検討表 冷房性能 着霜時の能力低下を制御ロジックで補正する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "冷房性能",
+      "source_row": 40,
+      "source_path": "$._trace_records[38]",
+      "source_section_id": "sheet-cooling-single",
+      "source_section_title": "冷房性能",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 39,
+        "分類": "冷房能力",
+        "項目": "冷房性能",
+        "内容": "着霜時の能力低下を制御ロジックで補正する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "冷房能力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "冷房性能",
+          "excel_row": 40
+        }
+      }
+    },
+    {
+      "trace_id": "design-cooling-oil-return",
+      "parent_id": "sheet-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "冷媒油戻り制御ロジックを改善する。",
+      "trace_content": [
+        "冷媒油戻り制御ロジックを改善する。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "設計検討表 冷房性能 冷媒油戻り制御ロジックを改善する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "冷房性能",
+      "source_row": 41,
+      "source_path": "$._trace_records[39]",
+      "source_section_id": "sheet-cooling-single",
+      "source_section_title": "冷房性能",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 40,
+        "分類": "冷房能力",
+        "項目": "冷房性能",
+        "内容": "冷媒油戻り制御ロジックを改善する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "冷房能力"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "冷房性能",
+          "excel_row": 41
+        }
+      }
+    },
+    {
+      "trace_id": "design-acoustic-overall",
+      "parent_id": "sheet-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "遮音材の追加により定格運転時騒音48dB(A)を実測する。",
+      "trace_content": [
+        "遮音材の追加により定格運転時騒音48dB(A)を実測する。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "設計検討表 騒音条件 遮音材の追加により定格運転時騒音48dB(A)を実測する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "騒音条件",
+      "source_row": 42,
+      "source_path": "$._trace_records[40]",
+      "source_section_id": "sheet-acoustic-single",
+      "source_section_title": "騒音条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 41,
+        "分類": "騒音",
+        "項目": "騒音条件",
+        "内容": "遮音材の追加により定格運転時騒音48dB(A)を実測する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "騒音"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "騒音条件",
+          "excel_row": 42
+        }
+      }
+    },
+    {
+      "trace_id": "design-acoustic-bearing",
+      "parent_id": "sheet-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "軸受部にセラミックベアリングを採用し、異音発生を防止する。",
+      "trace_content": [
+        "軸受部にセラミックベアリングを採用し、異音発生を防止する。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "設計検討表 騒音条件 軸受部にセラミックベアリングを採用し、異音発生を防止する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "騒音条件",
+      "source_row": 43,
+      "source_path": "$._trace_records[41]",
+      "source_section_id": "sheet-acoustic-single",
+      "source_section_title": "騒音条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 42,
+        "分類": "騒音",
+        "項目": "騒音条件",
+        "内容": "軸受部にセラミックベアリングを採用し、異音発生を防止する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "騒音"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "騒音条件",
+          "excel_row": 43
+        }
+      }
+    },
+    {
+      "trace_id": "design-acoustic-fanmotor",
+      "parent_id": "sheet-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "ファンモーターをDCブラシレス化し、異音発生を防止する。",
+      "trace_content": [
+        "ファンモーターをDCブラシレス化し、異音発生を防止する。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "設計検討表 騒音条件 ファンモーターをDCブラシレス化し、異音発生を防止する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "騒音条件",
+      "source_row": 44,
+      "source_path": "$._trace_records[42]",
+      "source_section_id": "sheet-acoustic-single",
+      "source_section_title": "騒音条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 43,
+        "分類": "騒音",
+        "項目": "騒音条件",
+        "内容": "ファンモーターをDCブラシレス化し、異音発生を防止する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "騒音"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "騒音条件",
+          "excel_row": 44
+        }
+      }
+    },
+    {
+      "trace_id": "design-acoustic-lowspeed",
+      "parent_id": "sheet-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "低速運転モードでの騒音を37dB(A)に低減する制御を追加する。",
+      "trace_content": [
+        "低速運転モードでの騒音を37dB(A)に低減する制御を追加する。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "設計検討表 騒音条件 低速運転モードでの騒音を37dB(A)に低減する制御を追加する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "騒音条件",
+      "source_row": 45,
+      "source_path": "$._trace_records[43]",
+      "source_section_id": "sheet-acoustic-single",
+      "source_section_title": "騒音条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 44,
+        "分類": "騒音",
+        "項目": "騒音条件",
+        "内容": "低速運転モードでの騒音を37dB(A)に低減する制御を追加する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "騒音"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "騒音条件",
+          "excel_row": 45
+        }
+      }
+    },
+    {
+      "trace_id": "design-acoustic-notag",
+      "parent_id": "sheet-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "夜間静音モードでファン回転数を20%低減する制御を追加する。",
+      "trace_content": [
+        "夜間静音モードでファン回転数を20%低減する制御を追加する。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "設計検討表 騒音条件 夜間静音モードでファン回転数を20%低減する制御を追加する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "騒音条件",
+      "source_row": 46,
+      "source_path": "$._trace_records[44]",
+      "source_section_id": "sheet-acoustic-single",
+      "source_section_title": "騒音条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 45,
+        "分類": "騒音",
+        "項目": "騒音条件",
+        "内容": "夜間静音モードでファン回転数を20%低減する制御を追加する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "騒音条件",
+          "excel_row": 46
+        }
+      }
+    },
+    {
+      "trace_id": "design-acoustic-vibration-mount",
+      "parent_id": "sheet-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "防振ゴムマウントを追加し、架台への振動伝達を抑制する。",
+      "trace_content": [
+        "防振ゴムマウントを追加し、架台への振動伝達を抑制する。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "設計検討表 騒音条件 防振ゴムマウントを追加し、架台への振動伝達を抑制する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "騒音条件",
+      "source_row": 47,
+      "source_path": "$._trace_records[45]",
+      "source_section_id": "sheet-acoustic-single",
+      "source_section_title": "騒音条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 46,
+        "分類": "騒音",
+        "項目": "騒音条件",
+        "内容": "防振ゴムマウントを追加し、架台への振動伝達を抑制する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "騒音"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "騒音条件",
+          "excel_row": 47
+        }
+      }
+    },
+    {
+      "trace_id": "design-acoustic-enclosure",
+      "parent_id": "sheet-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "防音カバーの形状を最適化する。",
+      "trace_content": [
+        "防音カバーの形状を最適化する。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "設計検討表 騒音条件 防音カバーの形状を最適化する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "騒音条件",
+      "source_row": 48,
+      "source_path": "$._trace_records[46]",
+      "source_section_id": "sheet-acoustic-single",
+      "source_section_title": "騒音条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 47,
+        "分類": "騒音",
+        "項目": "騒音条件",
+        "内容": "防音カバーの形状を最適化する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "騒音"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "騒音条件",
+          "excel_row": 48
+        }
+      }
+    },
+    {
+      "trace_id": "design-acoustic-motor-brand",
+      "parent_id": "sheet-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "ファンモーターのメーカーを変更する。",
+      "trace_content": [
+        "ファンモーターのメーカーを変更する。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "設計検討表 騒音条件 ファンモーターのメーカーを変更する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "騒音条件",
+      "source_row": 49,
+      "source_path": "$._trace_records[47]",
+      "source_section_id": "sheet-acoustic-single",
+      "source_section_title": "騒音条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 48,
+        "分類": "騒音",
+        "項目": "騒音条件",
+        "内容": "ファンモーターのメーカーを変更する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "騒音"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "騒音条件",
+          "excel_row": 49
+        }
+      }
+    },
+    {
+      "trace_id": "design-acoustic-test-method",
+      "parent_id": "sheet-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "騒音測定方法をJIS B 8616準拠に統一する。",
+      "trace_content": [
+        "騒音測定方法をJIS B 8616準拠に統一する。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "設計検討表 騒音条件 騒音測定方法をJIS B 8616準拠に統一する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "騒音条件",
+      "source_row": 50,
+      "source_path": "$._trace_records[48]",
+      "source_section_id": "sheet-acoustic-single",
+      "source_section_title": "騒音条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 49,
+        "分類": "騒音",
+        "項目": "騒音条件",
+        "内容": "騒音測定方法をJIS B 8616準拠に統一する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "騒音"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "騒音条件",
+          "excel_row": 50
+        }
+      }
+    },
+    {
+      "trace_id": "design-acoustic-panel-thickness",
+      "parent_id": "sheet-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "外装パネル厚みを1.2mmへ変更する。",
+      "trace_content": [
+        "外装パネル厚みを1.2mmへ変更する。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "設計検討表 騒音条件 外装パネル厚みを1.2mmへ変更する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "騒音条件",
+      "source_row": 51,
+      "source_path": "$._trace_records[49]",
+      "source_section_id": "sheet-acoustic-single",
+      "source_section_title": "騒音条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 50,
+        "分類": "騒音",
+        "項目": "騒音条件",
+        "内容": "外装パネル厚みを1.2mmへ変更する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "騒音"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "騒音条件",
+          "excel_row": 51
+        }
+      }
+    },
+    {
+      "trace_id": "design-mass-total",
+      "parent_id": "sheet-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "軽量化設計により本体質量115kgを実現する。",
+      "trace_content": [
+        "軽量化設計により本体質量115kgを実現する。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "設計検討表 質量条件 軽量化設計により本体質量115kgを実現する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "質量条件",
+      "source_row": 52,
+      "source_path": "$._trace_records[50]",
+      "source_section_id": "sheet-mass-single",
+      "source_section_title": "質量条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 51,
+        "分類": "質量",
+        "項目": "質量条件",
+        "内容": "軽量化設計により本体質量115kgを実現する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "質量"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "質量条件",
+          "excel_row": 52
+        }
+      }
+    },
+    {
+      "trace_id": "design-mass-notag",
+      "parent_id": "sheet-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "梱包時総質量135kgを実測する。",
+      "trace_content": [
+        "梱包時総質量135kgを実測する。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "設計検討表 質量条件 梱包時総質量135kgを実測する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "質量条件",
+      "source_row": 53,
+      "source_path": "$._trace_records[51]",
+      "source_section_id": "sheet-mass-single",
+      "source_section_title": "質量条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 52,
+        "分類": "質量",
+        "項目": "質量条件",
+        "内容": "梱包時総質量135kgを実測する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "質量条件",
+          "excel_row": 53
+        }
+      }
+    },
+    {
+      "trace_id": "design-mass-component-split",
+      "parent_id": "sheet-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "本体を室内機・室外機の2分割搬入構造とする。",
+      "trace_content": [
+        "本体を室内機・室外機の2分割搬入構造とする。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "設計検討表 質量条件 本体を室内機・室外機の2分割搬入構造とする。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "質量条件",
+      "source_row": 54,
+      "source_path": "$._trace_records[52]",
+      "source_section_id": "sheet-mass-single",
+      "source_section_title": "質量条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 53,
+        "分類": "質量",
+        "項目": "質量条件",
+        "内容": "本体を室内機・室外機の2分割搬入構造とする。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "質量"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "質量条件",
+          "excel_row": 54
+        }
+      }
+    },
+    {
+      "trace_id": "design-mass-frame-material",
+      "parent_id": "sheet-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "主要フレーム材質をスチールからアルミ合金へ変更し軽量化する。",
+      "trace_content": [
+        "主要フレーム材質をスチールからアルミ合金へ変更し軽量化する。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "設計検討表 質量条件 主要フレーム材質をスチールからアルミ合金へ変更し軽量化する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "質量条件",
+      "source_row": 55,
+      "source_path": "$._trace_records[53]",
+      "source_section_id": "sheet-mass-single",
+      "source_section_title": "質量条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 54,
+        "分類": "質量",
+        "項目": "質量条件",
+        "内容": "主要フレーム材質をスチールからアルミ合金へ変更し軽量化する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "質量"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "質量条件",
+          "excel_row": 55
+        }
+      }
+    },
+    {
+      "trace_id": "design-mass-label",
+      "parent_id": "sheet-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "銘板表示項目に製品質量(kg)を追加する。",
+      "trace_content": [
+        "銘板表示項目に製品質量(kg)を追加する。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "設計検討表 質量条件 銘板表示項目に製品質量(kg)を追加する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "質量条件",
+      "source_row": 56,
+      "source_path": "$._trace_records[54]",
+      "source_section_id": "sheet-mass-single",
+      "source_section_title": "質量条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 55,
+        "分類": "質量",
+        "項目": "質量条件",
+        "内容": "銘板表示項目に製品質量(kg)を追加する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "質量"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "質量条件",
+          "excel_row": 56
+        }
+      }
+    },
+    {
+      "trace_id": "design-mass-packaging",
+      "parent_id": "sheet-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "梱包材をダンボールから発泡材へ変更する。",
+      "trace_content": [
+        "梱包材をダンボールから発泡材へ変更する。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "設計検討表 質量条件 梱包材をダンボールから発泡材へ変更する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "質量条件",
+      "source_row": 57,
+      "source_path": "$._trace_records[55]",
+      "source_section_id": "sheet-mass-single",
+      "source_section_title": "質量条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 56,
+        "分類": "質量",
+        "項目": "質量条件",
+        "内容": "梱包材をダンボールから発泡材へ変更する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "質量"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "質量条件",
+          "excel_row": 57
+        }
+      }
+    },
+    {
+      "trace_id": "design-mass-bracket",
+      "parent_id": "sheet-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "取付ブラケットの板厚を変更する。",
+      "trace_content": [
+        "取付ブラケットの板厚を変更する。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "設計検討表 質量条件 取付ブラケットの板厚を変更する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "質量条件",
+      "source_row": 58,
+      "source_path": "$._trace_records[56]",
+      "source_section_id": "sheet-mass-single",
+      "source_section_title": "質量条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 57,
+        "分類": "質量",
+        "項目": "質量条件",
+        "内容": "取付ブラケットの板厚を変更する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "質量"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "質量条件",
+          "excel_row": 58
+        }
+      }
+    },
+    {
+      "trace_id": "design-mass-caster",
+      "parent_id": "sheet-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "移動用キャスターを追加する。",
+      "trace_content": [
+        "移動用キャスターを追加する。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "設計検討表 質量条件 移動用キャスターを追加する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "質量条件",
+      "source_row": 59,
+      "source_path": "$._trace_records[57]",
+      "source_section_id": "sheet-mass-single",
+      "source_section_title": "質量条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 58,
+        "分類": "質量",
+        "項目": "質量条件",
+        "内容": "移動用キャスターを追加する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "質量"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "質量条件",
+          "excel_row": 59
+        }
+      }
+    },
+    {
+      "trace_id": "design-mass-balance",
+      "parent_id": "sheet-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "重心バランスを見直し転倒しにくい形状とする。",
+      "trace_content": [
+        "重心バランスを見直し転倒しにくい形状とする。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "設計検討表 質量条件 重心バランスを見直し転倒しにくい形状とする。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "質量条件",
+      "source_row": 60,
+      "source_path": "$._trace_records[58]",
+      "source_section_id": "sheet-mass-single",
+      "source_section_title": "質量条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 59,
+        "分類": "質量",
+        "項目": "質量条件",
+        "内容": "重心バランスを見直し転倒しにくい形状とする。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "質量"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "質量条件",
+          "excel_row": 60
+        }
+      }
+    },
+    {
+      "trace_id": "design-mass-spec-sheet",
+      "parent_id": "sheet-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "質量値の仕様書記載単位をkgからlbへ換算併記する。",
+      "trace_content": [
+        "質量値の仕様書記載単位をkgからlbへ換算併記する。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "設計検討表 質量条件 質量値の仕様書記載単位をkgからlbへ換算併記する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "質量条件",
+      "source_row": 61,
+      "source_path": "$._trace_records[59]",
+      "source_section_id": "sheet-mass-single",
+      "source_section_title": "質量条件",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 60,
+        "分類": "質量",
+        "項目": "質量条件",
+        "内容": "質量値の仕様書記載単位をkgからlbへ換算併記する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "質量"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "質量条件",
+          "excel_row": 61
+        }
+      }
+    },
+    {
+      "trace_id": "design-dims-envelope",
+      "parent_id": "sheet-dims-outer",
+      "trace_title": "外形寸法",
+      "trace_text": "外形寸法を幅780mm×奥行590mm×高さ1180mmに収める設計とする。",
+      "trace_content": [
+        "外形寸法を幅780mm×奥行590mm×高さ1180mmに収める設計とする。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "設計検討表 外形寸法 外形寸法を幅780mm×奥行590mm×高さ1180mmに収める設計とする。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "外形寸法",
+      "source_row": 62,
+      "source_path": "$._trace_records[60]",
+      "source_section_id": "sheet-dims-outer",
+      "source_section_title": "外形寸法",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 61,
+        "分類": "寸法",
+        "項目": "外形寸法",
+        "内容": "外形寸法を幅780mm×奥行590mm×高さ1180mmに収める設計とする。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "寸法"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "外形寸法",
+          "excel_row": 62
+        }
+      }
+    },
+    {
+      "trace_id": "design-dims-clearance",
+      "parent_id": "sheet-dims-outer",
+      "trace_title": "外形寸法",
+      "trace_text": "背面保守スペースを500mmに変更する。",
+      "trace_content": [
+        "背面保守スペースを500mmに変更する。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "設計検討表 外形寸法 背面保守スペースを500mmに変更する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "外形寸法",
+      "source_row": 63,
+      "source_path": "$._trace_records[61]",
+      "source_section_id": "sheet-dims-outer",
+      "source_section_title": "外形寸法",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 62,
+        "分類": "寸法",
+        "項目": "外形寸法",
+        "内容": "背面保守スペースを500mmに変更する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "寸法"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "外形寸法",
+          "excel_row": 63
+        }
+      }
+    },
+    {
+      "trace_id": "design-dims-panel-gap",
+      "parent_id": "sheet-dims-outer",
+      "trace_title": "外形寸法",
+      "trace_text": "外装パネルの合わせ目隙間を1mm以下に管理する。",
+      "trace_content": [
+        "外装パネルの合わせ目隙間を1mm以下に管理する。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "設計検討表 外形寸法 外装パネルの合わせ目隙間を1mm以下に管理する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "外形寸法",
+      "source_row": 64,
+      "source_path": "$._trace_records[62]",
+      "source_section_id": "sheet-dims-outer",
+      "source_section_title": "外形寸法",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 63,
+        "分類": "寸法",
+        "項目": "外形寸法",
+        "内容": "外装パネルの合わせ目隙間を1mm以下に管理する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "寸法"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "外形寸法",
+          "excel_row": 64
+        }
+      }
+    },
+    {
+      "trace_id": "design-dims-base-frame",
+      "parent_id": "sheet-dims-outer",
+      "trace_title": "外形寸法",
+      "trace_text": "基礎ボルト穴ピッチを変更する。",
+      "trace_content": [
+        "基礎ボルト穴ピッチを変更する。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "設計検討表 外形寸法 基礎ボルト穴ピッチを変更する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "外形寸法",
+      "source_row": 65,
+      "source_path": "$._trace_records[63]",
+      "source_section_id": "sheet-dims-outer",
+      "source_section_title": "外形寸法",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 64,
+        "分類": "寸法",
+        "項目": "外形寸法",
+        "内容": "基礎ボルト穴ピッチを変更する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "寸法"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "外形寸法",
+          "excel_row": 65
+        }
+      }
+    },
+    {
+      "trace_id": "design-dims-tolerance",
+      "parent_id": "sheet-dims-outer",
+      "trace_title": "外形寸法",
+      "trace_text": "外形寸法公差を±5mmから±3mmへ厳格化する。",
+      "trace_content": [
+        "外形寸法公差を±5mmから±3mmへ厳格化する。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "設計検討表 外形寸法 外形寸法公差を±5mmから±3mmへ厳格化する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "外形寸法",
+      "source_row": 66,
+      "source_path": "$._trace_records[64]",
+      "source_section_id": "sheet-dims-outer",
+      "source_section_title": "外形寸法",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 65,
+        "分類": "寸法",
+        "項目": "外形寸法",
+        "内容": "外形寸法公差を±5mmから±3mmへ厳格化する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "寸法"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "外形寸法",
+          "excel_row": 66
+        }
+      }
+    },
+    {
+      "trace_id": "design-dims-notag",
+      "parent_id": "sheet-dims-connect",
+      "trace_title": "接続部寸法",
+      "trace_text": "配管接続口を背面下部に配置する。",
+      "trace_content": [
+        "配管接続口を背面下部に配置する。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "設計検討表 接続部寸法 配管接続口を背面下部に配置する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "接続部寸法",
+      "source_row": 67,
+      "source_path": "$._trace_records[65]",
+      "source_section_id": "sheet-dims-connect",
+      "source_section_title": "接続部寸法",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 66,
+        "分類": "寸法",
+        "項目": "接続部寸法",
+        "内容": "配管接続口を背面下部に配置する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "接続部寸法",
+          "excel_row": 67
+        }
+      }
+    },
+    {
+      "trace_id": "design-dims-duct-connect",
+      "parent_id": "sheet-dims-connect",
+      "trace_title": "接続部寸法",
+      "trace_text": "ダクト接続口を角形ダクト規格(JIS準拠)寸法に合わせる。",
+      "trace_content": [
+        "ダクト接続口を角形ダクト規格(JIS準拠)寸法に合わせる。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "設計検討表 接続部寸法 ダクト接続口を角形ダクト規格(JIS準拠)寸法に合わせる。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "接続部寸法",
+      "source_row": 68,
+      "source_path": "$._trace_records[66]",
+      "source_section_id": "sheet-dims-connect",
+      "source_section_title": "接続部寸法",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 67,
+        "分類": "寸法",
+        "項目": "接続部寸法",
+        "内容": "ダクト接続口を角形ダクト規格(JIS準拠)寸法に合わせる。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "寸法"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "接続部寸法",
+          "excel_row": 68
+        }
+      }
+    },
+    {
+      "trace_id": "design-dims-door-clear",
+      "parent_id": "sheet-dims-connect",
+      "trace_title": "接続部寸法",
+      "trace_text": "点検扉開閉クリアランスを520mmとする配置設計とする。",
+      "trace_content": [
+        "点検扉開閉クリアランスを520mmとする配置設計とする。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "設計検討表 接続部寸法 点検扉開閉クリアランスを520mmとする配置設計とする。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "接続部寸法",
+      "source_row": 69,
+      "source_path": "$._trace_records[67]",
+      "source_section_id": "sheet-dims-connect",
+      "source_section_title": "接続部寸法",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 68,
+        "分類": "寸法",
+        "項目": "接続部寸法",
+        "内容": "点検扉開閉クリアランスを520mmとする配置設計とする。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "寸法"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "接続部寸法",
+          "excel_row": 69
+        }
+      }
+    },
+    {
+      "trace_id": "design-dims-cable-entry",
+      "parent_id": "sheet-dims-connect",
+      "trace_title": "接続部寸法",
+      "trace_text": "ケーブル引込口をφ34mmに拡大する。",
+      "trace_content": [
+        "ケーブル引込口をφ34mmに拡大する。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "設計検討表 接続部寸法 ケーブル引込口をφ34mmに拡大する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "接続部寸法",
+      "source_row": 70,
+      "source_path": "$._trace_records[68]",
+      "source_section_id": "sheet-dims-connect",
+      "source_section_title": "接続部寸法",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 69,
+        "分類": "寸法",
+        "項目": "接続部寸法",
+        "内容": "ケーブル引込口をφ34mmに拡大する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "寸法"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "接続部寸法",
+          "excel_row": 70
+        }
+      }
+    },
+    {
+      "trace_id": "design-dims-label-position",
+      "parent_id": "sheet-dims-connect",
+      "trace_title": "接続部寸法",
+      "trace_text": "銘板取付位置を側面上部に変更する。",
+      "trace_content": [
+        "銘板取付位置を側面上部に変更する。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "設計検討表 接続部寸法 銘板取付位置を側面上部に変更する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "接続部寸法",
+      "source_row": 71,
+      "source_path": "$._trace_records[69]",
+      "source_section_id": "sheet-dims-connect",
+      "source_section_title": "接続部寸法",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 70,
+        "分類": "寸法",
+        "項目": "接続部寸法",
+        "内容": "銘板取付位置を側面上部に変更する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "寸法"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "接続部寸法",
+          "excel_row": 71
+        }
+      }
+    },
+    {
+      "trace_id": "design-maint-interval",
+      "parent_id": "sheet-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "推奨定期メンテナンス間隔を6か月に設定し、取扱説明書へ明記する。",
+      "trace_content": [
+        "推奨定期メンテナンス間隔を6か月に設定し、取扱説明書へ明記する。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "設計検討表 保守性 推奨定期メンテナンス間隔を6か月に設定し、取扱説明書へ明記する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "保守性",
+      "source_row": 72,
+      "source_path": "$._trace_records[70]",
+      "source_section_id": "sheet-maint-single",
+      "source_section_title": "保守性",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 71,
+        "分類": "保守",
+        "項目": "保守性",
+        "内容": "推奨定期メンテナンス間隔を6か月に設定し、取扱説明書へ明記する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "保守"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "保守性",
+          "excel_row": 72
+        }
+      }
+    },
+    {
+      "trace_id": "design-maint-filter-access",
+      "parent_id": "sheet-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "フィルタを工具レスで着脱できるスライド構造とする。",
+      "trace_content": [
+        "フィルタを工具レスで着脱できるスライド構造とする。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "設計検討表 保守性 フィルタを工具レスで着脱できるスライド構造とする。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "保守性",
+      "source_row": 73,
+      "source_path": "$._trace_records[71]",
+      "source_section_id": "sheet-maint-single",
+      "source_section_title": "保守性",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 72,
+        "分類": "保守",
+        "項目": "保守性",
+        "内容": "フィルタを工具レスで着脱できるスライド構造とする。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "保守"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "保守性",
+          "excel_row": 73
+        }
+      }
+    },
+    {
+      "trace_id": "design-maint-tool-free",
+      "parent_id": "sheet-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "主要消耗部品(フィルタ・ベルト)をすべて工具レスで交換できる構造に統一する。",
+      "trace_content": [
+        "主要消耗部品(フィルタ・ベルト)をすべて工具レスで交換できる構造に統一する。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "設計検討表 保守性 主要消耗部品(フィルタ・ベルト)をすべて工具レスで交換できる構造に統一する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "保守性",
+      "source_row": 74,
+      "source_path": "$._trace_records[72]",
+      "source_section_id": "sheet-maint-single",
+      "source_section_title": "保守性",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 73,
+        "分類": "保守",
+        "項目": "保守性",
+        "内容": "主要消耗部品(フィルタ・ベルト)をすべて工具レスで交換できる構造に統一する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "保守"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "保守性",
+          "excel_row": 74
+        }
+      }
+    },
+    {
+      "trace_id": "design-maint-notag",
+      "parent_id": "sheet-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "点検口カバーにシリンダー錠を追加する。",
+      "trace_content": [
+        "点検口カバーにシリンダー錠を追加する。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "設計検討表 保守性 点検口カバーにシリンダー錠を追加する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "保守性",
+      "source_row": 75,
+      "source_path": "$._trace_records[73]",
+      "source_section_id": "sheet-maint-single",
+      "source_section_title": "保守性",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 74,
+        "分類": "保守",
+        "項目": "保守性",
+        "内容": "点検口カバーにシリンダー錠を追加する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "保守性",
+          "excel_row": 75
+        }
+      }
+    },
+    {
+      "trace_id": "design-maint-spare-parts",
+      "parent_id": "sheet-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "消耗部品を市販標準品(ベルト・フィルタ)へ統一する。",
+      "trace_content": [
+        "消耗部品を市販標準品(ベルト・フィルタ)へ統一する。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "設計検討表 保守性 消耗部品を市販標準品(ベルト・フィルタ)へ統一する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "保守性",
+      "source_row": 76,
+      "source_path": "$._trace_records[74]",
+      "source_section_id": "sheet-maint-single",
+      "source_section_title": "保守性",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 75,
+        "分類": "保守",
+        "項目": "保守性",
+        "内容": "消耗部品を市販標準品(ベルト・フィルタ)へ統一する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "保守"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "保守性",
+          "excel_row": 76
+        }
+      }
+    },
+    {
+      "trace_id": "design-maint-log",
+      "parent_id": "sheet-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "制御基板に保守履歴(実施日・作業内容)を記録するログ機能を追加する。",
+      "trace_content": [
+        "制御基板に保守履歴(実施日・作業内容)を記録するログ機能を追加する。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "設計検討表 保守性 制御基板に保守履歴(実施日・作業内容)を記録するログ機能を追加する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "保守性",
+      "source_row": 77,
+      "source_path": "$._trace_records[75]",
+      "source_section_id": "sheet-maint-single",
+      "source_section_title": "保守性",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 76,
+        "分類": "保守",
+        "項目": "保守性",
+        "内容": "制御基板に保守履歴(実施日・作業内容)を記録するログ機能を追加する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "保守"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "保守性",
+          "excel_row": 77
+        }
+      }
+    },
+    {
+      "trace_id": "design-maint-checklist",
+      "parent_id": "sheet-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "定期点検チェックリストの様式を改訂する。",
+      "trace_content": [
+        "定期点検チェックリストの様式を改訂する。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "設計検討表 保守性 定期点検チェックリストの様式を改訂する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "保守性",
+      "source_row": 78,
+      "source_path": "$._trace_records[76]",
+      "source_section_id": "sheet-maint-single",
+      "source_section_title": "保守性",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 77,
+        "分類": "保守",
+        "項目": "保守性",
+        "内容": "定期点検チェックリストの様式を改訂する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "保守"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "保守性",
+          "excel_row": 78
+        }
+      }
+    },
+    {
+      "trace_id": "design-maint-manual-format",
+      "parent_id": "sheet-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "取扱説明書のページ構成を刷新する。",
+      "trace_content": [
+        "取扱説明書のページ構成を刷新する。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "設計検討表 保守性 取扱説明書のページ構成を刷新する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "保守性",
+      "source_row": 79,
+      "source_path": "$._trace_records[77]",
+      "source_section_id": "sheet-maint-single",
+      "source_section_title": "保守性",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 78,
+        "分類": "保守",
+        "項目": "保守性",
+        "内容": "取扱説明書のページ構成を刷新する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "保守"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "保守性",
+          "excel_row": 79
+        }
+      }
+    },
+    {
+      "trace_id": "design-maint-remote-diag",
+      "parent_id": "sheet-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "リモート診断機能を追加する。",
+      "trace_content": [
+        "リモート診断機能を追加する。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "設計検討表 保守性 リモート診断機能を追加する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "保守性",
+      "source_row": 80,
+      "source_path": "$._trace_records[78]",
+      "source_section_id": "sheet-maint-single",
+      "source_section_title": "保守性",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 79,
+        "分類": "保守",
+        "項目": "保守性",
+        "内容": "リモート診断機能を追加する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "保守"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "保守性",
+          "excel_row": 80
+        }
+      }
+    },
+    {
+      "trace_id": "design-maint-color-code",
+      "parent_id": "sheet-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "保守用配線の色分けルールを統一する。",
+      "trace_content": [
+        "保守用配線の色分けルールを統一する。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "設計検討表 保守性 保守用配線の色分けルールを統一する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "保守性",
+      "source_row": 81,
+      "source_path": "$._trace_records[79]",
+      "source_section_id": "sheet-maint-single",
+      "source_section_title": "保守性",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 80,
+        "分類": "保守",
+        "項目": "保守性",
+        "内容": "保守用配線の色分けルールを統一する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "保守"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "保守性",
+          "excel_row": 81
+        }
+      }
+    },
+    {
+      "trace_id": "design-safety-enclosure-grounding",
+      "parent_id": "sheet-safety-shock",
+      "trace_title": "感電・火災対策",
+      "trace_text": "充電部を樹脂カバーで隔離し、金属筐体は全てD種接地する。",
+      "trace_content": [
+        "充電部を樹脂カバーで隔離し、金属筐体は全てD種接地する。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "設計検討表 感電・火災対策 充電部を樹脂カバーで隔離し、金属筐体は全てD種接地する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "感電・火災対策",
+      "source_row": 82,
+      "source_path": "$._trace_records[80]",
+      "source_section_id": "sheet-safety-shock",
+      "source_section_title": "感電・火災対策",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 81,
+        "分類": "安全",
+        "項目": "感電・火災対策",
+        "内容": "充電部を樹脂カバーで隔離し、金属筐体は全てD種接地する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "安全"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "感電・火災対策",
+          "excel_row": 82
+        }
+      }
+    },
+    {
+      "trace_id": "design-safety-leak-current-breaker",
+      "parent_id": "sheet-safety-shock",
+      "trace_title": "感電・火災対策",
+      "trace_text": "漏電時に遮断する専用ブレーカーを電源入力部に追加する。",
+      "trace_content": [
+        "漏電時に遮断する専用ブレーカーを電源入力部に追加する。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "設計検討表 感電・火災対策 漏電時に遮断する専用ブレーカーを電源入力部に追加する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "感電・火災対策",
+      "source_row": 83,
+      "source_path": "$._trace_records[81]",
+      "source_section_id": "sheet-safety-shock",
+      "source_section_title": "感電・火災対策",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 82,
+        "分類": "安全",
+        "項目": "感電・火災対策",
+        "内容": "漏電時に遮断する専用ブレーカーを電源入力部に追加する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "安全"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "感電・火災対策",
+          "excel_row": 83
+        }
+      }
+    },
+    {
+      "trace_id": "design-safety-material-v0",
+      "parent_id": "sheet-safety-shock",
+      "trace_title": "感電・火災対策",
+      "trace_text": "主要樹脂部品をUL94 V-0認証材料へ変更する。",
+      "trace_content": [
+        "主要樹脂部品をUL94 V-0認証材料へ変更する。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "設計検討表 感電・火災対策 主要樹脂部品をUL94 V-0認証材料へ変更する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "感電・火災対策",
+      "source_row": 84,
+      "source_path": "$._trace_records[82]",
+      "source_section_id": "sheet-safety-shock",
+      "source_section_title": "感電・火災対策",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 83,
+        "分類": "安全",
+        "項目": "感電・火災対策",
+        "内容": "主要樹脂部品をUL94 V-0認証材料へ変更する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "安全"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "感電・火災対策",
+          "excel_row": 84
+        }
+      }
+    },
+    {
+      "trace_id": "design-safety-label",
+      "parent_id": "sheet-safety-shock",
+      "trace_title": "感電・火災対策",
+      "trace_text": "警告ラベルのデザインを国際規格ピクトグラムへ統一する。",
+      "trace_content": [
+        "警告ラベルのデザインを国際規格ピクトグラムへ統一する。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "設計検討表 感電・火災対策 警告ラベルのデザインを国際規格ピクトグラムへ統一する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "感電・火災対策",
+      "source_row": 85,
+      "source_path": "$._trace_records[83]",
+      "source_section_id": "sheet-safety-shock",
+      "source_section_title": "感電・火災対策",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 84,
+        "分類": "安全",
+        "項目": "感電・火災対策",
+        "内容": "警告ラベルのデザインを国際規格ピクトグラムへ統一する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "安全"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "感電・火災対策",
+          "excel_row": 85
+        }
+      }
+    },
+    {
+      "trace_id": "design-safety-restart-lock",
+      "parent_id": "sheet-safety-shock",
+      "trace_title": "感電・火災対策",
+      "trace_text": "非常停止解除後は手動リセットボタンを押すまで再起動しない回路とする。",
+      "trace_content": [
+        "非常停止解除後は手動リセットボタンを押すまで再起動しない回路とする。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "設計検討表 感電・火災対策 非常停止解除後は手動リセットボタンを押すまで再起動しない回路とする。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "感電・火災対策",
+      "source_row": 86,
+      "source_path": "$._trace_records[84]",
+      "source_section_id": "sheet-safety-shock",
+      "source_section_title": "感電・火災対策",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 85,
+        "分類": "安全",
+        "項目": "感電・火災対策",
+        "内容": "非常停止解除後は手動リセットボタンを押すまで再起動しない回路とする。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "安全"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "感電・火災対策",
+          "excel_row": 86
+        }
+      }
+    },
+    {
+      "trace_id": "design-safety-edge-radius",
+      "parent_id": "sheet-safety-physical",
+      "trace_title": "物理安全",
+      "trace_text": "外装パネルの角部を全てR2以上の面取り形状とする。",
+      "trace_content": [
+        "外装パネルの角部を全てR2以上の面取り形状とする。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "設計検討表 物理安全 外装パネルの角部を全てR2以上の面取り形状とする。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "物理安全",
+      "source_row": 87,
+      "source_path": "$._trace_records[85]",
+      "source_section_id": "sheet-safety-physical",
+      "source_section_title": "物理安全",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 86,
+        "分類": "安全",
+        "項目": "物理安全",
+        "内容": "外装パネルの角部を全てR2以上の面取り形状とする。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "安全"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "物理安全",
+          "excel_row": 87
+        }
+      }
+    },
+    {
+      "trace_id": "design-safety-tipping-stability",
+      "parent_id": "sheet-safety-physical",
+      "trace_title": "物理安全",
+      "trace_text": "設置脚の配置を見直し転倒に対する安定性を向上する。",
+      "trace_content": [
+        "設置脚の配置を見直し転倒に対する安定性を向上する。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "設計検討表 物理安全 設置脚の配置を見直し転倒に対する安定性を向上する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "物理安全",
+      "source_row": 88,
+      "source_path": "$._trace_records[86]",
+      "source_section_id": "sheet-safety-physical",
+      "source_section_title": "物理安全",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 87,
+        "分類": "安全",
+        "項目": "物理安全",
+        "内容": "設置脚の配置を見直し転倒に対する安定性を向上する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "安全"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "物理安全",
+          "excel_row": 88
+        }
+      }
+    },
+    {
+      "trace_id": "design-safety-interlock",
+      "parent_id": "sheet-safety-physical",
+      "trace_title": "物理安全",
+      "trace_text": "扉開放時に運転を停止するインターロックスイッチを追加する。",
+      "trace_content": [
+        "扉開放時に運転を停止するインターロックスイッチを追加する。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "設計検討表 物理安全 扉開放時に運転を停止するインターロックスイッチを追加する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "物理安全",
+      "source_row": 89,
+      "source_path": "$._trace_records[87]",
+      "source_section_id": "sheet-safety-physical",
+      "source_section_title": "物理安全",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 88,
+        "分類": "安全",
+        "項目": "物理安全",
+        "内容": "扉開放時に運転を停止するインターロックスイッチを追加する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "安全"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "物理安全",
+          "excel_row": 89
+        }
+      }
+    },
+    {
+      "trace_id": "design-safety-color",
+      "parent_id": "sheet-safety-physical",
+      "trace_title": "物理安全",
+      "trace_text": "非常停止ボタンの色を規格色(赤/黄)に統一する。",
+      "trace_content": [
+        "非常停止ボタンの色を規格色(赤/黄)に統一する。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "設計検討表 物理安全 非常停止ボタンの色を規格色(赤/黄)に統一する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "物理安全",
+      "source_row": 90,
+      "source_path": "$._trace_records[88]",
+      "source_section_id": "sheet-safety-physical",
+      "source_section_title": "物理安全",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 89,
+        "分類": "安全",
+        "項目": "物理安全",
+        "内容": "非常停止ボタンの色を規格色(赤/黄)に統一する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "安全"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "物理安全",
+          "excel_row": 90
+        }
+      }
+    },
+    {
+      "trace_id": "design-safety-cover-material",
+      "parent_id": "sheet-safety-shock",
+      "trace_title": "感電・火災対策",
+      "trace_text": "充電部カバーの材質を金属から樹脂へ変更する。",
+      "trace_content": [
+        "充電部カバーの材質を金属から樹脂へ変更する。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "設計検討表 感電・火災対策 充電部カバーの材質を金属から樹脂へ変更する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "感電・火災対策",
+      "source_row": 91,
+      "source_path": "$._trace_records[89]",
+      "source_section_id": "sheet-safety-shock",
+      "source_section_title": "感電・火災対策",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 90,
+        "分類": "安全",
+        "項目": "感電・火災対策",
+        "内容": "充電部カバーの材質を金属から樹脂へ変更する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "安全"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "感電・火災対策",
+          "excel_row": 91
+        }
+      }
+    },
+    {
+      "trace_id": "design-test-final-inspection-procedure",
+      "parent_id": "sheet-test-shipping",
+      "trace_title": "出荷検査",
+      "trace_text": "出荷前全数検査手順に絶縁抵抗測定と冷媒回路気密試験を組み込む。",
+      "trace_content": [
+        "出荷前全数検査手順に絶縁抵抗測定と冷媒回路気密試験を組み込む。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "設計検討表 出荷検査 出荷前全数検査手順に絶縁抵抗測定と冷媒回路気密試験を組み込む。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "出荷検査",
+      "source_row": 92,
+      "source_path": "$._trace_records[90]",
+      "source_section_id": "sheet-test-shipping",
+      "source_section_title": "出荷検査",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 91,
+        "分類": "試験",
+        "項目": "出荷検査",
+        "内容": "出荷前全数検査手順に絶縁抵抗測定と冷媒回路気密試験を組み込む。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "試験"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "出荷検査",
+          "excel_row": 92
+        }
+      }
+    },
+    {
+      "trace_id": "design-test-notag",
+      "parent_id": "sheet-test-shipping",
+      "trace_title": "出荷検査",
+      "trace_text": "出荷時に試験成績書PDFを同梱する。",
+      "trace_content": [
+        "出荷時に試験成績書PDFを同梱する。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "設計検討表 出荷検査 出荷時に試験成績書PDFを同梱する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "出荷検査",
+      "source_row": 93,
+      "source_path": "$._trace_records[91]",
+      "source_section_id": "sheet-test-shipping",
+      "source_section_title": "出荷検査",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 92,
+        "分類": "試験",
+        "項目": "出荷検査",
+        "内容": "出荷時に試験成績書PDFを同梱する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "出荷検査",
+          "excel_row": 93
+        }
+      }
+    },
+    {
+      "trace_id": "design-test-vibration",
+      "parent_id": "sheet-test-durability",
+      "trace_title": "環境・耐久試験",
+      "trace_text": "JIS Z 0232準拠の振動試験を量産初号機で実施する。",
+      "trace_content": [
+        "JIS Z 0232準拠の振動試験を量産初号機で実施する。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "設計検討表 環境・耐久試験 JIS Z 0232準拠の振動試験を量産初号機で実施する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "環境・耐久試験",
+      "source_row": 94,
+      "source_path": "$._trace_records[92]",
+      "source_section_id": "sheet-test-durability",
+      "source_section_title": "環境・耐久試験",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 93,
+        "分類": "試験",
+        "項目": "環境・耐久試験",
+        "内容": "JIS Z 0232準拠の振動試験を量産初号機で実施する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "試験"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "環境・耐久試験",
+          "excel_row": 94
+        }
+      }
+    },
+    {
+      "trace_id": "design-test-emc",
+      "parent_id": "sheet-test-durability",
+      "trace_title": "環境・耐久試験",
+      "trace_text": "EMC試験(CISPR規格準拠)を型式ごとに実施する。",
+      "trace_content": [
+        "EMC試験(CISPR規格準拠)を型式ごとに実施する。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "設計検討表 環境・耐久試験 EMC試験(CISPR規格準拠)を型式ごとに実施する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "環境・耐久試験",
+      "source_row": 95,
+      "source_path": "$._trace_records[93]",
+      "source_section_id": "sheet-test-durability",
+      "source_section_title": "環境・耐久試験",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 94,
+        "分類": "試験",
+        "項目": "環境・耐久試験",
+        "内容": "EMC試験(CISPR規格準拠)を型式ごとに実施する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "試験"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "環境・耐久試験",
+          "excel_row": 95
+        }
+      }
+    },
+    {
+      "trace_id": "design-test-durability",
+      "parent_id": "sheet-test-durability",
+      "trace_title": "環境・耐久試験",
+      "trace_text": "圧縮機の加速寿命試験により10年相当の耐久性を確認する。",
+      "trace_content": [
+        "圧縮機の加速寿命試験により10年相当の耐久性を確認する。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "設計検討表 環境・耐久試験 圧縮機の加速寿命試験により10年相当の耐久性を確認する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "環境・耐久試験",
+      "source_row": 96,
+      "source_path": "$._trace_records[94]",
+      "source_section_id": "sheet-test-durability",
+      "source_section_title": "環境・耐久試験",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 95,
+        "分類": "試験",
+        "項目": "環境・耐久試験",
+        "内容": "圧縮機の加速寿命試験により10年相当の耐久性を確認する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "試験"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "環境・耐久試験",
+          "excel_row": 96
+        }
+      }
+    },
+    {
+      "trace_id": "design-test-report-template",
+      "parent_id": "sheet-test-shipping",
+      "trace_title": "出荷検査",
+      "trace_text": "試験成績書のフォーマットをデジタル化する。",
+      "trace_content": [
+        "試験成績書のフォーマットをデジタル化する。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "設計検討表 出荷検査 試験成績書のフォーマットをデジタル化する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "出荷検査",
+      "source_row": 97,
+      "source_path": "$._trace_records[95]",
+      "source_section_id": "sheet-test-shipping",
+      "source_section_title": "出荷検査",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 96,
+        "分類": "試験",
+        "項目": "出荷検査",
+        "内容": "試験成績書のフォーマットをデジタル化する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "試験"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "出荷検査",
+          "excel_row": 97
+        }
+      }
+    },
+    {
+      "trace_id": "design-test-sample-size",
+      "parent_id": "sheet-test-shipping",
+      "trace_title": "出荷検査",
+      "trace_text": "抜取検査のサンプルサイズを見直す。",
+      "trace_content": [
+        "抜取検査のサンプルサイズを見直す。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "設計検討表 出荷検査 抜取検査のサンプルサイズを見直す。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "出荷検査",
+      "source_row": 98,
+      "source_path": "$._trace_records[96]",
+      "source_section_id": "sheet-test-shipping",
+      "source_section_title": "出荷検査",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 97,
+        "分類": "試験",
+        "項目": "出荷検査",
+        "内容": "抜取検査のサンプルサイズを見直す。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "試験"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "出荷検査",
+          "excel_row": 98
+        }
+      }
+    },
+    {
+      "trace_id": "design-test-jig",
+      "parent_id": "sheet-test-durability",
+      "trace_title": "環境・耐久試験",
+      "trace_text": "試験治具を新規製作する。",
+      "trace_content": [
+        "試験治具を新規製作する。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "設計検討表 環境・耐久試験 試験治具を新規製作する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "環境・耐久試験",
+      "source_row": 99,
+      "source_path": "$._trace_records[97]",
+      "source_section_id": "sheet-test-durability",
+      "source_section_title": "環境・耐久試験",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 98,
+        "分類": "試験",
+        "項目": "環境・耐久試験",
+        "内容": "試験治具を新規製作する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "試験"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "環境・耐久試験",
+          "excel_row": 99
+        }
+      }
+    },
+    {
+      "trace_id": "design-test-record-retention",
+      "parent_id": "sheet-test-shipping",
+      "trace_title": "出荷検査",
+      "trace_text": "試験記録の保管期間を5年から7年へ延長する。",
+      "trace_content": [
+        "試験記録の保管期間を5年から7年へ延長する。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "設計検討表 出荷検査 試験記録の保管期間を5年から7年へ延長する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "出荷検査",
+      "source_row": 100,
+      "source_path": "$._trace_records[98]",
+      "source_section_id": "sheet-test-shipping",
+      "source_section_title": "出荷検査",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 99,
+        "分類": "試験",
+        "項目": "出荷検査",
+        "内容": "試験記録の保管期間を5年から7年へ延長する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "試験"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "出荷検査",
+          "excel_row": 100
+        }
+      }
+    },
+    {
+      "trace_id": "design-test-calibration",
+      "parent_id": "sheet-test-durability",
+      "trace_title": "環境・耐久試験",
+      "trace_text": "測定器の校正周期を1年から6か月へ短縮する。",
+      "trace_content": [
+        "測定器の校正周期を1年から6か月へ短縮する。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "設計検討表 環境・耐久試験 測定器の校正周期を1年から6か月へ短縮する。",
+      "source_file": "design_review_medium.xlsx",
+      "source_sheet": "環境・耐久試験",
+      "source_row": 101,
+      "source_path": "$._trace_records[99]",
+      "source_section_id": "sheet-test-durability",
+      "source_section_title": "環境・耐久試験",
+      "block_type": "excel_row",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": [],
+      "source_record": {
+        "No": 100,
+        "分類": "試験",
+        "項目": "環境・耐久試験",
+        "内容": "測定器の校正周期を1年から6か月へ短縮する。",
+        "備考": "",
+        "review_status": "reviewed",
+        "tags": [
+          "試験"
+        ],
+        "unregistered_tags": [],
+        "ai_reviewed": false,
+        "ai_reviewed_at": "",
+        "ai_review_method": "",
+        "ai_review_model": "",
+        "ai_review_comment": "",
+        "_source": {
+          "file_name": "design_review_medium.xlsx",
+          "sheet_name": "環境・耐久試験",
+          "excel_row": 101
+        }
+      }
+    }
+  ]
+}

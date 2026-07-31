@@ -1,0 +1,2318 @@
+{
+  "file_name": "customer_requirements_medium.pdf",
+  "trace_format": "chapter-section-trace-v1",
+  "schema_version": "2.0-work",
+  "chapter_number": "第2章",
+  "chapter_title": "要求仕様（中規模評価サンプル）",
+  "source": {
+    "profile_name": "knowledge-builder-medium-sample"
+  },
+  "tag_policy": {
+    "vocabulary_id": "knowledge-builder-medium-sample",
+    "tag_vocabulary_version": "1.0.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "req-temp-use-range",
+      "parent_id": "sec-temp-use",
+      "trace_title": "使用時温度条件",
+      "trace_text": "空調ユニットは、周囲温度0℃から50℃の環境で正常に運転できること。",
+      "trace_content": [
+        "空調ユニットは、周囲温度0℃から50℃の環境で正常に運転できること。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "要求仕様 2.1 使用時温度条件 空調ユニットは、周囲温度0℃から50℃の環境で正常に運転できること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.1",
+      "section_title": "使用時温度条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-temp-use')].content[?(@.id=='req-temp-use-range')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-temp-use",
+      "source_section_title": "使用時温度条件",
+      "source_block_id": "block-req-temp-use-range",
+      "source_raw_text": "空調ユニットは、周囲温度0℃から50℃の環境で正常に運転できること。",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-temp-startup",
+      "parent_id": "sec-temp-use",
+      "trace_title": "使用時温度条件",
+      "trace_text": "低温始動時（0℃以下）でも5分以内に定格能力へ到達すること。",
+      "trace_content": [
+        "低温始動時（0℃以下）でも5分以内に定格能力へ到達すること。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "要求仕様 2.1 使用時温度条件 低温始動時（0℃以下）でも5分以内に定格能力へ到達すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.1",
+      "section_title": "使用時温度条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-temp-use')].content[?(@.id=='req-temp-startup')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-temp-use",
+      "source_section_title": "使用時温度条件",
+      "source_block_id": "block-req-temp-startup",
+      "source_raw_text": "低温始動時（0℃以下）でも5分以内に定格能力へ到達すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-temp-overheat",
+      "parent_id": "sec-temp-use",
+      "trace_title": "使用時温度条件",
+      "trace_text": "内部温度が90℃を超えた場合、自動的に運転を停止する保護機能を備えること。",
+      "trace_content": [
+        "内部温度が90℃を超えた場合、自動的に運転を停止する保護機能を備えること。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "要求仕様 2.1 使用時温度条件 内部温度が90℃を超えた場合、自動的に運転を停止する保護機能を備えること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.1",
+      "section_title": "使用時温度条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-temp-use')].content[?(@.id=='req-temp-overheat')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-temp-use",
+      "source_section_title": "使用時温度条件",
+      "source_block_id": "block-req-temp-overheat",
+      "source_raw_text": "内部温度が90℃を超えた場合、自動的に運転を停止する保護機能を備えること。",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-temp-ambient-derate",
+      "parent_id": "sec-temp-use",
+      "trace_title": "使用時温度条件",
+      "trace_text": "使用外気温度が45℃を超える場合は能力を段階的に低減してよい。",
+      "trace_content": [
+        "使用外気温度が45℃を超える場合は能力を段階的に低減してよい。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "要求仕様 2.1 使用時温度条件 使用外気温度が45℃を超える場合は能力を段階的に低減してよい。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.1",
+      "section_title": "使用時温度条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-temp-use')].content[?(@.id=='req-temp-ambient-derate')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-temp-use",
+      "source_section_title": "使用時温度条件",
+      "source_block_id": "block-req-temp-ambient-derate",
+      "source_raw_text": "使用外気温度が45℃を超える場合は能力を段階的に低減してよい。",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-temp-sensor-accuracy",
+      "parent_id": "sec-temp-use",
+      "trace_title": "使用時温度条件",
+      "trace_text": "温度センサの計測精度は±0.5℃以内とすること。",
+      "trace_content": [
+        "温度センサの計測精度は±0.5℃以内とすること。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "要求仕様 2.1 使用時温度条件 温度センサの計測精度は±0.5℃以内とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.1",
+      "section_title": "使用時温度条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-temp-use')].content[?(@.id=='req-temp-sensor-accuracy')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-temp-use",
+      "source_section_title": "使用時温度条件",
+      "source_block_id": "block-req-temp-sensor-accuracy",
+      "source_raw_text": "温度センサの計測精度は±0.5℃以内とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-temp-condensation",
+      "parent_id": "sec-temp-use",
+      "trace_title": "使用時温度条件",
+      "trace_text": "高温高湿環境（40℃・相対湿度90%）でも結露による誤動作が発生しないこと。",
+      "trace_content": [
+        "高温高湿環境（40℃・相対湿度90%）でも結露による誤動作が発生しないこと。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "要求仕様 2.1 使用時温度条件 高温高湿環境（40℃・相対湿度90%）でも結露による誤動作が発生しないこと。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.1",
+      "section_title": "使用時温度条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-temp-use')].content[?(@.id=='req-temp-condensation')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-temp-use",
+      "source_section_title": "使用時温度条件",
+      "source_block_id": "block-req-temp-condensation",
+      "source_raw_text": "高温高湿環境（40℃・相対湿度90%）でも結露による誤動作が発生しないこと。",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-temp-display",
+      "parent_id": "sec-temp-use",
+      "trace_title": "使用時温度条件",
+      "trace_text": "運転パネルに現在の周囲温度を表示すること。",
+      "trace_content": [
+        "運転パネルに現在の周囲温度を表示すること。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "要求仕様 2.1 使用時温度条件 運転パネルに現在の周囲温度を表示すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.1",
+      "section_title": "使用時温度条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-temp-use')].content[?(@.id=='req-temp-display')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-temp-use",
+      "source_section_title": "使用時温度条件",
+      "source_block_id": "block-req-temp-display",
+      "source_raw_text": "運転パネルに現在の周囲温度を表示すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-temp-storage-range",
+      "parent_id": "sec-temp-storage",
+      "trace_title": "保管時温度条件",
+      "trace_text": "未使用時の保管温度は-20℃から60℃の範囲を許容すること。",
+      "trace_content": [
+        "未使用時の保管温度は-20℃から60℃の範囲を許容すること。"
+      ],
+      "trace_category": "温度",
+      "trace_key_text": "要求仕様 2.1 保管時温度条件 未使用時の保管温度は-20℃から60℃の範囲を許容すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.1",
+      "section_title": "保管時温度条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-temp-storage')].content[?(@.id=='req-temp-storage-range')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-temp-storage",
+      "source_section_title": "保管時温度条件",
+      "source_block_id": "block-req-temp-storage-range",
+      "source_raw_text": "未使用時の保管温度は-20℃から60℃の範囲を許容すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "温度"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-press-water-min",
+      "parent_id": "sec-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "給水圧力は0.3MPa以上を確保すること。",
+      "trace_content": [
+        "給水圧力は0.3MPa以上を確保すること。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "要求仕様 2.2 圧力条件 給水圧力は0.3MPa以上を確保すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.2",
+      "section_title": "圧力条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-press-single')].content[?(@.id=='req-press-water-min')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-press-single",
+      "source_section_title": "圧力条件",
+      "source_block_id": "block-req-press-water-min",
+      "source_raw_text": "給水圧力は0.3MPa以上を確保すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-press-water-max",
+      "parent_id": "sec-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "給水圧力の上限は1.0MPaとし、これを超える場合は減圧弁を設けること。",
+      "trace_content": [
+        "給水圧力の上限は1.0MPaとし、これを超える場合は減圧弁を設けること。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "要求仕様 2.2 圧力条件 給水圧力の上限は1.0MPaとし、これを超える場合は減圧弁を設けること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.2",
+      "section_title": "圧力条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-press-single')].content[?(@.id=='req-press-water-max')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-press-single",
+      "source_section_title": "圧力条件",
+      "source_block_id": "block-req-press-water-max",
+      "source_raw_text": "給水圧力の上限は1.0MPaとし、これを超える場合は減圧弁を設けること。",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-press-refrigerant-high",
+      "parent_id": "sec-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "冷媒高圧側の設計圧力は4.2MPa以上とすること。",
+      "trace_content": [
+        "冷媒高圧側の設計圧力は4.2MPa以上とすること。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "要求仕様 2.2 圧力条件 冷媒高圧側の設計圧力は4.2MPa以上とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.2",
+      "section_title": "圧力条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-press-single')].content[?(@.id=='req-press-refrigerant-high')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-press-single",
+      "source_section_title": "圧力条件",
+      "source_block_id": "block-req-press-refrigerant-high",
+      "source_raw_text": "冷媒高圧側の設計圧力は4.2MPa以上とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-press-test-hydro",
+      "parent_id": "sec-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "配管の耐圧試験は使用圧力の1.5倍で実施すること。",
+      "trace_content": [
+        "配管の耐圧試験は使用圧力の1.5倍で実施すること。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "要求仕様 2.2 圧力条件 配管の耐圧試験は使用圧力の1.5倍で実施すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.2",
+      "section_title": "圧力条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-press-single')].content[?(@.id=='req-press-test-hydro')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-press-single",
+      "source_section_title": "圧力条件",
+      "source_block_id": "block-req-press-test-hydro",
+      "source_raw_text": "配管の耐圧試験は使用圧力の1.5倍で実施すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-press-sensor",
+      "parent_id": "sec-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "圧力センサの応答時間は100ms以内とすること。",
+      "trace_content": [
+        "圧力センサの応答時間は100ms以内とすること。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "要求仕様 2.2 圧力条件 圧力センサの応答時間は100ms以内とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.2",
+      "section_title": "圧力条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-press-single')].content[?(@.id=='req-press-sensor')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-press-single",
+      "source_section_title": "圧力条件",
+      "source_block_id": "block-req-press-sensor",
+      "source_raw_text": "圧力センサの応答時間は100ms以内とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-press-relief-valve",
+      "parent_id": "sec-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "冷媒回路には設計圧力を超えた場合に作動する安全弁を備えること。",
+      "trace_content": [
+        "冷媒回路には設計圧力を超えた場合に作動する安全弁を備えること。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "要求仕様 2.2 圧力条件 冷媒回路には設計圧力を超えた場合に作動する安全弁を備えること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.2",
+      "section_title": "圧力条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-press-single')].content[?(@.id=='req-press-relief-valve')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-press-single",
+      "source_section_title": "圧力条件",
+      "source_block_id": "block-req-press-relief-valve",
+      "source_raw_text": "冷媒回路には設計圧力を超えた場合に作動する安全弁を備えること。",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-press-drop-alarm",
+      "parent_id": "sec-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "圧力低下を検知した場合、5秒以内に警報を出すこと。",
+      "trace_content": [
+        "圧力低下を検知した場合、5秒以内に警報を出すこと。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "要求仕様 2.2 圧力条件 圧力低下を検知した場合、5秒以内に警報を出すこと。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.2",
+      "section_title": "圧力条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-press-single')].content[?(@.id=='req-press-drop-alarm')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-press-single",
+      "source_section_title": "圧力条件",
+      "source_block_id": "block-req-press-drop-alarm",
+      "source_raw_text": "圧力低下を検知した場合、5秒以内に警報を出すこと。",
+      "review_status": "reviewed",
+      "tags": [
+        "圧力"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-press-notag",
+      "parent_id": "sec-press-single",
+      "trace_title": "圧力条件",
+      "trace_text": "配管接続部からの圧力漏れがないこと。",
+      "trace_content": [
+        "配管接続部からの圧力漏れがないこと。"
+      ],
+      "trace_category": "圧力",
+      "trace_key_text": "要求仕様 2.2 圧力条件 配管接続部からの圧力漏れがないこと。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.2",
+      "section_title": "圧力条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-press-single')].content[?(@.id=='req-press-notag')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-press-single",
+      "source_section_title": "圧力条件",
+      "source_block_id": "block-req-press-notag",
+      "source_raw_text": "配管接続部からの圧力漏れがないこと。",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-power-voltage",
+      "parent_id": "sec-power-spec",
+      "trace_title": "電源仕様",
+      "trace_text": "電源電圧は三相AC200V、周波数50/60Hzに対応すること。",
+      "trace_content": [
+        "電源電圧は三相AC200V、周波数50/60Hzに対応すること。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "要求仕様 2.3 電源仕様 電源電圧は三相AC200V、周波数50/60Hzに対応すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.3",
+      "section_title": "電源仕様",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-power-spec')].content[?(@.id=='req-power-voltage')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-power-spec",
+      "source_section_title": "電源仕様",
+      "source_block_id": "block-req-power-voltage",
+      "source_raw_text": "電源電圧は三相AC200V、周波数50/60Hzに対応すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-power-inrush",
+      "parent_id": "sec-power-spec",
+      "trace_title": "電源仕様",
+      "trace_text": "始動時の突入電流は定格電流の6倍以内とすること。",
+      "trace_content": [
+        "始動時の突入電流は定格電流の6倍以内とすること。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "要求仕様 2.3 電源仕様 始動時の突入電流は定格電流の6倍以内とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.3",
+      "section_title": "電源仕様",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-power-spec')].content[?(@.id=='req-power-inrush')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-power-spec",
+      "source_section_title": "電源仕様",
+      "source_block_id": "block-req-power-inrush",
+      "source_raw_text": "始動時の突入電流は定格電流の6倍以内とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-power-standby",
+      "parent_id": "sec-power-spec",
+      "trace_title": "電源仕様",
+      "trace_text": "待機時消費電力は5W以下とすること。",
+      "trace_content": [
+        "待機時消費電力は5W以下とすること。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "要求仕様 2.3 電源仕様 待機時消費電力は5W以下とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.3",
+      "section_title": "電源仕様",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-power-spec')].content[?(@.id=='req-power-standby')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-power-spec",
+      "source_section_title": "電源仕様",
+      "source_block_id": "block-req-power-standby",
+      "source_raw_text": "待機時消費電力は5W以下とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-power-restart",
+      "parent_id": "sec-power-spec",
+      "trace_title": "電源仕様",
+      "trace_text": "停電復帰後は手動操作なしで自動的に運転を再開すること。",
+      "trace_content": [
+        "停電復帰後は手動操作なしで自動的に運転を再開すること。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "要求仕様 2.3 電源仕様 停電復帰後は手動操作なしで自動的に運転を再開すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.3",
+      "section_title": "電源仕様",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-power-spec')].content[?(@.id=='req-power-restart')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-power-spec",
+      "source_section_title": "電源仕様",
+      "source_block_id": "block-req-power-restart",
+      "source_raw_text": "停電復帰後は手動操作なしで自動的に運転を再開すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-power-earth",
+      "parent_id": "sec-power-protect",
+      "trace_title": "電源保護",
+      "trace_text": "本体は接地端子を備え、D種接地に対応すること。",
+      "trace_content": [
+        "本体は接地端子を備え、D種接地に対応すること。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "要求仕様 2.3 電源保護 本体は接地端子を備え、D種接地に対応すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.3",
+      "section_title": "電源保護",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-power-protect')].content[?(@.id=='req-power-earth')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-power-protect",
+      "source_section_title": "電源保護",
+      "source_block_id": "block-req-power-earth",
+      "source_raw_text": "本体は接地端子を備え、D種接地に対応すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-power-leak-breaker",
+      "parent_id": "sec-power-protect",
+      "trace_title": "電源保護",
+      "trace_text": "漏電時に0.1秒以内に電源を遮断する漏電遮断器を備えること。",
+      "trace_content": [
+        "漏電時に0.1秒以内に電源を遮断する漏電遮断器を備えること。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "要求仕様 2.3 電源保護 漏電時に0.1秒以内に電源を遮断する漏電遮断器を備えること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.3",
+      "section_title": "電源保護",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-power-protect')].content[?(@.id=='req-power-leak-breaker')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-power-protect",
+      "source_section_title": "電源保護",
+      "source_block_id": "block-req-power-leak-breaker",
+      "source_raw_text": "漏電時に0.1秒以内に電源を遮断する漏電遮断器を備えること。",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-power-notag",
+      "parent_id": "sec-power-protect",
+      "trace_title": "電源保護",
+      "trace_text": "電源コードの長さは2m以上とすること。",
+      "trace_content": [
+        "電源コードの長さは2m以上とすること。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "要求仕様 2.3 電源保護 電源コードの長さは2m以上とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.3",
+      "section_title": "電源保護",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-power-protect')].content[?(@.id=='req-power-notag')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-power-protect",
+      "source_section_title": "電源保護",
+      "source_block_id": "block-req-power-notag",
+      "source_raw_text": "電源コードの長さは2m以上とすること。",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-power-surge",
+      "parent_id": "sec-power-protect",
+      "trace_title": "電源保護",
+      "trace_text": "落雷等によるサージから内部回路を保護すること。",
+      "trace_content": [
+        "落雷等によるサージから内部回路を保護すること。"
+      ],
+      "trace_category": "電源",
+      "trace_key_text": "要求仕様 2.3 電源保護 落雷等によるサージから内部回路を保護すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.3",
+      "section_title": "電源保護",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-power-protect')].content[?(@.id=='req-power-surge')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-power-protect",
+      "source_section_title": "電源保護",
+      "source_block_id": "block-req-power-surge",
+      "source_raw_text": "落雷等によるサージから内部回路を保護すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "電源"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-cooling-capacity",
+      "parent_id": "sec-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "定格冷房能力は10kW以上とすること。",
+      "trace_content": [
+        "定格冷房能力は10kW以上とすること。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "要求仕様 2.4 冷房性能 定格冷房能力は10kW以上とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.4",
+      "section_title": "冷房性能",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-cooling-single')].content[?(@.id=='req-cooling-capacity')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-cooling-single",
+      "source_section_title": "冷房性能",
+      "source_block_id": "block-req-cooling-capacity",
+      "source_raw_text": "定格冷房能力は10kW以上とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-cooling-derate",
+      "parent_id": "sec-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "周囲温度40℃時でも冷房能力の低下を10%以内に抑えること。",
+      "trace_content": [
+        "周囲温度40℃時でも冷房能力の低下を10%以内に抑えること。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "要求仕様 2.4 冷房性能 周囲温度40℃時でも冷房能力の低下を10%以内に抑えること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.4",
+      "section_title": "冷房性能",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-cooling-single')].content[?(@.id=='req-cooling-derate')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-cooling-single",
+      "source_section_title": "冷房性能",
+      "source_block_id": "block-req-cooling-derate",
+      "source_raw_text": "周囲温度40℃時でも冷房能力の低下を10%以内に抑えること。",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-cooling-eer",
+      "parent_id": "sec-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "エネルギー消費効率は3.0以上とすること。",
+      "trace_content": [
+        "エネルギー消費効率は3.0以上とすること。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "要求仕様 2.4 冷房性能 エネルギー消費効率は3.0以上とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.4",
+      "section_title": "冷房性能",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-cooling-single')].content[?(@.id=='req-cooling-eer')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-cooling-single",
+      "source_section_title": "冷房性能",
+      "source_block_id": "block-req-cooling-eer",
+      "source_raw_text": "エネルギー消費効率は3.0以上とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-cooling-startup-time",
+      "parent_id": "sec-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "起動から定格能力到達までの時間は10分以内とすること。",
+      "trace_content": [
+        "起動から定格能力到達までの時間は10分以内とすること。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "要求仕様 2.4 冷房性能 起動から定格能力到達までの時間は10分以内とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.4",
+      "section_title": "冷房性能",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-cooling-single')].content[?(@.id=='req-cooling-startup-time')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-cooling-single",
+      "source_section_title": "冷房性能",
+      "source_block_id": "block-req-cooling-startup-time",
+      "source_raw_text": "起動から定格能力到達までの時間は10分以内とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-cooling-airflow",
+      "parent_id": "sec-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "冷房運転時の吹出風量は仕様書記載値の±10%以内とすること。",
+      "trace_content": [
+        "冷房運転時の吹出風量は仕様書記載値の±10%以内とすること。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "要求仕様 2.4 冷房性能 冷房運転時の吹出風量は仕様書記載値の±10%以内とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.4",
+      "section_title": "冷房性能",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-cooling-single')].content[?(@.id=='req-cooling-airflow')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-cooling-single",
+      "source_section_title": "冷房性能",
+      "source_block_id": "block-req-cooling-airflow",
+      "source_raw_text": "冷房運転時の吹出風量は仕様書記載値の±10%以内とすること。",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-cooling-restart",
+      "parent_id": "sec-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "サーモオフ後の再起動までの最小待機時間は3分とすること。",
+      "trace_content": [
+        "サーモオフ後の再起動までの最小待機時間は3分とすること。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "要求仕様 2.4 冷房性能 サーモオフ後の再起動までの最小待機時間は3分とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.4",
+      "section_title": "冷房性能",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-cooling-single')].content[?(@.id=='req-cooling-restart')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-cooling-single",
+      "source_section_title": "冷房性能",
+      "source_block_id": "block-req-cooling-restart",
+      "source_raw_text": "サーモオフ後の再起動までの最小待機時間は3分とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-cooling-uniformity",
+      "parent_id": "sec-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "吹出し温度分布のばらつきを±2℃以内とすること。",
+      "trace_content": [
+        "吹出し温度分布のばらつきを±2℃以内とすること。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "要求仕様 2.4 冷房性能 吹出し温度分布のばらつきを±2℃以内とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.4",
+      "section_title": "冷房性能",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-cooling-single')].content[?(@.id=='req-cooling-uniformity')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-cooling-single",
+      "source_section_title": "冷房性能",
+      "source_block_id": "block-req-cooling-uniformity",
+      "source_raw_text": "吹出し温度分布のばらつきを±2℃以内とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-cooling-mode-select",
+      "parent_id": "sec-cooling-single",
+      "trace_title": "冷房性能",
+      "trace_text": "除湿優先運転と冷房優先運転を選択できること。",
+      "trace_content": [
+        "除湿優先運転と冷房優先運転を選択できること。"
+      ],
+      "trace_category": "冷房能力",
+      "trace_key_text": "要求仕様 2.4 冷房性能 除湿優先運転と冷房優先運転を選択できること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.4",
+      "section_title": "冷房性能",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-cooling-single')].content[?(@.id=='req-cooling-mode-select')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-cooling-single",
+      "source_section_title": "冷房性能",
+      "source_block_id": "block-req-cooling-mode-select",
+      "source_raw_text": "除湿優先運転と冷房優先運転を選択できること。",
+      "review_status": "reviewed",
+      "tags": [
+        "冷房能力"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-acoustic-overall",
+      "parent_id": "sec-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "定格運転時の騒音値は50dB(A)以下とすること。",
+      "trace_content": [
+        "定格運転時の騒音値は50dB(A)以下とすること。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "要求仕様 2.5 騒音条件 定格運転時の騒音値は50dB(A)以下とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.5",
+      "section_title": "騒音条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-acoustic-single')].content[?(@.id=='req-acoustic-overall')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-acoustic-single",
+      "source_section_title": "騒音条件",
+      "source_block_id": "block-req-acoustic-overall",
+      "source_raw_text": "定格運転時の騒音値は50dB(A)以下とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-acoustic-bearing",
+      "parent_id": "sec-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "軸受部から異音が発生しないこと。",
+      "trace_content": [
+        "軸受部から異音が発生しないこと。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "要求仕様 2.5 騒音条件 軸受部から異音が発生しないこと。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.5",
+      "section_title": "騒音条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-acoustic-single')].content[?(@.id=='req-acoustic-bearing')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-acoustic-single",
+      "source_section_title": "騒音条件",
+      "source_block_id": "block-req-acoustic-bearing",
+      "source_raw_text": "軸受部から異音が発生しないこと。",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-acoustic-fanmotor",
+      "parent_id": "sec-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "ファンモーターから異音が発生しないこと。",
+      "trace_content": [
+        "ファンモーターから異音が発生しないこと。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "要求仕様 2.5 騒音条件 ファンモーターから異音が発生しないこと。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.5",
+      "section_title": "騒音条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-acoustic-single')].content[?(@.id=='req-acoustic-fanmotor')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-acoustic-single",
+      "source_section_title": "騒音条件",
+      "source_block_id": "block-req-acoustic-fanmotor",
+      "source_raw_text": "ファンモーターから異音が発生しないこと。",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-acoustic-lowspeed",
+      "parent_id": "sec-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "低速運転時の騒音値は40dB(A)以下とすること。",
+      "trace_content": [
+        "低速運転時の騒音値は40dB(A)以下とすること。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "要求仕様 2.5 騒音条件 低速運転時の騒音値は40dB(A)以下とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.5",
+      "section_title": "騒音条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-acoustic-single')].content[?(@.id=='req-acoustic-lowspeed')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-acoustic-single",
+      "source_section_title": "騒音条件",
+      "source_block_id": "block-req-acoustic-lowspeed",
+      "source_raw_text": "低速運転時の騒音値は40dB(A)以下とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-acoustic-notag",
+      "parent_id": "sec-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "夜間運転モードでは騒音をさらに抑制すること。",
+      "trace_content": [
+        "夜間運転モードでは騒音をさらに抑制すること。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "要求仕様 2.5 騒音条件 夜間運転モードでは騒音をさらに抑制すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.5",
+      "section_title": "騒音条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-acoustic-single')].content[?(@.id=='req-acoustic-notag')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-acoustic-single",
+      "source_section_title": "騒音条件",
+      "source_block_id": "block-req-acoustic-notag",
+      "source_raw_text": "夜間運転モードでは騒音をさらに抑制すること。",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-acoustic-vibration-mount",
+      "parent_id": "sec-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "設置架台への振動伝達を抑制し、共振による異音を防止すること。",
+      "trace_content": [
+        "設置架台への振動伝達を抑制し、共振による異音を防止すること。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "要求仕様 2.5 騒音条件 設置架台への振動伝達を抑制し、共振による異音を防止すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.5",
+      "section_title": "騒音条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-acoustic-single')].content[?(@.id=='req-acoustic-vibration-mount')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-acoustic-single",
+      "source_section_title": "騒音条件",
+      "source_block_id": "block-req-acoustic-vibration-mount",
+      "source_raw_text": "設置架台への振動伝達を抑制し、共振による異音を防止すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-acoustic-compressor",
+      "parent_id": "sec-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "圧縮機本体からの振動起因騒音を抑制すること。",
+      "trace_content": [
+        "圧縮機本体からの振動起因騒音を抑制すること。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "要求仕様 2.5 騒音条件 圧縮機本体からの振動起因騒音を抑制すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.5",
+      "section_title": "騒音条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-acoustic-single')].content[?(@.id=='req-acoustic-compressor')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-acoustic-single",
+      "source_section_title": "騒音条件",
+      "source_block_id": "block-req-acoustic-compressor",
+      "source_raw_text": "圧縮機本体からの振動起因騒音を抑制すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-acoustic-duct",
+      "parent_id": "sec-acoustic-single",
+      "trace_title": "騒音条件",
+      "trace_text": "ダクト接続部からの風切り音が発生しないこと。",
+      "trace_content": [
+        "ダクト接続部からの風切り音が発生しないこと。"
+      ],
+      "trace_category": "騒音",
+      "trace_key_text": "要求仕様 2.5 騒音条件 ダクト接続部からの風切り音が発生しないこと。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.5",
+      "section_title": "騒音条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-acoustic-single')].content[?(@.id=='req-acoustic-duct')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-acoustic-single",
+      "source_section_title": "騒音条件",
+      "source_block_id": "block-req-acoustic-duct",
+      "source_raw_text": "ダクト接続部からの風切り音が発生しないこと。",
+      "review_status": "reviewed",
+      "tags": [
+        "騒音"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-mass-total",
+      "parent_id": "sec-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "本体質量は120kg以下とすること。",
+      "trace_content": [
+        "本体質量は120kg以下とすること。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "要求仕様 2.6 質量条件 本体質量は120kg以下とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.6",
+      "section_title": "質量条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-mass-single')].content[?(@.id=='req-mass-total')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-mass-single",
+      "source_section_title": "質量条件",
+      "source_block_id": "block-req-mass-total",
+      "source_raw_text": "本体質量は120kg以下とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-mass-notag",
+      "parent_id": "sec-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "梱包時の総質量は140kg以下とすること。",
+      "trace_content": [
+        "梱包時の総質量は140kg以下とすること。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "要求仕様 2.6 質量条件 梱包時の総質量は140kg以下とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.6",
+      "section_title": "質量条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-mass-single')].content[?(@.id=='req-mass-notag')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-mass-single",
+      "source_section_title": "質量条件",
+      "source_block_id": "block-req-mass-notag",
+      "source_raw_text": "梱包時の総質量は140kg以下とすること。",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-mass-component-split",
+      "parent_id": "sec-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "設置作業性のため、主要ユニットを2分割搬入可能な構造とすること。",
+      "trace_content": [
+        "設置作業性のため、主要ユニットを2分割搬入可能な構造とすること。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "要求仕様 2.6 質量条件 設置作業性のため、主要ユニットを2分割搬入可能な構造とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.6",
+      "section_title": "質量条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-mass-single')].content[?(@.id=='req-mass-component-split')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-mass-single",
+      "source_section_title": "質量条件",
+      "source_block_id": "block-req-mass-component-split",
+      "source_raw_text": "設置作業性のため、主要ユニットを2分割搬入可能な構造とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-mass-frame-material",
+      "parent_id": "sec-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "強度を確保しつつ質量を抑えるため、主要フレームにアルミ合金を採用してよい。",
+      "trace_content": [
+        "強度を確保しつつ質量を抑えるため、主要フレームにアルミ合金を採用してよい。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "要求仕様 2.6 質量条件 強度を確保しつつ質量を抑えるため、主要フレームにアルミ合金を採用してよい。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.6",
+      "section_title": "質量条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-mass-single')].content[?(@.id=='req-mass-frame-material')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-mass-single",
+      "source_section_title": "質量条件",
+      "source_block_id": "block-req-mass-frame-material",
+      "source_raw_text": "強度を確保しつつ質量を抑えるため、主要フレームにアルミ合金を採用してよい。",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-mass-label",
+      "parent_id": "sec-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "製品質量を銘板に明記すること。",
+      "trace_content": [
+        "製品質量を銘板に明記すること。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "要求仕様 2.6 質量条件 製品質量を銘板に明記すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.6",
+      "section_title": "質量条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-mass-single')].content[?(@.id=='req-mass-label')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-mass-single",
+      "source_section_title": "質量条件",
+      "source_block_id": "block-req-mass-label",
+      "source_raw_text": "製品質量を銘板に明記すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-mass-per-person-lift",
+      "parent_id": "sec-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "50kgを超える部品は2人以上での運搬を前提とした形状とすること。",
+      "trace_content": [
+        "50kgを超える部品は2人以上での運搬を前提とした形状とすること。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "要求仕様 2.6 質量条件 50kgを超える部品は2人以上での運搬を前提とした形状とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.6",
+      "section_title": "質量条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-mass-single')].content[?(@.id=='req-mass-per-person-lift')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-mass-single",
+      "source_section_title": "質量条件",
+      "source_block_id": "block-req-mass-per-person-lift",
+      "source_raw_text": "50kgを超える部品は2人以上での運搬を前提とした形状とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-mass-transport-limit",
+      "parent_id": "sec-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "輸送車両の積載制限を考慮し、最大質量は200kgを超えないこと。",
+      "trace_content": [
+        "輸送車両の積載制限を考慮し、最大質量は200kgを超えないこと。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "要求仕様 2.6 質量条件 輸送車両の積載制限を考慮し、最大質量は200kgを超えないこと。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.6",
+      "section_title": "質量条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-mass-single')].content[?(@.id=='req-mass-transport-limit')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-mass-single",
+      "source_section_title": "質量条件",
+      "source_block_id": "block-req-mass-transport-limit",
+      "source_raw_text": "輸送車両の積載制限を考慮し、最大質量は200kgを超えないこと。",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-mass-pallet",
+      "parent_id": "sec-mass-single",
+      "trace_title": "質量条件",
+      "trace_text": "パレット梱包時の総質量は180kg以下とすること。",
+      "trace_content": [
+        "パレット梱包時の総質量は180kg以下とすること。"
+      ],
+      "trace_category": "質量",
+      "trace_key_text": "要求仕様 2.6 質量条件 パレット梱包時の総質量は180kg以下とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.6",
+      "section_title": "質量条件",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-mass-single')].content[?(@.id=='req-mass-pallet')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-mass-single",
+      "source_section_title": "質量条件",
+      "source_block_id": "block-req-mass-pallet",
+      "source_raw_text": "パレット梱包時の総質量は180kg以下とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "質量"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-dims-envelope",
+      "parent_id": "sec-dims-outer",
+      "trace_title": "外形寸法",
+      "trace_text": "設置スペースは幅800mm×奥行600mm×高さ1200mm以内とすること。",
+      "trace_content": [
+        "設置スペースは幅800mm×奥行600mm×高さ1200mm以内とすること。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "要求仕様 2.7 外形寸法 設置スペースは幅800mm×奥行600mm×高さ1200mm以内とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.7",
+      "section_title": "外形寸法",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-dims-outer')].content[?(@.id=='req-dims-envelope')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-dims-outer",
+      "source_section_title": "外形寸法",
+      "source_block_id": "block-req-dims-envelope",
+      "source_raw_text": "設置スペースは幅800mm×奥行600mm×高さ1200mm以内とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-dims-height-limit",
+      "parent_id": "sec-dims-outer",
+      "trace_title": "外形寸法",
+      "trace_text": "天井高2400mm以下の部屋にも設置可能な高さとすること。",
+      "trace_content": [
+        "天井高2400mm以下の部屋にも設置可能な高さとすること。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "要求仕様 2.7 外形寸法 天井高2400mm以下の部屋にも設置可能な高さとすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.7",
+      "section_title": "外形寸法",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-dims-outer')].content[?(@.id=='req-dims-height-limit')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-dims-outer",
+      "source_section_title": "外形寸法",
+      "source_block_id": "block-req-dims-height-limit",
+      "source_raw_text": "天井高2400mm以下の部屋にも設置可能な高さとすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-dims-weight-per-area",
+      "parent_id": "sec-dims-outer",
+      "trace_title": "外形寸法",
+      "trace_text": "床への荷重は500kg/m²以下とすること。",
+      "trace_content": [
+        "床への荷重は500kg/m²以下とすること。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "要求仕様 2.7 外形寸法 床への荷重は500kg/m²以下とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.7",
+      "section_title": "外形寸法",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-dims-outer')].content[?(@.id=='req-dims-weight-per-area')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-dims-outer",
+      "source_section_title": "外形寸法",
+      "source_block_id": "block-req-dims-weight-per-area",
+      "source_raw_text": "床への荷重は500kg/m²以下とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-dims-service-space",
+      "parent_id": "sec-dims-outer",
+      "trace_title": "外形寸法",
+      "trace_text": "保守点検のための前面クリアランス600mm以上を確保すること。",
+      "trace_content": [
+        "保守点検のための前面クリアランス600mm以上を確保すること。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "要求仕様 2.7 外形寸法 保守点検のための前面クリアランス600mm以上を確保すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.7",
+      "section_title": "外形寸法",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-dims-outer')].content[?(@.id=='req-dims-service-space')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-dims-outer",
+      "source_section_title": "外形寸法",
+      "source_block_id": "block-req-dims-service-space",
+      "source_raw_text": "保守点検のための前面クリアランス600mm以上を確保すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-dims-notag",
+      "parent_id": "sec-dims-connect",
+      "trace_title": "接続部寸法",
+      "trace_text": "配管接続口の位置は背面下部とすること。",
+      "trace_content": [
+        "配管接続口の位置は背面下部とすること。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "要求仕様 2.7 接続部寸法 配管接続口の位置は背面下部とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.7",
+      "section_title": "接続部寸法",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-dims-connect')].content[?(@.id=='req-dims-notag')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-dims-connect",
+      "source_section_title": "接続部寸法",
+      "source_block_id": "block-req-dims-notag",
+      "source_raw_text": "配管接続口の位置は背面下部とすること。",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-dims-duct-connect",
+      "parent_id": "sec-dims-connect",
+      "trace_title": "接続部寸法",
+      "trace_text": "ダクト接続口の寸法は規格化された角形ダクトサイズに適合すること。",
+      "trace_content": [
+        "ダクト接続口の寸法は規格化された角形ダクトサイズに適合すること。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "要求仕様 2.7 接続部寸法 ダクト接続口の寸法は規格化された角形ダクトサイズに適合すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.7",
+      "section_title": "接続部寸法",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-dims-connect')].content[?(@.id=='req-dims-duct-connect')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-dims-connect",
+      "source_section_title": "接続部寸法",
+      "source_block_id": "block-req-dims-duct-connect",
+      "source_raw_text": "ダクト接続口の寸法は規格化された角形ダクトサイズに適合すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-dims-door-clear",
+      "parent_id": "sec-dims-connect",
+      "trace_title": "接続部寸法",
+      "trace_text": "点検扉の開閉に必要な前面クリアランスを500mm以上確保すること。",
+      "trace_content": [
+        "点検扉の開閉に必要な前面クリアランスを500mm以上確保すること。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "要求仕様 2.7 接続部寸法 点検扉の開閉に必要な前面クリアランスを500mm以上確保すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.7",
+      "section_title": "接続部寸法",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-dims-connect')].content[?(@.id=='req-dims-door-clear')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-dims-connect",
+      "source_section_title": "接続部寸法",
+      "source_block_id": "block-req-dims-door-clear",
+      "source_raw_text": "点検扉の開閉に必要な前面クリアランスを500mm以上確保すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-dims-cable-entry",
+      "parent_id": "sec-dims-connect",
+      "trace_title": "接続部寸法",
+      "trace_text": "電源ケーブル引込口の寸法はφ30mm以上とすること。",
+      "trace_content": [
+        "電源ケーブル引込口の寸法はφ30mm以上とすること。"
+      ],
+      "trace_category": "寸法",
+      "trace_key_text": "要求仕様 2.7 接続部寸法 電源ケーブル引込口の寸法はφ30mm以上とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.7",
+      "section_title": "接続部寸法",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-dims-connect')].content[?(@.id=='req-dims-cable-entry')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-dims-connect",
+      "source_section_title": "接続部寸法",
+      "source_block_id": "block-req-dims-cable-entry",
+      "source_raw_text": "電源ケーブル引込口の寸法はφ30mm以上とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "寸法"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-maint-interval",
+      "parent_id": "sec-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "定期保守の推奨間隔は6か月とすること。",
+      "trace_content": [
+        "定期保守の推奨間隔は6か月とすること。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "要求仕様 2.8 保守性 定期保守の推奨間隔は6か月とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.8",
+      "section_title": "保守性",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-maint-single')].content[?(@.id=='req-maint-interval')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-maint-single",
+      "source_section_title": "保守性",
+      "source_block_id": "block-req-maint-interval",
+      "source_raw_text": "定期保守の推奨間隔は6か月とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-maint-filter-access",
+      "parent_id": "sec-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "フィルタ交換は工具なしで実施できること。",
+      "trace_content": [
+        "フィルタ交換は工具なしで実施できること。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "要求仕様 2.8 保守性 フィルタ交換は工具なしで実施できること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.8",
+      "section_title": "保守性",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-maint-single')].content[?(@.id=='req-maint-filter-access')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-maint-single",
+      "source_section_title": "保守性",
+      "source_block_id": "block-req-maint-filter-access",
+      "source_raw_text": "フィルタ交換は工具なしで実施できること。",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-maint-tool-free",
+      "parent_id": "sec-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "メンテナンス時、主要消耗部品の交換に特殊工具を必要としないこと。",
+      "trace_content": [
+        "メンテナンス時、主要消耗部品の交換に特殊工具を必要としないこと。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "要求仕様 2.8 保守性 メンテナンス時、主要消耗部品の交換に特殊工具を必要としないこと。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.8",
+      "section_title": "保守性",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-maint-single')].content[?(@.id=='req-maint-tool-free')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-maint-single",
+      "source_section_title": "保守性",
+      "source_block_id": "block-req-maint-tool-free",
+      "source_raw_text": "メンテナンス時、主要消耗部品の交換に特殊工具を必要としないこと。",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-maint-notag",
+      "parent_id": "sec-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "点検口には施錠機構を設けること。",
+      "trace_content": [
+        "点検口には施錠機構を設けること。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "要求仕様 2.8 保守性 点検口には施錠機構を設けること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.8",
+      "section_title": "保守性",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-maint-single')].content[?(@.id=='req-maint-notag')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-maint-single",
+      "source_section_title": "保守性",
+      "source_block_id": "block-req-maint-notag",
+      "source_raw_text": "点検口には施錠機構を設けること。",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-maint-spare-parts",
+      "parent_id": "sec-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "主要消耗部品は市販工具で入手可能な標準品を使用すること。",
+      "trace_content": [
+        "主要消耗部品は市販工具で入手可能な標準品を使用すること。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "要求仕様 2.8 保守性 主要消耗部品は市販工具で入手可能な標準品を使用すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.8",
+      "section_title": "保守性",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-maint-single')].content[?(@.id=='req-maint-spare-parts')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-maint-single",
+      "source_section_title": "保守性",
+      "source_block_id": "block-req-maint-spare-parts",
+      "source_raw_text": "主要消耗部品は市販工具で入手可能な標準品を使用すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-maint-log",
+      "parent_id": "sec-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "保守履歴を機器内に記録・保持できること。",
+      "trace_content": [
+        "保守履歴を機器内に記録・保持できること。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "要求仕様 2.8 保守性 保守履歴を機器内に記録・保持できること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.8",
+      "section_title": "保守性",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-maint-single')].content[?(@.id=='req-maint-log')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-maint-single",
+      "source_section_title": "保守性",
+      "source_block_id": "block-req-maint-log",
+      "source_raw_text": "保守履歴を機器内に記録・保持できること。",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-maint-training",
+      "parent_id": "sec-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "保守員向けの標準作業手順書を整備すること。",
+      "trace_content": [
+        "保守員向けの標準作業手順書を整備すること。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "要求仕様 2.8 保守性 保守員向けの標準作業手順書を整備すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.8",
+      "section_title": "保守性",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-maint-single')].content[?(@.id=='req-maint-training')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-maint-single",
+      "source_section_title": "保守性",
+      "source_block_id": "block-req-maint-training",
+      "source_raw_text": "保守員向けの標準作業手順書を整備すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-maint-warranty",
+      "parent_id": "sec-maint-single",
+      "trace_title": "保守性",
+      "trace_text": "初回保守は無償点検として実施すること。",
+      "trace_content": [
+        "初回保守は無償点検として実施すること。"
+      ],
+      "trace_category": "保守",
+      "trace_key_text": "要求仕様 2.8 保守性 初回保守は無償点検として実施すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.8",
+      "section_title": "保守性",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-maint-single')].content[?(@.id=='req-maint-warranty')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-maint-single",
+      "source_section_title": "保守性",
+      "source_block_id": "block-req-maint-warranty",
+      "source_raw_text": "初回保守は無償点検として実施すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "保守"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-safety-electric-shock",
+      "parent_id": "sec-safety-shock",
+      "trace_title": "感電・火災対策",
+      "trace_text": "感電保護のため、充電部への接触を防止すること。",
+      "trace_content": [
+        "感電保護のため、充電部への接触を防止すること。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "要求仕様 2.9 感電・火災対策 感電保護のため、充電部への接触を防止すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.9",
+      "section_title": "感電・火災対策",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-safety-shock')].content[?(@.id=='req-safety-electric-shock')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-safety-shock",
+      "source_section_title": "感電・火災対策",
+      "source_block_id": "block-req-safety-electric-shock",
+      "source_raw_text": "感電保護のため、充電部への接触を防止すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-safety-fire-retardant",
+      "parent_id": "sec-safety-shock",
+      "trace_title": "感電・火災対策",
+      "trace_text": "主要樹脂部品は難燃性材料(UL94 V-0相当)を使用すること。",
+      "trace_content": [
+        "主要樹脂部品は難燃性材料(UL94 V-0相当)を使用すること。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "要求仕様 2.9 感電・火災対策 主要樹脂部品は難燃性材料(UL94 V-0相当)を使用すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.9",
+      "section_title": "感電・火災対策",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-safety-shock')].content[?(@.id=='req-safety-fire-retardant')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-safety-shock",
+      "source_section_title": "感電・火災対策",
+      "source_block_id": "block-req-safety-fire-retardant",
+      "source_raw_text": "主要樹脂部品は難燃性材料(UL94 V-0相当)を使用すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-safety-warning-label",
+      "parent_id": "sec-safety-shock",
+      "trace_title": "感電・火災対策",
+      "trace_text": "感電・高温部に対する警告表示を視認しやすい位置に設けること。",
+      "trace_content": [
+        "感電・高温部に対する警告表示を視認しやすい位置に設けること。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "要求仕様 2.9 感電・火災対策 感電・高温部に対する警告表示を視認しやすい位置に設けること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.9",
+      "section_title": "感電・火災対策",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-safety-shock')].content[?(@.id=='req-safety-warning-label')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-safety-shock",
+      "source_section_title": "感電・火災対策",
+      "source_block_id": "block-req-safety-warning-label",
+      "source_raw_text": "感電・高温部に対する警告表示を視認しやすい位置に設けること。",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-safety-notag",
+      "parent_id": "sec-safety-shock",
+      "trace_title": "感電・火災対策",
+      "trace_text": "非常停止操作後、再起動には手動操作を要すること。",
+      "trace_content": [
+        "非常停止操作後、再起動には手動操作を要すること。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "要求仕様 2.9 感電・火災対策 非常停止操作後、再起動には手動操作を要すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.9",
+      "section_title": "感電・火災対策",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-safety-shock')].content[?(@.id=='req-safety-notag')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-safety-shock",
+      "source_section_title": "感電・火災対策",
+      "source_block_id": "block-req-safety-notag",
+      "source_raw_text": "非常停止操作後、再起動には手動操作を要すること。",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-safety-sharp-edge",
+      "parent_id": "sec-safety-physical",
+      "trace_title": "物理安全",
+      "trace_text": "外装に鋭利な突起・エッジがないこと。",
+      "trace_content": [
+        "外装に鋭利な突起・エッジがないこと。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "要求仕様 2.9 物理安全 外装に鋭利な突起・エッジがないこと。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.9",
+      "section_title": "物理安全",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-safety-physical')].content[?(@.id=='req-safety-sharp-edge')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-safety-physical",
+      "source_section_title": "物理安全",
+      "source_block_id": "block-req-safety-sharp-edge",
+      "source_raw_text": "外装に鋭利な突起・エッジがないこと。",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-safety-tipping",
+      "parent_id": "sec-safety-physical",
+      "trace_title": "物理安全",
+      "trace_text": "転倒防止のため、重心位置及び設置面積から転倒しにくい構造とすること。",
+      "trace_content": [
+        "転倒防止のため、重心位置及び設置面積から転倒しにくい構造とすること。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "要求仕様 2.9 物理安全 転倒防止のため、重心位置及び設置面積から転倒しにくい構造とすること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.9",
+      "section_title": "物理安全",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-safety-physical')].content[?(@.id=='req-safety-tipping')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-safety-physical",
+      "source_section_title": "物理安全",
+      "source_block_id": "block-req-safety-tipping",
+      "source_raw_text": "転倒防止のため、重心位置及び設置面積から転倒しにくい構造とすること。",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-safety-lockout",
+      "parent_id": "sec-safety-physical",
+      "trace_title": "物理安全",
+      "trace_text": "保守作業時に電源を確実に遮断できるロックアウト機構を備えること。",
+      "trace_content": [
+        "保守作業時に電源を確実に遮断できるロックアウト機構を備えること。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "要求仕様 2.9 物理安全 保守作業時に電源を確実に遮断できるロックアウト機構を備えること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.9",
+      "section_title": "物理安全",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-safety-physical')].content[?(@.id=='req-safety-lockout')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-safety-physical",
+      "source_section_title": "物理安全",
+      "source_block_id": "block-req-safety-lockout",
+      "source_raw_text": "保守作業時に電源を確実に遮断できるロックアウト機構を備えること。",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-safety-ip-rating",
+      "parent_id": "sec-safety-physical",
+      "trace_title": "物理安全",
+      "trace_text": "屋外設置部は保護等級IP24相当を満たすこと。",
+      "trace_content": [
+        "屋外設置部は保護等級IP24相当を満たすこと。"
+      ],
+      "trace_category": "安全",
+      "trace_key_text": "要求仕様 2.9 物理安全 屋外設置部は保護等級IP24相当を満たすこと。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.9",
+      "section_title": "物理安全",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-safety-physical')].content[?(@.id=='req-safety-ip-rating')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-safety-physical",
+      "source_section_title": "物理安全",
+      "source_block_id": "block-req-safety-ip-rating",
+      "source_raw_text": "屋外設置部は保護等級IP24相当を満たすこと。",
+      "review_status": "reviewed",
+      "tags": [
+        "安全"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-test-final-inspection-electric",
+      "parent_id": "sec-test-shipping",
+      "trace_title": "出荷検査",
+      "trace_text": "出荷前検査として、絶縁抵抗試験を全数実施すること。",
+      "trace_content": [
+        "出荷前検査として、絶縁抵抗試験を全数実施すること。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "要求仕様 2.10 出荷検査 出荷前検査として、絶縁抵抗試験を全数実施すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.10",
+      "section_title": "出荷検査",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-test-shipping')].content[?(@.id=='req-test-final-inspection-electric')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-test-shipping",
+      "source_section_title": "出荷検査",
+      "source_block_id": "block-req-test-final-inspection-electric",
+      "source_raw_text": "出荷前検査として、絶縁抵抗試験を全数実施すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-test-final-inspection-leak",
+      "parent_id": "sec-test-shipping",
+      "trace_title": "出荷検査",
+      "trace_text": "出荷前検査として、気密試験（冷媒回路）を全数実施すること。",
+      "trace_content": [
+        "出荷前検査として、気密試験（冷媒回路）を全数実施すること。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "要求仕様 2.10 出荷検査 出荷前検査として、気密試験（冷媒回路）を全数実施すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.10",
+      "section_title": "出荷検査",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-test-shipping')].content[?(@.id=='req-test-final-inspection-leak')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-test-shipping",
+      "source_section_title": "出荷検査",
+      "source_block_id": "block-req-test-final-inspection-leak",
+      "source_raw_text": "出荷前検査として、気密試験（冷媒回路）を全数実施すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-test-notag",
+      "parent_id": "sec-test-shipping",
+      "trace_title": "出荷検査",
+      "trace_text": "試験成績書を出荷時に添付すること。",
+      "trace_content": [
+        "試験成績書を出荷時に添付すること。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "要求仕様 2.10 出荷検査 試験成績書を出荷時に添付すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.10",
+      "section_title": "出荷検査",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-test-shipping')].content[?(@.id=='req-test-notag')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-test-shipping",
+      "source_section_title": "出荷検査",
+      "source_block_id": "block-req-test-notag",
+      "source_raw_text": "試験成績書を出荷時に添付すること。",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-test-vibration",
+      "parent_id": "sec-test-durability",
+      "trace_title": "環境・耐久試験",
+      "trace_text": "輸送を想定した振動試験を実施すること。",
+      "trace_content": [
+        "輸送を想定した振動試験を実施すること。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "要求仕様 2.10 環境・耐久試験 輸送を想定した振動試験を実施すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.10",
+      "section_title": "環境・耐久試験",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-test-durability')].content[?(@.id=='req-test-vibration')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-test-durability",
+      "source_section_title": "環境・耐久試験",
+      "source_block_id": "block-req-test-vibration",
+      "source_raw_text": "輸送を想定した振動試験を実施すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-test-emc",
+      "parent_id": "sec-test-durability",
+      "trace_title": "環境・耐久試験",
+      "trace_text": "電磁両立性(EMC)試験（放射妨害波・イミュニティ）を実施すること。",
+      "trace_content": [
+        "電磁両立性(EMC)試験（放射妨害波・イミュニティ）を実施すること。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "要求仕様 2.10 環境・耐久試験 電磁両立性(EMC)試験（放射妨害波・イミュニティ）を実施すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.10",
+      "section_title": "環境・耐久試験",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-test-durability')].content[?(@.id=='req-test-emc')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-test-durability",
+      "source_section_title": "環境・耐久試験",
+      "source_block_id": "block-req-test-emc",
+      "source_raw_text": "電磁両立性(EMC)試験（放射妨害波・イミュニティ）を実施すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-test-durability",
+      "parent_id": "sec-test-durability",
+      "trace_title": "環境・耐久試験",
+      "trace_text": "10年相当の耐久性を想定した加速寿命試験を実施すること。",
+      "trace_content": [
+        "10年相当の耐久性を想定した加速寿命試験を実施すること。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "要求仕様 2.10 環境・耐久試験 10年相当の耐久性を想定した加速寿命試験を実施すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.10",
+      "section_title": "環境・耐久試験",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-test-durability')].content[?(@.id=='req-test-durability')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-test-durability",
+      "source_section_title": "環境・耐久試験",
+      "source_block_id": "block-req-test-durability",
+      "source_raw_text": "10年相当の耐久性を想定した加速寿命試験を実施すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-test-humidity",
+      "parent_id": "sec-test-durability",
+      "trace_title": "環境・耐久試験",
+      "trace_text": "高湿度環境での絶縁性能試験を実施すること。",
+      "trace_content": [
+        "高湿度環境での絶縁性能試験を実施すること。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "要求仕様 2.10 環境・耐久試験 高湿度環境での絶縁性能試験を実施すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.10",
+      "section_title": "環境・耐久試験",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-test-durability')].content[?(@.id=='req-test-humidity')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-test-durability",
+      "source_section_title": "環境・耐久試験",
+      "source_block_id": "block-req-test-humidity",
+      "source_raw_text": "高湿度環境での絶縁性能試験を実施すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "req-test-drop",
+      "parent_id": "sec-test-durability",
+      "trace_title": "環境・耐久試験",
+      "trace_text": "梱包状態での落下試験を実施すること。",
+      "trace_content": [
+        "梱包状態での落下試験を実施すること。"
+      ],
+      "trace_category": "試験",
+      "trace_key_text": "要求仕様 2.10 環境・耐久試験 梱包状態での落下試験を実施すること。",
+      "chapter_number": "第2章",
+      "chapter_title": "要求仕様",
+      "section_number": "2.10",
+      "section_title": "環境・耐久試験",
+      "block_type": "text",
+      "source_file": "customer_requirements_medium.pdf",
+      "source_page": 1,
+      "source_path": "$.sections[?(@.id=='sec-test-durability')].content[?(@.id=='req-test-drop')]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-test-durability",
+      "source_section_title": "環境・耐久試験",
+      "source_block_id": "block-req-test-drop",
+      "source_raw_text": "梱包状態での落下試験を実施すること。",
+      "review_status": "reviewed",
+      "tags": [
+        "試験"
+      ],
+      "unregistered_tags": []
+    }
+  ]
+}

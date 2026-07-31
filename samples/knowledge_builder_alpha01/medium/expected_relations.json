@@ -1,0 +1,326 @@
+{
+  "schema": "knowledge-builder-expected-relations/1.0",
+  "purpose": "評価終了後にCandidate生成結果・採用Edgeと照合するためのground truth。通常のKnowledge Builder 実行に必須の入力ファイルではない(読み込ませる必要はない)。False Positive/False Negativeの確認に用いる。",
+  "generated_by": "samples/knowledge_builder_alpha01/medium/generate_medium_sample.js",
+  "total_true_relations": 62,
+  "relations": [
+    {
+      "category": "温度",
+      "requirement_trace_id": "req-temp-use-range",
+      "design_trace_id": "design-temp-use-range"
+    },
+    {
+      "category": "温度",
+      "requirement_trace_id": "req-temp-startup",
+      "design_trace_id": "design-temp-startup"
+    },
+    {
+      "category": "温度",
+      "requirement_trace_id": "req-temp-overheat",
+      "design_trace_id": "design-temp-overheat"
+    },
+    {
+      "category": "温度",
+      "requirement_trace_id": "req-temp-ambient-derate",
+      "design_trace_id": "design-temp-ambient-derate"
+    },
+    {
+      "category": "温度",
+      "requirement_trace_id": "req-temp-sensor-accuracy",
+      "design_trace_id": "design-temp-sensor-accuracy"
+    },
+    {
+      "category": "温度",
+      "requirement_trace_id": "req-temp-storage-range",
+      "design_trace_id": "design-temp-storage-range"
+    },
+    {
+      "category": "圧力",
+      "requirement_trace_id": "req-press-water-min",
+      "design_trace_id": "design-press-water-min"
+    },
+    {
+      "category": "圧力",
+      "requirement_trace_id": "req-press-water-max",
+      "design_trace_id": "design-press-water-max"
+    },
+    {
+      "category": "圧力",
+      "requirement_trace_id": "req-press-refrigerant-high",
+      "design_trace_id": "design-press-refrigerant-high"
+    },
+    {
+      "category": "圧力",
+      "requirement_trace_id": "req-press-test-hydro",
+      "design_trace_id": "design-press-test-hydro"
+    },
+    {
+      "category": "圧力",
+      "requirement_trace_id": "req-press-sensor",
+      "design_trace_id": "design-press-sensor"
+    },
+    {
+      "category": "圧力",
+      "requirement_trace_id": "req-press-relief-valve",
+      "design_trace_id": "design-press-relief-valve"
+    },
+    {
+      "category": "圧力",
+      "requirement_trace_id": "req-press-notag",
+      "design_trace_id": "design-press-notag",
+      "note": "tags未設定同士の関連(タグに頼らない一致確認用)"
+    },
+    {
+      "category": "電源",
+      "requirement_trace_id": "req-power-voltage",
+      "design_trace_id": "design-power-voltage"
+    },
+    {
+      "category": "電源",
+      "requirement_trace_id": "req-power-inrush",
+      "design_trace_id": "design-power-inrush"
+    },
+    {
+      "category": "電源",
+      "requirement_trace_id": "req-power-standby",
+      "design_trace_id": "design-power-standby"
+    },
+    {
+      "category": "電源",
+      "requirement_trace_id": "req-power-restart",
+      "design_trace_id": "design-power-restart"
+    },
+    {
+      "category": "電源",
+      "requirement_trace_id": "req-power-earth",
+      "design_trace_id": "design-power-earth"
+    },
+    {
+      "category": "電源",
+      "requirement_trace_id": "req-power-leak-breaker",
+      "design_trace_id": "design-power-leak-breaker"
+    },
+    {
+      "category": "電源",
+      "requirement_trace_id": "req-power-notag",
+      "design_trace_id": "design-power-notag",
+      "note": "tags未設定同士の関連(タグに頼らない一致確認用)"
+    },
+    {
+      "category": "冷房能力",
+      "requirement_trace_id": "req-cooling-capacity",
+      "design_trace_id": "design-cooling-capacity"
+    },
+    {
+      "category": "冷房能力",
+      "requirement_trace_id": "req-cooling-derate",
+      "design_trace_id": "design-cooling-derate"
+    },
+    {
+      "category": "冷房能力",
+      "requirement_trace_id": "req-cooling-eer",
+      "design_trace_id": "design-cooling-eer"
+    },
+    {
+      "category": "冷房能力",
+      "requirement_trace_id": "req-cooling-startup-time",
+      "design_trace_id": "design-cooling-startup-time"
+    },
+    {
+      "category": "冷房能力",
+      "requirement_trace_id": "req-cooling-airflow",
+      "design_trace_id": "design-cooling-airflow"
+    },
+    {
+      "category": "冷房能力",
+      "requirement_trace_id": "req-cooling-restart",
+      "design_trace_id": "design-cooling-restart"
+    },
+    {
+      "category": "騒音",
+      "requirement_trace_id": "req-acoustic-overall",
+      "design_trace_id": "design-acoustic-overall"
+    },
+    {
+      "category": "騒音",
+      "requirement_trace_id": "req-acoustic-bearing",
+      "design_trace_id": "design-acoustic-bearing"
+    },
+    {
+      "category": "騒音",
+      "requirement_trace_id": "req-acoustic-fanmotor",
+      "design_trace_id": "design-acoustic-fanmotor"
+    },
+    {
+      "category": "騒音",
+      "requirement_trace_id": "req-acoustic-lowspeed",
+      "design_trace_id": "design-acoustic-lowspeed"
+    },
+    {
+      "category": "騒音",
+      "requirement_trace_id": "req-acoustic-notag",
+      "design_trace_id": "design-acoustic-notag",
+      "note": "tags未設定同士の関連(タグに頼らない一致確認用)"
+    },
+    {
+      "category": "騒音",
+      "requirement_trace_id": "req-acoustic-vibration-mount",
+      "design_trace_id": "design-acoustic-vibration-mount"
+    },
+    {
+      "category": "質量",
+      "requirement_trace_id": "req-mass-total",
+      "design_trace_id": "design-mass-total"
+    },
+    {
+      "category": "質量",
+      "requirement_trace_id": "req-mass-notag",
+      "design_trace_id": "design-mass-notag",
+      "note": "tags未設定同士の関連(タグに頼らない一致確認用)"
+    },
+    {
+      "category": "質量",
+      "requirement_trace_id": "req-mass-component-split",
+      "design_trace_id": "design-mass-component-split"
+    },
+    {
+      "category": "質量",
+      "requirement_trace_id": "req-mass-frame-material",
+      "design_trace_id": "design-mass-frame-material"
+    },
+    {
+      "category": "質量",
+      "requirement_trace_id": "req-mass-label",
+      "design_trace_id": "design-mass-label"
+    },
+    {
+      "category": "寸法",
+      "requirement_trace_id": "req-dims-envelope",
+      "design_trace_id": "design-dims-envelope"
+    },
+    {
+      "category": "寸法",
+      "requirement_trace_id": "req-dims-notag",
+      "design_trace_id": "design-dims-notag",
+      "note": "tags未設定同士の関連(タグに頼らない一致確認用)"
+    },
+    {
+      "category": "寸法",
+      "requirement_trace_id": "req-dims-duct-connect",
+      "design_trace_id": "design-dims-duct-connect"
+    },
+    {
+      "category": "寸法",
+      "requirement_trace_id": "req-dims-door-clear",
+      "design_trace_id": "design-dims-door-clear"
+    },
+    {
+      "category": "寸法",
+      "requirement_trace_id": "req-dims-cable-entry",
+      "design_trace_id": "design-dims-cable-entry"
+    },
+    {
+      "category": "保守",
+      "requirement_trace_id": "req-maint-interval",
+      "design_trace_id": "design-maint-interval"
+    },
+    {
+      "category": "保守",
+      "requirement_trace_id": "req-maint-filter-access",
+      "design_trace_id": "design-maint-filter-access"
+    },
+    {
+      "category": "保守",
+      "requirement_trace_id": "req-maint-tool-free",
+      "design_trace_id": "design-maint-tool-free"
+    },
+    {
+      "category": "保守",
+      "requirement_trace_id": "req-maint-notag",
+      "design_trace_id": "design-maint-notag",
+      "note": "tags未設定同士の関連(タグに頼らない一致確認用)"
+    },
+    {
+      "category": "保守",
+      "requirement_trace_id": "req-maint-spare-parts",
+      "design_trace_id": "design-maint-spare-parts"
+    },
+    {
+      "category": "保守",
+      "requirement_trace_id": "req-maint-log",
+      "design_trace_id": "design-maint-log"
+    },
+    {
+      "category": "安全",
+      "requirement_trace_id": "req-safety-electric-shock",
+      "design_trace_id": "design-safety-enclosure-grounding"
+    },
+    {
+      "category": "安全",
+      "requirement_trace_id": "req-safety-electric-shock",
+      "design_trace_id": "design-safety-leak-current-breaker"
+    },
+    {
+      "category": "安全",
+      "requirement_trace_id": "req-safety-fire-retardant",
+      "design_trace_id": "design-safety-material-v0"
+    },
+    {
+      "category": "安全",
+      "requirement_trace_id": "req-safety-warning-label",
+      "design_trace_id": "design-safety-label"
+    },
+    {
+      "category": "安全",
+      "requirement_trace_id": "req-safety-notag",
+      "design_trace_id": "design-safety-restart-lock",
+      "note": "tags未設定同士の関連(タグに頼らない一致確認用)"
+    },
+    {
+      "category": "安全",
+      "requirement_trace_id": "req-safety-sharp-edge",
+      "design_trace_id": "design-safety-edge-radius"
+    },
+    {
+      "category": "安全",
+      "requirement_trace_id": "req-safety-tipping",
+      "design_trace_id": "design-safety-tipping-stability"
+    },
+    {
+      "category": "安全",
+      "requirement_trace_id": "req-safety-lockout",
+      "design_trace_id": "design-safety-interlock"
+    },
+    {
+      "category": "試験",
+      "requirement_trace_id": "req-test-final-inspection-electric",
+      "design_trace_id": "design-test-final-inspection-procedure"
+    },
+    {
+      "category": "試験",
+      "requirement_trace_id": "req-test-final-inspection-leak",
+      "design_trace_id": "design-test-final-inspection-procedure"
+    },
+    {
+      "category": "試験",
+      "requirement_trace_id": "req-test-notag",
+      "design_trace_id": "design-test-notag",
+      "note": "tags未設定同士の関連(タグに頼らない一致確認用)"
+    },
+    {
+      "category": "試験",
+      "requirement_trace_id": "req-test-vibration",
+      "design_trace_id": "design-test-vibration"
+    },
+    {
+      "category": "試験",
+      "requirement_trace_id": "req-test-emc",
+      "design_trace_id": "design-test-emc"
+    },
+    {
+      "category": "試験",
+      "requirement_trace_id": "req-test-durability",
+      "design_trace_id": "design-test-durability"
+    }
+  ]
+}

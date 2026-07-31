@@ -201,20 +201,23 @@
 
   // ---- Edge lifecycle (§4.4: lifecycle自体はknowledge_hashに影響しない) ----
 
-  async function promoteCandidate(dataset, edgeId, actor) {
+  // `via` ('individual'|'bulk') はoperation.paramsへ記録するだけの補助情報(§6.4 paramsは自由形)。
+  // schemaや検証には影響しない。UI側が「個別判断」と「一括操作」の作業量を
+  // operation historyから後付けで集計できるようにするためのタグ付け(α0.1.1)。
+  async function promoteCandidate(dataset, edgeId, actor, via = 'individual') {
     const edge = findEdge(dataset, edgeId);
     if (!edge) throw new Error(`edge not found: ${edgeId}`);
     const hash = edge.revision.knowledge_hash;
     edge.lifecycle = 'active';
-    await pushOperation(dataset, { commandType: 'PROMOTE_CANDIDATE', actor, targetKind: 'edge', targetId: edgeId, beforeHash: hash, afterHash: hash });
+    await pushOperation(dataset, { commandType: 'PROMOTE_CANDIDATE', actor, targetKind: 'edge', targetId: edgeId, beforeHash: hash, afterHash: hash, params: { via } });
   }
 
-  async function rejectCandidate(dataset, edgeId, actor) {
+  async function rejectCandidate(dataset, edgeId, actor, via = 'individual') {
     const edge = findEdge(dataset, edgeId);
     if (!edge) throw new Error(`edge not found: ${edgeId}`);
     const hash = edge.revision.knowledge_hash;
     edge.lifecycle = 'rejected';
-    await pushOperation(dataset, { commandType: 'REJECT_CANDIDATE', actor, targetKind: 'edge', targetId: edgeId, beforeHash: hash, afterHash: hash });
+    await pushOperation(dataset, { commandType: 'REJECT_CANDIDATE', actor, targetKind: 'edge', targetId: edgeId, beforeHash: hash, afterHash: hash, params: { via } });
   }
 
   // ---- Review (§7.2: 生成 ≠ 確認。before_hash===after_hash) ----
