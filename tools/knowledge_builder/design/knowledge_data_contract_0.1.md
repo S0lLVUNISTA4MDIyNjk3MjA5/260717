@@ -129,7 +129,8 @@ Word対応 / PLM・CAD連携 / クラウド化 / 共同編集 / UI schema
   "revision":    { /* §6.5 */ },            // 必須
   "review":      { /* §7 */ },              // 必須
   "export_binding": {                       // 必須（§1.2 互換性要件）
-    "trace_id": "req-use-temperature"
+    "trace_id":     "req-use-temperature",  // 必須。既存Export側の識別子（§8.1: node_idとは役割分離）
+    "content_hash": "<64桁hex>"             // 必須。既存 computeRecordContentHash() と同一算出（§6.6）
   },
   "confidence":  0.91,                      // 必須。0..1。例外レビュー選別用（指示§16）
   "extensions":  {}                         // 必須（空オブジェクト可）。自由形
@@ -139,6 +140,11 @@ Word対応 / PLM・CAD連携 / クラウド化 / 共同編集 / UI schema
 **0.1で意図的に外したもの**（§11に予約）: `text_parts` / `key_text` / `hierarchy.path` /
 `hierarchy.ordinal` / `confidence` の内訳分解。
 評価で必要性が判明した時点で追加する（追加は非破壊）。
+
+**`node_id` と `export_binding.trace_id` は役割が異なる**（承認済み）。
+`node_id` は Knowledge Data 内部の決定的識別子（§8）、`export_binding.trace_id` は
+既存producer（PDF/Excel）が発行した trace_id をそのまま保持する互換用の値であり、
+Knowledge側の都合で変更・再生成しない。
 
 ### 3.2 `node_type`（0.1のenum）
 
@@ -227,6 +233,27 @@ Word対応 / PLM・CAD連携 / クラウド化 / 共同編集 / UI schema
 `lifecycle:"active"` かつ `review.*.status:"unreviewed"` で表す。自動昇格でも
 `generation.generated_by` / `confidence` / `evidence` は必ず残す。
 
+#### 4.4.1 3つの状態軸は独立（重要・混同禁止）
+
+Candidate と Edge を単一schema + `lifecycle` field で表現する（§4.4）決定とは別に、
+次の3軸は**互いに独立**した状態であり、どれか1つを見て他を推測してはならない。
+
+| 軸 | 値域 | 保存方法 | 意味 |
+|---|---|---|---|
+| **lifecycle** | `candidate` / `active` / `rejected` | `edge.lifecycle` に保存 | Relation Engineの提案が採用されたか |
+| **freshness** | `stale` / `current` | **保存しない。導出値**（§6.5 `edge_stale()`） | 元Nodeの内容変化で再評価が必要か |
+| **review** | Human: `unreviewed`/`reviewed`/`needs_fix`/`excluded`（Edgeは`not_applicable`可）<br>AI: 同様 | `edge.review.human.*` / `edge.review.ai.*` | 人間またはAIが内容を確認したか |
+
+3軸の組み合わせは全て意味があり、実際に起こり得る。例:
+
+- `active` + `current` + `review.human.status=="unreviewed"`: 自動昇格直後、未確認
+- `active` + `stale` + `review.human.status=="reviewed"`: 確認済みだが元Nodeが変更され再評価待ち
+- `candidate` + `current` + `review.human.status=="not_applicable"`: 未採用候補（レビュー対象外）
+
+**禁止事項**: 「`lifecycle=="active"` だから確認済み」「`review.human.status=="reviewed"` だから
+`freshness=="current"`」といった軸をまたいだ推測をUI・validation双方で行わない。
+`freshness` は常に `edge_stale()` / 対応するNode版で都度再計算する（§6.5参照）。
+
 ### 4.5 `evidence` — Matching Features（指示§8）
 
 **`matching_key` という単一項目は持たない。** 実際に寄与したFeatureを列挙する。
@@ -260,8 +287,8 @@ Word対応 / PLM・CAD連携 / クラウド化 / 共同編集 / UI schema
   "generated_by": { /* §6.4 Actor */ },      // 必須
   "generated_at": "2026-07-31T00:05:00.000Z",// 必須
   "engine":       "relation-engine",          // 必須
-  "source_node_content_hash": "<64桁hex>",   // 必須（§6.5 stale判定用）
-  "target_node_content_hash": "<64桁hex>"    // 必須（同上）
+  "source_node_knowledge_hash": "<64桁hex>", // 必須。生成時点のnode(source).revision.knowledge_hash（§6.6・stale判定用）
+  "target_node_knowledge_hash": "<64桁hex>"  // 必須。同上
 }
 ```
 
@@ -361,6 +388,27 @@ Word対応 / PLM・CAD連携 / クラウド化 / 共同編集 / UI schema
 この値をそのままハッシュ入力に使う。原文を捨てる設計にすると既存Exportが**構造的に不可能**になる。
 `text`（表示・解析用）と `provenance.verbatim`（原文）は**別field**であり混同してはならない。
 
+#### 6.1.1 losslessness 要件（validation条件・指示で必須化）
+
+**`provenance.verbatim` は、既存producerが要求するhash入力を byte/semantic loss なく
+再構成できなければならない。** field構造自体は0.1として最小でよいが、
+「既存Exportへ戻せること」を満たさない実装は不合格とする（§9.1 S-8 / §9.2 V-8）。
+
+producerごとの再構成条件:
+
+| producer | 既存hash入力（§1.1再掲） | `verbatim` からの再構成条件 |
+|---|---|---|
+| PDF | `trace_id`, `source_raw_text`, `tags` | `verbatim.source_raw_text` が既存 `source_raw_text` と**文字列として完全一致**（正規化前の生文字列。改行・全角空白等を一切変更しない） |
+| Excel | `trace_id`, `source_record`, `source_record_display`, `tags`, `source_row` | `verbatim.source_record` が既存 `source_record` オブジェクトと**キー・値ともに完全一致**（キー順は`canonicalJson`が吸収するため不問）。`verbatim.source_record_display` は既存値と一致、または既存契約どおり`null`。`verbatim.source_row` が既存 `source_row` と一致 |
+
+`tags` / `trace_id` は `verbatim` の外側（Node直下 / `export_binding`）に既に必須fieldとして
+存在するため、ここでの再構成対象は producer 固有部分（`source_raw_text` または
+`source_record`+`source_record_display`+`source_row`）に限定する。
+
+**検証方法**（Phase 2で実施。§10.4のround-trip検査に含める）: Knowledge Node から
+`export_binding.content_hash` を再計算し、元の既存Trace JSON上の `content_hash` と一致することを
+確認する。一致しなければ `verbatim` のどこかでlossが発生している。
+
 ### 6.2 SemanticAttributes（0.1は最小）
 
 ```jsonc
@@ -368,6 +416,7 @@ Word対応 / PLM・CAD連携 / クラウド化 / 共同編集 / UI schema
   "subject":        { "text": "空調ユニット", "concept_id": null },   // 必須（値はnull許容）
   "property":       { "text": "周囲温度", "concept_id": "temperature.operating" }, // 必須（同上）
   "statement_type": "constraint",             // 必須。enum
+  "modality":       "shall",                  // 任意（省略可）。§6.2.1
   "derived_by":     { /* §6.4 Actor */ },     // 必須
   "extensions":     {}
 }
@@ -376,9 +425,26 @@ Word対応 / PLM・CAD連携 / クラウド化 / 共同編集 / UI schema
 `statement_type` enum（0.1）: `constraint` / `capability` / `behavior` / `structure` /
 `procedure` / `information`
 
-**0.1で意図的に外したもの**（§11予約）: `modality`（shall/should/may）/ `polarity` /
-`conditions` / semantics内の個別confidence。
+**0.1で意図的に外したもの**（§11予約）: `polarity` / `conditions` / semantics内の個別confidence。
 これらは意味解析の精度評価が始まってから追加する方が、値域を実データに合わせられる。
+
+#### 6.2.1 `modality`（optional field。0.1から予約・実装済み）
+
+`modality` は **optional field**として0.1自身に含める（0.2への先送りにしない）。
+確実に判定できる場合のみ設定し、不明な場合は**field自体を省略**する（`null`固定ではなく省略可）。
+
+enum（0.1）: `shall` / `must` / `should` / `may` / `will` / `informative`
+
+- `shall` / `must`: 必須要求（強い義務）
+- `should`: 推奨
+- `may` / `will`: 許容・宣言
+- `informative`: 参考情報（義務を伴わない記述）
+
+判定はNode生成時のルールベース抽出（既存tools内の文言パターンとの整合）またはAIの
+意味付与のいずれでもよいが、**自信を持てない場合は設定しない**。誤ったmodalityを
+振ることは無設定より害が大きい（要求解釈を誤らせるため）。これを理由にα0.1のリリースは
+遅らせない — validationは「設定されていれば上記enumであること」のみを検査し（§9.1 S-6拡張）、
+未設定を許容する。
 
 **意味付与が未実施の表現**: `semantics: {}` ではなく
 `subject.text: null`, `property.text: null`, `statement_type: "information"` とする。
@@ -470,13 +536,13 @@ Human / AI / AI Agent は**編集主体として同等**に扱う。タグ体系
 ```jsonc
 "revision": {
   "content_revision": 5,                 // 必須。1始まり単調増加
-  "content_hash":     "<64桁hex>",       // 必須
+  "knowledge_hash":   "<64桁hex>",       // 必須。§6.6の定義。review stale判定・Edge stale判定に使う
   "updated_by":       { /* Actor */ },   // 必須
   "updated_at":       "2026-07-31T00:00:00.000Z"  // 必須
 }
 ```
 
-**content_hash の定義**:
+**`revision.knowledge_hash` の定義**:
 
 ```
 Node: hashParts('knowledge-node-content-v1',
@@ -491,22 +557,46 @@ Edge: hashParts('knowledge-edge-content-v1',
 - `provenance.ingested_at` 等は再取込のたびに変わり、不要なstale化を招く
 - `confidence` を含めると、AIの再評価でconfidenceだけ変わってもEdgeがstale化する（§12論点2）
 
-**Edge の stale 判定**:
+**Edge の stale 判定**（`knowledge_hash` を使う。§1.1の既存互換hashとは無関係）:
 
 ```
-edge_stale(edge) := edge.generation.source_node_content_hash != node(source).revision.content_hash
-                 || edge.generation.target_node_content_hash != node(target).revision.content_hash
+edge_stale(edge) := edge.generation.source_node_knowledge_hash != node(source).revision.knowledge_hash
+                 || edge.generation.target_node_knowledge_hash != node(target).revision.knowledge_hash
 ```
 
 指示§19の例（Requirement Rev.5 → satisfied_by → Design Rev.8 で Requirement が Rev.6 になったら
 Edge を stale にして Relation Engine で再評価）はこの定義で成立する。
 
-**revision番号ではなく content_hash で判定する理由**: 再取込で revision番号がリセットされても
+**revision番号ではなく `knowledge_hash` で判定する理由**: 再取込で revision番号がリセットされても
 内容が同じなら stale にならない。内容が実際に変わった場合のみ stale になる。
 指示§15「Drop → Build Knowledge」の再実行を安全にする。
 
 **stale は保存fieldではなく導出値**とする。保存すると更新漏れで嘘をつく。
 stale Edge は自動削除せず、Relation Engine の再評価対象としてマークするのみ。
+
+### 6.6 既存Export互換hashとKnowledge変更検知hashの分離（承認済み・重要）
+
+**2つのハッシュは責務も算出方法も別物であり、混同してはならない。**
+
+| | `export_binding.content_hash` | `revision.knowledge_hash` |
+|---|---|---|
+| 目的 | 既存Quantity Sidecar／照合ツールとのbinding互換 | Knowledge Node/EdgeのReview stale判定・Edge stale判定 |
+| 算出方法 | §1.1 既存 `computeRecordContentHash()` を**無改変で再利用** | §6.5 新規定義（`knowledge-node-content-v1` 等） |
+| 入力 | producerで分岐（PDF: `trace_id`+`source_raw_text`+`tags` / Excel: `trace_id`+`source_record`+`source_record_display`+`tags`+`source_row`） | `node_type`/`text`/`title`/`semantics`/`tags`/`quantities`/`parent_node_id`（Knowledgeとして意味を変える属性のみ） |
+| 変わる契機 | 原文・タグが変わったとき（既存契約のまま） | 上記に加え、`semantics.property`・quantity解釈・`node_type` 等のKnowledge属性が変わったとき |
+| 保存先 | `export_binding.content_hash`（Node直下） | `revision.knowledge_hash`（Node/Edge共通） |
+
+**分離が必要な理由**: 既存 `computeRecordContentHash()` は `semantics.property` や quantityの
+解釈結果、`node_type` の変更を入力に含まない。この既存hashだけで review stale を判定すると、
+Knowledge属性を変更してもレビューがstale化しない欠陥が生じる。したがって
+
+```
+既存Sidecar binding互換   → export_binding.content_hash（既存アルゴリズム、無改変）
+Node/Edge Review stale判定 → revision.knowledge_hash（新規定義、Knowledge属性を対象）
+```
+
+と責務を分離する。§7.3 の `reviewed_content_hash` は `revision.knowledge_hash` と比較する
+（既存の `export_binding.content_hash` とは比較しない）。
 
 ---
 
@@ -522,7 +612,7 @@ stale Edge は自動削除せず、Relation Engine の再評価対象として�
     "actor":       null,          // 必須。null|Actor
     "reviewed_at": null,          // 必須。null|canonical UTC timestamp
     "note":        null,          // 必須。null|string
-    "reviewed_content_hash": null // 必須。null|64桁hex（§7.3）
+    "reviewed_knowledge_hash": null // 必須。null|64桁hex（§7.3。revision.knowledge_hashと比較）
   },
   "ai": {
     "status":      "unreviewed",  // 必須（同上）
@@ -530,7 +620,7 @@ stale Edge は自動削除せず、Relation Engine の再評価対象として�
     "actor":       null,          // Actor（type は "ai" | "ai_agent"）
     "reviewed_at": null,
     "note":        null,
-    "reviewed_content_hash": null,
+    "reviewed_knowledge_hash": null,
     "method":      null,          // 必須。null|string（既存 ai_review_method 相当）
     "model":       null           // 必須。null|string（既存 ai_review_model 相当）
   }
@@ -547,11 +637,12 @@ stale Edge は自動削除せず、Relation Engine の再評価対象として�
 
 ### 7.3 レビューの stale 判定
 
-`reviewed_content_hash` はレビュー時点の `revision.content_hash` を記録する。
+`reviewed_knowledge_hash` はレビュー時点の `revision.knowledge_hash`（§6.6。既存の
+`export_binding.content_hash` ではない）を記録する。
 
 ```
 review_stale(target, track) := review[track].status == "reviewed"
-                            && review[track].reviewed_content_hash != target.revision.content_hash
+                            && review[track].reviewed_knowledge_hash != target.revision.knowledge_hash
 ```
 
 stale レビューを**自動で `unreviewed` へ戻さない**。`reviewed` のまま stale を導出値として提示する。
@@ -619,7 +710,7 @@ excel : "excel|sheet=<sheet>|row=<row>|path=<source_path>"
 | S-3 | hash形式: 64桁hex |
 | S-4 | timestamp: `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$`（既存rc2と同一） |
 | S-5 | `confidence` は 0..1 |
-| S-6 | enum: `node_type`/`relation_type`/`relation_category`/`lifecycle`/`statement_type`/`feature`/`effect`/`command_type`/`status` |
+| S-6 | enum: `node_type`/`relation_type`/`relation_category`/`lifecycle`/`statement_type`/`feature`/`effect`/`command_type`/`status`/`modality`（設定時のみ。未設定＝field省略は許容） |
 | S-7 | `provenance.locator` は `kind` による判別可能な共用体 |
 | S-8 | `provenance.verbatim` が producer に対応（pdf→`source_raw_text` 必須、excel→`source_record`+`source_row` 必須） |
 
@@ -632,12 +723,14 @@ excel : "excel|sheet=<sheet>|row=<row>|path=<source_path>"
 | V-3 | `node.provenance.source_document_id` が実在 | 参照整合 |
 | V-4 | `parent_node_id` が実在（null除く）かつ循環なし | 構造整合 |
 | V-5 | `node_id` / `edge_id` が §8 で再計算した値と一致 | ID決定性 |
-| V-6 | `revision.content_hash` が §6.5 で再計算した値と一致 | 改竄検出 |
+| V-6 | `revision.knowledge_hash` が §6.5 で再計算した値と一致 | 改竄検出 |
+| V-6b | `export_binding.content_hash` が既存 `computeRecordContentHash()` の再計算値と一致 | §6.6・Sidecar互換 |
 | V-7 | `relation_type` と `relation_category` の対応が §4.2 の表と一致 | §4.3 |
+| V-8 | `provenance.verbatim` から producer 固有hash入力を再構成した結果が、`export_binding.content_hash` と整合する（V-6bと合わせて losslessness を保証） | §6.1.1 |
 | V-C1 | `structural` → `lifecycle=="active"` | §4.3 |
 | V-C2 | `structural` → `confidence==1.0` | §4.3 |
 | V-C3 | `structural` → 両端Nodeの `source_document_id` が同一 | §4.3 |
-| V-R1 | `status=="reviewed"` → `actor`/`reviewed_at`/`reviewed_content_hash` が非null | §7 |
+| V-R1 | `status=="reviewed"` → `actor`/`reviewed_at`/`reviewed_knowledge_hash` が非null | §7 |
 | V-R2 | `status!="reviewed"` → `verdict==null` | §7 |
 | V-R3 | `command_type` が `REVIEW_*` の operation は `before_hash===after_hash` | **§7.2の機械的検査** |
 | V-R4 | `review.ai.actor.type` ∈ {`ai`,`ai_agent`}、`review.human.actor.type` == `human` | §6.4 |
@@ -731,8 +824,8 @@ Export した TraceRecordSet / Quantity Sidecar は、既存 `quantity_sidecar_b
 `evidence.features[].weight` / `evidence.features[].contribution` / `evidence.notes`
 
 ### Semantics
-`modality`（shall/should/may/informative/unknown）/ `polarity` / `conditions[]` /
-`subject.confidence` / `property.confidence` / `property.candidates[]`
+（`modality` は §6.2.1 のとおり 0.1 で optional field として予約済み。0.2以降の予約は次のみ）
+`polarity` / `conditions[]` / `subject.confidence` / `property.confidence` / `property.candidates[]`
 
 ### relation_type 追加予定
 `requires` / `derived_from` / `allocated_to` / `depends_on` / `constrains` /
@@ -752,15 +845,23 @@ Ontology語彙定義 / Node identity across restructuring（位置非依存の�
 1. **§4.4 lifecycle方式** — Candidate と Edge を別コレクションに分けず単一schemaの `lifecycle`
    field で区別する案。指示§18の「区別」を満たすと考えるが、別コレクションを意図されていた
    場合は差し戻し希望。
-2. **§6.5 content_hash の入力範囲** — `review`/`provenance`/`confidence` を除外した。
-   特に `confidence` 除外（AIが再評価してconfidenceだけ変わってもEdgeをstaleにしない）の是非。
+2. **【解決済み】§6.5/§6.6 knowledge_hash の入力範囲** — 指示により
+   `export_binding.content_hash`（既存アルゴリズム・Sidecar互換専用）と
+   `revision.knowledge_hash`（新規・Knowledge属性を対象とするReview/Edge stale判定用）に
+   分離した（§6.6）。`knowledge_hash` は `review`/`provenance`/`confidence` を除外する
+   （`confidence` 除外＝AIが再評価してconfidenceだけ変わってもEdgeをstaleにしない、という
+   判断を含む）。この分離方針自体の是非は確定事項として扱うが、`knowledge_hash` の入力field
+   一覧（`node_type`/`text`/`title`/`semantics`/`tags`/`quantities`/`parent_node_id`）の
+   過不足は引き続きレビュー対象。
 3. **§8 node_id の決定性** — 位置ベース（`source_path`）とし、節の挿入で node_id が変わることを
    0.1では許容した点の是非。
 4. **§6.3 Quantity の内部表現** — 既存 sidecar record と一致させた。将来の分離余地を
    `extensions` のみに頼る点の是非。
 5. **§7.3 stale レビューを自動で `unreviewed` へ戻さない**方針の是非。
-6. **§11 の予約範囲が妥当か** — 0.1 から外しすぎ／残しすぎがないか。特に `modality` を
-   0.1 から外した判断（要求文の shall/should 判別を初期評価で見たい場合は 0.1 へ戻す）。
+6. **【解決済み】§11 の予約範囲・`modality`** — 指示により `modality` は 0.2 への先送りをやめ、
+   §6.2.1 のとおり **0.1自身にoptional fieldとして予約・実装**した（確実な場合のみ設定、
+   不明なら省略）。§11 に残るその他の予約項目（`polarity`/`conditions`等）の要否は
+   引き続きレビュー対象。
 
 ---
 
