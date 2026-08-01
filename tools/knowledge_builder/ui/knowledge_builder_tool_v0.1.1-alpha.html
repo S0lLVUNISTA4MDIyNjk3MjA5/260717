@@ -124,7 +124,7 @@
     </select>
     <select id="nodeStatusFilter">
       <option value="all">状態: 全件</option>
-      <option value="unedited">要確認（未修正）</option>
+      <option value="unedited">未修正（初期状態）</option>
       <option value="edited">修正済</option>
     </select>
     <label><input type="checkbox" id="showStructural"> 文書の章・節などの構造ノードも表示</label>
@@ -214,7 +214,8 @@
   <button id="btnSave">Knowledge JSONを保存</button>
   <span class="status-line" id="saveStatus" style="margin:0; display:inline-block;"></span>
   <div class="muted" style="font-size:11px; margin-top:10px;">
-    作業量サマリ（件数が増えても人の操作件数を減らせているかの目安。α0.1.1で追加）
+    作業量サマリ（件数が増えても人の操作件数を減らせているかの目安。α0.1.1で追加）。
+    「操作対象にしたNode数」は選択または修正したNodeの重複除外件数であり、内容を実際に確認したことの保証ではありません。
   </div>
   <div class="metrics-grid" id="metricsGrid"></div>
 </section>
@@ -244,9 +245,10 @@ let dataset = null;
 let docAId = null, docBId = null;
 const actorHuman = { type: 'human', id: 'evaluator' };
 
-// UI専用の選択・閲覧ログ(Knowledge Data Contract 0.1のschemaには含めない。保存JSONにも出力しない)。
-// 「人が実際に確認したNode数」を later 集計するための補助。一度選択されたNodeは
-// チェックを外しても"確認履歴"としては残す(単純な現在選択数ではなく延べ確認数にするため)。
+// UI専用の選択・操作ログ(Knowledge Data Contract 0.1のschemaには含めない。保存JSONにも出力しない)。
+// 「操作対象にしたNode数」(選択または修正したNodeの重複除外件数)を集計するための補助。
+// 実際の内容確認を保証するものではない。一度選択されたNodeはチェックを外しても
+// "操作対象履歴"としては残す(単純な現在選択数ではなく延べ操作対象数にするため)。
 let selectedNodeIds = new Set();
 let nodeTouchLog = new Set();
 let selectedEdgeIds = new Set();
@@ -425,7 +427,7 @@ function renderNodeTable() {
     } else {
       tdStatus.innerHTML = isNodeEdited(node)
         ? '<span class="badge badge-edited">修正済</span>'
-        : '<span class="badge badge-unedited">要確認</span>';
+        : '<span class="badge badge-unedited">未修正</span>';
     }
     tr.appendChild(tdStatus);
 
@@ -771,7 +773,9 @@ function renderGraph() {
 
 // §15: 「全件数が増えても、人の操作件数を減らせたか」を確認するための最小限の集計。
 // すべてdataset.operations(既存のOperation History。§6.4)から導出し、専用の状態を二重管理しない。
-// nodeTouchLogのみUI専用の補助ログ(選択したことがあるNode)で、保存JSONには含まれない。
+// nodeTouchLogのみUI専用の補助ログ(選択または修正したことがあるNode)で、保存JSONには含まれない。
+// touchedNodeCountは「内容を実際に確認した」ことを保証するものではなく、あくまで
+// 選択または修正によって操作対象にしたNodeの重複除外件数(§注記参照)。
 function computeMetrics() {
   if (!dataset) return null;
   const totalNodes = contentNodes().length;
@@ -798,7 +802,7 @@ function renderMetrics() {
   if (!m) return;
   const cards = [
     ['全Node数', m.totalNodes],
-    ['人が確認したNode数', m.touchedNodeCount],
+    ['操作対象にしたNode数', m.touchedNodeCount],
     ['個別修正したNode数', m.editedNodeCount],
     ['関連候補 総数', m.totalCandidates],
     ['人が個別判断した候補数', m.individualDecisions],

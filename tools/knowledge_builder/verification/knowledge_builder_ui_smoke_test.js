@@ -71,7 +71,7 @@ async function main() {
   await page.selectOption('#nodeStatusFilter', 'unedited');
   await page.waitForTimeout(30);
   const uneditedCount = await page.$$eval('#nodeTableBody tr', rows => rows.length);
-  assert(uneditedCount === contentRowCount, '取込直後は全content Nodeが「要確認(未修正)」として表示される');
+  assert(uneditedCount === contentRowCount, '取込直後は全content Nodeが「未修正(初期状態)」として表示される');
   await page.selectOption('#nodeStatusFilter', 'all');
 
   // ---- Node複数選択 + タグ一括追加/削除(指示書§3) ----
