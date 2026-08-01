@@ -75,6 +75,12 @@
   .conf-low { color: #a12727; font-weight: 600; }
   .group-toggle { cursor: pointer; user-select: none; }
   .group-stats { font-weight: 400; color: #556; font-size: 11px; margin-left: 6px; }
+  .jump-target-row { outline: 2px solid #4a6cf7; outline-offset: -2px; }
+  .chip.disabled { opacity: .5; cursor: not-allowed; }
+  details#nodeAdvancedFilters summary { list-style: none; }
+  details#nodeAdvancedFilters summary::-webkit-details-marker { display: none; }
+  details#nodeAdvancedFilters summary::before { content: "▶ "; font-size: 10px; }
+  details#nodeAdvancedFilters[open] summary::before { content: "▼ "; }
 </style>
 </head>
 <body>
@@ -117,41 +123,47 @@
 </section>
 
 <section class="panel">
-  <h2>2. 文書内容を確認・修正 <span class="en">(Knowledge Nodes)</span></h2>
+  <h2>2. 変換結果を確認・修正 <span class="en">(Knowledge Nodes)</span></h2>
   <div class="explain">
-    読み込んだ文書の各項目を一覧で確認します。内容や分類、タグに誤りがある項目だけ修正してください。
-    検索やフィルタを使うと、確認したい項目を絞り込めます。
-    <br><span class="muted" style="font-size:11px;">1. 対象を絞る → 2. 内容を確認する → 3. 必要な項目だけ修正する</span>
+    変換結果に明らかな誤りがある項目だけを修正します。該当する項目がなければ、この画面の作業は完了です。
     <br><span class="muted" style="font-size:11px;">一覧の各行をKnowledge Nodeと呼びます。</span>
   </div>
   <div class="toolbar">
-    <input type="text" id="nodeSearch" placeholder="本文・タイトル・タグで検索">
-    <select id="nodeDocFilter">
-      <option value="all">文書: すべて</option>
-      <option value="A">文書A</option>
-      <option value="B">文書B</option>
-    </select>
-    <select id="nodeTypeFilter">
-      <option value="all">種別: すべて</option>
-      <option value="requirement">requirement</option>
-      <option value="design_item">design_item</option>
-      <option value="verification_item">verification_item</option>
-      <option value="statement">statement</option>
-      <option value="document">document</option>
-      <option value="section">section</option>
-    </select>
-    <select id="nodeTagFilter">
-      <option value="all">タグ: すべて</option>
-      <option value="__none__">(タグ未設定)</option>
-    </select>
-    <label><input type="checkbox" id="showStructural"> 文書の章・節などの構造ノードも表示</label>
+    <input type="text" id="nodeSearch" placeholder="ID・本文・タイトル・タグで検索" style="min-width:220px;">
     <label><input type="checkbox" id="nodeDetailMode"> 詳細表示</label>
-    <button id="btnNodeResetFilter" class="small secondary">フィルタ解除</button>
-    <span id="nodeFilterActiveBadge" class="filter-active-badge" style="display:none;">フィルタ適用中</span>
   </div>
-  <div class="muted" style="font-size:11px; margin: 2px 0 4px;">確認したい条件を選んでください。複数選択すると、すべての条件に当てはまる項目を表示します。</div>
-  <div class="toolbar" id="nodeQuickFilterRow"></div>
-  <div class="toolbar">
+  <div class="muted" style="font-size:11px; margin: 2px 0 4px;">確認したい観点を1つ選んでください。該当件数が0件の観点は、修正の必要がないことを示します。</div>
+  <div class="toolbar" id="nodeConfirmMenuRow"></div>
+  <div class="status-line" id="nodeConfirmGuidance" style="margin: 2px 0 8px;"></div>
+  <details id="nodeAdvancedFilters">
+    <summary style="cursor:pointer; font-size:12px; color:#4a6cf7;">詳細な絞り込み</summary>
+    <div class="toolbar" style="margin-top:8px;">
+      <select id="nodeDocFilter">
+        <option value="all">文書: すべて</option>
+        <option value="A">文書A</option>
+        <option value="B">文書B</option>
+      </select>
+      <select id="nodeTypeFilter">
+        <option value="all">種別: すべて</option>
+        <option value="requirement">requirement</option>
+        <option value="design_item">design_item</option>
+        <option value="verification_item">verification_item</option>
+        <option value="statement">statement</option>
+        <option value="document">document</option>
+        <option value="section">section</option>
+      </select>
+      <select id="nodeTagFilter">
+        <option value="all">タグ: すべて</option>
+        <option value="__none__">(タグ未設定)</option>
+      </select>
+      <label><input type="checkbox" id="showStructural"> 文書の章・節などの構造ノードも表示</label>
+      <button id="btnNodeResetFilter" class="small secondary">フィルタ解除</button>
+      <span id="nodeFilterActiveBadge" class="filter-active-badge" style="display:none;">フィルタ適用中</span>
+    </div>
+    <div class="muted" style="font-size:11px; margin: 6px 0 4px;">個別の条件で絞り込みたい場合に使用してください。複数選択すると、すべての条件に当てはまる項目を表示します。</div>
+    <div class="toolbar" id="nodeQuickFilterRow"></div>
+  </details>
+  <div class="toolbar" style="margin-top:8px;">
     <label><input type="checkbox" id="nodeSelectAll"> このページの全選択</label>
     <span class="muted">選択中: <span id="nodeSelectedCount">0</span>件</span>
     <select id="nodeBulkTagAdd"><option value="">選択Nodeへタグを一括追加...</option></select>
@@ -165,8 +177,8 @@
   <div class="table-scroll">
     <table id="nodeTable">
       <thead><tr>
-        <th></th><th>状態</th><th>文書</th><th>種別</th><th>短縮ID</th><th>タイトル</th><th>本文</th><th>タグ</th>
-        <th class="detail-col">信頼度</th><th class="detail-col">出典</th><th class="detail-col">revision</th><th class="detail-col">stale関連</th>
+        <th></th><th>文書</th><th>種別</th><th>短縮ID</th><th>タイトル</th><th>本文</th><th>タグ</th>
+        <th class="detail-col">編集履歴</th><th class="detail-col">信頼度</th><th class="detail-col">出典</th><th class="detail-col">revision</th><th class="detail-col">stale関連</th>
       </tr></thead>
       <tbody id="nodeTableBody"></tbody>
     </table>
@@ -179,6 +191,15 @@
     文書Aの各項目に対して、文書Bの関連候補を表示します。候補を開き、両方の本文と根拠を確認して、
     「採用」または「却下」を選んでください。
     <br><span class="muted" style="font-size:11px;">採用した関連はナレッジグラフに表示されます。</span>
+  </div>
+  <div class="toolbar" style="margin-bottom:4px;">
+    <label style="font-size:12px; font-weight:600;">表示基準:
+      <select id="edgeGroupBasis">
+        <option value="A" selected>文書Aを基準に表示</option>
+        <option value="B">文書Bを基準に表示</option>
+      </select>
+    </label>
+    <span id="edgeBasisNote" class="muted" style="font-size:11px; display:none;">生成済みの関連候補を、文書Bの項目ごとにまとめて表示しています。</span>
   </div>
   <div class="row" style="margin-bottom:8px;">
     <button id="btnGenerateCandidates" class="secondary">関連候補を自動生成</button>
@@ -225,7 +246,7 @@
   <div class="table-scroll">
     <table>
       <thead><tr>
-        <th></th><th>状態</th><th>関係</th><th>Source(A)</th><th>Target(B)</th><th>信頼度</th><th>根拠(evidence)</th><th>操作</th>
+        <th></th><th>状態</th><th>関係</th><th id="edgeColFocusHeader">文書Aの項目</th><th id="edgeColCandidateHeader">文書Bの関連候補</th><th>信頼度</th><th>根拠(evidence)</th><th>操作</th>
       </tr></thead>
       <tbody id="edgeTableBody"></tbody>
     </table>
@@ -334,17 +355,53 @@ let nodeShortIds = new Map();
 let expandedGroups = new Set();
 // Knowledge Graph: 選択中Node(UI専用。クリックで強調表示・周辺表示モードに使う)。
 let selectedGraphNodeId = null;
-// Node一覧: 有効なクイックフィルタの集合(UI専用)。
+// Node一覧: 詳細な絞り込み内の有効な条件の集合(UI専用)。
 let activeNodeQuickFilters = new Set();
+// Node一覧: 選択中の確認メニュー(UI専用。1つだけ選択可。null=未選択)。
+let selectedConfirmMenu = null;
+// Relation候補が一度でも生成されたか(UI専用。取込のたびにfalseへ戻る)。
+// 「関連づけ後に確認」メニューと詳細フィルタのRelation候補関連条件は、この値がtrueになるまで無効化する
+// (候補生成前は全content Nodeが"候補0件"になり誤解を招くため)。保存JSONには含めない。
+let candidatesGenerated = false;
+// Node一覧: 画面間ジャンプで強調表示する対象Node(UI専用)。
+let jumpHighlightNodeId = null;
+// Relation一覧: グループ化の基準(UI専用。'A'=文書A基準/既定, 'B'=文書B基準)。
+// 表示上のグループ化・列の並び順のみに影響し、edge.source_node_id/target_node_idは一切変更しない。
+let candidateGroupBasis = 'A';
 
 const NODE_QUICK_FILTERS = [
   { key: 'untagged', label: 'タグ未設定', test: n => n.tags.length === 0 },
   { key: 'unregistered', label: '未登録タグあり', test: n => (n.unregistered_tags || []).length > 0 },
   { key: 'low_confidence', label: `低confidence(<${LOW_CONFIDENCE_THRESHOLD})`, test: n => n.confidence < LOW_CONFIDENCE_THRESHOLD },
   { key: 'short_text', label: '本文が空/短い', test: n => (n.text || '').trim().length < SHORT_TEXT_THRESHOLD },
-  { key: 'edited', label: '修正済み', test: n => isNodeEdited(n) },
-  { key: 'no_candidates', label: 'Relation候補なし', test: n => nodeCandidateCount(n) === 0 },
-  { key: 'has_stale', label: 'stale Relationあり', test: n => nodeStaleRelationCount(n) > 0 },
+  { key: 'edited', label: '変更あり', test: n => isNodeEdited(n) },
+  { key: 'no_candidates', label: 'Relation候補なし', test: n => nodeCandidateCount(n) === 0, requiresCandidates: true },
+  { key: 'has_stale', label: 'stale Relationあり', test: n => nodeStaleRelationCount(n) > 0, requiresCandidates: true },
+];
+
+// Node一覧: 「確認メニュー」(§4)。通常の利用者はここから1つ選ぶ。各itemのtestはOR条件。
+const CONFIRM_MENUS = [
+  {
+    key: 'tags', label: 'タグを確認',
+    description: 'タグの付け忘れや、共有タグ辞書にないタグを確認します。',
+    test: n => n.tags.length === 0 || (n.unregistered_tags || []).length > 0,
+  },
+  {
+    key: 'text', label: '本文を確認',
+    description: '取込内容が不足している可能性がある項目を確認します。',
+    test: n => (n.text || '').trim().length < SHORT_TEXT_THRESHOLD || n.confidence < LOW_CONFIDENCE_THRESHOLD,
+  },
+  {
+    key: 'changed', label: '変更した項目を見る',
+    description: '今回、自分が変更した項目を見直します。',
+    test: n => isNodeEdited(n),
+  },
+  {
+    key: 'after_relation', label: '関連づけ後に確認',
+    description: '関連候補を生成した後に、関連が見つからなかった項目や、変更によって再確認が必要になった項目を確認します。',
+    requiresCandidates: true,
+    test: n => nodeCandidateCount(n) === 0 || nodeStaleRelationCount(n) > 0,
+  },
 ];
 
 function $(id) { return document.getElementById(id); }
@@ -395,6 +452,11 @@ async function ingest() {
     expandedGroups = new Set();
     selectedGraphNodeId = null;
     activeNodeQuickFilters = new Set();
+    selectedConfirmMenu = null;
+    candidatesGenerated = false;
+    jumpHighlightNodeId = null;
+    candidateGroupBasis = 'A';
+    $('edgeGroupBasis').value = 'A';
     resetNodeFilters();
     resetEdgeFilters();
     resetGraphFilters();
@@ -516,7 +578,8 @@ function filteredNodes() {
 
   const search = $('nodeSearch').value.trim();
   if (search) {
-    rows = rows.filter(n => (n.title || '').includes(search) || (n.text || '').includes(search) || n.tags.some(t => t.includes(search)));
+    rows = rows.filter(n => (n.title || '').includes(search) || (n.text || '').includes(search) ||
+      n.tags.some(t => t.includes(search)) || shortId(n).includes(search) || n.node_id.includes(search));
   }
   const docFilter = $('nodeDocFilter').value;
   if (docFilter !== 'all') {
@@ -530,9 +593,19 @@ function filteredNodes() {
   if (tagFilter === '__none__') rows = rows.filter(n => n.tags.length === 0);
   else if (tagFilter !== 'all') rows = rows.filter(n => n.tags.includes(tagFilter));
 
+  if (selectedConfirmMenu) {
+    const menu = CONFIRM_MENUS.find(m => m.key === selectedConfirmMenu);
+    if (menu && !(menu.requiresCandidates && !candidatesGenerated)) {
+      rows = rows.filter(n => {
+        if (n.node_type === 'document' || n.node_type === 'section') return false;
+        return menu.test(n);
+      });
+    }
+  }
+
   if (activeNodeQuickFilters.size > 0) {
     rows = rows.filter(n => {
-      if (n.node_type === 'document' || n.node_type === 'section') return false; // クイックフィルタは内容Node対象
+      if (n.node_type === 'document' || n.node_type === 'section') return false; // 詳細な絞り込みは内容Node対象
       return NODE_QUICK_FILTERS.filter(f => activeNodeQuickFilters.has(f.key)).every(f => f.test(n));
     });
   }
@@ -544,17 +617,68 @@ function renderNodeQuickFilterRow() {
   row.innerHTML = '';
   const rows = contentNodes();
   for (const f of NODE_QUICK_FILTERS) {
-    const count = rows.filter(f.test).length;
+    const disabled = f.requiresCandidates && !candidatesGenerated;
     const chip = document.createElement('span');
-    chip.className = 'chip' + (activeNodeQuickFilters.has(f.key) ? ' active' : '');
-    chip.innerHTML = `${esc(f.label)} <span class="count">${count}</span>`;
-    chip.addEventListener('click', () => {
-      if (activeNodeQuickFilters.has(f.key)) activeNodeQuickFilters.delete(f.key);
-      else activeNodeQuickFilters.add(f.key);
-      renderNodeTable();
-    });
+    if (disabled) {
+      chip.className = 'chip disabled';
+      chip.textContent = f.label;
+      chip.title = '関連候補を生成した後に使用できます。';
+    } else {
+      const count = rows.filter(f.test).length;
+      chip.className = 'chip' + (activeNodeQuickFilters.has(f.key) ? ' active' : '');
+      chip.innerHTML = `${esc(f.label)} <span class="count">${count}</span>`;
+      chip.addEventListener('click', () => {
+        if (activeNodeQuickFilters.has(f.key)) activeNodeQuickFilters.delete(f.key);
+        else activeNodeQuickFilters.add(f.key);
+        renderNodeTable();
+      });
+    }
     row.appendChild(chip);
   }
+}
+
+function renderNodeConfirmMenuRow() {
+  const row = $('nodeConfirmMenuRow');
+  row.innerHTML = '';
+  const rows = contentNodes();
+  for (const m of CONFIRM_MENUS) {
+    const disabled = m.requiresCandidates && !candidatesGenerated;
+    const chip = document.createElement('span');
+    if (disabled) {
+      chip.className = 'chip disabled';
+      chip.textContent = `${m.label}（候補生成後）`;
+      chip.title = '関連候補を生成した後に使用できます。';
+    } else {
+      const count = rows.filter(m.test).length;
+      chip.className = 'chip' + (selectedConfirmMenu === m.key ? ' active' : '');
+      chip.innerHTML = `${esc(m.label)} <span class="count">${count}</span>`;
+      chip.addEventListener('click', () => {
+        selectedConfirmMenu = (selectedConfirmMenu === m.key) ? null : m.key;
+        renderNodeTable();
+      });
+    }
+    row.appendChild(chip);
+  }
+  renderNodeConfirmGuidance();
+}
+
+function renderNodeConfirmGuidance() {
+  const box = $('nodeConfirmGuidance');
+  const notes = [];
+  if (!candidatesGenerated) {
+    notes.push('「関連づけ後に確認」は、「3. 文書間の関連を確認」で関連候補を生成した後に使用できます。');
+  }
+  if (selectedConfirmMenu) {
+    const menu = CONFIRM_MENUS.find(m => m.key === selectedConfirmMenu);
+    if (menu && !(menu.requiresCandidates && !candidatesGenerated)) {
+      const count = contentNodes().filter(menu.test).length;
+      const guidance = count === 0
+        ? 'この確認項目に該当するデータはありません。次の「文書間の関連を確認」へ進めます。'
+        : `確認対象が${count}件あります。内容を確認し、修正が必要な項目だけ変更してください。`;
+      notes.push(`${menu.description} ${guidance}`);
+    }
+  }
+  box.textContent = notes.join(' ');
 }
 
 function updateNodeSelectionUi() {
@@ -566,6 +690,7 @@ function updateNodeSelectionUi() {
 
 function renderNodeTable() {
   renderNodeQuickFilterRow();
+  renderNodeConfirmMenuRow();
   const table = $('nodeTable');
   table.className = $('nodeDetailMode').checked ? '' : 'simple-mode';
 
@@ -579,7 +704,9 @@ function renderNodeTable() {
 
   for (const node of rows) {
     const tr = document.createElement('tr');
-    tr.className = 'node-row' + (selectedNodeIds.has(node.node_id) ? ' selected-row' : '');
+    tr.className = 'node-row' + (selectedNodeIds.has(node.node_id) ? ' selected-row' : '') +
+      (jumpHighlightNodeId === node.node_id ? ' jump-target-row' : '');
+    tr.dataset.nodeId = node.node_id;
 
     const tdSel = document.createElement('td');
     const cb = document.createElement('input');
@@ -593,16 +720,6 @@ function renderNodeTable() {
     });
     tdSel.appendChild(cb);
     tr.appendChild(tdSel);
-
-    const tdStatus = document.createElement('td');
-    if (node.node_type === 'document' || node.node_type === 'section') {
-      tdStatus.innerHTML = '<span class="muted" style="font-size:10px;">-</span>';
-    } else {
-      tdStatus.innerHTML = isNodeEdited(node)
-        ? '<span class="badge badge-edited">修正済</span>'
-        : '<span class="badge badge-unedited">未修正</span>';
-    }
-    tr.appendChild(tdStatus);
 
     const side = node.provenance.source_document_id === docAId ? 'A' : 'B';
     const sideClass = side === 'A' ? 'doc-a' : 'doc-b';
@@ -648,6 +765,17 @@ function renderNodeTable() {
     const tdTags = document.createElement('td');
     tdTags.appendChild(renderTagEditor(node));
     tr.appendChild(tdTags);
+
+    const tdEditHistory = document.createElement('td');
+    tdEditHistory.className = 'detail-col';
+    if (node.node_type === 'document' || node.node_type === 'section') {
+      tdEditHistory.innerHTML = '<span class="muted" style="font-size:10px;">構造Node</span>';
+    } else {
+      tdEditHistory.innerHTML = isNodeEdited(node)
+        ? '<span class="badge badge-edited">変更あり</span>'
+        : '<span class="badge badge-unedited">変更なし</span>';
+    }
+    tr.appendChild(tdEditHistory);
 
     const tdConf = document.createElement('td');
     tdConf.className = 'detail-col';
@@ -760,6 +888,7 @@ async function generateCandidates() {
     generatedAt: new Date().toISOString(), existingPairKeys: existing
   });
   await KnowledgeStore.addCandidateEdges(dataset, candidates, { type: 'ai', id: 'relation-candidate-engine' });
+  candidatesGenerated = true;
   $('candidateStatus').textContent = `候補 ${candidates.length}件を生成しました。`;
   renderAll();
 }
@@ -808,8 +937,14 @@ function filteredEdges() {
   return rows;
 }
 
-function allSemanticEdgesForSource(sourceId) {
-  return dataset.edges.filter(e => e.relation_category === 'semantic' && e.source_node_id === sourceId);
+// candidateGroupBasisに応じて、グループ化に使うNode(=focus Node)のIDをedgeから取り出す。
+// A基準: focus=source_node_id(文書A) / B基準: focus=target_node_id(文書B)。
+// edge.source_node_id/target_node_id自体は一切変更しない(表示上のグループ化のみ)。
+function groupFocusNodeId(edge) {
+  return candidateGroupBasis === 'A' ? edge.source_node_id : edge.target_node_id;
+}
+function allSemanticEdgesForGroupNode(nodeId) {
+  return dataset.edges.filter(e => e.relation_category === 'semantic' && groupFocusNodeId(e) === nodeId);
 }
 
 function updateEdgeSelectionUi() {
@@ -820,6 +955,10 @@ function updateEdgeSelectionUi() {
 }
 
 function renderEdgeTable() {
+  $('edgeColFocusHeader').textContent = candidateGroupBasis === 'A' ? '文書Aの項目' : '文書Bの項目';
+  $('edgeColCandidateHeader').textContent = candidateGroupBasis === 'A' ? '文書Bの関連候補' : '文書Aの関連候補';
+  $('edgeBasisNote').style.display = candidateGroupBasis === 'B' ? 'inline' : 'none';
+
   const tbody = $('edgeTableBody');
   tbody.innerHTML = '';
   if (!dataset) { $('edgeCount').textContent = '0'; $('edgeTotalCount').textContent = '0'; updateEdgeSelectionUi(); return; }
@@ -828,36 +967,40 @@ function renderEdgeTable() {
   $('edgeCount').textContent = String(rows.length);
   $('edgeTotalCount').textContent = String(dataset.edges.filter(e => e.relation_category === 'semantic').length);
 
-  // Source Node単位でグループ化(折りたたみ可能)。グループ見出しには全体の内訳(未処理/採用/却下)を表示する。
+  // 表示基準のNode単位でグループ化(折りたたみ可能)。グループ見出しには全体の内訳(未処理/採用/却下)を表示する。
+  // グループ化はedge.source_node_id/target_node_idの値そのものには影響しない(表示専用)。
   const groups = new Map();
   for (const edge of rows) {
-    if (!groups.has(edge.source_node_id)) groups.set(edge.source_node_id, []);
-    groups.get(edge.source_node_id).push(edge);
+    const key = groupFocusNodeId(edge);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(edge);
   }
-  let groupList = [...groups.entries()].map(([sourceId, edges]) => {
+  let groupList = [...groups.entries()].map(([groupNodeId, edges]) => {
     edges.sort((a, b) => b.confidence - a.confidence);
-    const allForSource = allSemanticEdgesForSource(sourceId);
+    const allForGroup = allSemanticEdgesForGroupNode(groupNodeId);
     const stats = {
-      total: allForSource.length,
-      candidate: allForSource.filter(e => e.lifecycle === 'candidate').length,
-      active: allForSource.filter(e => e.lifecycle === 'active').length,
-      rejected: allForSource.filter(e => e.lifecycle === 'rejected').length,
+      total: allForGroup.length,
+      candidate: allForGroup.filter(e => e.lifecycle === 'candidate').length,
+      active: allForGroup.filter(e => e.lifecycle === 'active').length,
+      rejected: allForGroup.filter(e => e.lifecycle === 'rejected').length,
     };
-    return { sourceId, edges, maxConf: Math.max(...edges.map(e => e.confidence)), stats };
+    return { groupNodeId, edges, maxConf: Math.max(...edges.map(e => e.confidence)), stats };
   });
 
   const sortMode = $('edgeSort').value;
   if (sortMode === 'source_id') {
-    groupList.sort((a, b) => shortId(dataset.nodes.find(n => n.node_id === a.sourceId)).localeCompare(shortId(dataset.nodes.find(n => n.node_id === b.sourceId))));
+    groupList.sort((a, b) => shortId(dataset.nodes.find(n => n.node_id === a.groupNodeId)).localeCompare(shortId(dataset.nodes.find(n => n.node_id === b.groupNodeId))));
   } else if (sortMode === 'pending') {
     groupList.sort((a, b) => (b.stats.candidate - a.stats.candidate) || (b.maxConf - a.maxConf));
   } else {
     groupList.sort((a, b) => b.maxConf - a.maxConf);
   }
 
+  const basisLabel = candidateGroupBasis === 'A' ? '文書Aの項目' : '文書Bの項目';
+
   for (const group of groupList) {
-    const sourceNode = dataset.nodes.find(n => n.node_id === group.sourceId);
-    const isExpanded = expandedGroups.has(group.sourceId);
+    const groupNode = dataset.nodes.find(n => n.node_id === group.groupNodeId);
+    const isExpanded = expandedGroups.has(group.groupNodeId);
 
     const headerTr = document.createElement('tr');
     headerTr.className = 'group-header-row';
@@ -866,11 +1009,11 @@ function renderEdgeTable() {
     const toggleSpan = document.createElement('span');
     toggleSpan.className = 'group-toggle';
     toggleSpan.textContent = (isExpanded ? '▼ ' : '▶ ') +
-      `要求Node: [${shortId(sourceNode)}] ${sourceNode ? sourceNode.text.slice(0, 50) : group.sourceId}`;
-    toggleSpan.title = sourceNode ? sourceNode.node_id : group.sourceId;
+      `${basisLabel}: [${shortId(groupNode)}] ${groupNode ? groupNode.text.slice(0, 50) : group.groupNodeId}`;
+    toggleSpan.title = groupNode ? groupNode.node_id : group.groupNodeId;
     toggleSpan.addEventListener('click', () => {
-      if (expandedGroups.has(group.sourceId)) expandedGroups.delete(group.sourceId);
-      else expandedGroups.add(group.sourceId);
+      if (expandedGroups.has(group.groupNodeId)) expandedGroups.delete(group.groupNodeId);
+      else expandedGroups.add(group.groupNodeId);
       renderEdgeTable();
     });
     headerTd.appendChild(toggleSpan);
@@ -885,7 +1028,7 @@ function renderEdgeTable() {
       groupRejectBtn.textContent = 'このグループの候補をすべて却下';
       groupRejectBtn.addEventListener('click', async (ev) => {
         ev.stopPropagation();
-        for (const e of allSemanticEdgesForSource(group.sourceId)) {
+        for (const e of allSemanticEdgesForGroupNode(group.groupNodeId)) {
           if (e.lifecycle === 'candidate') await KnowledgeStore.rejectCandidate(dataset, e.edge_id, actorHuman, 'bulk');
         }
         renderAll();
@@ -898,10 +1041,12 @@ function renderEdgeTable() {
     if (!isExpanded) continue;
 
     for (const edge of group.edges) {
+      const sourceNode = edgeNode(edge, 'source_node_id');
       const target = edgeNode(edge, 'target_node_id');
       const stale = KnowledgeStore.isEdgeStale(dataset, edge);
       const tr = document.createElement('tr');
       tr.className = 'edge-row' + (selectedEdgeIds.has(edge.edge_id) ? ' selected-row' : '');
+      tr.dataset.edgeId = edge.edge_id;
 
       const tdSel = document.createElement('td');
       const cb = document.createElement('input');
@@ -923,15 +1068,17 @@ function renderEdgeTable() {
       tdRel.textContent = edge.relation_type;
       tr.appendChild(tdRel);
 
+      // 実データのsource(A)/target(B)は変えない。表示上の列の並びだけを基準に合わせて入れ替える。
       const tdSrc = document.createElement('td');
       tdSrc.innerHTML = `<span class="short-id" title="${esc(sourceNode ? sourceNode.node_id : '')}">${esc(shortId(sourceNode))}</span> ` +
         renderTagChipsHtml(sourceNode, edge) + `<br>${esc(sourceNode ? sourceNode.text.slice(0, 40) : '(不明)')}`;
-      tr.appendChild(tdSrc);
 
       const tdTgt = document.createElement('td');
       tdTgt.innerHTML = `<span class="short-id" title="${esc(target ? target.node_id : '')}">${esc(shortId(target))}</span> ` +
         renderTagChipsHtml(target, edge) + `<br>${esc(target ? target.text.slice(0, 40) : '(不明)')}`;
-      tr.appendChild(tdTgt);
+
+      if (candidateGroupBasis === 'A') { tr.appendChild(tdSrc); tr.appendChild(tdTgt); }
+      else { tr.appendChild(tdTgt); tr.appendChild(tdSrc); }
 
       const tdConf = document.createElement('td');
       const cl = confidenceLabel(edge.confidence);
@@ -999,7 +1146,7 @@ async function bulkRejectEdges() {
 }
 
 function expandAllGroups() {
-  expandedGroups = new Set(filteredEdges().map(e => e.source_node_id));
+  expandedGroups = new Set(filteredEdges().map(groupFocusNodeId));
   renderEdgeTable();
 }
 function collapseAllGroups() {
@@ -1172,8 +1319,27 @@ function renderGraphSelectedInfo() {
   const node = dataset.nodes.find(n => n.node_id === selectedGraphNodeId);
   if (!node) { box.style.display = 'none'; return; }
   box.style.display = 'block';
+  box.dataset.selectedNodeId = node.node_id;
   box.innerHTML = `<strong>選択中Node: [${esc(shortId(node))}] ${esc(node.title || '')}</strong><br>` +
-    `${esc(node.text)}<br><span class="muted" style="font-size:10px;">node_id: ${esc(node.node_id)}</span>`;
+    `${esc(node.text)}<br><span class="muted" style="font-size:10px;">node_id: ${esc(node.node_id)}</span><br>` +
+    `<button id="btnJumpToNodeList" class="small secondary" style="margin-top:6px;">この項目を変換結果一覧で確認</button>`;
+  $('btnJumpToNodeList').addEventListener('click', () => jumpToNodeInList(node.node_id));
+}
+
+// Knowledge Graphの選択Nodeから「2. 変換結果を確認・修正」の該当行へ移動する(§12)。
+// Node一覧の絞り込みを短縮ID検索へ切り替えるだけで、Knowledge JSONには一切影響しない。
+function jumpToNodeInList(nodeId) {
+  const node = dataset && dataset.nodes.find(n => n.node_id === nodeId);
+  if (!node) return;
+  resetNodeFilters();
+  selectedConfirmMenu = null;
+  if (node.node_type === 'document' || node.node_type === 'section') $('showStructural').checked = true;
+  $('nodeSearch').value = shortId(node);
+  jumpHighlightNodeId = nodeId;
+  $('nodeAdvancedFilters').open = false;
+  renderNodeTable();
+  const row = document.querySelector(`#nodeTableBody tr[data-node-id="${CSS.escape(nodeId)}"]`);
+  if (row) row.scrollIntoView({ block: 'center' });
 }
 
 function resetGraphFiltersAndRender() {
@@ -1272,6 +1438,11 @@ $('btnBulkAddTag').addEventListener('click', bulkAddTag);
 $('btnBulkRemoveTag').addEventListener('click', bulkRemoveTag);
 $('btnNodeResetFilter').addEventListener('click', resetNodeFiltersAndRender);
 
+$('edgeGroupBasis').addEventListener('change', () => {
+  candidateGroupBasis = $('edgeGroupBasis').value;
+  expandedGroups = new Set();
+  renderEdgeTable();
+});
 $('edgeStatusFilter').addEventListener('change', renderEdgeTable);
 $('edgeSearch').addEventListener('input', renderEdgeTable);
 $('edgeStaleOnly').addEventListener('change', renderEdgeTable);

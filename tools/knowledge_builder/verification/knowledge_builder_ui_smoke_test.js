@@ -46,20 +46,62 @@ async function main() {
   const contentRowCount = await page.$$eval('#nodeTableBody tr', rows => rows.length);
   assert(contentRowCount === expectedContentCount, `content Nodeが${expectedContentCount}件表示される(実際: ${contentRowCount})`);
 
-  // ---- 説明文修正の確認(人手評価後の指定文言。§5) ----
+  // ---- Node画面の作業設計・画面間Node識別改善(人手評価後の指示。§1-§17) ----
   const nodeHeading = (await page.locator('section.panel h2').nth(1).innerText()).trim();
-  assert(nodeHeading.startsWith('2. 文書内容を確認・修正'), `Node画面の見出しが指定どおり(実際: "${nodeHeading}")`);
+  assert(nodeHeading.startsWith('2. 変換結果を確認・修正'), `Node画面の見出しが指定どおり(実際: "${nodeHeading}")`);
+  assert(nodeHeading.includes('Knowledge Nodes'), 'Node画面の見出しに英語概念名Knowledge Nodesが補助表記として残る');
   const nodeExplainText = await page.locator('section.panel').nth(1).locator('.explain').innerText();
-  assert(nodeExplainText.includes('読み込んだ文書の各項目を一覧で確認します。内容や分類、タグに誤りがある項目だけ修正してください。'),
-    'Node画面の説明文が指定どおり(主文)');
-  assert(nodeExplainText.includes('対象を絞る') && nodeExplainText.includes('内容を確認する') && nodeExplainText.includes('必要な項目だけ修正する'),
-    'Node画面に作業の流れの案内(絞る→確認する→修正する)が表示される');
+  assert(nodeExplainText.includes('変換結果に明らかな誤りがある項目だけを修正します。該当する項目がなければ、この画面の作業は完了です。'),
+    'Node画面の説明文が指定どおり(主文。全件処理を示唆しない)');
   assert(nodeExplainText.includes('一覧の各行をKnowledge Nodeと呼びます'), 'Node画面にKnowledge Nodeの補足説明が表示される');
-  assert(!nodeExplainText.includes('知識の単位') && !nodeExplainText.includes('問題の可能性があるNode') &&
-    !nodeExplainText.includes('チップ') && !nodeExplainText.includes('全件を修正する必要はありません'),
-    'Node画面の説明文から指定された禁止表現が排除されている');
-  const nodeQuickFilterHelpCount = await page.locator('div.muted', { hasText: '確認したい条件を選んでください。複数選択すると、すべての条件に当てはまる項目を表示します。' }).count();
-  assert(nodeQuickFilterHelpCount > 0, 'Nodeクイックフィルタ付近の補助文が指定どおり');
+  assert(!nodeExplainText.includes('全件を確認') && !nodeExplainText.includes('確認済みにする'),
+    'Node画面の説明文が「全件確認」「確認済みにする」を示唆しない');
+
+  // §3: 状態列(編集履歴)は簡易表示では非表示。既存の未修正/修正済は使わない。
+  const simpleModeEditHistoryVisible = await page.isVisible('#nodeTableBody tr:first-child td.detail-col');
+  assert(!simpleModeEditHistoryVisible, '簡易表示(既定)では編集履歴列を含む詳細列が隠れる');
+  const oldLabelCount = await page.locator('#nodeTableBody').locator('text=未修正').count() +
+    await page.locator('#nodeTableBody').locator('text=修正済').count();
+  assert(oldLabelCount === 0, 'Node一覧に旧ラベル「未修正」「修正済」が残っていない');
+
+  // §4: 4つの確認メニュー(単一選択・OR結合)
+  const confirmMenuChipTexts = await page.locator('#nodeConfirmMenuRow .chip').allInnerTexts();
+  assert(confirmMenuChipTexts.some(t => t.includes('タグを確認')), '確認メニューに「タグを確認」がある');
+  assert(confirmMenuChipTexts.some(t => t.includes('本文を確認')), '確認メニューに「本文を確認」がある');
+  assert(confirmMenuChipTexts.some(t => t.includes('変更した項目を見る')), '確認メニューに「変更した項目を見る」がある');
+  assert(confirmMenuChipTexts.some(t => t.includes('関連づけ後に確認')), '確認メニューに「関連づけ後に確認」がある');
+  assert((await page.locator('#nodeConfirmMenuRow .chip').count()) === 4, '確認メニューは4種類だけ表示される');
+
+  // §5: 候補生成前は「関連づけ後に確認」が無効化され、全件が「候補なし」扱いにならない
+  const afterRelationChipPre = page.locator('#nodeConfirmMenuRow .chip', { hasText: '関連づけ後に確認' });
+  assert(await afterRelationChipPre.evaluate(el => el.classList.contains('disabled')), '候補生成前は「関連づけ後に確認」が無効化されている');
+  const guidancePre = await page.textContent('#nodeConfirmGuidance');
+  assert(guidancePre.includes('関連候補を生成した後に使用できます'), '候補生成前は「関連づけ後に確認」の案内が表示される');
+
+  // 詳細な絞り込み(§7): 旧クイックフィルタ7種はここへ移動し、修正済み→変更ありへ改称
+  await page.click('#nodeAdvancedFilters summary');
+  const advancedChipTexts = await page.locator('#nodeQuickFilterRow .chip').allInnerTexts();
+  assert(advancedChipTexts.length === 7, `詳細な絞り込みに旧クイックフィルタ7種が表示される(実際: ${advancedChipTexts.length})`);
+  assert(advancedChipTexts.some(t => t.includes('変更あり')), '詳細な絞り込みの「修正済み」が「変更あり」に改称されている');
+  assert(!advancedChipTexts.some(t => t.includes('修正済み')), '詳細な絞り込みに旧ラベル「修正済み」が残っていない');
+  const noCandidatesChipAdvanced = page.locator('#nodeQuickFilterRow .chip', { hasText: 'Relation候補なし' });
+  assert(await noCandidatesChipAdvanced.evaluate(el => el.classList.contains('disabled')), '候補生成前は詳細絞り込みの「Relation候補なし」も無効化されている');
+  const hasStaleChipAdvanced = page.locator('#nodeQuickFilterRow .chip', { hasText: 'stale Relationあり' });
+  assert(await hasStaleChipAdvanced.evaluate(el => el.classList.contains('disabled')), '候補生成前は詳細絞り込みの「stale Relationあり」も無効化されている');
+  await page.click('#nodeAdvancedFilters summary');
+
+  // §4: 確認メニュー選択時の件数・案内文(0件/N件)
+  const tagsMenuChip = page.locator('#nodeConfirmMenuRow .chip', { hasText: 'タグを確認' });
+  await tagsMenuChip.click();
+  await page.waitForTimeout(30);
+  const tagsMenuGuidance = await page.textContent('#nodeConfirmGuidance');
+  assert(/確認対象が\d+件あります|この確認項目に該当するデータはありません/.test(tagsMenuGuidance),
+    `確認メニュー選択時に0件/N件いずれかの案内文が表示される(実際: "${tagsMenuGuidance}")`);
+  const filteredByTagsMenu = await page.$$eval('#nodeTableBody tr', rows => rows.length);
+  assert(filteredByTagsMenu <= contentRowCount, '確認メニュー「タグを確認」でNode一覧が絞り込まれる');
+  await tagsMenuChip.click();
+  await page.waitForTimeout(30);
+  assert((await page.$$eval('#nodeTableBody tr', rows => rows.length)) === contentRowCount, '確認メニューを再クリックで選択解除・全件表示に戻る');
 
   const relationHeading = (await page.locator('section.panel h2').nth(2).innerText()).trim();
   assert(relationHeading.startsWith('3. 文書間の関連を確認'), 'Relation画面の見出しは維持されている(今回変更対象外)');
@@ -72,48 +114,59 @@ async function main() {
   const confidenceHelpCount = await page.locator('div.muted', { hasText: '信頼度は候補の並び順を決める参考値です。採用・却下は、本文と根拠を確認して判断してください。' }).count();
   assert(confidenceHelpCount > 0, 'confidence/evidenceの説明が表の近くに表示される');
 
-  // ---- Node一覧: 短縮ID・クイックフィルタ・簡易/詳細表示 ----
+  // ---- Node一覧: 短縮ID・詳細な絞り込み・簡易/詳細表示 ----
   const shortIdCount = await page.locator('#nodeTableBody .short-id').count();
   assert(shortIdCount === contentRowCount, `全Nodeに短縮IDが表示される(実際: ${shortIdCount}/${contentRowCount})`);
   const firstShortId = await page.locator('#nodeTableBody .short-id').first().innerText();
   assert(/^[AB]-\d{3}$/.test(firstShortId), `短縮IDが A-001 等の表記規則に従う(実際: "${firstShortId}")`);
 
-  const quickChipCount = await page.locator('#nodeQuickFilterRow .chip').count();
-  assert(quickChipCount === 7, `Nodeクイックフィルタが7種類表示される(実際: ${quickChipCount})`);
-  const noCandidatesChip = page.locator('#nodeQuickFilterRow .chip', { hasText: 'Relation候補なし' });
-  const noCandidatesCountBefore = await noCandidatesChip.innerText();
-  assert(noCandidatesCountBefore.includes(String(expectedContentCount)), `候補生成前は「Relation候補なし」チップが全content Node件数と一致(実際: ${noCandidatesCountBefore})`);
-  await noCandidatesChip.click();
-  await page.waitForTimeout(30);
-  const filteredByChip = await page.$$eval('#nodeTableBody tr', rows => rows.length);
-  assert(filteredByChip === contentRowCount, 'クイックフィルタ「Relation候補なし」適用でNode一覧が絞り込まれる(候補生成前は全件該当)');
-  const nodeFilterBadgeVisible1 = await page.isVisible('#nodeFilterActiveBadge');
-  assert(nodeFilterBadgeVisible1, 'クイックフィルタ適用中は「フィルタ適用中」バッジが表示される');
-  await noCandidatesChip.click();
-
   await page.check('#nodeDetailMode');
   await page.waitForTimeout(30);
   const detailColVisible = await page.isVisible('#nodeTableBody tr:first-child td.detail-col');
-  assert(detailColVisible, '詳細表示ONで信頼度等の詳細列が見える');
+  assert(detailColVisible, '詳細表示ONで編集履歴・信頼度等の詳細列が見える');
+  const editHistoryValues = await page.locator('#nodeTableBody tr:first-child td.detail-col').first().innerText();
+  assert(editHistoryValues.includes('変更なし') || editHistoryValues.includes('変更あり'), `編集履歴列の値が指定どおり(実際: "${editHistoryValues}")`);
   await page.uncheck('#nodeDetailMode');
   const detailColHidden = await page.isVisible('#nodeTableBody tr:first-child td.detail-col');
-  assert(!detailColHidden, '簡易表示(既定)では詳細列が隠れる');
+  assert(!detailColHidden, '簡易表示(既定)では詳細列(編集履歴含む)が隠れる');
 
+  await page.click('#nodeAdvancedFilters summary');
   await page.check('#showStructural');
   const withStructuralCount = await page.$$eval('#nodeTableBody tr', rows => rows.length);
   assert(withStructuralCount > contentRowCount, '構造Node表示ONで行数が増える(document/section)');
   const structuralNonCompatCount = await page.locator('#nodeTableBody td', { hasText: '構造Node・legacy Trace非互換' }).count();
   assert(structuralNonCompatCount > 0, '構造Node(document/section)は「legacy Trace非互換」と明示表示される(export_binding:null)');
+  await page.check('#nodeDetailMode');
+  const structuralEditHistory = await page.locator('#nodeTableBody td.detail-col', { hasText: '構造Node' }).count();
+  assert(structuralEditHistory > 0, '構造Nodeの編集履歴列は「構造Node」と表示され、変更なし/変更ありと混同されない');
+  await page.uncheck('#nodeDetailMode');
   await page.uncheck('#showStructural');
 
+  // §8: 検索は本文・タイトル・タグに加え、短縮ID・正式node_idにも一致する
   await page.fill('#nodeSearch', '温度');
   await page.waitForTimeout(30);
   const searchFilteredCount = await page.$$eval('#nodeTableBody tr', rows => rows.length);
   assert(searchFilteredCount > 0 && searchFilteredCount <= contentRowCount, `検索「温度」で件数が絞り込まれる(${searchFilteredCount}/${contentRowCount})`);
+  const searchPlaceholder = await page.getAttribute('#nodeSearch', 'placeholder');
+  assert(searchPlaceholder === 'ID・本文・タイトル・タグで検索', `Node検索のplaceholderが指定どおり(実際: "${searchPlaceholder}")`);
+  await page.fill('#nodeSearch', firstShortId);
+  await page.waitForTimeout(30);
+  const shortIdSearchRows = await page.$$eval('#nodeTableBody tr', rows => rows.length);
+  assert(shortIdSearchRows === 1, `短縮ID「${firstShortId}」での検索で1件に絞り込まれる(実際: ${shortIdSearchRows})`);
+  const searchedShortId = await page.locator('#nodeTableBody .short-id').first().innerText();
+  assert(searchedShortId === firstShortId, '短縮ID検索の結果行が検索対象と一致する');
+  const fullNodeId = await page.locator('#nodeTableBody .short-id').first().getAttribute('title');
+  await page.fill('#nodeSearch', fullNodeId);
+  await page.waitForTimeout(30);
+  const nodeIdSearchRows = await page.$$eval('#nodeTableBody tr', rows => rows.length);
+  assert(nodeIdSearchRows === 1, `正式node_id「${fullNodeId}」での検索でも1件に絞り込まれる(実際: ${nodeIdSearchRows})`);
+
   await page.click('#btnNodeResetFilter');
+  await page.fill('#nodeSearch', '');
   await page.waitForTimeout(30);
   const afterResetCount = await page.$$eval('#nodeTableBody tr', rows => rows.length);
   assert(afterResetCount === contentRowCount, 'Nodeの「フィルタ解除」で全件表示に戻る');
+  await page.click('#nodeAdvancedFilters summary');
 
   // ---- Node複数選択 + タグ一括追加/削除 + 選択行の強調 ----
   const nodeCheckboxes = page.locator('#nodeTableBody input.node-select-checkbox');
@@ -163,6 +216,67 @@ async function main() {
 
   const shortIdInEdgeTable = await page.locator('#edgeTableBody tr.edge-row .short-id').first().innerText();
   assert(/^[AB]-\d{3}$/.test(shortIdInEdgeTable), `Relation一覧のSource/Targetにも短縮IDが表示される(実際: "${shortIdInEdgeTable}")`);
+
+  // §9: Node一覧とRelation一覧で同一Nodeの短縮IDが一致する
+  const nodeListFirstShortIdSpan = page.locator('#nodeTableBody .short-id').first();
+  const nodeListFirstShortIdText = await nodeListFirstShortIdSpan.innerText();
+  const nodeListFirstNodeId = await nodeListFirstShortIdSpan.getAttribute('title');
+  const matchingEdgeSpan = page.locator(`#edgeTableBody .short-id[title="${nodeListFirstNodeId}"]`).first();
+  if (await matchingEdgeSpan.count() > 0) {
+    assert((await matchingEdgeSpan.innerText()) === nodeListFirstShortIdText, 'Node一覧とRelation一覧で同一Nodeの短縮IDが一致する(同一node_idに対し常に同じ短縮ID)');
+  } else {
+    console.log('INFO: Node一覧先頭NodeがRelation一覧の候補に含まれないため短縮ID一致確認は次のNodeでスキップ扱い');
+  }
+
+  // ---- Relation Candidateの表示基準切替(文書A基準/文書B基準) §「Relation Candidateの表示基準切替」指示 ----
+  const focusHeaderA = await page.textContent('#edgeColFocusHeader');
+  const candidateHeaderA = await page.textContent('#edgeColCandidateHeader');
+  assert(focusHeaderA === '文書Aの項目' && candidateHeaderA === '文書Bの関連候補', 'A基準(既定)の列見出しが指定どおり');
+  assert(await page.isHidden('#edgeBasisNote'), 'A基準表示では注意文が表示されない');
+  const edgeIdsBasisA = (await page.$$eval('#edgeTableBody tr.edge-row', rows => rows.map(r => r.dataset.edgeId))).sort();
+  const totalCountBasisA = await page.textContent('#edgeTotalCount');
+  const nodeTotalBeforeBasisSwitch = await page.textContent('#nodeTotalCount');
+
+  await page.selectOption('#edgeGroupBasis', 'B');
+  await page.waitForTimeout(30);
+  const focusHeaderB = await page.textContent('#edgeColFocusHeader');
+  const candidateHeaderB = await page.textContent('#edgeColCandidateHeader');
+  assert(focusHeaderB === '文書Bの項目' && candidateHeaderB === '文書Aの関連候補', 'B基準の列見出しが指定どおり(固定的なSource/Targetではない)');
+  assert(await page.isVisible('#edgeBasisNote'), 'B基準表示では注意文が表示される');
+  const basisNoteText = await page.textContent('#edgeBasisNote');
+  assert(basisNoteText.includes('生成済みの関連候補を、文書Bの項目ごとにまとめて表示しています。'), 'B基準の注意文言が指定どおり');
+
+  const groupHeaderCountBasisB = await page.$$eval('#edgeTableBody tr.group-header-row', rows => rows.length);
+  assert(groupHeaderCountBasisB > 0, 'B基準でも文書Bの項目単位のグループが表示される');
+  await page.click('#btnExpandAllGroups');
+  await page.waitForTimeout(30);
+  const totalCountBasisB = await page.textContent('#edgeTotalCount');
+  assert(totalCountBasisB === totalCountBasisA, `A基準とB基準でCandidate総数が変わらない(A:${totalCountBasisA} / B:${totalCountBasisB})`);
+  const edgeIdsBasisB = (await page.$$eval('#edgeTableBody tr.edge-row', rows => rows.map(r => r.dataset.edgeId))).sort();
+  assert(JSON.stringify(edgeIdsBasisA) === JSON.stringify(edgeIdsBasisB), '表示切替後も同じedge_id集合を参照する(逆向きEdgeの新規生成や欠落がない)');
+  const shortIdInEdgeTableBasisB = await page.locator('#edgeTableBody tr.edge-row .short-id').first().innerText();
+  assert(/^[AB]-\d{3}$/.test(shortIdInEdgeTableBasisB), 'B基準表示でも短縮IDが表示される');
+  const nodeTotalAfterBasisSwitch = await page.textContent('#nodeTotalCount');
+  assert(nodeTotalAfterBasisSwitch === nodeTotalBeforeBasisSwitch, 'Node総数が表示基準切替の前後で変わらない');
+
+  // B基準で1件採用し、A基準へ戻しても結果が即時反映されることを確認する
+  const firstCandidateRowBasisB = page.locator('#edgeTableBody tr.edge-row').first();
+  const acceptedEdgeIdBasisB = await firstCandidateRowBasisB.getAttribute('data-edge-id');
+  await firstCandidateRowBasisB.locator('button', { hasText: '採用' }).click();
+  await page.waitForTimeout(50);
+  await page.selectOption('#edgeStatusFilter', 'all');
+  await page.waitForTimeout(30);
+  await page.selectOption('#edgeGroupBasis', 'A');
+  await page.waitForTimeout(30);
+  await page.click('#btnExpandAllGroups');
+  await page.waitForTimeout(30);
+  const acceptedRowBasisA = page.locator(`#edgeTableBody tr.edge-row[data-edge-id="${acceptedEdgeIdBasisB}"]`);
+  const acceptedRowStateBasisA = await acceptedRowBasisA.locator('td').nth(1).innerText();
+  assert(acceptedRowStateBasisA.includes('採用済み'), 'B基準で採用した結果がA基準表示へ即時反映される(edge_id単位で状態が共有される)');
+  await page.selectOption('#edgeStatusFilter', 'candidate');
+  await page.waitForTimeout(30);
+  await page.click('#btnExpandAllGroups');
+  await page.waitForTimeout(30);
 
   const matchedTagChipCount = await page.locator('#edgeTableBody .tag-chip.matched').count();
   assert(matchedTagChipCount >= 0, '一致タグの強調表示(matchedクラス)がエラーなく描画される');
@@ -298,6 +412,29 @@ async function main() {
   const selectedInfoText = await page.textContent('#graphSelectedInfo');
   assert(/^選択中Node: \[[AB]-\d{3}\]/.test(selectedInfoText.trim()), '選択中Node情報に短縮IDが表示される');
 
+  // §9: Graphで選択したNodeの短縮IDが、Node一覧で同一node_idに付与された短縮IDと一致する
+  const graphSelectedShortId = selectedInfoText.trim().match(/^選択中Node: \[([AB]-\d{3})\]/)[1];
+  const graphSelectedNodeId = await page.getAttribute('#graphSelectedInfo', 'data-selected-node-id');
+  const nodeListMatchingShortId = await page.locator(`#nodeTableBody .short-id[title="${graphSelectedNodeId}"]`).innerText();
+  assert(nodeListMatchingShortId === graphSelectedShortId, 'Graphで選択したNodeの短縮IDがNode一覧の同一Nodeと一致する(3画面で統一)');
+
+  // §12: Graphの選択Node情報から「この項目を変換結果一覧で確認」でNode一覧へジャンプできる
+  const jumpBtn = page.locator('#btnJumpToNodeList');
+  assert(await jumpBtn.count() === 1, 'Graphの選択Node情報パネルに「この項目を変換結果一覧で確認」ボタンが表示される');
+  await jumpBtn.click();
+  await page.waitForTimeout(50);
+  const nodeSearchAfterJump = await page.inputValue('#nodeSearch');
+  assert(nodeSearchAfterJump === graphSelectedShortId, 'ジャンプ後、Node検索欄に対象Nodeの短縮IDが設定される');
+  const rowsAfterJump = await page.$$eval('#nodeTableBody tr', rows => rows.length);
+  assert(rowsAfterJump === 1, 'ジャンプ後、Node一覧が対象Node 1件へ絞り込まれる');
+  const jumpTargetRowCount = await page.locator('#nodeTableBody tr.jump-target-row').count();
+  assert(jumpTargetRowCount === 1, 'ジャンプ後、対象Nodeの行が強調表示される');
+  const jumpedRowNodeId = await page.locator('#nodeTableBody tr').first().getAttribute('data-node-id');
+  assert(jumpedRowNodeId === graphSelectedNodeId, 'ジャンプ後に表示される行がGraphで選択したNodeと一致する');
+  await page.fill('#nodeSearch', '');
+  await page.waitForTimeout(30);
+  assert((await page.$$eval('#nodeTableBody tr', rows => rows.length)) === contentRowCount, 'ジャンプ由来の検索を解除すると全件表示に戻る');
+
   await page.check('#graphFocusMode');
   await page.waitForTimeout(30);
   const focusNodeCountText = await page.textContent('#graphNodeCount');
@@ -331,8 +468,22 @@ async function main() {
     '保存JSON内のStructural Nodeはexport_binding===null');
   assert(saved.operations.some(op => op.params && op.params.via === 'bulk'),
     '保存JSONのoperation historyに一括操作(via:"bulk")が記録される');
-  assert(!savedText.includes('nodeShortIds') && !savedText.includes('selectedGraphNodeId') && !savedText.includes('expandedGroups'),
-    '保存JSONに短縮ID対応表・Graph選択状態・グループ展開状態などのUI専用状態が含まれない(画面変更がKnowledge JSONへ影響しない)');
+  assert(!savedText.includes('nodeShortIds') && !savedText.includes('selectedGraphNodeId') && !savedText.includes('expandedGroups') &&
+    !savedText.includes('selectedConfirmMenu') && !savedText.includes('candidatesGenerated') && !savedText.includes('candidateGroupBasis') &&
+    !savedText.includes('jumpHighlightNodeId') && !savedText.includes('activeNodeQuickFilters'),
+    '保存JSONに短縮ID対応表・Graph選択状態・グループ展開状態・確認メニュー選択・候補生成フラグ・表示基準・ジャンプ強調などのUI専用状態が含まれない(画面変更がKnowledge JSONへ影響しない)');
+
+  // ---- 表示基準切替がKnowledge JSONのsource/target・件数へ影響しないことの確認 ----
+  const nodeDocMap = new Map(saved.nodes.map(n => [n.node_id, n.provenance.source_document_id]));
+  const savedSemanticEdges = saved.edges.filter(e => e.relation_category === 'semantic');
+  const sourceDocIds = new Set(savedSemanticEdges.map(e => nodeDocMap.get(e.source_node_id)));
+  const targetDocIds = new Set(savedSemanticEdges.map(e => nodeDocMap.get(e.target_node_id)));
+  assert(sourceDocIds.size === 1, '保存JSON: semantic edgeのsource_node_idは常に同一文書に属する(B基準表示で入れ替わらない)');
+  assert(targetDocIds.size === 1, '保存JSON: semantic edgeのtarget_node_idは常に同一文書に属する(B基準表示で入れ替わらない)');
+  assert([...sourceDocIds][0] !== [...targetDocIds][0], '保存JSON: source文書とtarget文書は異なる(方向が保たれている)');
+  const savedPairKeys = new Set(savedSemanticEdges.map(e => `${e.source_node_id}|${e.target_node_id}`));
+  const reverseDuplicates = savedSemanticEdges.filter(e => savedPairKeys.has(`${e.target_node_id}|${e.source_node_id}`));
+  assert(reverseDuplicates.length === 0, '保存JSON: 表示基準切替によって逆向きEdgeが重複生成されていない');
 
   assert(consoleErrors.length === 0, `ブラウザconsole errorが0件(実際: ${consoleErrors.length}件${consoleErrors.length ? ': ' + consoleErrors[0] : ''})`);
 
