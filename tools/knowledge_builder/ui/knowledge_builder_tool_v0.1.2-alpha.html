@@ -117,10 +117,12 @@
 </section>
 
 <section class="panel">
-  <h2>2. ノードを確認・修正 <span class="en">(Knowledge Nodes)</span></h2>
+  <h2>2. 文書内容を確認・修正 <span class="en">(Knowledge Nodes)</span></h2>
   <div class="explain">
-    文書から生成された"知識の単位"（ノード / Knowledge Node）を確認します。<strong>通常は全件を修正する必要はありません。</strong>
-    下のチップ（クイックフィルタ）で「問題の可能性があるNode」だけへすぐ絞り込めます。件数はチップに表示されます。
+    読み込んだ文書の各項目を一覧で確認します。内容や分類、タグに誤りがある項目だけ修正してください。
+    検索やフィルタを使うと、確認したい項目を絞り込めます。
+    <br><span class="muted" style="font-size:11px;">1. 対象を絞る → 2. 内容を確認する → 3. 必要な項目だけ修正する</span>
+    <br><span class="muted" style="font-size:11px;">一覧の各行をKnowledge Nodeと呼びます。</span>
   </div>
   <div class="toolbar">
     <input type="text" id="nodeSearch" placeholder="本文・タイトル・タグで検索">
@@ -147,6 +149,7 @@
     <button id="btnNodeResetFilter" class="small secondary">フィルタ解除</button>
     <span id="nodeFilterActiveBadge" class="filter-active-badge" style="display:none;">フィルタ適用中</span>
   </div>
+  <div class="muted" style="font-size:11px; margin: 2px 0 4px;">確認したい条件を選んでください。複数選択すると、すべての条件に当てはまる項目を表示します。</div>
   <div class="toolbar" id="nodeQuickFilterRow"></div>
   <div class="toolbar">
     <label><input type="checkbox" id="nodeSelectAll"> このページの全選択</label>
@@ -173,13 +176,13 @@
 <section class="panel">
   <h2>3. 文書間の関連を確認 <span class="en">(Relations / Edges)</span></h2>
   <div class="explain">
-    文書Aと文書Bのノードから、"関連している可能性がある組み合わせ"を自動抽出します。<strong>要求Node（Source）ごとに
-    グループ化</strong>されており、見出しをクリックすると候補を展開できます。候補を確認し、正しければ「採用」、
-    誤っていれば「却下」してください。採用した関係がKnowledge Graph上のEdge（つながり）になります。
-    confidenceは合否判定ではなく参考値です。自動採用はしません。人が判断してください。
+    文書Aの各項目に対して、文書Bの関連候補を表示します。候補を開き、両方の本文と根拠を確認して、
+    「採用」または「却下」を選んでください。
+    <br><span class="muted" style="font-size:11px;">採用した関連はナレッジグラフに表示されます。</span>
   </div>
   <div class="row" style="margin-bottom:8px;">
     <button id="btnGenerateCandidates" class="secondary">関連候補を自動生成</button>
+    <span class="muted" style="font-size:11px;">最初に「関連候補を自動生成」を押してください。</span>
     <span class="status-line" id="candidateStatus" style="margin:0;"></span>
   </div>
   <div class="toolbar">
@@ -218,6 +221,7 @@
   <div class="row" style="margin-bottom:8px;">
     <span class="muted" style="font-size:12px;">表示中: <span id="edgeCount">0</span>件 / 全<span id="edgeTotalCount">0</span>件（semantic edge）</span>
   </div>
+  <div class="muted" style="font-size:11px; margin: 2px 0 6px;">信頼度は候補の並び順を決める参考値です。採用・却下は、本文と根拠を確認して判断してください。</div>
   <div class="table-scroll">
     <table>
       <thead><tr>

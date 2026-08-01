@@ -46,6 +46,32 @@ async function main() {
   const contentRowCount = await page.$$eval('#nodeTableBody tr', rows => rows.length);
   assert(contentRowCount === expectedContentCount, `content Nodeが${expectedContentCount}件表示される(実際: ${contentRowCount})`);
 
+  // ---- 説明文修正の確認(人手評価後の指定文言。§5) ----
+  const nodeHeading = (await page.locator('section.panel h2').nth(1).innerText()).trim();
+  assert(nodeHeading.startsWith('2. 文書内容を確認・修正'), `Node画面の見出しが指定どおり(実際: "${nodeHeading}")`);
+  const nodeExplainText = await page.locator('section.panel').nth(1).locator('.explain').innerText();
+  assert(nodeExplainText.includes('読み込んだ文書の各項目を一覧で確認します。内容や分類、タグに誤りがある項目だけ修正してください。'),
+    'Node画面の説明文が指定どおり(主文)');
+  assert(nodeExplainText.includes('対象を絞る') && nodeExplainText.includes('内容を確認する') && nodeExplainText.includes('必要な項目だけ修正する'),
+    'Node画面に作業の流れの案内(絞る→確認する→修正する)が表示される');
+  assert(nodeExplainText.includes('一覧の各行をKnowledge Nodeと呼びます'), 'Node画面にKnowledge Nodeの補足説明が表示される');
+  assert(!nodeExplainText.includes('知識の単位') && !nodeExplainText.includes('問題の可能性があるNode') &&
+    !nodeExplainText.includes('チップ') && !nodeExplainText.includes('全件を修正する必要はありません'),
+    'Node画面の説明文から指定された禁止表現が排除されている');
+  const nodeQuickFilterHelpCount = await page.locator('div.muted', { hasText: '確認したい条件を選んでください。複数選択すると、すべての条件に当てはまる項目を表示します。' }).count();
+  assert(nodeQuickFilterHelpCount > 0, 'Nodeクイックフィルタ付近の補助文が指定どおり');
+
+  const relationHeading = (await page.locator('section.panel h2').nth(2).innerText()).trim();
+  assert(relationHeading.startsWith('3. 文書間の関連を確認'), 'Relation画面の見出しは維持されている(今回変更対象外)');
+  const relationExplainText = await page.locator('section.panel').nth(2).locator('.explain').first().innerText();
+  assert(relationExplainText.includes('文書Aの各項目に対して、文書Bの関連候補を表示します。候補を開き、両方の本文と根拠を確認して、'),
+    'Relation画面の説明文が指定どおり(主文)');
+  assert(relationExplainText.includes('採用した関連はナレッジグラフに表示されます。'), 'Relation画面の採用後説明が一文だけで表示される');
+  const generateButtonRowText = await page.locator('#btnGenerateCandidates').locator('xpath=..').innerText();
+  assert(generateButtonRowText.includes('最初に「関連候補を自動生成」を押してください。'), '関連候補生成ボタン付近の補助文が指定どおり');
+  const confidenceHelpCount = await page.locator('div.muted', { hasText: '信頼度は候補の並び順を決める参考値です。採用・却下は、本文と根拠を確認して判断してください。' }).count();
+  assert(confidenceHelpCount > 0, 'confidence/evidenceの説明が表の近くに表示される');
+
   // ---- Node一覧: 短縮ID・クイックフィルタ・簡易/詳細表示 ----
   const shortIdCount = await page.locator('#nodeTableBody .short-id').count();
   assert(shortIdCount === contentRowCount, `全Nodeに短縮IDが表示される(実際: ${shortIdCount}/${contentRowCount})`);
