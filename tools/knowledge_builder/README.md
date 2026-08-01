@@ -1,66 +1,97 @@
-# Knowledge Data Builder — α0.1.1（早期評価用）
+# Knowledge Data Builder — α0.1.2（早期評価用）
 
 **状態**: 早期評価用の動作物。正式な設計判断・成果物提出には使用しないでください。
-**準拠Contract**: `design/knowledge_data_contract_0.1.md`（Knowledge Data Contract 0.1。α0.1.1では変更していません）
+**準拠Contract**: `design/knowledge_data_contract_0.1.md`（Knowledge Data Contract 0.1。α0.1.2でも変更していません）
 
-このディレクトリは Knowledge Data Builder の最初の評価可能な動作物（α0.1）を、人手評価結果を
-受けて改定したものです（α0.1.1）。既存α版ファイル・配布ZIP（`tools/alpha_release/`、
+このディレクトリは Knowledge Data Builder の最初の評価可能な動作物（α0.1）を、2回の人手評価結果を
+受けて改定したものです（α0.1.1 → α0.1.2）。既存α版ファイル・配布ZIP（`tools/alpha_release/`、
 `tools/release/`配下）は**一切変更していません**。この配下は新規系統です。
 
-## α0.1.1での変更点（人手評価4件への対応）
+## α0.1.2での変更点（視認性・確認効率の改善）
 
-α0.1の限定人手評価で次の4点が指摘され、α0.1.1で対応しました。今回のテーマは
-**「Node/Relationの件数が増えても、人が全件を手作業で確認・編集しなくてよいUIへ改善すること」**
-と、**「Node/Relation/Edge/Knowledge Graphの意味と作業内容を、初見の評価者でも理解できるように
-すること」**です。機能追加ではなく、この2点に直接関係する改善のみを行っています。
+α0.1.1の人手評価で、次の3画面の視認性・作業効率に課題が確認され、α0.1.2で対応しました。
+新しい意味解析機能の追加ではなく、既存のNode・Relation Candidate・Edgeを**人が理解しやすく、
+少ない操作で確認できるようにすること**が目的です。Knowledge Data Contract 0.1は変更していません。
 
-1. 「Node一覧・修正」が何をする画面か分かりにくい
-   → 「2. ノードを確認・修正（Knowledge Nodes）」に改称し、画面上に日本語の説明文を追加
-2. 「Relation Candidate生成 → Edge採用/削除 → Relation一覧」が日本語として理解しにくい
-   → 「3. 文書間の関連を確認（Relations / Edges）」に改称。ボタンも「関連候補を自動生成」、
-   lifecycle表示も「候補(candidate)」「採用済み(active)」「却下(rejected)」の日本語主体表示へ変更
-3. Node/Relation Candidateが増えると個別確認・編集作業の負荷が高い
-   → Node一覧・Relation一覧の両方に検索・絞り込み・複数選択・一括操作（タグ一括追加/削除、
-   候補の一括採用/一括却下）を追加。Relation一覧はSource Node単位でグループ化し、
-   初期表示は「未処理候補のみ」に限定
-4. Knowledge Graphの「構造Edge（contains）も表示」の意味が伝わらない
-   → 「文書内の階層関係も表示」に改称し、「文書間の関連」と色分けする凡例を追加
+### 1. Knowledge Graph
+- 初期表示を「採用済みの文書間関連のみ表示」に変更(以前は未処理候補も既定で表示していた)。
+  未処理候補・文書内階層は明示的にチェックを入れた場合のみ表示される
+- Nodeをクリックすると接続先Node・Edgeを強調表示し、選択中Nodeの情報(短縮ID・全文)を
+  画面下に表示する
+- 「選択Nodeの周辺だけを表示」モードを追加
+- 採用済み／未処理候補／文書内階層をそれぞれ個別に表示切替できるようにした
+- 文書A／文書B、Node種別、タグによるGraph絞り込みを追加
+- Nodeラベルに短縮ID(`A-001`等)を併記し、長いラベルは省略・ホバーで全文表示
+- document(大きい四角)／section(小さい四角)／内容Node(丸)を形状で区別し、色は文書A(青)/
+  文書B(緑)で統一。structural表示ONの場合は章→節→項目の階層をインデントで表現する
+  (階層の折りたたみ／展開は今回未実装。形状・サイズ・インデントによる区別を優先した)
+- 色・線種・Node種別を説明する常設の凡例を追加
 
-## このα0.1.1の範囲
+### 2. 文書間の関連確認画面（Relations / Edges）
+- Relation CandidateをSource Node単位でグループ化し、**既定で折りたたみ**表示にした
+  （234件規模でも単純な長い表として出さない）。グループ見出しをクリックすると展開できる
+- グループ見出しに、そのSource Nodeの全件数・未処理数・採用数・却下数を表示
+- Source／Target Nodeに短縮IDを併記し、一致したタグを強調表示
+- confidenceの数値に加えて高／中／低の補助表示を追加(合否判定ではなく参考情報)
+- staleのみ表示、タグ一致あり／文章類似のみの絞り込み、confidence範囲による絞り込みを追加
+- 並べ替え(信頼度順／Source短縮ID順／未処理優先)を追加
+- Source Node単位で候補をまとめて却下する操作を追加
+- 「未処理候補を初期表示」の方針は維持。自動採用機能は追加していない
 
-含むもの（α0.1から変更なし）:
+### 3. ノード確認・修正画面
+- 「問題の可能性があるNode」へすぐ絞り込めるクイックフィルタ(チップ)を追加: タグ未設定・
+  未登録タグあり・低confidence・本文が空/短い・修正済み・Relation Candidateなし・
+  stale Relationあり。各チップに該当件数を表示し、クリックでON/OFFを切り替える
+  （画面上部の主要件数表示を兼ねる）
+- 短縮ID列を追加
+- 「簡易表示／詳細表示」の切替を追加。簡易表示(既定)では状態・文書・種別・短縮ID・
+  タイトル・本文・タグのみを表示し、詳細表示にすると信頼度・出典・revision・stale関連件数
+  も表示される
+
+### 共通UX
+- 文書Aは青系・文書Bは緑系・未処理候補は橙系・採用済みは緑の実線・staleは赤系警告で統一
+- 選択中のNode／Relationの行を明確に強調表示
+- 短縮IDの表記規則(`A-001`/`B-001`等)を3画面で統一
+- 各画面に「フィルタ適用中」バッジと「フィルタ解除」ボタンを追加
+- 表示中件数／全件数の常時表示を維持・強化
+
+## このα0.1.2の範囲
+
+含むもの（α0.1.1から機能面の変更なし。表示・操作性のみ改善）:
 
 1. 既存Trace JSON投入(PDF/Excel構造化JSON) — 既存PDF/Excelツールが出力した trace JSON
    （`_trace_records[]`を持つ既存形式）を読み込む。**PDF/Excelの解析自体は追加していません**。
-   既存ツールで一度エクスポートしたJSONファイルをこのツールへ読み込ませてください。
 2. Node生成 — Trace JSON Adapter が document/section/内容Node（requirement/design_item）を生成
-3. Node確認・修正 — node_type / 本文(text) / タグの編集（今回から検索・絞り込み・複数選択・
-   タグ一括追加/削除を追加）
+3. Node確認・修正 — node_type / 本文(text) / タグの編集。検索・絞り込み・クイックフィルタ・
+   複数選択・タグ一括追加/削除・簡易/詳細表示切替
 4. 文書間の関連の自動候補生成 — 既存タグの一致・文字列類似度に基づく semantic candidate edge の生成
-5. Edge採用/却下 — candidateをactive/rejectedへ（今回から複数選択・一括採用/一括却下を追加）
-6. Relation一覧 — Edgeの根拠(evidence)・信頼度・stale状態の確認（今回からSource Node単位で
-   グループ化、状態フィルタ、検索を追加）
-7. 簡易Knowledge Graph — SVGによる読み取り専用の可視化（今回から「文書内の階層関係」と
-   「文書間の関連」を用語・色分けで区別）
+5. Edge採用/却下 — candidateをactive/rejectedへ。複数選択・一括採用/一括却下・グループ単位一括却下
+6. Relation一覧 — Source Node単位グループ表示(折りたたみ可)・状態/stale/evidence/confidence
+   フィルタ・並べ替え
+7. Knowledge Graph — 採用済み/未処理候補/文書内階層の個別表示切替、Node選択強調、周辺表示
+   モード、文書/種別/タグ絞り込み、常設凡例
 8. Knowledge JSON保存 — Knowledge Data Contract 0.1形式でのJSON出力
-9. 作業量サマリ（α0.1.1で追加） — 全Node数・操作対象にしたNode数・個別修正したNode数・
-   関連候補総数・人が個別判断した候補数・一括採用/却下件数・最終採用済みEdge数を表示。
-   「操作対象にしたNode数」は選択または修正したNodeの重複除外件数であり、内容を実際に
-   確認したことを保証するものではない
+9. 作業量サマリ — 全Node数・操作対象にしたNode数・個別修正したNode数・関連候補総数・
+   人が個別判断した候補数・一括採用/却下件数・最終採用済みEdge数を表示
 
-意図的に含まないもの(次段階以降の課題。α0.1.1でも先回りして追加していません):
+意図的に含まないもの(次段階以降の課題。α0.1.2でも先回りして追加していません):
 
-- Ontologyに基づくnode_type/relation_type自動判定(現状は文書役割による既定値＋人手修正)
-- Quantity compatibility / Property Resolution / Semantic reasoningを統合したrelation_type
-  自動分類。このツールは`related_to`(semantic)と`contains`(structural)のみ自動生成する。
-  タグ一致・文字列類似度だけでは「関係がありそう」までしか判定できず「要求を満足している」
-  とまでは判定できないため、`satisfied_by`/`implemented_by`/`verified_by`への分類・昇格は
-  それらの判定要素を追加した後段のCheckpointへ持ち越す
-- 本格的なAIによるSemantic Tagging、AI Agentによる自律編集
-- 完全なQuantity統合(数量抽出との連携。`quantities`は常に空配列)
-- Graph DB / Vector DB、PDF/Excel直接取込の統合、1000件級の性能最適化
+- AIによる本格的なSemantic Tagging、完全なQuantity統合、Property Resolution
+- `satisfied_by`等の強いRelationの自動判定。タグ一致・文字列類似度だけでは「関係がありそう」
+  までしか判定できず「要求を満足している」とまでは判定できないため
+- AI Agentによる自律操作、Graph DB／Vector DB、PDF/Excel直接取込の統合
+- 1000件級の性能最適化、Contractの全面改定
+- Knowledge Graphの階層折りたたみ／展開(形状・サイズ・インデントで代替)
 - Human/AIレビュー確定(`review.human`/`review.ai`)のUI(内部engineには実装済み。
-  `core/knowledge_store.js`の`reviewHuman`/`reviewAI`参照。UIへの露出は評価結果を見てから)
+  `core/knowledge_store.js`の`reviewHuman`/`reviewAI`参照)
+
+### 短縮ID(画面表示専用)について
+
+Node一覧・Relation一覧・Knowledge Graphで使う`A-001`/`B-001`等の短縮IDは、**画面表示専用の
+別名**です。取込のたびに文書A/Bそれぞれの中で1から採番し直され、Knowledge Data Contract 0.1
+のschemaには含まれません(保存するKnowledge JSONにも出力されません)。元Nodeの一意な特定は
+引き続き`node_id`（Contract §8のID規則）で行います。短縮IDと`node_id`の対応は、各画面で
+短縮IDにカーソルを合わせる(title属性)か、Knowledge Graph上でNodeを選択すると確認できます。
 
 ### Structural Node(document/section)とlegacy Trace互換性
 
@@ -72,44 +103,42 @@
 
 ## 使い方
 
-1. `ui/knowledge_builder_tool_v0.1.1-alpha.html` をブラウザで直接開く(サーバ不要)
+1. `ui/knowledge_builder_tool_v0.1.2-alpha.html` をブラウザで直接開く(サーバ不要)
 2. 「1. データを読み込む」の「文書A(requirement側)」「文書B(design側)」に、既存PDF/Excel
    ツールが出力したtrace JSONファイルを指定する。動作確認用の小規模サンプルとして
    `samples/hvac_trace_sample_small/JSON_A_customer_requirements_trace.json` /
    `JSON_B_design_review_trace.json`(リポジトリ直下)がそのまま使える。件数が増えたときの
-   絞り込み・一括操作を評価する場合は下記の中規模サンプルを使うこと
-3. 「読み込んでノードを生成」→「2. ノードを確認・修正」に一覧が表示される
-4. 必要なら検索・文書/種別/タグ/状態での絞り込みを使い、内容・種別・タグに誤りがある項目
-   だけ修正する。複数Nodeを選択してタグを一括追加/削除できる
-5. 「3. 文書間の関連を確認」で「関連候補を自動生成」→ 初期表示は「未処理候補のみ」。
-   Source Node単位でグループ化されて表示される。各行の「採用」「却下」、または複数選択して
-   一括採用/一括却下できる
-6. 「4. ナレッジグラフを確認」で全体像を確認する。「文書間の関連」と「文書内の階層関係」は
-   色分け・チェックボックスで区別されている(初期状態では階層関係は非表示)
-7. 「5. ナレッジデータを保存」でKnowledge Data Contract 0.1形式のJSONをダウンロードする。
-   同じ画面に作業量サマリ（人が実際に触った件数の目安）を表示する
+   絞り込み・グループ表示・Graphの効果を評価する場合は下記の中規模サンプルを使うこと
+3. 「読み込んでノードを生成」→「2. ノードを確認・修正」に一覧が表示される。上部のチップ
+   （クイックフィルタ）で「問題の可能性があるNode」だけへ絞り込める
+4. 「3. 文書間の関連を確認」で「関連候補を自動生成」→ Source Node単位でグループ化され、
+   既定では折りたたまれている。見出しをクリックして展開し、候補を確認する
+5. 「4. ナレッジグラフを確認」では、初期状態で採用済みの文書間関連だけが表示される。
+   Nodeをクリックすると接続先が強調表示される
+6. 「5. ナレッジデータを保存」でKnowledge Data Contract 0.1形式のJSONをダウンロードする。
+   同じ画面に作業量サマリを表示する
 
 ## 中規模評価サンプル（件数が増えたときの評価用）
 
 `samples/knowledge_builder_alpha01/medium/` に、Node/Relation Candidateが増えたときの
-絞り込み・一括操作の効果を評価するための中規模サンプル（文書A 80件・文書B 100件・
+絞り込み・グループ表示・Graphの効果を評価するための中規模サンプル（文書A 80件・文書B 100件・
 関連候補約230件規模）を同梱しています。使い方・意図的に含めたケース（同義語・略語・
 タグ不足・1要求→複数設計項目等）・評価用ground truth(`expected_relations.json`)の使い方は
 `samples/knowledge_builder_alpha01/medium/README.md` を参照してください。
 
-## 評価していただきたい観点（α0.1.1）
+## 評価していただきたい観点（α0.1.2）
 
-1. どこで何をする画面か理解できるか
-2. 日本語主体でNode/Relation/Edge/Graphの概念を理解できるか
-3. 必要なNodeへ絞り込めるか(検索・文書/種別/タグ/状態フィルタ)
-4. 複数Nodeを一括操作できるか(タグ一括追加/削除)
-5. 未処理のRelation Candidateへ絞り込めるか
-6. 複数Candidateを一括採用/一括却下できるか
-7. Knowledge Graph上の「文書内の階層関係」と「文書間の関連」を区別できるか
-8. Knowledge JSONを保存できるか
+1. 目的のNodeを短時間で絞り込めるか
+2. 同名Nodeを短縮IDで識別できるか
+3. Source NodeごとにRelation Candidateを比較できるか
+4. confidenceとevidenceを見て候補を判断できるか
+5. Graphで採用済み関係を追跡できるか
+6. 選択Node周辺だけを確認できるか
+7. 文書内階層と文書間関連を区別できるか
+8. 多数の未処理候補によってGraphが初期状態から混雑しないか
 
 自動Semantic Tagging(Knowledge Builder自身によるタグ自動生成)、`satisfied_by`等の強い
-Relationの自動判定は今回のα0.1.1にも含まれないため評価対象外です。次Checkpoint以降で
+Relationの自動判定は今回のα0.1.2にも含まれないため評価対象外です。次Checkpoint以降で
 別途評価します。
 
 ## 内部構成
@@ -121,15 +150,16 @@ core/
   trace_json_adapter.js        既存trace JSON → KnowledgeNode/構造Edge(§10.1 Adapter)
   relation_candidate_engine.js タグ一致・文字列類似度によるsemantic candidate生成(§4.5)
   knowledge_store.js           Node/Edge編集・lifecycle・review・operation historyのreducer(§6.4)
+                               (α0.1.2では変更なし。表示改善はUI側のみ)
 verification/
   knowledge_builder_core_verification.js         Node.js検証(losslessness・dual-hash・stale判定等)
   knowledge_builder_ui_smoke_test.js              Playwright検証(小規模サンプルでのUI一連操作)
   knowledge_builder_medium_sample_smoke_test.js   Playwright検証(中規模サンプルでの規模・一括操作)
   (いずれもNODE_PATH="$(npm root -g)"が必要なものはPlaywright使用箇所のみ)
 ui/
-  knowledge_builder_tool_v0.1.1-alpha.html  評価用ブラウザツール本体
+  knowledge_builder_tool_v0.1.2-alpha.html  評価用ブラウザツール本体
 design/
-  knowledge_data_contract_0.1.md          Knowledge Data Contract 0.1(設計文書。α0.1.1では未変更)
+  knowledge_data_contract_0.1.md          Knowledge Data Contract 0.1(設計文書。α0.1.2では未変更)
 ```
 
 ## 検証の実行方法

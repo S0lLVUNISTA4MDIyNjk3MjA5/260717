@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-/* Knowledge Data Builder alpha 0.1.1 - medium-scale sample smoke test (Playwright/Chromium).
- * Per the α0.1.1 revision instructions §19: for the medium-scale evaluation sample, confirm
- *   (1) it loads successfully, (2) node scale matches expectations, (3) candidate generation
- *   succeeds, (4) no fatal error makes the UI unusable - including basic search/filter/bulk
- *   operations at this larger scale.
- * This is NOT a performance benchmark; it only checks functional correctness at ~200 nodes /
- * ~200+ candidates.
+/* Knowledge Data Builder alpha 0.1.2 - medium-scale sample smoke test (Playwright/Chromium).
+ * Per the alpha 0.1.2 revision instructions §6: for the medium-scale evaluation sample, confirm
+ * the new visibility/efficiency features hold up at ~200 nodes / ~230 candidates:
+ *   Graph default state (candidates+hierarchy hidden), active edges visible, candidate/hierarchy
+ *   toggles, node-selection highlight, graph filters, Relation Source-grouping (collapsed by
+ *   default), stale/confidence/evidence filters, Node quick filters, simple/detail toggle,
+ *   no impact on Knowledge JSON save, and zero browser console errors.
+ * This is NOT a performance benchmark; it only checks functional correctness at scale.
  * Run: NODE_PATH="$(npm root -g)" node tools/knowledge_builder/verification/knowledge_builder_medium_sample_smoke_test.js
  */
 'use strict';
@@ -14,7 +15,7 @@ const fs = require('fs');
 const os = require('os');
 const { chromium } = require('playwright');
 
-const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.1.1-alpha.html');
+const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.1.2-alpha.html');
 const MEDIUM_DIR = path.join(__dirname, '..', '..', '..', 'samples', 'knowledge_builder_alpha01', 'medium');
 const FILE_A = path.join(MEDIUM_DIR, 'JSON_A_medium_customer_requirements_trace.json');
 const FILE_B = path.join(MEDIUM_DIR, 'JSON_B_medium_design_review_trace.json');
@@ -39,7 +40,7 @@ async function main() {
 
   await page.goto('file://' + HTML_PATH);
 
-  // ---- 1. 読み込み成功 ----
+  // ---- 読み込み成功・想定Node規模 ----
   await page.setInputFiles('#fileA', FILE_A);
   await page.setInputFiles('#fileB', FILE_B);
   await page.setInputFiles('#fileVocab', FILE_VOCAB);
@@ -48,28 +49,41 @@ async function main() {
   const ingestStatus = await page.textContent('#ingestStatus');
   assert(ingestStatus.includes('取込完了'), `中規模サンプルの読み込みが成功する(status: ${ingestStatus.slice(0, 60)}...)`);
 
-  // ---- 2. 想定Node規模 ----
   const contentRowCount = await page.$$eval('#nodeTableBody tr', rows => rows.length);
   assert(contentRowCount === expectedTotalContent,
     `content Nodeが期待件数(${expectedTotalContent} = A:${expectedA}+B:${expectedB})表示される(実際: ${contentRowCount})`);
+
+  const shortIdSample = await page.locator('#nodeTableBody .short-id').nth(expectedA - 1).innerText();
+  assert(/^A-\d{3}$/.test(shortIdSample), `文書A末尾のNodeも短縮IDが割り当てられる(実際: "${shortIdSample}")`);
 
   await page.check('#showStructural');
   const withStructuralCount = await page.$$eval('#nodeTableBody tr', rows => rows.length);
   assert(withStructuralCount > contentRowCount, '構造Node表示ONで行数が増える(15節×2文書+文書2件程度)');
   await page.uncheck('#showStructural');
 
-  // ---- UIが大規模データでも操作可能(検索・絞り込み) ----
+  // ---- Nodeクイックフィルタ・簡易/詳細表示が中規模データでもエラーなく動く ----
+  const chipTexts = await page.locator('#nodeQuickFilterRow .chip').allInnerTexts();
+  assert(chipTexts.length === 7, `Nodeクイックフィルタ7種類が中規模データでも表示される(実際: ${chipTexts.length})`);
+  const untaggedChip = page.locator('#nodeQuickFilterRow .chip', { hasText: 'タグ未設定' });
+  await untaggedChip.click();
+  await page.waitForTimeout(50);
+  const untaggedRowCount = await page.$$eval('#nodeTableBody tr', rows => rows.length);
+  assert(untaggedRowCount > 0 && untaggedRowCount < contentRowCount, `「タグ未設定」クイックフィルタで絞り込まれる(実際: ${untaggedRowCount})`);
+  await untaggedChip.click();
+
+  await page.check('#nodeDetailMode');
+  await page.waitForTimeout(50);
+  const detailVisible = await page.isVisible('#nodeTableBody tr:first-child td.detail-col');
+  assert(detailVisible, '詳細表示が中規模データでもエラーなく切り替わる');
+  await page.uncheck('#nodeDetailMode');
+
   await page.fill('#nodeSearch', '温度');
   await page.waitForTimeout(50);
   const searchCount = await page.$$eval('#nodeTableBody tr', rows => rows.length);
   assert(searchCount > 0 && searchCount < contentRowCount, `検索「温度」で${contentRowCount}件から絞り込まれる(実際: ${searchCount})`);
-  await page.fill('#nodeSearch', '');
-
-  await page.selectOption('#nodeTagFilter', '安全');
+  await page.click('#btnNodeResetFilter');
   await page.waitForTimeout(50);
-  const tagFilterCount = await page.$$eval('#nodeTableBody tr', rows => rows.length);
-  assert(tagFilterCount > 0 && tagFilterCount < contentRowCount, `タグ「安全」で絞り込まれる(実際: ${tagFilterCount})`);
-  await page.selectOption('#nodeTagFilter', 'all');
+  assert((await page.$$eval('#nodeTableBody tr', rows => rows.length)) === contentRowCount, 'Nodeの「フィルタ解除」が中規模データでも全件表示に戻す');
 
   await page.selectOption('#nodeTagFilter', '__none__');
   await page.waitForTimeout(50);
@@ -77,7 +91,7 @@ async function main() {
   assert(noTagCount >= 10, `(タグ未設定)フィルタで意図的に配置したnotag Nodeが見つかる(実際: ${noTagCount})`);
   await page.selectOption('#nodeTagFilter', 'all');
 
-  // ---- 3. Candidate生成成功 ----
+  // ---- Candidate生成成功 ----
   await page.click('#btnGenerateCandidates');
   await page.waitForFunction(() => document.getElementById('candidateStatus').textContent.includes('候補'), null, { timeout: 30000 });
   const candidateStatus = await page.textContent('#candidateStatus');
@@ -86,21 +100,48 @@ async function main() {
   assert(candidateCount >= 100 && candidateCount <= 400,
     `関連候補が指示書の目安(150-300件程度)に近い規模で生成される(実際: ${candidateCount}件)`);
 
-  const edgeRowCount = await page.$$eval('#edgeTableBody tr.edge-row', rows => rows.length);
-  assert(edgeRowCount === candidateCount, `Relation一覧(未処理候補)の表示件数が生成件数と一致する(実際: ${edgeRowCount}/${candidateCount})`);
-
+  // ---- Relation一覧: 既定折りたたみでも234件が長い表として出ない ----
   const groupHeaderCount = await page.$$eval('#edgeTableBody tr.group-header-row', rows => rows.length);
   assert(groupHeaderCount > 0 && groupHeaderCount <= expectedA, `Source Node単位のグループが複数表示される(実際: ${groupHeaderCount}グループ)`);
+  const edgeRowsCollapsed = await page.$$eval('#edgeTableBody tr.edge-row', rows => rows.length);
+  assert(edgeRowsCollapsed === 0, `${candidateCount}件の候補は既定で折りたたまれ、候補行が展開されるまで表示されない`);
 
-  // ---- 4. 大規模データでの絞り込み・複数選択・一括操作が致命的エラーなく動く ----
-  await page.selectOption('#edgeStatusFilter', 'candidate');
-  await page.fill('#edgeSearch', '安全');
+  await page.click('#btnExpandAllGroups');
+  await page.waitForTimeout(100);
+  const edgeRowsExpanded = await page.$$eval('#edgeTableBody tr.edge-row', rows => rows.length);
+  assert(edgeRowsExpanded === candidateCount, `「すべて展開」で候補件数と一致する行数が表示される(実際: ${edgeRowsExpanded}/${candidateCount})`);
+  await page.click('#btnCollapseAllGroups');
   await page.waitForTimeout(50);
-  const edgeSearchCount = await page.$$eval('#edgeTableBody tr.edge-row', rows => rows.length);
-  assert(edgeSearchCount >= 0, 'Relation一覧の検索が中規模データでもエラーなく動作する');
-  await page.fill('#edgeSearch', '');
-  await page.waitForTimeout(50);
+  assert((await page.$$eval('#edgeTableBody tr.edge-row', rows => rows.length)) === 0, '「すべて折りたたむ」で再び折りたたまれる');
 
+  // ---- Relationフィルタ(stale/evidence/confidence/並べ替え)が中規模データでもエラーなく動く ----
+  await page.check('#edgeStaleOnly');
+  await page.waitForTimeout(50);
+  assert(true, 'staleのみフィルタが中規模データでもエラーなく適用できる');
+  await page.uncheck('#edgeStaleOnly');
+
+  await page.selectOption('#edgeEvidenceFilter', 'tag_match');
+  await page.waitForTimeout(50);
+  await page.click('#btnExpandAllGroups');
+  await page.waitForTimeout(100);
+  const tagMatchRows = await page.$$eval('#edgeTableBody tr.edge-row', rows => rows.length);
+  assert(tagMatchRows > 0 && tagMatchRows <= candidateCount, `エビデンス種別「タグ一致あり」で中規模データが絞り込まれる(実際: ${tagMatchRows}/${candidateCount})`);
+  await page.selectOption('#edgeEvidenceFilter', 'all');
+
+  await page.selectOption('#edgeSort', 'source_id');
+  await page.waitForTimeout(50);
+  await page.selectOption('#edgeSort', 'pending');
+  await page.waitForTimeout(50);
+  await page.selectOption('#edgeSort', 'confidence');
+  await page.waitForTimeout(50);
+  assert(true, '並べ替え(信頼度順/Source ID順/未処理優先)が中規模データでもエラーなく切り替わる');
+
+  await page.click('#btnEdgeResetFilter');
+  await page.waitForTimeout(50);
+  await page.click('#btnExpandAllGroups');
+  await page.waitForTimeout(100);
+
+  // ---- 複数選択・一括採用(グループ折りたたみ後でも整合する) ----
   const candidateCheckboxes = page.locator('#edgeTableBody tr.edge-row input.edge-select-checkbox');
   const availableForBulk = await candidateCheckboxes.count();
   const bulkTarget = Math.min(10, availableForBulk);
@@ -109,22 +150,58 @@ async function main() {
   assert(Number(selectedCountText) === bulkTarget, `${bulkTarget}件の複数選択が中規模データでも正しく反映される(実際: ${selectedCountText})`);
 
   await page.click('#btnBulkAccept');
-  await page.waitForTimeout(100);
+  await page.waitForTimeout(150);
   await page.selectOption('#edgeStatusFilter', 'active');
-  await page.waitForTimeout(50);
+  await page.click('#btnExpandAllGroups');
+  await page.waitForTimeout(100);
   const activeAfterBulk = await page.$$eval('#edgeTableBody tr.edge-row', rows => rows.length);
   assert(activeAfterBulk === bulkTarget, `一括採用(${bulkTarget}件)が中規模データでも正しく反映される(実際: ${activeAfterBulk})`);
   await page.selectOption('#edgeStatusFilter', 'candidate');
 
-  // ---- Graphが描画できる(致命的エラーが出ない) ----
-  const circleCount = await page.$$eval('#graphSvg circle', els => els.length);
-  assert(circleCount >= expectedTotalContent, `Graphが中規模データでも描画される(実際: ${circleCount}円)`);
+  // ---- Knowledge Graph: 既定状態で234件の候補・階層によって混雑しない ----
+  const graphActiveChecked = await page.isChecked('#graphShowActive');
+  const graphCandidatesChecked = await page.isChecked('#graphShowCandidates');
+  const graphStructuralChecked = await page.isChecked('#graphShowStructural');
+  assert(graphActiveChecked === true && graphCandidatesChecked === false && graphStructuralChecked === false,
+    'Graph既定状態: 採用済みのみ表示、未処理候補・文書内階層は非表示');
+
+  const graphEdgeCountDefault = await page.textContent('#graphEdgeCount');
+  assert(Number(graphEdgeCountDefault) === bulkTarget,
+    `Graph既定表示のEdge数が採用済み件数と一致し、${candidateCount}件の候補では混雑しない(実際: ${graphEdgeCountDefault})`);
+
+  await page.check('#graphShowCandidates');
+  await page.waitForTimeout(100);
+  const graphEdgeCountWithCandidates = await page.textContent('#graphEdgeCount');
+  assert(Number(graphEdgeCountWithCandidates) >= candidateCount,
+    `未処理候補も表示ONにすると${candidateCount}件規模の候補がGraphに反映される(実際: ${graphEdgeCountWithCandidates})`);
+  await page.uncheck('#graphShowCandidates');
+
+  // ---- Graphフィルタ(文書/種別/タグ)・Node選択・周辺表示モード ----
+  await page.selectOption('#graphDocFilter', 'A');
+  await page.waitForTimeout(100);
+  const graphNodeCountDocA = await page.textContent('#graphNodeCount');
+  assert(Number(graphNodeCountDocA) > 0 && Number(graphNodeCountDocA) < expectedTotalContent,
+    `Graphの文書Aのみフィルタが中規模データでも機能する(実際: ${graphNodeCountDocA})`);
+  await page.click('#btnGraphResetFilter');
+  await page.waitForTimeout(100);
+
+  const anyShape = page.locator('#graphSvg circle, #graphSvg rect').first();
+  await anyShape.click();
+  await page.waitForTimeout(50);
+  assert(await page.isVisible('#graphSelectedInfo'), 'Node選択(強調表示)が中規模データでもエラーなく動作する');
+
+  await page.check('#graphFocusMode');
+  await page.waitForTimeout(100);
+  const focusNodeCount = await page.textContent('#graphNodeCount');
+  assert(Number(focusNodeCount) < expectedTotalContent,
+    `周辺表示モードで${expectedTotalContent}件規模のGraphが選択Node周辺だけに絞り込まれる(実際: ${focusNodeCount})`);
+  await page.uncheck('#graphFocusMode');
 
   // ---- 作業量サマリ ----
-  const metricsText = await page.textContent('#metricsGrid');
-  assert(metricsText.includes(String(bulkTarget)) || true, '作業量サマリが表示される(値の詳細は別テストで確認済み)');
+  const metricCardCount = await page.locator('#metricsGrid .metric-card').count();
+  assert(metricCardCount === 8, `作業量サマリが中規模データでも8種類表示される(実際: ${metricCardCount})`);
 
-  // ---- Knowledge JSON保存(致命的エラーなく最後まで完走する) ----
+  // ---- Knowledge JSON保存(致命的エラーなく最後まで完走する。Contract/hash/operation historyへの影響なし) ----
   const downloadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-medium-smoke-'));
   const [download] = await Promise.all([
     page.waitForEvent('download'),
@@ -132,10 +209,15 @@ async function main() {
   ]);
   const savedPath = path.join(downloadDir, download.suggestedFilename());
   await download.saveAs(savedPath);
-  const saved = JSON.parse(fs.readFileSync(savedPath, 'utf8'));
-  assert(saved.nodes.length === contentRowCount + (withStructuralCount - contentRowCount),
-    `保存JSONのnode数がUI表示と一致する(実際: ${saved.nodes.length})`);
+  const savedText = fs.readFileSync(savedPath, 'utf8');
+  const saved = JSON.parse(savedText);
+  assert(saved.nodes.length === withStructuralCount, `保存JSONのnode数がUI表示(構造Node含む)と一致する(実際: ${saved.nodes.length})`);
+  assert(saved.schema_version === 'knowledge-data/0.1', '中規模データでも保存JSONのschema_versionが変わらない');
   assert(saved.diagnostics.filter(d => d.severity === 'error').length === 0, '中規模データの保存JSONにerror diagnosticsがない');
+  assert(saved.operations.length > 0 && saved.operations.every(op => typeof op.sequence === 'number'),
+    '中規模データでもoperation historyが連番のまま保たれている');
+  assert(!savedText.includes('nodeShortIds') && !savedText.includes('expandedGroups') && !savedText.includes('selectedGraphNodeId'),
+    '保存JSONに短縮ID対応表・グループ展開状態・Graph選択状態などのUI専用状態が含まれない');
 
   assert(consoleErrors.length === 0,
     `中規模データ操作を通してブラウザconsole errorが0件(実際: ${consoleErrors.length}件${consoleErrors.length ? ': ' + consoleErrors[0] : ''})`);

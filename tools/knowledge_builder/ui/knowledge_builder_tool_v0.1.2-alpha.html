@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Knowledge Data Builder α0.1.1（早期評価用）</title>
+<title>Knowledge Data Builder α0.1.2（早期評価用）</title>
 <style>
   :root { color-scheme: light dark; }
   body { font-family: "Segoe UI", "Hiragino Sans", sans-serif; margin: 0; padding: 0; background: #f6f7f9; color: #1b1f23; }
@@ -11,28 +11,33 @@
   header h1 { margin: 0; font-size: 18px; }
   header p { margin: 4px 0 0; font-size: 12px; color: #b9c2d0; }
   .banner { background: #fff6d8; border-bottom: 1px solid #e0c95a; padding: 8px 20px; font-size: 12px; }
-  main { padding: 16px 20px 60px; max-width: 1400px; margin: 0 auto; }
+  main { padding: 16px 20px 60px; max-width: 1450px; margin: 0 auto; }
   section.panel { background: #fff; border: 1px solid #d8dde3; border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
   section.panel > h2 { margin: 0 0 4px; font-size: 15px; }
   section.panel > h2 .en { font-size: 11px; color: #8a929c; font-weight: 400; }
   .explain { font-size: 12px; color: #444; background: #f4f6fb; border: 1px solid #e2e6ea; border-radius: 6px; padding: 8px 10px; margin: 6px 0 10px; }
   .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
   .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; font-size: 12px; }
-  .toolbar input[type=text], .toolbar select { font-size: 12px; padding: 3px 6px; border: 1px solid #ccd2d9; border-radius: 4px; }
+  .toolbar input[type=text], .toolbar input[type=number], .toolbar select { font-size: 12px; padding: 3px 6px; border: 1px solid #ccd2d9; border-radius: 4px; }
+  .toolbar input[type=number] { width: 60px; }
   .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
   .field label { font-weight: 600; color: #333; }
   button { cursor: pointer; border: 1px solid #4a6cf7; background: #4a6cf7; color: #fff; border-radius: 6px; padding: 7px 14px; font-size: 13px; }
   button.secondary { background: #fff; color: #4a6cf7; }
   button.small { padding: 3px 8px; font-size: 11px; border-radius: 4px; }
+  button.tiny { padding: 1px 6px; font-size: 10px; border-radius: 4px; }
   button.danger { background: #fff; color: #c62828; border-color: #c62828; }
   button:disabled { opacity: .45; cursor: not-allowed; }
   table { border-collapse: collapse; width: 100%; font-size: 12px; }
   th, td { border: 1px solid #e2e6ea; padding: 5px 7px; text-align: left; vertical-align: top; }
   th { background: #f0f2f5; position: sticky; top: 0; }
   tbody tr:nth-child(even) { background: #fafbfc; }
+  tr.selected-row { background: #fff4d6 !important; }
   tr.group-header-row td { background: #eef2fa; font-weight: 600; color: #33415c; }
-  .table-scroll { max-height: 440px; overflow: auto; border: 1px solid #e2e6ea; border-radius: 6px; }
+  table.simple-mode .detail-col { display: none; }
+  .table-scroll { max-height: 460px; overflow: auto; border: 1px solid #e2e6ea; border-radius: 6px; }
   .tag-chip { display: inline-flex; align-items: center; gap: 4px; background: #eef1fb; border: 1px solid #c8d1f5; border-radius: 12px; padding: 1px 8px; font-size: 11px; margin: 1px 2px 1px 0; }
+  .tag-chip.matched { background: #fff3d6; border-color: #e0a800; font-weight: 600; }
   .tag-chip button { border: none; background: none; color: #6675a3; padding: 0; font-size: 12px; border-radius: 0; }
   .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 10px; font-weight: 600; }
   .badge-candidate { background: #fff3d6; color: #8a6100; }
@@ -50,23 +55,38 @@
   .muted { color: #8a929c; }
   .doc-a { color: #1a56c4; } .doc-b { color: #1a8a3f; }
   code.small { font-size: 10px; color: #777; }
-  .legend { font-size: 11px; color: #444; display: flex; gap: 18px; flex-wrap: wrap; margin-top: 8px; }
+  .short-id { font-family: "SF Mono", Consolas, monospace; font-size: 10px; color: #33415c; background: #eef1fb; border-radius: 3px; padding: 0 4px; white-space: nowrap; }
+  .legend { font-size: 11px; color: #444; display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; padding-top: 8px; border-top: 1px solid #e2e6ea; }
   .legend-swatch { display: inline-block; width: 18px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 4px; }
+  .legend-shape { display: inline-block; width: 10px; height: 10px; vertical-align: middle; margin-right: 4px; background: #888; }
+  .legend-shape.sq-lg { width: 12px; height: 12px; }
+  .legend-shape.sq-sm { width: 9px; height: 9px; }
+  .legend-shape.circle { border-radius: 50%; width: 8px; height: 8px; }
   .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
   .metric-card { background: #f7f8fb; border: 1px solid #e2e6ea; border-radius: 6px; padding: 8px 10px; }
   .metric-card .value { font-size: 20px; font-weight: 700; color: #202733; }
   .metric-card .label { font-size: 11px; color: #666; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border: 1px solid #ccd2d9; border-radius: 14px; font-size: 11px; cursor: pointer; background: #fff; color: #333; }
+  .chip.active { background: #4a6cf7; color: #fff; border-color: #4a6cf7; }
+  .chip .count { font-weight: 700; }
+  .filter-active-badge { background: #fff3d6; color: #8a6100; border-radius: 10px; padding: 1px 8px; font-size: 10px; font-weight: 600; }
+  .conf-high { color: #1f7a34; font-weight: 600; }
+  .conf-mid { color: #8a6100; font-weight: 600; }
+  .conf-low { color: #a12727; font-weight: 600; }
+  .group-toggle { cursor: pointer; user-select: none; }
+  .group-stats { font-weight: 400; color: #556; font-size: 11px; margin-left: 6px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Knowledge Data Builder — α0.1.1（早期評価用ビルド）</h1>
-  <p>Knowledge Data Contract 0.1 準拠 / 今回の改善テーマ: 件数が増えても全件を人が確認しなくてよいUIへ（詳細は同梱README参照）</p>
+  <h1>Knowledge Data Builder — α0.1.2（早期評価用ビルド）</h1>
+  <p>Knowledge Data Contract 0.1 準拠 / 今回の改善テーマ: Node・Relation Candidate・EdgeをGraph/一覧で見やすく、少ない操作で確認できるように（詳細は同梱README参照）</p>
 </header>
 <div class="banner">
   これは<strong>限定評価用の動作物</strong>です。正式な設計判断・成果物提出には使用しないでください。
-  評価目的: 画面の分かりやすさ・必要なNodeへ絞り込めるか・複数Nodeの一括操作・未処理の関連候補への絞り込み・
-  複数候補の一括採用/却下・Knowledge Graphでの「文書内階層」と「文書間関連」の区別・Knowledge JSON保存までの一連操作。
+  評価目的: 目的のNodeへ短時間で絞り込めるか・短縮IDで識別できるか・Source Node単位でCandidateを比較できるか・
+  confidenceとevidenceで判断できるか・Graphで採用済み関係を追跡できるか・選択Node周辺だけを確認できるか・
+  文書内階層と文書間関連を区別できるか・件数が増えてもGraphが混雑しないか。
 </div>
 <main>
 
@@ -100,7 +120,7 @@
   <h2>2. ノードを確認・修正 <span class="en">(Knowledge Nodes)</span></h2>
   <div class="explain">
     文書から生成された"知識の単位"（ノード / Knowledge Node）を確認します。<strong>通常は全件を修正する必要はありません。</strong>
-    内容・種別・タグに誤りがある項目だけ修正してください。件数が多い場合は下の検索・絞り込みを使ってください。
+    下のチップ（クイックフィルタ）で「問題の可能性があるNode」だけへすぐ絞り込めます。件数はチップに表示されます。
   </div>
   <div class="toolbar">
     <input type="text" id="nodeSearch" placeholder="本文・タイトル・タグで検索">
@@ -122,13 +142,12 @@
       <option value="all">タグ: すべて</option>
       <option value="__none__">(タグ未設定)</option>
     </select>
-    <select id="nodeStatusFilter">
-      <option value="all">状態: 全件</option>
-      <option value="unedited">未修正（初期状態）</option>
-      <option value="edited">修正済</option>
-    </select>
     <label><input type="checkbox" id="showStructural"> 文書の章・節などの構造ノードも表示</label>
+    <label><input type="checkbox" id="nodeDetailMode"> 詳細表示</label>
+    <button id="btnNodeResetFilter" class="small secondary">フィルタ解除</button>
+    <span id="nodeFilterActiveBadge" class="filter-active-badge" style="display:none;">フィルタ適用中</span>
   </div>
+  <div class="toolbar" id="nodeQuickFilterRow"></div>
   <div class="toolbar">
     <label><input type="checkbox" id="nodeSelectAll"> このページの全選択</label>
     <span class="muted">選択中: <span id="nodeSelectedCount">0</span>件</span>
@@ -141,9 +160,10 @@
     <span class="muted" style="font-size:12px;">表示中: <span id="nodeCount">0</span>件 / 全<span id="nodeTotalCount">0</span>件</span>
   </div>
   <div class="table-scroll">
-    <table>
+    <table id="nodeTable">
       <thead><tr>
-        <th></th><th>状態</th><th>文書</th><th>種別</th><th>タイトル</th><th>本文</th><th>タグ</th><th>信頼度</th><th>出典</th>
+        <th></th><th>状態</th><th>文書</th><th>種別</th><th>短縮ID</th><th>タイトル</th><th>本文</th><th>タグ</th>
+        <th class="detail-col">信頼度</th><th class="detail-col">出典</th><th class="detail-col">revision</th><th class="detail-col">stale関連</th>
       </tr></thead>
       <tbody id="nodeTableBody"></tbody>
     </table>
@@ -153,10 +173,10 @@
 <section class="panel">
   <h2>3. 文書間の関連を確認 <span class="en">(Relations / Edges)</span></h2>
   <div class="explain">
-    文書Aと文書Bのノードから、"関連している可能性がある組み合わせ"を自動抽出します。候補を確認し、
-    正しければ「採用」、誤っていれば「却下」してください。<strong>採用した関係がKnowledge Graph上のEdge（つながり）になります。</strong>
-    現時点はタグの一致・文字列の似ている度合いだけで候補を出しているため、「関連がありそう」までしか判定していません
-    （「要求を満足している」の判定はまだ行っていません）。
+    文書Aと文書Bのノードから、"関連している可能性がある組み合わせ"を自動抽出します。<strong>要求Node（Source）ごとに
+    グループ化</strong>されており、見出しをクリックすると候補を展開できます。候補を確認し、正しければ「採用」、
+    誤っていれば「却下」してください。採用した関係がKnowledge Graph上のEdge（つながり）になります。
+    confidenceは合否判定ではなく参考値です。自動採用はしません。人が判断してください。
   </div>
   <div class="row" style="margin-bottom:8px;">
     <button id="btnGenerateCandidates" class="secondary">関連候補を自動生成</button>
@@ -170,20 +190,38 @@
       <option value="all">すべて</option>
     </select>
     <input type="text" id="edgeSearch" placeholder="ノードの本文・タイトル・タグで検索">
+    <label><input type="checkbox" id="edgeStaleOnly"> staleのみ表示</label>
+    <select id="edgeEvidenceFilter">
+      <option value="all">根拠: すべて</option>
+      <option value="tag_match">タグ一致あり</option>
+      <option value="text_similarity_only">文章類似のみ</option>
+    </select>
+  </div>
+  <div class="toolbar">
+    <label>信頼度 <input type="number" id="edgeConfMin" min="0" max="1" step="0.05" value="0"> 〜 <input type="number" id="edgeConfMax" min="0" max="1" step="0.05" value="1"></label>
+    <select id="edgeSort">
+      <option value="confidence">並べ替え: 信頼度順</option>
+      <option value="source_id">並べ替え: Source短縮ID順</option>
+      <option value="pending">並べ替え: 未処理優先</option>
+    </select>
+    <button id="btnEdgeResetFilter" class="small secondary">フィルタ解除</button>
+    <span id="edgeFilterActiveBadge" class="filter-active-badge" style="display:none;">フィルタ適用中</span>
   </div>
   <div class="toolbar">
     <label><input type="checkbox" id="edgeSelectAll"> このページの全選択</label>
     <span class="muted">選択中: <span id="edgeSelectedCount">0</span>件</span>
     <button id="btnBulkAccept" class="small secondary">選択した候補を一括採用</button>
     <button id="btnBulkReject" class="small danger">選択した候補を一括却下</button>
+    <button id="btnExpandAllGroups" class="small secondary">すべて展開</button>
+    <button id="btnCollapseAllGroups" class="small secondary">すべて折りたたむ</button>
   </div>
   <div class="row" style="margin-bottom:8px;">
-    <span class="muted" style="font-size:12px;">表示中: <span id="edgeCount">0</span>件</span>
+    <span class="muted" style="font-size:12px;">表示中: <span id="edgeCount">0</span>件 / 全<span id="edgeTotalCount">0</span>件（semantic edge）</span>
   </div>
   <div class="table-scroll">
     <table>
       <thead><tr>
-        <th></th><th>状態</th><th>関係</th><th>要求Node(A)</th><th>設計Node(B)</th><th>信頼度</th><th>根拠(evidence)</th><th>操作</th>
+        <th></th><th>状態</th><th>関係</th><th>Source(A)</th><th>Target(B)</th><th>信頼度</th><th>根拠(evidence)</th><th>操作</th>
       </tr></thead>
       <tbody id="edgeTableBody"></tbody>
     </table>
@@ -193,19 +231,48 @@
 <section class="panel">
   <h2>4. ナレッジグラフを確認 <span class="en">(Knowledge Graph)</span></h2>
   <div class="explain">
-    ノード同士のつながりを図で確認します。「文書間の関連」（文書Aと文書Bをつなぐ線）と、
-    「文書内の階層関係」（章 → 節 → 項目など、元文書内の親子関係）を色分けして区別しています。
-    まず確認したいのは通常「文書間の関連」なので、「文書内の階層関係」は初期状態では非表示にしています。
+    ノード同士のつながりを図で確認します。初期状態では<strong>採用済みの文書間の関連だけ</strong>を表示し、
+    未処理候補・文書内の階層関係は非表示です。Nodeをクリックすると接続先が強調表示されます。
   </div>
-  <div class="row" style="margin-bottom:8px;">
-    <label style="font-size:12px;"><input type="checkbox" id="graphShowCandidates" checked> 未採用の候補も表示</label>
+  <div class="toolbar">
+    <label style="font-size:12px;"><input type="checkbox" id="graphShowActive" checked> 採用済み文書間関連を表示</label>
+    <label style="font-size:12px;"><input type="checkbox" id="graphShowCandidates"> 未処理候補も表示</label>
     <label style="font-size:12px;"><input type="checkbox" id="graphShowStructural"> 文書内の階層関係も表示</label>
   </div>
+  <div class="toolbar">
+    <select id="graphDocFilter">
+      <option value="all">文書: すべて</option>
+      <option value="A">文書Aのみ</option>
+      <option value="B">文書Bのみ</option>
+    </select>
+    <select id="graphTypeFilter">
+      <option value="all">種別: すべて</option>
+      <option value="requirement">requirement</option>
+      <option value="design_item">design_item</option>
+      <option value="verification_item">verification_item</option>
+      <option value="statement">statement</option>
+      <option value="document">document</option>
+      <option value="section">section</option>
+    </select>
+    <select id="graphTagFilter"><option value="all">タグ: すべて</option></select>
+    <label style="font-size:12px;"><input type="checkbox" id="graphFocusMode"> 選択Nodeの周辺だけを表示</label>
+    <button id="btnGraphResetFilter" class="small secondary">フィルタ解除</button>
+    <span id="graphFilterActiveBadge" class="filter-active-badge" style="display:none;">フィルタ適用中</span>
+  </div>
+  <div class="row" style="margin-bottom:8px;">
+    <span class="muted" style="font-size:12px;">表示中Node: <span id="graphNodeCount">0</span>件 / 表示中Edge: <span id="graphEdgeCount">0</span>件</span>
+  </div>
   <div id="graphWrap"><svg id="graphSvg" width="1200" height="600"></svg></div>
+  <div class="explain" id="graphSelectedInfo" style="display:none;"></div>
   <div class="legend">
     <span><span class="legend-swatch" style="border-color:#2e7d32;"></span>文書間の関連（採用済み）</span>
     <span><span class="legend-swatch" style="border-color:#e0a800; border-top-style:dashed;"></span>文書間の関連（未処理候補）</span>
     <span><span class="legend-swatch" style="border-color:#bbb;"></span>文書内の階層関係</span>
+    <span><span class="legend-swatch" style="border-color:#c62828; border-top-style:dashed;"></span>stale（要再確認）</span>
+    <span><span class="legend-shape" style="background:#4a6cf7;"></span><span class="legend-shape" style="background:#1f9d55;"></span>青=文書A / 緑=文書B</span>
+    <span><span class="legend-shape sq-lg" style="background:#888;"></span>document</span>
+    <span><span class="legend-shape sq-sm" style="background:#888;"></span>section</span>
+    <span><span class="legend-shape circle" style="background:#888;"></span>内容Node</span>
   </div>
 </section>
 
@@ -214,7 +281,7 @@
   <button id="btnSave">Knowledge JSONを保存</button>
   <span class="status-line" id="saveStatus" style="margin:0; display:inline-block;"></span>
   <div class="muted" style="font-size:11px; margin-top:10px;">
-    作業量サマリ（件数が増えても人の操作件数を減らせているかの目安。α0.1.1で追加）。
+    作業量サマリ（件数が増えても人の操作件数を減らせているかの目安）。
     「操作対象にしたNode数」は選択または修正したNodeの重複除外件数であり、内容を実際に確認したことの保証ではありません。
   </div>
   <div class="metrics-grid" id="metricsGrid"></div>
@@ -240,6 +307,8 @@ const DEFAULT_TAG_VOCABULARY = {
 
 const LIFECYCLE_LABEL = { candidate: '候補', active: '採用済み', rejected: '却下' };
 const NODE_TYPES = ['document','section','requirement','design_item','verification_item','statement'];
+const LOW_CONFIDENCE_THRESHOLD = 0.7;
+const SHORT_TEXT_THRESHOLD = 10;
 
 let dataset = null;
 let docAId = null, docBId = null;
@@ -252,6 +321,27 @@ const actorHuman = { type: 'human', id: 'evaluator' };
 let selectedNodeIds = new Set();
 let nodeTouchLog = new Set();
 let selectedEdgeIds = new Set();
+
+// UI専用の画面表示ID(node_id -> "A-001"等)。取込のたびに再割当てされ、保存JSONには含めない。
+// 元Nodeの一意な特定は引き続きnode_id(node.node_id)で行う。短縮IDは画面表示専用の別名。
+let nodeShortIds = new Map();
+
+// Relation一覧: Source Node単位グループの展開状態(UI専用。既定は折りたたみ)。
+let expandedGroups = new Set();
+// Knowledge Graph: 選択中Node(UI専用。クリックで強調表示・周辺表示モードに使う)。
+let selectedGraphNodeId = null;
+// Node一覧: 有効なクイックフィルタの集合(UI専用)。
+let activeNodeQuickFilters = new Set();
+
+const NODE_QUICK_FILTERS = [
+  { key: 'untagged', label: 'タグ未設定', test: n => n.tags.length === 0 },
+  { key: 'unregistered', label: '未登録タグあり', test: n => (n.unregistered_tags || []).length > 0 },
+  { key: 'low_confidence', label: `低confidence(<${LOW_CONFIDENCE_THRESHOLD})`, test: n => n.confidence < LOW_CONFIDENCE_THRESHOLD },
+  { key: 'short_text', label: '本文が空/短い', test: n => (n.text || '').trim().length < SHORT_TEXT_THRESHOLD },
+  { key: 'edited', label: '修正済み', test: n => isNodeEdited(n) },
+  { key: 'no_candidates', label: 'Relation候補なし', test: n => nodeCandidateCount(n) === 0 },
+  { key: 'has_stale', label: 'stale Relationあり', test: n => nodeStaleRelationCount(n) > 0 },
+];
 
 function $(id) { return document.getElementById(id); }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -287,20 +377,26 @@ async function ingest() {
     const resultA = await KnowledgeTraceJsonAdapter.adaptTraceJson(traceA, { role: 'requirement', contentDigest: digestA, ingestedAt });
     const resultB = await KnowledgeTraceJsonAdapter.adaptTraceJson(traceB, { role: 'design', contentDigest: digestB, ingestedAt });
 
-    dataset = KnowledgeStore.createEmptyDataset({ tool: 'knowledge_builder_tool', version: '0.1.1-alpha' });
+    dataset = KnowledgeStore.createEmptyDataset({ tool: 'knowledge_builder_tool', version: '0.1.2-alpha' });
     await KnowledgeStore.setTagVocabulary(dataset, vocab);
     await KnowledgeStore.ingestAdapterResult(dataset, resultA, { type: 'ai', id: 'trace-json-adapter' });
     await KnowledgeStore.ingestAdapterResult(dataset, resultB, { type: 'ai', id: 'trace-json-adapter' });
     docAId = resultA.sourceDocument.source_document_id;
     docBId = resultB.sourceDocument.source_document_id;
 
+    assignShortIds();
     selectedNodeIds = new Set();
     nodeTouchLog = new Set();
     selectedEdgeIds = new Set();
+    expandedGroups = new Set();
+    selectedGraphNodeId = null;
+    activeNodeQuickFilters = new Set();
     resetNodeFilters();
     resetEdgeFilters();
+    resetGraphFilters();
     populateNodeTagFilterOptions();
     populateBulkTagSelects();
+    populateGraphTagFilterOptions();
 
     $('ingestStatus').textContent =
       `取込完了: 文書A「${resultA.sourceDocument.file_name}」Node ${resultA.nodes.length}件 / ` +
@@ -312,15 +408,38 @@ async function ingest() {
   }
 }
 
+// ---- 短縮ID(画面表示専用。元Nodeの一意特定はnode_idで行う) ----
+function assignShortIds() {
+  nodeShortIds = new Map();
+  const a = dataset.nodes.filter(n => n.provenance.source_document_id === docAId);
+  const b = dataset.nodes.filter(n => n.provenance.source_document_id === docBId);
+  a.forEach((n, i) => nodeShortIds.set(n.node_id, `A-${String(i + 1).padStart(3, '0')}`));
+  b.forEach((n, i) => nodeShortIds.set(n.node_id, `B-${String(i + 1).padStart(3, '0')}`));
+}
+function shortId(node) { return node ? (nodeShortIds.get(node.node_id) || node.node_id.slice(0, 10)) : '?'; }
+
 function resetNodeFilters() {
   $('nodeSearch').value = '';
   $('nodeDocFilter').value = 'all';
   $('nodeTypeFilter').value = 'all';
-  $('nodeStatusFilter').value = 'all';
+  $('nodeTagFilter').value = 'all';
+  activeNodeQuickFilters = new Set();
 }
 function resetEdgeFilters() {
   $('edgeSearch').value = '';
   $('edgeStatusFilter').value = 'candidate';
+  $('edgeStaleOnly').checked = false;
+  $('edgeEvidenceFilter').value = 'all';
+  $('edgeConfMin').value = '0';
+  $('edgeConfMax').value = '1';
+  $('edgeSort').value = 'confidence';
+}
+function resetGraphFilters() {
+  $('graphDocFilter').value = 'all';
+  $('graphTypeFilter').value = 'all';
+  $('graphTagFilter').value = 'all';
+  $('graphFocusMode').checked = false;
+  selectedGraphNodeId = null;
 }
 
 function contentNodes() {
@@ -334,10 +453,31 @@ function nodeLabel(node) {
 
 function isNodeEdited(node) { return node.revision.content_revision > 1; }
 
+function nodeCandidateCount(node) {
+  if (!dataset) return 0;
+  return dataset.edges.filter(e => e.relation_category === 'semantic' &&
+    (e.source_node_id === node.node_id || e.target_node_id === node.node_id)).length;
+}
+function nodeStaleRelationCount(node) {
+  if (!dataset) return 0;
+  return dataset.edges.filter(e => e.relation_category === 'semantic' &&
+    (e.source_node_id === node.node_id || e.target_node_id === node.node_id) &&
+    KnowledgeStore.isEdgeStale(dataset, e)).length;
+}
+
 function populateNodeTagFilterOptions() {
+  const allowed = (dataset && dataset.tag_vocabulary && dataset.tag_vocabulary.allowed_tags) || [];
   const sel = $('nodeTagFilter');
   sel.innerHTML = '<option value="all">タグ: すべて</option><option value="__none__">(タグ未設定)</option>';
+  for (const tag of allowed) {
+    const opt = document.createElement('option'); opt.value = tag; opt.textContent = tag;
+    sel.appendChild(opt);
+  }
+}
+function populateGraphTagFilterOptions() {
   const allowed = (dataset && dataset.tag_vocabulary && dataset.tag_vocabulary.allowed_tags) || [];
+  const sel = $('graphTagFilter');
+  sel.innerHTML = '<option value="all">タグ: すべて</option>';
   for (const tag of allowed) {
     const opt = document.createElement('option'); opt.value = tag; opt.textContent = tag;
     sel.appendChild(opt);
@@ -356,6 +496,13 @@ function populateBulkTagSelects() {
       sel.appendChild(opt);
     }
   }
+}
+
+// ---- 2. ノード一覧 ----
+
+function isNodeFilterActive() {
+  return $('nodeSearch').value.trim() !== '' || $('nodeDocFilter').value !== 'all' ||
+    $('nodeTypeFilter').value !== 'all' || $('nodeTagFilter').value !== 'all' || activeNodeQuickFilters.size > 0;
 }
 
 function filteredNodes() {
@@ -379,26 +526,48 @@ function filteredNodes() {
   if (tagFilter === '__none__') rows = rows.filter(n => n.tags.length === 0);
   else if (tagFilter !== 'all') rows = rows.filter(n => n.tags.includes(tagFilter));
 
-  const statusFilter = $('nodeStatusFilter').value;
-  if (statusFilter !== 'all') {
+  if (activeNodeQuickFilters.size > 0) {
     rows = rows.filter(n => {
-      if (n.node_type === 'document' || n.node_type === 'section') return false;
-      return statusFilter === 'edited' ? isNodeEdited(n) : !isNodeEdited(n);
+      if (n.node_type === 'document' || n.node_type === 'section') return false; // クイックフィルタは内容Node対象
+      return NODE_QUICK_FILTERS.filter(f => activeNodeQuickFilters.has(f.key)).every(f => f.test(n));
     });
   }
   return rows;
+}
+
+function renderNodeQuickFilterRow() {
+  const row = $('nodeQuickFilterRow');
+  row.innerHTML = '';
+  const rows = contentNodes();
+  for (const f of NODE_QUICK_FILTERS) {
+    const count = rows.filter(f.test).length;
+    const chip = document.createElement('span');
+    chip.className = 'chip' + (activeNodeQuickFilters.has(f.key) ? ' active' : '');
+    chip.innerHTML = `${esc(f.label)} <span class="count">${count}</span>`;
+    chip.addEventListener('click', () => {
+      if (activeNodeQuickFilters.has(f.key)) activeNodeQuickFilters.delete(f.key);
+      else activeNodeQuickFilters.add(f.key);
+      renderNodeTable();
+    });
+    row.appendChild(chip);
+  }
 }
 
 function updateNodeSelectionUi() {
   $('nodeSelectedCount').textContent = String(selectedNodeIds.size);
   const rows = filteredNodes();
   $('nodeSelectAll').checked = rows.length > 0 && rows.every(n => selectedNodeIds.has(n.node_id));
+  $('nodeFilterActiveBadge').style.display = isNodeFilterActive() ? 'inline-block' : 'none';
 }
 
 function renderNodeTable() {
+  renderNodeQuickFilterRow();
+  const table = $('nodeTable');
+  table.className = $('nodeDetailMode').checked ? '' : 'simple-mode';
+
   const tbody = $('nodeTableBody');
   tbody.innerHTML = '';
-  if (!dataset) { $('nodeCount').textContent = '0'; $('nodeTotalCount').textContent = '0'; return; }
+  if (!dataset) { $('nodeCount').textContent = '0'; $('nodeTotalCount').textContent = '0'; updateNodeSelectionUi(); return; }
 
   const rows = filteredNodes();
   $('nodeCount').textContent = String(rows.length);
@@ -406,7 +575,7 @@ function renderNodeTable() {
 
   for (const node of rows) {
     const tr = document.createElement('tr');
-    tr.className = 'node-row';
+    tr.className = 'node-row' + (selectedNodeIds.has(node.node_id) ? ' selected-row' : '');
 
     const tdSel = document.createElement('td');
     const cb = document.createElement('input');
@@ -415,7 +584,7 @@ function renderNodeTable() {
     cb.addEventListener('change', () => {
       if (cb.checked) { selectedNodeIds.add(node.node_id); nodeTouchLog.add(node.node_id); }
       else selectedNodeIds.delete(node.node_id);
-      updateNodeSelectionUi();
+      renderNodeTable();
       renderMetrics();
     });
     tdSel.appendChild(cb);
@@ -452,8 +621,13 @@ function renderNodeTable() {
     tdType.appendChild(sel);
     tr.appendChild(tdType);
 
+    const tdShortId = document.createElement('td');
+    tdShortId.innerHTML = `<span class="short-id" title="${esc(node.node_id)}">${esc(shortId(node))}</span>`;
+    tr.appendChild(tdShortId);
+
     const tdTitle = document.createElement('td');
     tdTitle.textContent = node.title || '';
+    tdTitle.title = node.title || '';
     tr.appendChild(tdTitle);
 
     const tdText = document.createElement('td');
@@ -472,16 +646,29 @@ function renderNodeTable() {
     tr.appendChild(tdTags);
 
     const tdConf = document.createElement('td');
+    tdConf.className = 'detail-col';
     tdConf.textContent = node.confidence.toFixed(2);
     tr.appendChild(tdConf);
 
     const tdSrc = document.createElement('td');
+    tdSrc.className = 'detail-col';
     const loc = node.provenance.locator;
     const idLine = node.export_binding
       ? `<code class="small">${esc(node.export_binding.trace_id)}</code>`
       : `<span class="muted" style="font-size:10px;">(構造Node・legacy Trace非互換)</span>`;
     tdSrc.innerHTML = `${idLine}<br><span class="muted" style="font-size:10px;">${esc(loc.kind === 'pdf' ? `p.${loc.page ?? '-'} ${loc.section_title ?? ''}` : `${loc.sheet ?? ''} row${loc.row ?? ''}`)}</span>`;
     tr.appendChild(tdSrc);
+
+    const tdRev = document.createElement('td');
+    tdRev.className = 'detail-col';
+    tdRev.innerHTML = `rev.${node.revision.content_revision}<br><code class="small">${esc(node.revision.knowledge_hash.slice(0, 8))}…</code>`;
+    tr.appendChild(tdRev);
+
+    const tdStale = document.createElement('td');
+    tdStale.className = 'detail-col';
+    const staleCount = nodeStaleRelationCount(node);
+    tdStale.innerHTML = staleCount > 0 ? `<span class="badge badge-stale">stale ${staleCount}</span>` : '<span class="muted">0</span>';
+    tr.appendChild(tdStale);
 
     tbody.appendChild(tr);
   }
@@ -553,6 +740,13 @@ function toggleAllNodeSelection() {
   renderMetrics();
 }
 
+function resetNodeFiltersAndRender() {
+  resetNodeFilters();
+  renderNodeTable();
+}
+
+// ---- 3. Relation一覧 ----
+
 async function generateCandidates() {
   if (!dataset) return;
   const contentA = dataset.nodes.filter(n => n.provenance.source_document_id === docAId && n.node_type !== 'document' && n.node_type !== 'section');
@@ -570,6 +764,23 @@ function edgeNode(edge, which) {
   return dataset.nodes.find(n => n.node_id === edge[which]);
 }
 
+function confidenceLabel(c) {
+  if (c >= 0.6) return { text: '高', cls: 'conf-high' };
+  if (c >= 0.3) return { text: '中', cls: 'conf-mid' };
+  return { text: '低', cls: 'conf-low' };
+}
+
+function edgeHasTagMatch(edge) {
+  return edge.evidence.features.some(f => f.feature === 'semantic_tag');
+}
+
+function isEdgeFilterActive() {
+  return $('edgeStatusFilter').value !== 'candidate' || $('edgeSearch').value.trim() !== '' ||
+    $('edgeStaleOnly').checked || $('edgeEvidenceFilter').value !== 'all' ||
+    Number($('edgeConfMin').value) > 0 || Number($('edgeConfMax').value) < 1 ||
+    $('edgeSort').value !== 'confidence';
+}
+
 function filteredEdges() {
   if (!dataset) return [];
   let rows = dataset.edges.filter(e => e.relation_category === 'semantic');
@@ -583,50 +794,110 @@ function filteredEdges() {
       return hay.includes(search);
     });
   }
+  if ($('edgeStaleOnly').checked) rows = rows.filter(e => KnowledgeStore.isEdgeStale(dataset, e));
+  const evidenceFilter = $('edgeEvidenceFilter').value;
+  if (evidenceFilter === 'tag_match') rows = rows.filter(edgeHasTagMatch);
+  else if (evidenceFilter === 'text_similarity_only') rows = rows.filter(e => !edgeHasTagMatch(e));
+  const confMin = Number($('edgeConfMin').value) || 0;
+  const confMax = Number($('edgeConfMax').value ?? 1);
+  rows = rows.filter(e => e.confidence >= confMin && e.confidence <= (Number.isFinite(confMax) ? confMax : 1));
   return rows;
+}
+
+function allSemanticEdgesForSource(sourceId) {
+  return dataset.edges.filter(e => e.relation_category === 'semantic' && e.source_node_id === sourceId);
 }
 
 function updateEdgeSelectionUi() {
   $('edgeSelectedCount').textContent = String(selectedEdgeIds.size);
   const rows = filteredEdges();
   $('edgeSelectAll').checked = rows.length > 0 && rows.every(e => selectedEdgeIds.has(e.edge_id));
+  $('edgeFilterActiveBadge').style.display = isEdgeFilterActive() ? 'inline-block' : 'none';
 }
 
 function renderEdgeTable() {
   const tbody = $('edgeTableBody');
   tbody.innerHTML = '';
-  if (!dataset) { $('edgeCount').textContent = '0'; return; }
+  if (!dataset) { $('edgeCount').textContent = '0'; $('edgeTotalCount').textContent = '0'; updateEdgeSelectionUi(); return; }
 
   const rows = filteredEdges();
   $('edgeCount').textContent = String(rows.length);
+  $('edgeTotalCount').textContent = String(dataset.edges.filter(e => e.relation_category === 'semantic').length);
 
-  // Source Node単位でグループ化(指示書§7)。グループはグループ内最大confidence降順、
-  // グループ内は各候補をconfidence降順で並べ、1つの要求Nodeに対する候補をまとめて比較できるようにする。
+  // Source Node単位でグループ化(折りたたみ可能)。グループ見出しには全体の内訳(未処理/採用/却下)を表示する。
   const groups = new Map();
   for (const edge of rows) {
     if (!groups.has(edge.source_node_id)) groups.set(edge.source_node_id, []);
     groups.get(edge.source_node_id).push(edge);
   }
-  const groupList = [...groups.entries()].map(([sourceId, edges]) => {
+  let groupList = [...groups.entries()].map(([sourceId, edges]) => {
     edges.sort((a, b) => b.confidence - a.confidence);
-    return { sourceId, edges, maxConf: Math.max(...edges.map(e => e.confidence)) };
-  }).sort((a, b) => b.maxConf - a.maxConf);
+    const allForSource = allSemanticEdgesForSource(sourceId);
+    const stats = {
+      total: allForSource.length,
+      candidate: allForSource.filter(e => e.lifecycle === 'candidate').length,
+      active: allForSource.filter(e => e.lifecycle === 'active').length,
+      rejected: allForSource.filter(e => e.lifecycle === 'rejected').length,
+    };
+    return { sourceId, edges, maxConf: Math.max(...edges.map(e => e.confidence)), stats };
+  });
+
+  const sortMode = $('edgeSort').value;
+  if (sortMode === 'source_id') {
+    groupList.sort((a, b) => shortId(dataset.nodes.find(n => n.node_id === a.sourceId)).localeCompare(shortId(dataset.nodes.find(n => n.node_id === b.sourceId))));
+  } else if (sortMode === 'pending') {
+    groupList.sort((a, b) => (b.stats.candidate - a.stats.candidate) || (b.maxConf - a.maxConf));
+  } else {
+    groupList.sort((a, b) => b.maxConf - a.maxConf);
+  }
 
   for (const group of groupList) {
     const sourceNode = dataset.nodes.find(n => n.node_id === group.sourceId);
+    const isExpanded = expandedGroups.has(group.sourceId);
+
     const headerTr = document.createElement('tr');
     headerTr.className = 'group-header-row';
     const headerTd = document.createElement('td');
     headerTd.colSpan = 8;
-    headerTd.textContent = `要求Node: ${sourceNode ? nodeLabel(sourceNode) : group.sourceId}（候補 ${group.edges.length}件）`;
+    const toggleSpan = document.createElement('span');
+    toggleSpan.className = 'group-toggle';
+    toggleSpan.textContent = (isExpanded ? '▼ ' : '▶ ') +
+      `要求Node: [${shortId(sourceNode)}] ${sourceNode ? sourceNode.text.slice(0, 50) : group.sourceId}`;
+    toggleSpan.title = sourceNode ? sourceNode.node_id : group.sourceId;
+    toggleSpan.addEventListener('click', () => {
+      if (expandedGroups.has(group.sourceId)) expandedGroups.delete(group.sourceId);
+      else expandedGroups.add(group.sourceId);
+      renderEdgeTable();
+    });
+    headerTd.appendChild(toggleSpan);
+    const statsSpan = document.createElement('span');
+    statsSpan.className = 'group-stats';
+    statsSpan.textContent = `全${group.stats.total}件（未処理${group.stats.candidate}・採用${group.stats.active}・却下${group.stats.rejected}）`;
+    headerTd.appendChild(statsSpan);
+    if (group.stats.candidate > 0) {
+      const groupRejectBtn = document.createElement('button');
+      groupRejectBtn.className = 'tiny danger';
+      groupRejectBtn.style.marginLeft = '8px';
+      groupRejectBtn.textContent = 'このグループの候補をすべて却下';
+      groupRejectBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        for (const e of allSemanticEdgesForSource(group.sourceId)) {
+          if (e.lifecycle === 'candidate') await KnowledgeStore.rejectCandidate(dataset, e.edge_id, actorHuman, 'bulk');
+        }
+        renderAll();
+      });
+      headerTd.appendChild(groupRejectBtn);
+    }
     headerTr.appendChild(headerTd);
     tbody.appendChild(headerTr);
+
+    if (!isExpanded) continue;
 
     for (const edge of group.edges) {
       const target = edgeNode(edge, 'target_node_id');
       const stale = KnowledgeStore.isEdgeStale(dataset, edge);
       const tr = document.createElement('tr');
-      tr.className = 'edge-row';
+      tr.className = 'edge-row' + (selectedEdgeIds.has(edge.edge_id) ? ' selected-row' : '');
 
       const tdSel = document.createElement('td');
       const cb = document.createElement('input');
@@ -634,7 +905,7 @@ function renderEdgeTable() {
       cb.checked = selectedEdgeIds.has(edge.edge_id);
       cb.addEventListener('change', () => {
         if (cb.checked) selectedEdgeIds.add(edge.edge_id); else selectedEdgeIds.delete(edge.edge_id);
-        updateEdgeSelectionUi();
+        renderEdgeTable();
       });
       tdSel.appendChild(cb);
       tr.appendChild(tdSel);
@@ -649,15 +920,18 @@ function renderEdgeTable() {
       tr.appendChild(tdRel);
 
       const tdSrc = document.createElement('td');
-      tdSrc.textContent = sourceNode ? sourceNode.text.slice(0, 44) : '(不明)';
+      tdSrc.innerHTML = `<span class="short-id" title="${esc(sourceNode ? sourceNode.node_id : '')}">${esc(shortId(sourceNode))}</span> ` +
+        renderTagChipsHtml(sourceNode, edge) + `<br>${esc(sourceNode ? sourceNode.text.slice(0, 40) : '(不明)')}`;
       tr.appendChild(tdSrc);
 
       const tdTgt = document.createElement('td');
-      tdTgt.textContent = target ? nodeLabel(target) + ': ' + target.text.slice(0, 40) : '(不明)';
+      tdTgt.innerHTML = `<span class="short-id" title="${esc(target ? target.node_id : '')}">${esc(shortId(target))}</span> ` +
+        renderTagChipsHtml(target, edge) + `<br>${esc(target ? target.text.slice(0, 40) : '(不明)')}`;
       tr.appendChild(tdTgt);
 
       const tdConf = document.createElement('td');
-      tdConf.textContent = edge.confidence.toFixed(2);
+      const cl = confidenceLabel(edge.confidence);
+      tdConf.innerHTML = `${edge.confidence.toFixed(2)} <span class="${cl.cls}">(${cl.text})</span>`;
       tr.appendChild(tdConf);
 
       const tdEv = document.createElement('td');
@@ -684,6 +958,13 @@ function renderEdgeTable() {
     }
   }
   updateEdgeSelectionUi();
+}
+
+function renderTagChipsHtml(node, edge) {
+  if (!node || !node.tags.length) return '';
+  const matchedFeature = edge.evidence.features.find(f => f.feature === 'semantic_tag');
+  const matched = new Set(matchedFeature ? matchedFeature.detail.matched || [] : []);
+  return node.tags.map(t => `<span class="tag-chip${matched.has(t) ? ' matched' : ''}">${esc(t)}</span>`).join('');
 }
 
 function toggleAllEdgeSelection() {
@@ -713,20 +994,99 @@ async function bulkRejectEdges() {
   renderAll();
 }
 
+function expandAllGroups() {
+  expandedGroups = new Set(filteredEdges().map(e => e.source_node_id));
+  renderEdgeTable();
+}
+function collapseAllGroups() {
+  expandedGroups = new Set();
+  renderEdgeTable();
+}
+function resetEdgeFiltersAndRender() {
+  resetEdgeFilters();
+  renderEdgeTable();
+}
+
+// ---- 4. Knowledge Graph ----
+
+function nodeTypeDepth(node) {
+  if (node.node_type === 'document') return 0;
+  if (node.node_type === 'section') return 1;
+  return 2;
+}
+function nodeShapeSize(node) {
+  if (node.node_type === 'document') return { shape: 'rect', size: 12 };
+  if (node.node_type === 'section') return { shape: 'rect', size: 9 };
+  return { shape: 'circle', size: 6 };
+}
+function nodeColor(node) {
+  return node.provenance.source_document_id === docAId ? '#4a6cf7' : '#1f9d55';
+}
+
+function isGraphFilterActive() {
+  return $('graphDocFilter').value !== 'all' || $('graphTypeFilter').value !== 'all' ||
+    $('graphTagFilter').value !== 'all' || $('graphFocusMode').checked;
+}
+
+function graphCandidateNodes() {
+  if (!dataset) return [];
+  const showStructural = $('graphShowStructural').checked;
+  let rows = dataset.nodes.filter(n => showStructural || (n.node_type !== 'document' && n.node_type !== 'section'));
+  const docFilter = $('graphDocFilter').value;
+  if (docFilter !== 'all') {
+    const targetDocId = docFilter === 'A' ? docAId : docBId;
+    rows = rows.filter(n => n.provenance.source_document_id === targetDocId);
+  }
+  const typeFilter = $('graphTypeFilter').value;
+  if (typeFilter !== 'all') rows = rows.filter(n => n.node_type === typeFilter);
+  const tagFilter = $('graphTagFilter').value;
+  if (tagFilter !== 'all') rows = rows.filter(n => n.tags.includes(tagFilter));
+  return rows;
+}
+
+function graphEdgesToDraw() {
+  if (!dataset) return [];
+  let edges = [];
+  if ($('graphShowActive').checked) edges = edges.concat(dataset.edges.filter(e => e.relation_category === 'semantic' && e.lifecycle === 'active'));
+  if ($('graphShowCandidates').checked) edges = edges.concat(dataset.edges.filter(e => e.relation_category === 'semantic' && e.lifecycle === 'candidate'));
+  if ($('graphShowStructural').checked) edges = edges.concat(dataset.edges.filter(e => e.relation_category === 'structural'));
+  return edges;
+}
+
 function renderGraph() {
   const svg = $('graphSvg');
   svg.innerHTML = '';
-  if (!dataset) return;
-  const showCandidates = $('graphShowCandidates').checked;
+  $('graphFilterActiveBadge').style.display = isGraphFilterActive() ? 'inline-block' : 'none';
+  if (!dataset) { $('graphNodeCount').textContent = '0'; $('graphEdgeCount').textContent = '0'; return; }
+
+  let nodeCandidates = graphCandidateNodes();
+  let edgeCandidates = graphEdgesToDraw();
+
+  // 選択Nodeの周辺だけを表示するモード: 選択Node + 直接つながるNodeのみへ絞り込む。
+  const focusMode = $('graphFocusMode').checked && selectedGraphNodeId;
+  if (focusMode) {
+    const connected = new Set([selectedGraphNodeId]);
+    for (const e of edgeCandidates) {
+      if (e.source_node_id === selectedGraphNodeId) connected.add(e.target_node_id);
+      if (e.target_node_id === selectedGraphNodeId) connected.add(e.source_node_id);
+    }
+    nodeCandidates = nodeCandidates.filter(n => connected.has(n.node_id));
+  }
+  const nodeIdSet = new Set(nodeCandidates.map(n => n.node_id));
+  edgeCandidates = edgeCandidates.filter(e => nodeIdSet.has(e.source_node_id) && nodeIdSet.has(e.target_node_id));
+
+  const listA = nodeCandidates.filter(n => n.provenance.source_document_id === docAId);
+  const listB = nodeCandidates.filter(n => n.provenance.source_document_id === docBId);
+
+  $('graphNodeCount').textContent = String(nodeCandidates.length);
+  $('graphEdgeCount').textContent = String(edgeCandidates.length);
+
   const showStructural = $('graphShowStructural').checked;
-
-  const listA = dataset.nodes.filter(n => n.provenance.source_document_id === docAId && (showStructural || (n.node_type !== 'document' && n.node_type !== 'section')));
-  const listB = dataset.nodes.filter(n => n.provenance.source_document_id === docBId && (showStructural || (n.node_type !== 'document' && n.node_type !== 'section')));
-
   const pos = new Map();
   const marginY = 30, stepY = Math.max(28, Math.min(60, 560 / Math.max(1, Math.max(listA.length, listB.length))));
-  listA.forEach((n, i) => pos.set(n.node_id, { x: 160, y: marginY + i * stepY }));
-  listB.forEach((n, i) => pos.set(n.node_id, { x: 900, y: marginY + i * stepY }));
+  const baseA = 160, baseB = 900, indentStep = showStructural ? 24 : 0;
+  listA.forEach((n, i) => pos.set(n.node_id, { x: baseA + (showStructural ? nodeTypeDepth(n) * indentStep : 0), y: marginY + i * stepY }));
+  listB.forEach((n, i) => pos.set(n.node_id, { x: baseB - (showStructural ? nodeTypeDepth(n) * indentStep : 0), y: marginY + i * stepY }));
 
   const height = Math.max(600, marginY * 2 + Math.max(listA.length, listB.length) * stepY);
   svg.setAttribute('height', String(height));
@@ -738,17 +1098,27 @@ function renderGraph() {
     return e;
   }
 
-  // 「文書間の関連」(semantic edge, A↔B)と「文書内の階層関係」(structural edge, contains)を
-  // 明確に色分けする(指示書§8)。
-  let edgesToDraw = dataset.edges.filter(e => e.relation_category === 'semantic' && (e.lifecycle === 'active' || (showCandidates && e.lifecycle === 'candidate')));
-  if (showStructural) edgesToDraw = edgesToDraw.concat(dataset.edges.filter(e => e.relation_category === 'structural'));
+  const connectedToSelection = new Set();
+  if (selectedGraphNodeId) {
+    connectedToSelection.add(selectedGraphNodeId);
+    for (const e of edgeCandidates) {
+      if (e.source_node_id === selectedGraphNodeId) connectedToSelection.add(e.target_node_id);
+      if (e.target_node_id === selectedGraphNodeId) connectedToSelection.add(e.source_node_id);
+    }
+  }
 
-  for (const edge of edgesToDraw) {
+  for (const edge of edgeCandidates) {
     const p1 = pos.get(edge.source_node_id), p2 = pos.get(edge.target_node_id);
     if (!p1 || !p2) continue;
     const stale = KnowledgeStore.isEdgeStale(dataset, edge);
-    const color = edge.relation_category === 'structural' ? '#bbb' : (edge.lifecycle === 'candidate' ? '#e0a800' : '#2e7d32');
-    const line = el('line', { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, stroke: color, 'stroke-width': edge.lifecycle === 'active' ? 2 : 1, 'stroke-dasharray': (edge.lifecycle === 'candidate' || stale) ? '4,3' : '' });
+    const isHighlighted = !selectedGraphNodeId || edge.source_node_id === selectedGraphNodeId || edge.target_node_id === selectedGraphNodeId;
+    const color = stale ? '#c62828' : (edge.relation_category === 'structural' ? '#bbb' : (edge.lifecycle === 'candidate' ? '#e0a800' : '#2e7d32'));
+    const line = el('line', {
+      x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, stroke: color,
+      'stroke-width': (edge.lifecycle === 'active' ? 2 : 1) * (isHighlighted ? 1.6 : 1),
+      'stroke-dasharray': (edge.lifecycle === 'candidate' || stale) ? '4,3' : '',
+      opacity: isHighlighted ? '1' : '0.18'
+    });
     const title = el('title', {});
     const kindLabel = edge.relation_category === 'structural' ? '文書内の階層関係' : '文書間の関連';
     title.textContent = `${kindLabel}: ${edge.relation_type} (${LIFECYCLE_LABEL[edge.lifecycle] || edge.lifecycle}${stale ? '・stale' : ''}) conf=${edge.confidence.toFixed(2)}`;
@@ -757,18 +1127,55 @@ function renderGraph() {
   }
 
   function drawNode(node, p) {
-    const color = node.node_type === 'requirement' ? '#4a6cf7' : node.node_type === 'design_item' ? '#1f9d55' : '#9aa1ab';
-    const circle = el('circle', { cx: p.x, cy: p.y, r: 7, fill: color, stroke: '#fff', 'stroke-width': 1.5 });
+    const color = nodeColor(node);
+    const { shape, size } = nodeShapeSize(node);
+    const isSelected = node.node_id === selectedGraphNodeId;
+    const isDimmed = selectedGraphNodeId && !connectedToSelection.has(node.node_id);
+    const commonAttrs = {
+      fill: color, stroke: isSelected ? '#000' : '#fff', 'stroke-width': isSelected ? 3 : 1.5,
+      opacity: isDimmed ? '0.25' : '1', style: 'cursor:pointer;'
+    };
+    let shapeEl;
+    if (shape === 'rect') {
+      shapeEl = el('rect', { x: p.x - size / 2, y: p.y - size / 2, width: size, height: size, ...commonAttrs });
+    } else {
+      shapeEl = el('circle', { cx: p.x, cy: p.y, r: size, ...commonAttrs });
+    }
     const title = el('title', {});
-    title.textContent = `${node.node_type}: ${node.title || node.text}`;
-    circle.appendChild(title);
-    svg.appendChild(circle);
-    const label = el('text', { x: p.x + (p.x < 500 ? 12 : -12), y: p.y + 4, 'font-size': 10, fill: '#333', 'text-anchor': p.x < 500 ? 'start' : 'end' });
-    label.textContent = (node.title || node.text).slice(0, 22);
+    title.textContent = `[${shortId(node)}] ${node.node_type}: ${node.title || node.text}`;
+    shapeEl.appendChild(title);
+    shapeEl.addEventListener('click', () => {
+      selectedGraphNodeId = (selectedGraphNodeId === node.node_id) ? null : node.node_id;
+      renderGraphSelectedInfo();
+      renderGraph();
+    });
+    svg.appendChild(shapeEl);
+
+    const label = el('text', {
+      x: p.x + (p.x < 500 ? size + 6 : -(size + 6)), y: p.y + 4, 'font-size': 10,
+      fill: isDimmed ? '#bbb' : '#333', 'text-anchor': p.x < 500 ? 'start' : 'end'
+    });
+    label.textContent = `[${shortId(node)}] ${(node.title || node.text).slice(0, 18)}`;
     svg.appendChild(label);
   }
   for (const n of listA) drawNode(n, pos.get(n.node_id));
   for (const n of listB) drawNode(n, pos.get(n.node_id));
+}
+
+function renderGraphSelectedInfo() {
+  const box = $('graphSelectedInfo');
+  if (!selectedGraphNodeId || !dataset) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  const node = dataset.nodes.find(n => n.node_id === selectedGraphNodeId);
+  if (!node) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  box.innerHTML = `<strong>選択中Node: [${esc(shortId(node))}] ${esc(node.title || '')}</strong><br>` +
+    `${esc(node.text)}<br><span class="muted" style="font-size:10px;">node_id: ${esc(node.node_id)}</span>`;
+}
+
+function resetGraphFiltersAndRender() {
+  resetGraphFilters();
+  renderGraphSelectedInfo();
+  renderGraph();
 }
 
 // §15: 「全件数が増えても、人の操作件数を減らせたか」を確認するための最小限の集計。
@@ -841,6 +1248,7 @@ async function saveKnowledgeJson() {
 function renderAll() {
   renderNodeTable();
   renderEdgeTable();
+  renderGraphSelectedInfo();
   renderGraph();
   renderMetrics();
 }
@@ -850,23 +1258,38 @@ $('btnGenerateCandidates').addEventListener('click', generateCandidates);
 $('btnSave').addEventListener('click', saveKnowledgeJson);
 
 $('showStructural').addEventListener('change', renderNodeTable);
+$('nodeDetailMode').addEventListener('change', renderNodeTable);
 $('nodeSearch').addEventListener('input', renderNodeTable);
 $('nodeDocFilter').addEventListener('change', renderNodeTable);
 $('nodeTypeFilter').addEventListener('change', renderNodeTable);
 $('nodeTagFilter').addEventListener('change', renderNodeTable);
-$('nodeStatusFilter').addEventListener('change', renderNodeTable);
 $('nodeSelectAll').addEventListener('change', toggleAllNodeSelection);
 $('btnBulkAddTag').addEventListener('click', bulkAddTag);
 $('btnBulkRemoveTag').addEventListener('click', bulkRemoveTag);
+$('btnNodeResetFilter').addEventListener('click', resetNodeFiltersAndRender);
 
 $('edgeStatusFilter').addEventListener('change', renderEdgeTable);
 $('edgeSearch').addEventListener('input', renderEdgeTable);
+$('edgeStaleOnly').addEventListener('change', renderEdgeTable);
+$('edgeEvidenceFilter').addEventListener('change', renderEdgeTable);
+$('edgeConfMin').addEventListener('input', renderEdgeTable);
+$('edgeConfMax').addEventListener('input', renderEdgeTable);
+$('edgeSort').addEventListener('change', renderEdgeTable);
 $('edgeSelectAll').addEventListener('change', toggleAllEdgeSelection);
 $('btnBulkAccept').addEventListener('click', bulkAcceptEdges);
 $('btnBulkReject').addEventListener('click', bulkRejectEdges);
+$('btnExpandAllGroups').addEventListener('click', expandAllGroups);
+$('btnCollapseAllGroups').addEventListener('click', collapseAllGroups);
+$('btnEdgeResetFilter').addEventListener('click', resetEdgeFiltersAndRender);
 
+$('graphShowActive').addEventListener('change', renderGraph);
 $('graphShowCandidates').addEventListener('change', renderGraph);
 $('graphShowStructural').addEventListener('change', renderGraph);
+$('graphDocFilter').addEventListener('change', renderGraph);
+$('graphTypeFilter').addEventListener('change', renderGraph);
+$('graphTagFilter').addEventListener('change', renderGraph);
+$('graphFocusMode').addEventListener('change', renderGraph);
+$('btnGraphResetFilter').addEventListener('click', resetGraphFiltersAndRender);
 </script>
 </body>
 </html>
