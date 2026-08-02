@@ -556,28 +556,49 @@ function headerDetectionWarningText(code) {
   return code;
 }
 
+// 是正Checkpoint 2c.1 §4: meaningful_range_too_largeは利用者向け固定エラーとして扱う
+// (console errorではなく、対象シートを選択不可にしてメッセージをバッジ表示する)。
+function meaningfulRangeErrorText(e) {
+  if (e && e.code === 'meaningful_range_too_large') return e.message;
+  return null;
+}
+
 function renderSheetList(side) {
   const input = excelInputRef(side);
   const container = $('sheetList' + side);
   if (!input) { container.innerHTML = ''; updatePreviewButtonState(side); return; }
-  const firstSelectable = input.sheetNames.find(s => !s.hidden && !s.empty);
-  container.innerHTML = input.sheetNames.map(s => {
-    const checked = firstSelectable && s.index === firstSelectable.index;
-    const disabled = s.empty;
-    const badge = s.empty ? '<span class="muted">(空シートのため選択不可)</span>'
-      : (s.hidden ? '<span class="muted">(非表示シート)</span>' : '');
-    let detected = { headerRow: 1, dataStartRow: 2, confidence: 'high', code: null };
-    if (!s.empty) {
-      try { detected = KnowledgeExcelDirectAdapter.detectHeaderAndDataStart(input.workbook, s.name); }
-      catch (e) { /* 推定に失敗しても既定値(1/2)のまま利用者が修正できる */ }
+
+  // まず各シートの推定結果(または大きすぎる実効範囲の固定エラー)を求めてから、
+  // 「選択可能な」シートの中から初期選択を決める(大きすぎるシートを既定選択にしない)。
+  const detections = input.sheetNames.map(s => {
+    if (s.empty) return { detected: null, rangeTooLargeText: null };
+    try {
+      return { detected: KnowledgeExcelDirectAdapter.detectHeaderAndDataStart(input.workbook, s.name), rangeTooLargeText: null };
+    } catch (e) {
+      const rangeTooLargeText = meaningfulRangeErrorText(e);
+      if (rangeTooLargeText) return { detected: null, rangeTooLargeText };
+      // 想定外のエラーは推定に失敗しても既定値(1/2)のまま利用者が修正できるようにする。
+      return { detected: null, rangeTooLargeText: null };
     }
-    const detectionBadge = detected.code
-      ? `<span class="muted excel-sheet-detect-badge">(${esc(headerDetectionWarningText(detected.code))})</span>` : '';
+  });
+
+  const firstSelectable = input.sheetNames.find((s, i) => !s.hidden && !s.empty && !detections[i].rangeTooLargeText);
+
+  container.innerHTML = input.sheetNames.map((s, i) => {
+    const { detected, rangeTooLargeText } = detections[i];
+    const checked = firstSelectable && s.index === firstSelectable.index;
+    const disabled = s.empty || !!rangeTooLargeText;
+    const badge = s.empty ? '<span class="muted">(空シートのため選択不可)</span>'
+      : (rangeTooLargeText ? `<span class="muted excel-sheet-range-too-large-badge">(${esc(rangeTooLargeText)})</span>`
+      : (s.hidden ? '<span class="muted">(非表示シート)</span>' : ''));
+    const d = detected || { headerRow: 1, dataStartRow: 2, confidence: 'high', code: null };
+    const detectionBadge = d.code
+      ? `<span class="muted excel-sheet-detect-badge">(${esc(headerDetectionWarningText(d.code))})</span>` : '';
     return `<div class="excel-sheet-row" data-sheet-index="${s.index}" data-sheet-name="${esc(s.name)}">
       <label><input type="checkbox" class="excel-sheet-check" data-side="${side}" data-sheet-index="${s.index}"${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}> ${esc(s.name)}</label>
       ${badge}
-      <span>見出し行: <input type="number" class="excel-sheet-header" data-side="${side}" data-sheet-index="${s.index}" min="1" value="${detected.headerRow}"${disabled ? ' disabled' : ''}></span>
-      <span>データ開始行: <input type="number" class="excel-sheet-datastart" data-side="${side}" data-sheet-index="${s.index}" min="1" value="${detected.dataStartRow}"${disabled ? ' disabled' : ''}></span>
+      <span>見出し行: <input type="number" class="excel-sheet-header" data-side="${side}" data-sheet-index="${s.index}" min="1" value="${d.headerRow}"${disabled ? ' disabled' : ''}></span>
+      <span>データ開始行: <input type="number" class="excel-sheet-datastart" data-side="${side}" data-sheet-index="${s.index}" min="1" value="${d.dataStartRow}"${disabled ? ' disabled' : ''}></span>
       ${detectionBadge}
     </div>`;
   }).join('');

@@ -81,16 +81,60 @@
     return !!cell && ((cell.v !== undefined && cell.v !== null && cell.v !== '') || !!cell.f);
   }
 
-  // シート内に値または数式を持つセルが1つでもあるか(是正Checkpoint 2c §2)。
-  // '!ref'が存在していても、書式だけが適用され実データが1つもないシートはここでfalseになる
-  // (使用範囲の広さだけを見て「非空」と誤判定しない)。
-  function hasAnyMeaningfulCell(worksheet) {
-    if (!worksheet) return false;
-    for (const ref in worksheet) {
-      if (ref.charCodeAt(0) === 33) continue; // '!'始まりのメタキー(!ref, !rows, !cols, !merges等)は除く
-      if (cellHasRawOrFormula(worksheet[ref])) return true;
+  /**
+   * シートの「意味のある実効範囲」を計算する(UI非依存の純関数。是正Checkpoint 2c.1)。
+   * 値または数式を持つ実セルだけを走査し、その最小外接矩形を返す。書式(z/s)だけのセルは
+   * 範囲計算に含めない。非表示行・非表示列でも実データがあれば含める(hidden判定を一切見ない)。
+   * 数式結果(表示値)が空でもformulaがあれば含める。worksheetオブジェクトはSheetJSが疎(スパース)に
+   * 保持しているため、この走査コストは実際に値を持つセル数に比例し、'!ref'が主張する物理範囲の
+   * 広さには左右されない。
+   * @param {object} worksheet  workbook.Sheets[sheetName]
+   * @returns {{ firstRow:number|null, lastRow:number|null, firstCol:number|null, lastCol:number|null,
+   *             ref:string|null, meaningfulCellCount:number }}
+   */
+  function computeMeaningfulRange(worksheet) {
+    const XLSX = resolveXLSX();
+    let firstRow = null, lastRow = null, firstCol = null, lastCol = null, meaningfulCellCount = 0;
+    if (worksheet) {
+      for (const ref in worksheet) {
+        if (ref.charCodeAt(0) === 33) continue; // '!'始まりのメタキー(!ref, !rows, !cols, !merges等)は除く
+        const cell = worksheet[ref];
+        if (!cellHasRawOrFormula(cell)) continue;
+        const pos = XLSX.utils.decode_cell(ref);
+        if (firstRow === null || pos.r < firstRow) firstRow = pos.r;
+        if (lastRow === null || pos.r > lastRow) lastRow = pos.r;
+        if (firstCol === null || pos.c < firstCol) firstCol = pos.c;
+        if (lastCol === null || pos.c > lastCol) lastCol = pos.c;
+        meaningfulCellCount++;
+      }
     }
-    return false;
+    if (meaningfulCellCount === 0) {
+      return { firstRow: null, lastRow: null, firstCol: null, lastCol: null, ref: null, meaningfulCellCount: 0 };
+    }
+    const ref = `${XLSX.utils.encode_cell({ r: firstRow, c: firstCol })}:${XLSX.utils.encode_cell({ r: lastRow, c: lastCol })}`;
+    return { firstRow, lastRow, firstCol, lastCol, ref, meaningfulCellCount };
+  }
+
+  // 是正Checkpoint 2c.1 §4: 意味のある実効範囲(外接矩形)が大きすぎる場合にブラウザを固まらせない
+  // ための上限。遠く離れた2セルだけが実データでも外接矩形は巨大になりうる(疎な巨大範囲)。
+  // 実務上妥当な最大規模(例: 5,000行×100列=50万セル)を吸収しつつ、それを超える異常な疎範囲は
+  // extractSheetRows()/detectHeaderAndDataStart()の総当たりループへ進む前に検出する。
+  const MAX_MEANINGFUL_RANGE_CELLS = 500000;
+
+  function assertMeaningfulRangeWithinLimit(meaningfulRange, sheetName) {
+    if (meaningfulRange.meaningfulCellCount === 0) return;
+    const rowCount = meaningfulRange.lastRow - meaningfulRange.firstRow + 1;
+    const colCount = meaningfulRange.lastCol - meaningfulRange.firstCol + 1;
+    const estimatedCells = rowCount * colCount;
+    if (estimatedCells > MAX_MEANINGFUL_RANGE_CELLS) {
+      const err = new Error(
+        `シート「${sheetName}」の実効範囲(${meaningfulRange.ref})が大きすぎます` +
+        `(推定セル数: ${estimatedCells.toLocaleString('en-US')}件、上限: ${MAX_MEANINGFUL_RANGE_CELLS.toLocaleString('en-US')}件)。` +
+        `遠く離れたセルにまで実データが散在していないかご確認ください。`
+      );
+      err.code = 'meaningful_range_too_large';
+      throw err;
+    }
   }
 
   // 是正Checkpoint 2a.1: SheetJSはcellDates:trueの日付セルを、シリアル値を「実行環境のローカル時刻」の
@@ -145,9 +189,10 @@
     const wbSheetMeta = (workbook.Workbook && Array.isArray(workbook.Workbook.Sheets)) ? workbook.Workbook.Sheets : [];
     const sheetNames = workbook.SheetNames.map((name, index) => {
       const worksheet = workbook.Sheets[name];
-      // 是正Checkpoint 2c §2: '!ref'があるだけでは「データがある」とみなさない。書式だけが適用され
-      // 値・数式を持つセルが1つもないシート(例: 範囲だけ選択して太字にした等)も空シート扱いにする。
-      const empty = !worksheet || !worksheet['!ref'] || !hasAnyMeaningfulCell(worksheet);
+      // 是正Checkpoint 2c §2 / 2c.1: '!ref'があるだけでは「データがある」とみなさない。書式だけが
+      // 適用され値・数式を持つセルが1つもないシート(例: 範囲だけ選択して太字にした等)は、
+      // computeMeaningfulRange()のmeaningfulCellCountが0になるため空シート扱いにする。
+      const empty = !worksheet || computeMeaningfulRange(worksheet).meaningfulCellCount === 0;
       // Hidden: 0=表示, 1=非表示, 2=非常に非表示(いずれも1以上を「非表示」として扱う)。
       const meta = wbSheetMeta[index];
       const hidden = !!(meta && Number(meta.Hidden) >= 1);
@@ -171,11 +216,16 @@
     const sheetIndex = workbook.SheetNames.indexOf(sheetName);
     if (sheetIndex < 0) throw new Error(`シート「${sheetName}」が見つかりません。`);
     const worksheet = workbook.Sheets[sheetName];
-    // 是正Checkpoint 2c §2: inspectWorkbook()のempty判定と同じ基準(値または数式を持つセルの有無)で
-    // 空シートを判定する('!ref'だけを見て「非空」と誤判定しない)。
-    if (!worksheet || !worksheet['!ref'] || !hasAnyMeaningfulCell(worksheet)) {
+    // 是正Checkpoint 2c.1: '!ref'(物理範囲)は参考情報として保持するだけで、抽出範囲の正本には
+    // 使わない。列・行の範囲は必ずcomputeMeaningfulRange()が返す「意味のある実効範囲」を基準にする。
+    const physicalUsedRange = (worksheet && worksheet['!ref']) ? worksheet['!ref'] : null;
+    const meaningfulRange = computeMeaningfulRange(worksheet);
+    if (meaningfulRange.meaningfulCellCount === 0) {
       throw new Error(`シート「${sheetName}」にデータがありません(空シート)。`);
     }
+    // 是正Checkpoint 2c.1 §4: 総当たりループへ進む前に、実効範囲が大きすぎないかを確認する。
+    assertMeaningfulRangeWithinLimit(meaningfulRange, sheetName);
+
     if (!Number.isInteger(headerRowNumber) || headerRowNumber < 1) {
       throw new Error('見出し行番号は1以上の整数で指定してください。');
     }
@@ -186,9 +236,8 @@
       throw new Error('データ開始行番号は見出し行番号より後の行にしてください。');
     }
 
-    const range = XLSX.utils.decode_range(worksheet['!ref']);
-    const firstCol = range.s.c, lastCol = range.e.c;
-    const lastRow0 = range.e.r;
+    const firstCol = meaningfulRange.firstCol, lastCol = meaningfulRange.lastCol;
+    const lastRow0 = meaningfulRange.lastRow;
 
     if ((dataStartRowNumber - 1) > lastRow0) {
       throw new Error(`シート「${sheetName}」にデータ開始行(${dataStartRowNumber}行目)以降のデータがありません(空シート)。`);
@@ -246,7 +295,10 @@
 
     return {
       sheetName, sheetIndex, headerRowNumber, dataStartRowNumber,
-      headers, headerIsFallback, usedRange: worksheet['!ref'], rows,
+      headers, headerIsFallback,
+      // 是正Checkpoint 2c.1 §3: 物理範囲('!ref')は参考情報として、実効範囲は正本として両方保持する。
+      physicalUsedRange, meaningfulUsedRange: meaningfulRange.ref,
+      rows,
       nonEmptyRowCount: rows.filter(r => !r.isEmpty).length
     };
   }
@@ -256,11 +308,13 @@
    * あくまでUI側の初期値提案であり、利用者はいつでも修正できる。誤判定・未判定の場合でも
    * extractSheetRows()の列記号フォールバックはこの関数の判定に関係なく常に効く。
    *
-   * 判定方法: 先頭から最大20行を走査し、「使用範囲の列数の半分以上のセルに値または数式がある」
-   * 最初の行を見出し行候補とする。見つからない場合は先頭行を見出し行とみなし、confidence='low'
+   * 判定方法: 意味のある実効範囲(computeMeaningfulRange())の先頭から最大20行を走査し、
+   * 「実効範囲の列数の半分以上のセルに値または数式がある」最初の行を見出し行候補とする。
+   * 見つからない場合は実効範囲の先頭行を見出し行とみなし、confidence='low'
    * (固定code: header_detection_low_confidence)を返す。データ開始行は見出し行の直後で最初に
    * 値または数式を持つ行とし、見つからない場合は見出し行の直後をそのまま採用してconfidence='low'
-   * にする。
+   * にする。是正Checkpoint 2c.1: 列数・走査行・閾値はすべて物理範囲('!ref')ではなく
+   * meaningful rangeを基準にする。
    * @param {object} workbook  inspectWorkbook()が返したworkbookそのもの
    * @param {string} sheetName
    * @returns {{ headerRow:number, dataStartRow:number, confidence:'high'|'low', code:string|null }}
@@ -269,12 +323,15 @@
     const XLSX = resolveXLSX();
     if (!workbook || !Array.isArray(workbook.SheetNames)) throw new Error('workbookが不正です。');
     const worksheet = workbook.Sheets[sheetName];
-    if (!worksheet || !worksheet['!ref'] || !hasAnyMeaningfulCell(worksheet)) {
+    const meaningfulRange = computeMeaningfulRange(worksheet);
+    if (meaningfulRange.meaningfulCellCount === 0) {
       throw new Error(`シート「${sheetName}」にデータがありません(空シート)。`);
     }
+    // 是正Checkpoint 2c.1 §4: 総当たりループへ進む前に、実効範囲が大きすぎないかを確認する。
+    assertMeaningfulRangeWithinLimit(meaningfulRange, sheetName);
 
-    const range = XLSX.utils.decode_range(worksheet['!ref']);
-    const firstCol = range.s.c, lastCol = range.e.c, firstRow = range.s.r, lastRow = range.e.r;
+    const firstCol = meaningfulRange.firstCol, lastCol = meaningfulRange.lastCol;
+    const firstRow = meaningfulRange.firstRow, lastRow = meaningfulRange.lastRow;
     const totalCols = lastCol - firstCol + 1;
     const threshold = Math.ceil(totalCols / 2);
 
@@ -468,7 +525,15 @@
         tags: [], unregistered_tags: [], semantics: EMPTY_SEMANTICS(), quantities: [], parent_node_id: docNodeId,
         provenance: {
           source_document_id: sourceDocId, producer, locator: secLocator, verbatim: structuralVerbatim(secLabel),
-          extensions: { sheet_index: extraction.sheetIndex }
+          extensions: {
+            sheet_index: extraction.sheetIndex,
+            // 是正Checkpoint 2c.1 §3: 物理範囲('!ref')は参考情報、実効範囲(meaningful)は正本として
+            // Contract本体を変えずにextensionsへ保持する。
+            physical_used_range: extraction.physicalUsedRange,
+            meaningful_used_range: extraction.meaningfulUsedRange,
+            header_row: extraction.headerRowNumber,
+            data_start_row: extraction.dataStartRowNumber
+          }
         },
         revision: { content_revision: 1, knowledge_hash: null, updated_by: { type: 'ai', id: 'excel-direct-adapter' }, updated_at: opts.ingestedAt },
         review: DEFAULT_REVIEW(),
@@ -515,6 +580,12 @@
             extensions: {
               sheet_index: extraction.sheetIndex, cell_range: row.cellRange,
               column_headers: extraction.headers, formulas, input_mode: 'excel-direct',
+              // 是正Checkpoint 2c.1 §3: 物理範囲・実効範囲・見出し行・データ開始行を行Nodeにも残す
+              // (Contract本体は変更せず、既存extensionsへ追加するだけ)。
+              physical_used_range: extraction.physicalUsedRange,
+              meaningful_used_range: extraction.meaningfulUsedRange,
+              header_row: extraction.headerRowNumber,
+              data_start_row: extraction.dataStartRowNumber,
               // 是正Checkpoint 2a §2: 表示値のない数式セル等の固定警告(code形式)を保存JSONにも残す。
               warnings: row.warnings
             }
@@ -565,9 +636,10 @@
   }
 
   return Object.freeze({
-    inspectWorkbook, extractSheetRows, detectHeaderAndDataStart,
+    inspectWorkbook, extractSheetRows, detectHeaderAndDataStart, computeMeaningfulRange,
     buildKnowledgeNodesFromExcel, buildKnowledgeNodesFromExcelSheets, adaptExcelDirect,
     columnLetter, matchInitialTags, deriveTitle, deriveText,
-    cellHasContent, cellTextValue, truncateForDisplay
+    cellHasContent, cellTextValue, truncateForDisplay,
+    MAX_MEANINGFUL_RANGE_CELLS
   });
 });

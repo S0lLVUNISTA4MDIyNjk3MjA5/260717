@@ -30,6 +30,9 @@ const FIXTURE_FORMULA_ONLY = path.join(FIXTURES_DIR, 'excel_direct_fixture_formu
 const FIXTURE_HIDDEN_ROWS_COLS = path.join(FIXTURES_DIR, 'excel_direct_fixture_hidden_rows_cols.xlsx');
 const FIXTURE_CUSTOM_TAG = path.join(FIXTURES_DIR, 'excel_direct_fixture_custom_tag.xlsx');
 const CUSTOM_TAG_VOCAB = JSON.parse(fs.readFileSync(path.join(FIXTURES_DIR, 'excel_direct_custom_tag_vocab.json'), 'utf8'));
+const FIXTURE_MEANINGFUL_SMALL = path.join(FIXTURES_DIR, 'excel_direct_fixture_meaningful_small.xlsx');
+const FIXTURE_MEANINGFUL_OFFSET = path.join(FIXTURES_DIR, 'excel_direct_fixture_meaningful_offset.xlsx');
+const FIXTURE_MEANINGFUL_TOO_LARGE = path.join(FIXTURES_DIR, 'excel_direct_fixture_meaningful_too_large.xlsx');
 
 const TAG_VOCAB = { allowed_tags: ['安全', '性能', '機能', '品質', 'インターフェース', '製造', '検査', '保守'], aliases: { 'けが防止': '安全' } };
 
@@ -500,6 +503,80 @@ async function main() {
     });
     const customNode = resultCustom.nodes.find(n => n.node_type === 'statement');
     assert(customNode.tags.includes('耐熱'), 'Node生成時もカスタム辞書を渡せば同じタグが付与される(プレビューとNode生成で同じ辞書を使う設計)');
+  }
+
+  // ================= Checkpoint 2c.1: Meaningful Range Hardening =================
+
+  // ---- fixture A: 実データA1:B3 + 書式だけZ1000 ----
+  {
+    const { workbook } = Adapter.inspectWorkbook(readAsArrayBuffer(FIXTURE_MEANINGFUL_SMALL));
+    const detect = Adapter.detectHeaderAndDataStart(workbook, '実効範囲小');
+    assert(detect.headerRow === 1 && detect.dataStartRow === 2,
+      `fixture A: 見出し行=1・データ開始行=2と推定される(実際: header=${detect.headerRow}, dataStart=${detect.dataStartRow})`);
+    const ext = Adapter.extractSheetRows(workbook, '実効範囲小', detect.headerRow, detect.dataStartRow);
+    assert(ext.physicalUsedRange === 'A1:Z1000', `fixture A: physical_used_rangeは'!ref'どおりA1:Z1000(実際: ${ext.physicalUsedRange})`);
+    assert(ext.meaningfulUsedRange === 'A1:B3', `fixture A: meaningful_used_rangeは実データのA1:B3になる(実際: ${ext.meaningfulUsedRange})`);
+    assert(ext.headers.length === 2, `fixture A: 列数は書式だけのZ列を含まず2列になる(実際: ${ext.headers.length})`);
+    assert(ext.nonEmptyRowCount === 2, `fixture A: Node候補(非空データ行)は2件(実際: ${ext.nonEmptyRowCount})`);
+
+    const result = await Adapter.buildKnowledgeNodesFromExcelSheets([ext], {
+      fileName: 'excel_direct_fixture_meaningful_small.xlsx', contentDigest: 'k'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB
+    });
+    assert(result.nodes.filter(n => n.node_type === 'statement').length === 2, 'fixture A: content Nodeが2件生成される');
+    const sec = result.nodes.find(n => n.node_type === 'section');
+    assert(sec.provenance.extensions.physical_used_range === 'A1:Z1000' && sec.provenance.extensions.meaningful_used_range === 'A1:B3',
+      `fixture A: section Nodeのprovenance.extensionsにphysical/meaningful_used_rangeが保持される(実際: ${JSON.stringify(sec.provenance.extensions)})`);
+    assert(sec.provenance.extensions.header_row === 1 && sec.provenance.extensions.data_start_row === 2,
+      'fixture A: section Nodeのprovenance.extensionsにheader_row/data_start_rowが保持される');
+    const contentNode = result.nodes.find(n => n.node_type === 'statement');
+    assert(contentNode.provenance.extensions.meaningful_used_range === 'A1:B3',
+      'fixture A: content Nodeのprovenance.extensionsにもmeaningful_used_rangeが保持される');
+  }
+
+  // ---- fixture B: 実データC3:D5 + 書式だけA1:Z1000 ----
+  {
+    const { workbook } = Adapter.inspectWorkbook(readAsArrayBuffer(FIXTURE_MEANINGFUL_OFFSET));
+    const detect = Adapter.detectHeaderAndDataStart(workbook, '実効範囲オフセット');
+    assert(detect.headerRow === 3 && detect.dataStartRow === 4,
+      `fixture B: 見出し行=3・データ開始行=4と推定される(実際: header=${detect.headerRow}, dataStart=${detect.dataStartRow})`);
+    const ext = Adapter.extractSheetRows(workbook, '実効範囲オフセット', detect.headerRow, detect.dataStartRow);
+    assert(ext.meaningfulUsedRange === 'C3:D5', `fixture B: meaningful rangeはC3:D5になる(実際: ${ext.meaningfulUsedRange})`);
+    assert(JSON.stringify(ext.headers) === JSON.stringify(['項目', '結果']), `fixture B: 見出しはC/D列の実データどおり(実際: ${JSON.stringify(ext.headers)})`);
+    assert(ext.rows.every(r => r.cellRange.startsWith('C') || r.cellRange.includes(':D')),
+      `fixture B: cell_rangeはC/D列基準になる(実際: ${JSON.stringify(ext.rows.map(r => r.cellRange))})`);
+    assert(JSON.stringify(ext.rows.map(r => r.cellRange)) === JSON.stringify(['C4:D4', 'C5:D5']),
+      `fixture B: cell_rangeが正確にC/D列基準になる(実際: ${JSON.stringify(ext.rows.map(r => r.cellRange))})`);
+  }
+
+  // ---- fixture C: 遠方に実データがある巨大疎範囲 ----
+  {
+    const { workbook } = Adapter.inspectWorkbook(readAsArrayBuffer(FIXTURE_MEANINGFUL_TOO_LARGE));
+    let detectThrew = false, detectErr = null;
+    try { Adapter.detectHeaderAndDataStart(workbook, '巨大疎範囲'); }
+    catch (e) { detectThrew = true; detectErr = e; }
+    assert(detectThrew && detectErr.code === 'meaningful_range_too_large',
+      `fixture C: detectHeaderAndDataStart()は固定code(meaningful_range_too_large)でfail-closedする(実際: threw=${detectThrew}, code=${detectErr && detectErr.code})`);
+    assert(detectErr.message.includes('巨大疎範囲') && detectErr.message.includes('A1:A600000') && detectErr.message.includes('600,000'),
+      `fixture C: エラーメッセージにシート名・範囲・推定セル数が含まれる(実際: "${detectErr.message}")`);
+
+    let extractThrew = false, extractErr = null;
+    try { Adapter.extractSheetRows(workbook, '巨大疎範囲', 1, 2); }
+    catch (e) { extractThrew = true; extractErr = e; }
+    assert(extractThrew && extractErr.code === 'meaningful_range_too_large',
+      `fixture C: extractSheetRows()も同じ固定codeでfail-closedする(実際: threw=${extractThrew}, code=${extractErr && extractErr.code})`);
+    assert(Adapter.MAX_MEANINGFUL_RANGE_CELLS === 500000, `MAX_MEANINGFUL_RANGE_CELLSは500,000として一元管理される(実際: ${Adapter.MAX_MEANINGFUL_RANGE_CELLS})`);
+  }
+
+  // ---- computeMeaningfulRange()単体の直接確認(境界値: ちょうど上限は許容、1件超過は拒否) ----
+  {
+    const okRange = Adapter.computeMeaningfulRange({ A1: { v: 1 }, T1000: { v: 2 } }); // 1000行x20列=20,000セル(上限内)
+    assert(okRange.meaningfulCellCount === 2 && okRange.ref === 'A1:T1000',
+      `computeMeaningfulRange()は実データを持つセルだけを外接矩形として返す(実際: ${JSON.stringify(okRange)})`);
+    const emptyRange = Adapter.computeMeaningfulRange({ A1: { z: '0.00' } }); // 書式だけ(値なし)
+    assert(emptyRange.meaningfulCellCount === 0 && emptyRange.ref === null,
+      `computeMeaningfulRange()は書式だけのセルを対象に含めない(実際: ${JSON.stringify(emptyRange)})`);
+    const formulaRange = Adapter.computeMeaningfulRange({ A1: { f: 'A2*2' } }); // 表示値/計算結果キャッシュがなくてもformulaがあれば含む
+    assert(formulaRange.meaningfulCellCount === 1, `computeMeaningfulRange()はformulaがあれば値(v)がなくても含める(実際: ${JSON.stringify(formulaRange)})`);
   }
 
   console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);

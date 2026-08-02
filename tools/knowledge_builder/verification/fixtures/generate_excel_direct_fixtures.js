@@ -337,6 +337,51 @@ function buildFixtureCustomTag() {
   return wb;
 }
 
+// 是正Checkpoint 2c.1 §5 fixture A: 実データA1:B3 + 書式だけZ1000。
+// 物理範囲('!ref')は書式だけのZ1000まで広がるが、意味のある実効範囲はA1:B3だけになることを確認する。
+function buildFixtureMeaningfulSmall() {
+  const ws = {};
+  setCell(ws, 'A1', '項目');
+  setCell(ws, 'B1', '数量');
+  setCell(ws, 'A2', '部品P');
+  setCell(ws, 'B2', 2);
+  setCell(ws, 'A3', '部品Q');
+  setCell(ws, 'B3', 4);
+  ws['!ref'] = 'A1:Z1000'; // 書式だけのZ1000まで含む物理範囲(実データはA1:B3のみ)
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '実効範囲小');
+  return wb;
+}
+
+// 是正Checkpoint 2c.1 §5 fixture B: 実データC3:D5 + 書式だけA1:Z1000。
+// 実効範囲がA列/1行目からではなくC3:D5から始まることを確認する(列記号・cell_rangeもC/D基準)。
+function buildFixtureMeaningfulOffset() {
+  const ws = {};
+  setCell(ws, 'C3', '項目');
+  setCell(ws, 'D3', '結果');
+  setCell(ws, 'C4', '部品X');
+  setCell(ws, 'D4', 'OK');
+  setCell(ws, 'C5', '部品Y');
+  setCell(ws, 'D5', 'NG');
+  ws['!ref'] = 'A1:Z1000'; // 書式だけの物理範囲(実データはC3:D5のみ)
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '実効範囲オフセット');
+  return wb;
+}
+
+// 是正Checkpoint 2c.1 §5 fixture C: 遠方に実データがある巨大疎範囲。
+// A1と(600,000行目の)A列だけに実データがあり、外接矩形が600,000セル(> 上限50万セル)になる。
+// meaningfulCellCount自体は2件と少ないが、範囲(外接矩形)が上限を超えるためfail-closedになることを確認する。
+function buildFixtureMeaningfulTooLarge() {
+  const ws = {};
+  setCell(ws, 'A1', '項目');
+  setCell(ws, 'A600000', '遠方データ');
+  ws['!ref'] = 'A1:A600000';
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '巨大疎範囲');
+  return wb;
+}
+
 function main() {
   const outDir = __dirname;
   writeWorkbook(buildFixtureA(), path.join(outDir, 'excel_direct_fixture_a.xlsx'));
@@ -355,6 +400,9 @@ function main() {
   writeWorkbook(buildFixtureFormulaOnly(), path.join(outDir, 'excel_direct_fixture_formula_only.xlsx'));
   writeWorkbook(buildFixtureHiddenRowsCols(), path.join(outDir, 'excel_direct_fixture_hidden_rows_cols.xlsx'));
   writeWorkbook(buildFixtureCustomTag(), path.join(outDir, 'excel_direct_fixture_custom_tag.xlsx'));
+  writeWorkbook(buildFixtureMeaningfulSmall(), path.join(outDir, 'excel_direct_fixture_meaningful_small.xlsx'));
+  writeWorkbook(buildFixtureMeaningfulOffset(), path.join(outDir, 'excel_direct_fixture_meaningful_offset.xlsx'));
+  writeWorkbook(buildFixtureMeaningfulTooLarge(), path.join(outDir, 'excel_direct_fixture_meaningful_too_large.xlsx'));
   const customVocab = {
     schema: 'trace-tag-vocabulary/1.0',
     vocabulary_id: 'custom-test-ja',
@@ -368,7 +416,9 @@ function main() {
     'excel_direct_fixture_date.xlsx, excel_direct_fixture_raw_only.xlsx, excel_direct_fixture_multi.xlsx, ' +
     'excel_direct_fixture_detect_row1.xlsx, excel_direct_fixture_detect_row3.xlsx, excel_direct_fixture_detect_unclear.xlsx, ' +
     'excel_direct_fixture_format_only.xlsx, excel_direct_fixture_formula_only.xlsx, excel_direct_fixture_hidden_rows_cols.xlsx, ' +
-    'excel_direct_fixture_custom_tag.xlsx, excel_direct_custom_tag_vocab.json');
+    'excel_direct_fixture_custom_tag.xlsx, excel_direct_custom_tag_vocab.json, ' +
+    'excel_direct_fixture_meaningful_small.xlsx, excel_direct_fixture_meaningful_offset.xlsx, ' +
+    'excel_direct_fixture_meaningful_too_large.xlsx');
 }
 
 main();
