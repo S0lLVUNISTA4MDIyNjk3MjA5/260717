@@ -15,6 +15,7 @@ const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.1.
 const FIXTURES_DIR = path.join(__dirname, 'fixtures');
 const FIXTURE_A = path.join(FIXTURES_DIR, 'excel_direct_fixture_a.xlsx');
 const FIXTURE_B = path.join(FIXTURES_DIR, 'excel_direct_fixture_b.xlsx');
+const FIXTURE_LONG_TITLE = path.join(FIXTURES_DIR, 'excel_direct_fixture_long_title.xlsx');
 const SAMPLE_DIR = path.join(__dirname, '..', '..', '..', 'samples', 'hvac_trace_sample_small');
 const TRACE_A = path.join(SAMPLE_DIR, 'JSON_A_customer_requirements_trace.json');
 const TRACE_B = path.join(SAMPLE_DIR, 'JSON_B_design_review_trace.json');
@@ -228,6 +229,31 @@ async function main() {
       return !!table.querySelector('input, textarea, [contenteditable="true"]');
     });
     assert(!hasEditableCell, 'プレビュー表に編集可能な入力欄が存在しない(読み取り専用)');
+    await page.close();
+  }
+
+  // ---- 是正Checkpoint 2a §3確認: 長いtitleはプレビュー表示だけ省略され、保存Node.titleは切り詰めない ----
+  {
+    const page = await browser.newPage();
+    await page.goto('file://' + HTML_PATH);
+    await setExcelSide(page, 'A', FIXTURE_LONG_TITLE, '長いタイトル', 1, 2);
+    const previewTitleCell = await page.$eval('#excelPreviewTableA tbody tr td:nth-child(4)', td => td.textContent);
+    assert(previewTitleCell.length === 60 && previewTitleCell.endsWith('…'),
+      `プレビュー表示のタイトルは60文字+省略記号に切り詰められる(実際の長さ: ${previewTitleCell.length}, 実際: "${previewTitleCell.slice(0, 20)}...")`);
+
+    await setTraceSide(page, 'B', TRACE_B);
+    await page.click('#btnIngest');
+    await page.waitForFunction(() => document.getElementById('ingestStatus').textContent.includes('取込完了'), null, { timeout: 15000 });
+
+    const downloadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-excel-2a-'));
+    const [download] = await Promise.all([page.waitForEvent('download'), page.click('#btnSave')]);
+    const savedPath = path.join(downloadDir, download.suggestedFilename());
+    await download.saveAs(savedPath);
+    const saved = JSON.parse(fs.readFileSync(savedPath, 'utf8'));
+    const longTitleNode = saved.nodes.find(n => n.node_type === 'statement' && n.provenance.source_document_id &&
+      saved.sources.find(s => s.source_document_id === n.provenance.source_document_id && s.file_name.includes('long_title')));
+    assert(!!longTitleNode && longTitleNode.title.length === 80,
+      `保存JSONのNode.titleは80文字のまま切り詰められない(§3。実際: ${longTitleNode ? longTitleNode.title.length : 'not found'})`);
     await page.close();
   }
 

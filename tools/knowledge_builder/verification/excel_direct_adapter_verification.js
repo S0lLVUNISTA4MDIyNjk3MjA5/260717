@@ -16,6 +16,10 @@ const FIXTURES_DIR = path.join(__dirname, 'fixtures');
 const FIXTURE_A = path.join(FIXTURES_DIR, 'excel_direct_fixture_a.xlsx');
 const FIXTURE_B = path.join(FIXTURES_DIR, 'excel_direct_fixture_b.xlsx');
 const FIXTURE_EMPTY = path.join(FIXTURES_DIR, 'excel_direct_fixture_empty.xlsx');
+const FIXTURE_C_START = path.join(FIXTURES_DIR, 'excel_direct_fixture_c_start.xlsx');
+const FIXTURE_FORMULA_EMPTY = path.join(FIXTURES_DIR, 'excel_direct_fixture_formula_empty.xlsx');
+const FIXTURE_LONG_TITLE = path.join(FIXTURES_DIR, 'excel_direct_fixture_long_title.xlsx');
+const FIXTURE_DATE = path.join(FIXTURES_DIR, 'excel_direct_fixture_date.xlsx');
 
 const TAG_VOCAB = { allowed_tags: ['安全', '性能', '機能', '品質', 'インターフェース', '製造', '検査', '保守'], aliases: { 'けが防止': '安全' } };
 
@@ -153,6 +157,85 @@ async function main() {
   const sharedTagA = r1.nodes.some(n => n.tags.includes('安全'));
   const sharedTagB = rB.nodes.some(n => n.tags.includes('安全'));
   assert(sharedTagA && sharedTagB, 'fixture A・Bの双方に「安全」タグを持つNodeがある(Relation Candidate生成確認の前提)');
+
+  // ================= Checkpoint 2a Hardening =================
+
+  // ---- §1: 空見出し・重複見出しの列記号は、使用範囲からの相対列ではなく実際のExcel列記号にする ----
+  {
+    const abC = readAsArrayBuffer(FIXTURE_C_START);
+    const { workbook } = Adapter.inspectWorkbook(abC);
+    const extraction = Adapter.extractSheetRows(workbook, 'C列開始', 1, 2);
+    assert(JSON.stringify(extraction.headers) === JSON.stringify(['項目', 'D', '備考']),
+      `使用範囲がC列から始まる場合、空見出しの列記号が実際のExcel列記号(D)になる。相対indexなら誤って"B"になっていた(§1。実際: ${JSON.stringify(extraction.headers)})`);
+    assert(extraction.headerIsFallback[1] === true, 'フォールバックした列(D1)がheaderIsFallbackでも正しく示される');
+
+    const result = await Adapter.buildKnowledgeNodesFromExcel(extraction, {
+      fileName: 'excel_direct_fixture_c_start.xlsx', contentDigest: 'c'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB
+    });
+    const row2Node = result.nodes.find(n => n.provenance.locator && n.provenance.locator.row === 2);
+    assert(row2Node.provenance.verbatim.source_record['D'] === '開閉部品',
+      `絶対列記号"D"がsource_recordのキーとして使われる(実際: ${JSON.stringify(row2Node.provenance.verbatim.source_record)})`);
+    assert(row2Node.provenance.extensions.cell_range === 'C2:E2', `セル範囲もC列開始のまま正しく記録される(実際: ${row2Node.provenance.extensions.cell_range})`);
+  }
+
+  // ---- §2: formulaが存在するセルを空セル扱いしない。数式だけの行もNode化し、本文・警告を固定する ----
+  {
+    const abF = readAsArrayBuffer(FIXTURE_FORMULA_EMPTY);
+    const { workbook } = Adapter.inspectWorkbook(abF);
+    const extraction = Adapter.extractSheetRows(workbook, '空結果数式', 1, 2);
+    const row2 = extraction.rows.find(r => r.rowNumber === 2);
+    assert(row2.isEmpty === false,
+      `A列が空欄でもB列に数式があれば行は空行扱いにならない(§2。実際のisEmpty: ${row2.isEmpty})`);
+    assert(row2.warnings.length === 1 && row2.warnings[0].code === 'formula_no_display_value' && row2.warnings[0].header === '判定',
+      `表示値のない数式セルには固定code(formula_no_display_value)の警告が付与される(実際: ${JSON.stringify(row2.warnings)})`);
+
+    const result = await Adapter.buildKnowledgeNodesFromExcel(extraction, {
+      fileName: 'excel_direct_fixture_formula_empty.xlsx', contentDigest: 'f'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB
+    });
+    const contentNodes = result.nodes.filter(n => n.node_type === 'statement');
+    assert(contentNodes.length === 2, `数式だけの行(行2)・通常データ行(行3)の両方がNode化される(実際: ${contentNodes.length}件)`);
+    const node2 = contentNodes.find(n => n.provenance.locator.row === 2);
+    assert(node2.title === '=IF(A2="","","x")' && node2.text === '判定: =IF(A2="","","x")',
+      `表示値がない数式セルの本文は"=数式"という固定表記になる(§2。実際のtitle: "${node2.title}"/text: "${node2.text}"）`);
+    assert(Array.isArray(node2.provenance.extensions.warnings) && node2.provenance.extensions.warnings.length === 1 &&
+      node2.provenance.extensions.warnings[0].code === 'formula_no_display_value',
+      '固定警告(code)が保存Nodeのprovenance.extensions.warningsにも記録される');
+    const node3 = contentNodes.find(n => n.provenance.locator.row === 3);
+    assert(node3.title === '部品Z', '通常セルが1つでもあればそちらがtitleに使われる(数式セルの固定表記より優先度は単純に列順)');
+  }
+
+  // ---- §3: Node.titleは保存時に60文字へ切らない(表示側だけで省略する) ----
+  {
+    const abT = readAsArrayBuffer(FIXTURE_LONG_TITLE);
+    const { workbook } = Adapter.inspectWorkbook(abT);
+    const extraction = Adapter.extractSheetRows(workbook, '長いタイトル', 1, 2);
+    const result = await Adapter.buildKnowledgeNodesFromExcel(extraction, {
+      fileName: 'excel_direct_fixture_long_title.xlsx', contentDigest: 'l'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB
+    });
+    const node = result.nodes.find(n => n.node_type === 'statement');
+    assert(node.title.length === 80, `保存されるNode.titleは60文字へ切り詰められない(§3。実際の長さ: ${node.title.length})`);
+    assert(node.title === 'あ'.repeat(80), 'title全体がfixtureの値と一致する(欠落がない)');
+    const displayTitle = Adapter.truncateForDisplay(node.title, 60);
+    assert(displayTitle.length === 60 && displayTitle.endsWith('…'),
+      `truncateForDisplay()は表示専用の省略を提供する(Node本体とは別物。実際の長さ: ${displayTitle.length})`);
+  }
+
+  // ---- §4: 日付fixtureが正しく処理される(raw/display双方が保持され、JSON化しても壊れない) ----
+  {
+    const abD = readAsArrayBuffer(FIXTURE_DATE);
+    const { workbook } = Adapter.inspectWorkbook(abD);
+    const extraction = Adapter.extractSheetRows(workbook, '日付あり', 1, 2);
+    const result = await Adapter.buildKnowledgeNodesFromExcel(extraction, {
+      fileName: 'excel_direct_fixture_date.xlsx', contentDigest: 'd'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB
+    });
+    const node = result.nodes.find(n => n.node_type === 'statement');
+    assert(node.provenance.verbatim.source_record_display['納期'] === '2026/08/02',
+      `日付セルのdisplay値が書式どおりに保持される(実際: ${node.provenance.verbatim.source_record_display['納期']})`);
+    assert(node.text.includes('納期: 2026/08/02'), 'textにも書式化された日付表示が使われる');
+    const roundTripped = JSON.parse(JSON.stringify(node));
+    assert(typeof roundTripped.provenance.verbatim.source_record['納期'] === 'string',
+      `日付のraw値(Dateオブジェクト)はJSON化しても壊れずISO文字列になる(実際: ${JSON.stringify(roundTripped.provenance.verbatim.source_record['納期'])})`);
+  }
 
   console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);

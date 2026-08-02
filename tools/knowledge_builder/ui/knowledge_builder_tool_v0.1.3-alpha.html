@@ -582,6 +582,12 @@ function previewExcel(side) {
   }
 }
 
+// row.warnings(固定code)を表示用の固定日本語文へ変換する(是正Checkpoint 2a §2)。
+function excelWarningText(w) {
+  if (w.code === 'formula_no_display_value') return `数式の表示値がありません(列: ${w.header})`;
+  return w.code;
+}
+
 // 読み取り専用プレビュー表示(編集不可): シート名・行番号・セル範囲・タイトル・本文抜粋・初期タグ・警告。
 function renderExcelPreview(side) {
   const input = excelInputRef(side);
@@ -594,16 +600,18 @@ function renderExcelPreview(side) {
   // 未指定時の既定辞書のみでタグ一致を仮表示する(実際の取込時は指定辞書があればそちらを使う)。
   const previewVocab = DEFAULT_TAG_VOCABULARY;
   const rowsHtml = extraction.rows.map(row => {
-    const nonBlank = row.cells.filter(c => String(c.display ?? '').trim() !== '');
+    const nonBlank = row.cells.filter(KnowledgeExcelDirectAdapter.cellHasContent);
     const title = row.isEmpty ? '' : KnowledgeExcelDirectAdapter.deriveTitle(nonBlank, row.rowNumber);
     const text = row.isEmpty ? '' : KnowledgeExcelDirectAdapter.deriveText(nonBlank);
-    const tags = row.isEmpty ? [] : KnowledgeExcelDirectAdapter.matchInitialTags(nonBlank.map(c => c.display), previewVocab);
-    const warnings = row.isEmpty ? ['空行のため取込対象外(Node化されません)'] : [];
+    const tags = row.isEmpty ? [] : KnowledgeExcelDirectAdapter.matchInitialTags(nonBlank.map(c => KnowledgeExcelDirectAdapter.cellTextValue(c)), previewVocab);
+    const warnings = row.isEmpty ? ['空行のため取込対象外(Node化されません)'] : row.warnings.map(excelWarningText);
+    // タイトルはNode.titleとしては切り詰めないが(§3)、プレビュー表示だけは省略する。
+    const titleDisplay = KnowledgeExcelDirectAdapter.truncateForDisplay(title, 60);
     return `<tr>
       <td>${esc(extraction.sheetName)}</td>
       <td>${row.rowNumber}</td>
       <td>${esc(row.cellRange)}</td>
-      <td>${esc(title)}</td>
+      <td>${esc(titleDisplay)}</td>
       <td>${esc(text.slice(0, 60))}${text.length > 60 ? '…' : ''}</td>
       <td>${tags.map(t => `<span class="tag-chip">${esc(t)}</span>`).join('') || '<span class="muted">-</span>'}</td>
       <td>${warnings.map(w => esc(w)).join('; ') || ''}</td>

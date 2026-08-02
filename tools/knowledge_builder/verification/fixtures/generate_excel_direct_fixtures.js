@@ -20,10 +20,14 @@ function writeWorkbook(wb, filePath) {
 
 function setCell(ws, ref, value, opts) {
   opts = opts || {};
-  if (!opts.formula && (value === '' || value === null || value === undefined)) return; // 意図的に空セルのまま(空欄・空行の再現)
+  if (!opts.formula && !opts.formulaEmpty && !opts.date && (value === '' || value === null || value === undefined)) return; // 意図的に空セルのまま(空欄・空行の再現)
   const cell = { v: value };
   if (typeof value === 'number') cell.t = 'n'; else cell.t = 's';
   if (opts.formula) { cell.f = opts.formula; cell.t = 'n'; cell.v = opts.value; }
+  // 是正Checkpoint 2a §2用: 数式はあるが計算結果が空文字列のセル(実Excelでも起こり得る、
+  // 例えばIF()が""を返す場合)。t='str'+v=''でSheetJSの書き出し時にセル自体が消えるのを防ぐ。
+  if (opts.formulaEmpty) { cell.t = 'str'; cell.v = ''; cell.f = opts.formulaEmpty; }
+  if (opts.date) { cell.t = 'd'; cell.v = opts.date; cell.z = 'yyyy/mm/dd'; }
   if (opts.w) cell.w = opts.w;
   ws[ref] = cell;
 }
@@ -94,12 +98,86 @@ function buildFixtureEmpty() {
   return wb;
 }
 
+// 是正Checkpoint 2a §1・§4: 使用範囲がC列から始まるシート。見出し(D1)を空欄にし、
+// 絶対列記号("D")でフォールバックすることを確認する(相対index("B")との違いが出る構成)。
+function buildFixtureCStart() {
+  const ws = {};
+  setCell(ws, 'C1', '項目');
+  // D1: 空欄のまま(列記号フォールバック確認用。使用範囲内での相対2列目=B、絶対列=Dなので区別できる)
+  setCell(ws, 'E1', '備考');
+
+  setCell(ws, 'C2', 'バルブ');
+  setCell(ws, 'D2', '開閉部品');
+  setCell(ws, 'E2', 'なし');
+
+  ws['!ref'] = 'C1:E2';
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'C列開始');
+  return wb;
+}
+
+// 是正Checkpoint 2a §2・§4: 数式はあるが計算結果(表示値)が空文字列のセルを含む行。
+// 行全体が空行扱いにならず、本文・警告が固定表記になることを確認する。
+function buildFixtureFormulaEmpty() {
+  const ws = {};
+  setCell(ws, 'A1', '項目');
+  setCell(ws, 'B1', '判定');
+
+  // Row2: B列が「計算結果が空文字列の数式」のみ(表示値なし)。A列も空欄 -> 行全体が数式だけの行。
+  setCell(ws, 'B2', null, { formulaEmpty: 'IF(A2="","","x")' });
+
+  setCell(ws, 'A3', '部品Z');
+  setCell(ws, 'B3', null, { formulaEmpty: 'IF(A3="","","x")' });
+
+  ws['!ref'] = 'A1:B3';
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '空結果数式');
+  return wb;
+}
+
+// 是正Checkpoint 2a §3・§4: 最初の非空セルの表示値が60文字を超える行。
+// 保存されるNode.titleが切り詰められないことを確認する(表示側のみ省略されるべき)。
+function buildFixtureLongTitle() {
+  const ws = {};
+  setCell(ws, 'A1', '説明');
+  setCell(ws, 'B1', '備考');
+
+  const longText = 'あ'.repeat(80); // 60文字を明確に超える長さ
+  setCell(ws, 'A2', longText);
+  setCell(ws, 'B2', '長文サンプル');
+
+  ws['!ref'] = 'A1:B2';
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '長いタイトル');
+  return wb;
+}
+
+// 是正Checkpoint 2a §4: 日付型セルを含む行(raw=Dateオブジェクト、display=書式化された文字列)。
+function buildFixtureDate() {
+  const ws = {};
+  setCell(ws, 'A1', '項目');
+  setCell(ws, 'B1', '納期');
+
+  setCell(ws, 'A2', '部品Y');
+  setCell(ws, 'B2', null, { date: new Date(Date.UTC(2026, 7, 2)) }); // 2026-08-02
+
+  ws['!ref'] = 'A1:B2';
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '日付あり');
+  return wb;
+}
+
 function main() {
   const outDir = __dirname;
   writeWorkbook(buildFixtureA(), path.join(outDir, 'excel_direct_fixture_a.xlsx'));
   writeWorkbook(buildFixtureB(), path.join(outDir, 'excel_direct_fixture_b.xlsx'));
   writeWorkbook(buildFixtureEmpty(), path.join(outDir, 'excel_direct_fixture_empty.xlsx'));
-  console.log('Generated: excel_direct_fixture_a.xlsx, excel_direct_fixture_b.xlsx, excel_direct_fixture_empty.xlsx');
+  writeWorkbook(buildFixtureCStart(), path.join(outDir, 'excel_direct_fixture_c_start.xlsx'));
+  writeWorkbook(buildFixtureFormulaEmpty(), path.join(outDir, 'excel_direct_fixture_formula_empty.xlsx'));
+  writeWorkbook(buildFixtureLongTitle(), path.join(outDir, 'excel_direct_fixture_long_title.xlsx'));
+  writeWorkbook(buildFixtureDate(), path.join(outDir, 'excel_direct_fixture_date.xlsx'));
+  console.log('Generated: excel_direct_fixture_a.xlsx, excel_direct_fixture_b.xlsx, excel_direct_fixture_empty.xlsx, ' +
+    'excel_direct_fixture_c_start.xlsx, excel_direct_fixture_formula_empty.xlsx, excel_direct_fixture_long_title.xlsx, excel_direct_fixture_date.xlsx');
 }
 
 main();

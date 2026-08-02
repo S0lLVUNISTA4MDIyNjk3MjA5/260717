@@ -56,6 +56,8 @@
   const { sourceDocumentId, nodeId, edgeId, nodeKnowledgeHash, edgeKnowledgeHash } = resolveIdHashUtils();
 
   // ---- 列記号フォールバック(見出し未判定/未指定時) ----
+  // index0は「シート先頭列(A列)からの絶対列index」を渡すこと(使用範囲の先頭列からの相対indexではない。
+  // 是正Checkpoint 2a: C列開始等、使用範囲がA列以外から始まるシートで誤った列記号を生成していた不具合を修正)。
   function columnLetter(index0) {
     let n = index0 + 1;
     let s = '';
@@ -65,6 +67,20 @@
       n = Math.floor((n - 1) / 26);
     }
     return s;
+  }
+
+  // 是正Checkpoint 2a: 表示値(display)が空でも、数式(formula)を持つセルは「空セル」扱いにしない。
+  function cellHasContent(cell) {
+    return String(cell.display ?? '').trim() !== '' || !!cell.formula;
+  }
+
+  // セルのtext表現。表示値があればそれを使い、表示値がない数式セルは"=数式"という固定表記にする
+  // (是正Checkpoint 2a §2: 数式だけの行でも本文が不定にならないようにする)。
+  function cellTextValue(cell) {
+    const disp = String(cell.display ?? '').trim();
+    if (disp !== '') return disp;
+    if (cell.formula) return `=${cell.formula}`;
+    return '';
   }
 
   /**
@@ -131,20 +147,21 @@
       const ref = XLSX.utils.encode_cell({ r: headerRow0, c });
       const cell = worksheet[ref];
       const text = cell && cell.w != null ? String(cell.w).trim() : (cell && cell.v != null ? String(cell.v).trim() : '');
-      rawHeaders.push(text || columnLetter(c - firstCol));
+      rawHeaders.push(text || columnLetter(c)); // 絶対列index(A列=0起点)で列記号を生成する
       headerIsFallback.push(!text);
     }
-    // 列見出しの重複(まれ)は列記号を付けて一意化する。
+    // 列見出しの重複(まれ)は列記号を付けて一意化する(こちらも絶対列indexを使う)。
     const seen = new Map();
     const headers = rawHeaders.map((h, i) => {
       if (!seen.has(h)) { seen.set(h, 1); return h; }
       seen.set(h, seen.get(h) + 1);
-      return `${h}(${columnLetter(i)})`;
+      return `${h}(${columnLetter(firstCol + i)})`;
     });
 
     const rows = [];
     for (let r0 = dataStartRowNumber - 1; r0 <= lastRow0; r0++) {
       const cells = [];
+      const warnings = [];
       let anyNonBlank = false;
       for (let ci = 0; ci < headers.length; ci++) {
         const c = firstCol + ci;
@@ -153,12 +170,17 @@
         const raw = cell ? (cell.v ?? null) : null;
         const display = cell ? (cell.w != null ? cell.w : (cell.v != null ? String(cell.v) : '')) : '';
         const formula = cell && cell.f ? String(cell.f) : null;
-        if (String(display ?? '').trim() !== '') anyNonBlank = true;
-        cells.push({ ref, header: headers[ci], raw, display, formula });
+        const cellObj = { ref, header: headers[ci], raw, display, formula };
+        // 是正Checkpoint 2a §2: 表示値が空でも数式を持つセルは空セル扱いにしない。
+        if (cellHasContent(cellObj)) anyNonBlank = true;
+        if (formula && String(display ?? '').trim() === '') {
+          warnings.push({ code: 'formula_no_display_value', ref, header: headers[ci] });
+        }
+        cells.push(cellObj);
       }
       const rowNumber = r0 + 1;
       const cellRange = `${XLSX.utils.encode_cell({ r: r0, c: firstCol })}:${XLSX.utils.encode_cell({ r: r0, c: lastCol })}`;
-      rows.push({ rowNumber, cellRange, cells, isEmpty: !anyNonBlank });
+      rows.push({ rowNumber, cellRange, cells, isEmpty: !anyNonBlank, warnings });
     }
 
     return {
@@ -168,20 +190,23 @@
     };
   }
 
-  function truncate(s, max) {
+  // 表示専用の省略(是正Checkpoint 2a §3): Node.titleそのものは保存時に切り詰めない。
+  // 呼び出し側(プレビュー等の表示層)がこの関数を使って表示だけを省略する。
+  function truncateForDisplay(s, max) {
     const str = String(s ?? '');
     return str.length > max ? str.slice(0, max - 1) + '…' : str;
   }
 
   // 行の最初の非空セル値をtitleにする(全セル空欄はここに来ない。呼び出し側で空行を除外済み)。
+  // 保存時は切り詰めない(§3)。表示値のない数式セルはcellTextValue()により固定表記になる(§2)。
   function deriveTitle(nonBlankCells, rowNumber) {
     if (!nonBlankCells.length) return `行${rowNumber}`;
-    return truncate(nonBlankCells[0].display, 60);
+    return cellTextValue(nonBlankCells[0]);
   }
 
   // 全非空セルを"見出し: 値"の形で連結した文字列をtextにする(Step 2で修正可能な初期値)。
   function deriveText(nonBlankCells) {
-    return nonBlankCells.map(c => `${c.header}: ${c.display}`).join(' / ');
+    return nonBlankCells.map(c => `${c.header}: ${cellTextValue(c)}`).join(' / ');
   }
 
   // 安全な完全一致・alias一致だけを初期タグにする(類義語・部分一致・AI推定は行わない)。
@@ -336,10 +361,10 @@
         formulas[cell.header] = cell.formula;
       }
 
-      const nonBlankCells = row.cells.filter(c => String(c.display ?? '').trim() !== '');
+      const nonBlankCells = row.cells.filter(cellHasContent);
       const title = deriveTitle(nonBlankCells, row.rowNumber);
       const text = deriveText(nonBlankCells);
-      const tags = matchInitialTags(nonBlankCells.map(c => c.display), opts.tagVocabulary);
+      const tags = matchInitialTags(nonBlankCells.map(c => cellTextValue(c)), opts.tagVocabulary);
 
       const contentNode = await finalizeNode({
         // node_type: A/B(文書の役割)によらず常に'statement'固定。requirement/design_itemには載せない。
@@ -350,7 +375,9 @@
           verbatim: { source_record: sourceRecord, source_record_display: sourceRecordDisplay, source_row: row.rowNumber },
           extensions: {
             sheet_index: extraction.sheetIndex, cell_range: row.cellRange,
-            column_headers: extraction.headers, formulas, input_mode: 'excel-direct'
+            column_headers: extraction.headers, formulas, input_mode: 'excel-direct',
+            // 是正Checkpoint 2a §2: 表示値のない数式セル等の固定警告(code形式)を保存JSONにも残す。
+            warnings: row.warnings
           }
         },
         revision: { content_revision: 1, knowledge_hash: null, updated_by: { type: 'ai', id: 'excel-direct-adapter' }, updated_at: opts.ingestedAt },
@@ -381,6 +408,7 @@
 
   return Object.freeze({
     inspectWorkbook, extractSheetRows, buildKnowledgeNodesFromExcel, adaptExcelDirect,
-    columnLetter, matchInitialTags, deriveTitle, deriveText
+    columnLetter, matchInitialTags, deriveTitle, deriveText,
+    cellHasContent, cellTextValue, truncateForDisplay
   });
 });
