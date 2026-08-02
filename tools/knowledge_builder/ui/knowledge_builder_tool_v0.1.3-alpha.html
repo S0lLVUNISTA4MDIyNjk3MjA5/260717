@@ -52,6 +52,11 @@
   .evidence-pill { display: inline-block; background: #eef; border-radius: 4px; padding: 1px 5px; font-size: 10px; margin: 1px; }
   #graphWrap { border: 1px solid #e2e6ea; border-radius: 6px; overflow: auto; background: #fff; }
   .status-line { font-size: 12px; color: #555; margin-top: 6px; white-space: pre-wrap; }
+  .excel-sheet-list { border: 1px solid #e2e6ea; border-radius: 6px; padding: 6px; margin: 4px 0; max-height: 160px; overflow: auto; }
+  .excel-sheet-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 0; flex-wrap: wrap; }
+  .excel-sheet-row input[type="number"] { width: 48px; }
+  .excel-sheet-preview-block { border: 1px solid #e2e6ea; border-radius: 6px; padding: 6px; margin-top: 8px; }
+  .excel-sheet-preview-block h4 { margin: 0 0 4px; font-size: 12px; }
   .muted { color: #8a929c; }
   .doc-a { color: #1a56c4; } .doc-b { color: #1a8a3f; }
   code.small { font-size: 10px; color: #777; }
@@ -121,20 +126,11 @@
       <div id="excelBlockA" style="display:none;">
         <label>文書A（.xlsxファイル）</label>
         <input type="file" id="fileExcelA" accept=".xlsx">
-        <label>シート</label>
-        <select id="sheetSelectA" disabled></select>
-        <label>見出し行番号</label>
-        <input type="number" id="headerRowA" min="1" value="1">
-        <label>データ開始行番号</label>
-        <input type="number" id="dataStartRowA" min="1" value="2">
+        <label>シート選択(1つ以上。既定は先頭の可視・非空シートのみ選択)</label>
+        <div id="sheetListA" class="excel-sheet-list"></div>
         <button type="button" class="secondary small" id="btnPreviewExcelA" disabled>プレビュー取り込み</button>
         <div class="status-line" id="excelStatusA"></div>
-        <div id="excelPreviewWrapA" style="display:none; max-height:220px; overflow:auto; margin-top:6px;">
-          <table id="excelPreviewTableA">
-            <thead><tr><th>シート名</th><th>行番号</th><th>セル範囲</th><th>タイトル</th><th>本文抜粋</th><th>初期タグ</th><th>警告</th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
+        <div id="excelPreviewWrapA" style="display:none; max-height:320px; overflow:auto; margin-top:6px;"></div>
       </div>
     </div>
 
@@ -150,20 +146,11 @@
       <div id="excelBlockB" style="display:none;">
         <label>文書B（.xlsxファイル）</label>
         <input type="file" id="fileExcelB" accept=".xlsx">
-        <label>シート</label>
-        <select id="sheetSelectB" disabled></select>
-        <label>見出し行番号</label>
-        <input type="number" id="headerRowB" min="1" value="1">
-        <label>データ開始行番号</label>
-        <input type="number" id="dataStartRowB" min="1" value="2">
+        <label>シート選択(1つ以上。既定は先頭の可視・非空シートのみ選択)</label>
+        <div id="sheetListB" class="excel-sheet-list"></div>
         <button type="button" class="secondary small" id="btnPreviewExcelB" disabled>プレビュー取り込み</button>
         <div class="status-line" id="excelStatusB"></div>
-        <div id="excelPreviewWrapB" style="display:none; max-height:220px; overflow:auto; margin-top:6px;">
-          <table id="excelPreviewTableB">
-            <thead><tr><th>シート名</th><th>行番号</th><th>セル範囲</th><th>タイトル</th><th>本文抜粋</th><th>初期タグ</th><th>警告</th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
+        <div id="excelPreviewWrapB" style="display:none; max-height:320px; overflow:auto; margin-top:6px;"></div>
       </div>
     </div>
 
@@ -461,8 +448,11 @@ let graphRelationScope = null;
 // 文書A/Bそれぞれの入力方式('trace'|'excel'。既定'trace'=既存どおり)。
 let inputModeA = 'trace', inputModeB = 'trace';
 // Excel直接入力のプレビュー状態(UI専用)。ファイル未選択時はnull。
-// { file, arrayBuffer, contentDigest, workbook, sheetNames, extraction }
-// extractionはプレビュー取り込みボタンを押すまでnull(プレビューを取り込むまでStep 2へは進めない)。
+// { file, arrayBuffer, contentDigest, workbook, sheetNames, extractions }
+// sheetNamesは inspectWorkbook() の {name,index,hidden,empty}[]。
+// extractionsは選択中の各シートのextractSheetRows()結果の配列(sheet index順)。
+// プレビュー取り込みボタンを押すまでnull(プレビューを取り込むまでStep 2へは進めない。
+// 是正Checkpoint 2b: シート選択・見出し行/データ開始行を変更した時点でもnullへ戻す)。
 let excelInputA = null, excelInputB = null;
 
 const NODE_QUICK_FILTERS = [
@@ -532,13 +522,12 @@ function setInputMode(side, mode) {
 // ファイル選択直後: inspectWorkbook()でシート一覧だけを読む(まだNode化しない。読み取り専用)。
 async function onExcelFileChange(side) {
   const file = $('fileExcel' + side).files[0];
-  const sheetSelect = $('sheetSelect' + side);
+  const sheetList = $('sheetList' + side);
   const btnPreview = $('btnPreviewExcel' + side);
   const status = $('excelStatus' + side);
   setExcelInputRef(side, null);
+  sheetList.innerHTML = '';
   renderExcelPreview(side);
-  sheetSelect.innerHTML = '';
-  sheetSelect.disabled = true;
   btnPreview.disabled = true;
   btnPreview.textContent = 'プレビュー取り込み';
   if (!file) { status.textContent = ''; return; }
@@ -548,35 +537,83 @@ async function onExcelFileChange(side) {
     const arrayBuffer = await file.arrayBuffer();
     const contentDigest = await sha256HexOfFile(file);
     const { workbook, sheetNames } = KnowledgeExcelDirectAdapter.inspectWorkbook(arrayBuffer);
-    sheetSelect.innerHTML = sheetNames.map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join('');
-    sheetSelect.disabled = false;
-    btnPreview.disabled = false;
-    setExcelInputRef(side, { file, arrayBuffer, contentDigest, workbook, sheetNames, extraction: null });
-    status.textContent = `シート${sheetNames.length}件を検出しました。シート・見出し行・データ開始行を指定し、「プレビュー取り込み」を押してください。`;
+    setExcelInputRef(side, { file, arrayBuffer, contentDigest, workbook, sheetNames, extractions: null });
+    renderSheetList(side);
+    status.textContent = `シート${sheetNames.length}件を検出しました。取り込むシートを選択し(既定は先頭の可視・非空シートのみ)、見出し行・データ開始行を確認のうえ「プレビュー取り込み」を押してください。`;
   } catch (e) {
     status.textContent = `Excel解析エラー: ${e.message || e}`;
   }
 }
 
-// 「プレビュー取り込み」: extractSheetRows()を実行し、結果を読み取り専用プレビューとして表示する。
-// この時点ではまだKnowledge Node化しない(Step 2へは進まない)。
+// 是正Checkpoint 2b: シート一覧をチェックボックスで表示する。空シートは選択不可(disabled)、
+// 非表示シートは一覧表示するが初期選択しない。初期選択は「先頭の非空・可視シート」だけ。
+function renderSheetList(side) {
+  const input = excelInputRef(side);
+  const container = $('sheetList' + side);
+  if (!input) { container.innerHTML = ''; updatePreviewButtonState(side); return; }
+  const firstSelectable = input.sheetNames.find(s => !s.hidden && !s.empty);
+  container.innerHTML = input.sheetNames.map(s => {
+    const checked = firstSelectable && s.index === firstSelectable.index;
+    const disabled = s.empty;
+    const badge = s.empty ? '<span class="muted">(空シートのため選択不可)</span>'
+      : (s.hidden ? '<span class="muted">(非表示シート)</span>' : '');
+    return `<div class="excel-sheet-row" data-sheet-index="${s.index}" data-sheet-name="${esc(s.name)}">
+      <label><input type="checkbox" class="excel-sheet-check" data-side="${side}" data-sheet-index="${s.index}"${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}> ${esc(s.name)}</label>
+      ${badge}
+      <span>見出し行: <input type="number" class="excel-sheet-header" data-side="${side}" data-sheet-index="${s.index}" min="1" value="1"${disabled ? ' disabled' : ''}></span>
+      <span>データ開始行: <input type="number" class="excel-sheet-datastart" data-side="${side}" data-sheet-index="${s.index}" min="1" value="2"${disabled ? ' disabled' : ''}></span>
+    </div>`;
+  }).join('');
+  updatePreviewButtonState(side);
+}
+
+function checkedSheetIndexes(side) {
+  return [...document.querySelectorAll(`.excel-sheet-check[data-side="${side}"]:checked`)].map(el => Number(el.dataset.sheetIndex));
+}
+
+function updatePreviewButtonState(side) {
+  const input = excelInputRef(side);
+  $('btnPreviewExcel' + side).disabled = !input || checkedSheetIndexes(side).length === 0;
+}
+
+// シート選択・見出し行・データ開始行を変更した時点で、既存プレビュー結果は無効化する
+// (取り込み直すまでStep 2には進めない。プレビューと実際の設定の食い違いを防ぐ)。
+function onSheetSelectionChange(side) {
+  const input = excelInputRef(side);
+  if (input) input.extractions = null;
+  renderExcelPreview(side);
+  updatePreviewButtonState(side);
+  $('btnPreviewExcel' + side).textContent = 'プレビュー取り込み';
+  if (input) $('excelStatus' + side).textContent = 'シート選択または見出し行/データ開始行を変更しました。「プレビュー取り込み」を押してください。';
+}
+
+// 「プレビュー取り込み」: チェックした各シートについてextractSheetRows()を実行し、
+// 結果を読み取り専用プレビューとして表示する。この時点ではまだKnowledge Node化しない(Step 2へは進まない)。
+// 是正Checkpoint 2b: いずれか1シートでも抽出に失敗したら、プレビュー全体を取込エラーとして扱う
+// (実際のKnowledge Node生成時の文書全体fail-closedと挙動を合わせる)。
 function previewExcel(side) {
   const input = excelInputRef(side);
   const status = $('excelStatus' + side);
   const btnPreview = $('btnPreviewExcel' + side);
   if (!input) { status.textContent = 'Excelファイルを選択してください。'; return; }
-  const sheetName = $('sheetSelect' + side).value;
-  const headerRow = Number($('headerRow' + side).value);
-  const dataStartRow = Number($('dataStartRow' + side).value);
+  const indexes = checkedSheetIndexes(side);
+  if (indexes.length === 0) { status.textContent = '取り込むシートを1つ以上選択してください。'; return; }
   try {
-    const extraction = KnowledgeExcelDirectAdapter.extractSheetRows(input.workbook, sheetName, headerRow, dataStartRow);
-    input.extraction = extraction;
-    input.sheetName = sheetName;
-    status.textContent = `プレビュー取り込み完了: 非空データ行 ${extraction.nonEmptyRowCount}件(全${extraction.rows.length}行中)。内容を確認し、問題なければ「Knowledge Nodeを生成してStep 2へ」を押してください。`;
+    const extractions = indexes.map(idx => {
+      const sheetMeta = input.sheetNames.find(s => s.index === idx);
+      const headerRow = Number(document.querySelector(`.excel-sheet-header[data-side="${side}"][data-sheet-index="${idx}"]`).value);
+      const dataStartRow = Number(document.querySelector(`.excel-sheet-datastart[data-side="${side}"][data-sheet-index="${idx}"]`).value);
+      return KnowledgeExcelDirectAdapter.extractSheetRows(input.workbook, sheetMeta.name, headerRow, dataStartRow);
+    });
+    // 決定性: プレビュー表示もsheet index順に揃える(実際のNode生成順と一致させる)。
+    extractions.sort((a, b) => a.sheetIndex - b.sheetIndex);
+    input.extractions = extractions;
+    const totalNonEmpty = extractions.reduce((sum, e) => sum + e.nonEmptyRowCount, 0);
+    status.textContent = `プレビュー取り込み完了: ${extractions.length}シート、非空データ行 合計${totalNonEmpty}件。内容を確認し、問題なければ「Knowledge Nodeを生成してStep 2へ」を押してください。`;
     btnPreview.textContent = 'プレビューを取り込み直す';
     renderExcelPreview(side);
   } catch (e) {
-    input.extraction = null;
+    input.extractions = null;
     status.textContent = `プレビュー取り込みエラー: ${e.message || e}`;
     renderExcelPreview(side);
   }
@@ -589,41 +626,47 @@ function excelWarningText(w) {
   return w.code;
 }
 
-// 読み取り専用プレビュー表示(編集不可): シート名・行番号・セル範囲・タイトル・本文抜粋・初期タグ・警告。
+// 読み取り専用プレビュー表示(編集不可): シート単位で区切って表示する(是正Checkpoint 2b)。
+// 各シートブロック内は従来どおりシート名・行番号・セル範囲・タイトル・本文抜粋・初期タグ・警告。
 function renderExcelPreview(side) {
   const input = excelInputRef(side);
   const wrap = $('excelPreviewWrap' + side);
-  const tbody = $('excelPreviewTable' + side).querySelector('tbody');
-  if (!input || !input.extraction) { wrap.style.display = 'none'; tbody.innerHTML = ''; return; }
-  const extraction = input.extraction;
-  const vocabFile = $('fileVocab').files[0];
+  if (!input || !input.extractions || !input.extractions.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
   // プレビュー時点では共有タグ辞書ファイルの読み込みは行わない(重い非同期処理を避けるため)。
   // 未指定時の既定辞書のみでタグ一致を仮表示する(実際の取込時は指定辞書があればそちらを使う)。
   const previewVocab = DEFAULT_TAG_VOCABULARY;
-  const rowsHtml = extraction.rows.map(row => {
-    const nonBlank = row.cells.filter(KnowledgeExcelDirectAdapter.cellHasContent);
-    const title = row.isEmpty ? '' : KnowledgeExcelDirectAdapter.deriveTitle(nonBlank, row.rowNumber);
-    const text = row.isEmpty ? '' : KnowledgeExcelDirectAdapter.deriveText(nonBlank);
-    const tags = row.isEmpty ? [] : KnowledgeExcelDirectAdapter.matchInitialTags(nonBlank.map(c => KnowledgeExcelDirectAdapter.cellTextValue(c)), previewVocab);
-    const warnings = row.isEmpty ? ['空行のため取込対象外(Node化されません)'] : row.warnings.map(excelWarningText);
-    // タイトルはNode.titleとしては切り詰めないが(§3)、プレビュー表示だけは省略する。
-    const titleDisplay = KnowledgeExcelDirectAdapter.truncateForDisplay(title, 60);
-    return `<tr>
-      <td>${esc(extraction.sheetName)}</td>
-      <td>${row.rowNumber}</td>
-      <td>${esc(row.cellRange)}</td>
-      <td>${esc(titleDisplay)}</td>
-      <td>${esc(text.slice(0, 60))}${text.length > 60 ? '…' : ''}</td>
-      <td>${tags.map(t => `<span class="tag-chip">${esc(t)}</span>`).join('') || '<span class="muted">-</span>'}</td>
-      <td>${warnings.map(w => esc(w)).join('; ') || ''}</td>
-    </tr>`;
+  wrap.innerHTML = input.extractions.map(extraction => {
+    const rowsHtml = extraction.rows.map(row => {
+      const nonBlank = row.cells.filter(KnowledgeExcelDirectAdapter.cellHasContent);
+      const title = row.isEmpty ? '' : KnowledgeExcelDirectAdapter.deriveTitle(nonBlank, row.rowNumber);
+      const text = row.isEmpty ? '' : KnowledgeExcelDirectAdapter.deriveText(nonBlank);
+      const tags = row.isEmpty ? [] : KnowledgeExcelDirectAdapter.matchInitialTags(nonBlank.map(c => KnowledgeExcelDirectAdapter.cellTextValue(c)), previewVocab);
+      const warnings = row.isEmpty ? ['空行のため取込対象外(Node化されません)'] : row.warnings.map(excelWarningText);
+      // タイトルはNode.titleとしては切り詰めないが(§3)、プレビュー表示だけは省略する。
+      const titleDisplay = KnowledgeExcelDirectAdapter.truncateForDisplay(title, 60);
+      return `<tr>
+        <td>${esc(extraction.sheetName)}</td>
+        <td>${row.rowNumber}</td>
+        <td>${esc(row.cellRange)}</td>
+        <td>${esc(titleDisplay)}</td>
+        <td>${esc(text.slice(0, 60))}${text.length > 60 ? '…' : ''}</td>
+        <td>${tags.map(t => `<span class="tag-chip">${esc(t)}</span>`).join('') || '<span class="muted">-</span>'}</td>
+        <td>${warnings.map(w => esc(w)).join('; ') || ''}</td>
+      </tr>`;
+    }).join('');
+    const fallbackCols = extraction.headers.filter((h, i) => extraction.headerIsFallback[i]);
+    const fallbackNote = fallbackCols.length
+      ? `<tr><td colspan="7" class="muted" style="font-size:11px;">見出し未指定のため列記号を使用した列: ${fallbackCols.map(esc).join(', ')}</td></tr>`
+      : '';
+    return `<div class="excel-sheet-preview-block">
+      <h4>シート「${esc(extraction.sheetName)}」(sheet index ${extraction.sheetIndex}) - 非空データ行 ${extraction.nonEmptyRowCount}件 / 全${extraction.rows.length}行</h4>
+      <table class="excel-preview-table" data-sheet-index="${extraction.sheetIndex}">
+        <thead><tr><th>シート名</th><th>行番号</th><th>セル範囲</th><th>タイトル</th><th>本文抜粋</th><th>初期タグ</th><th>警告</th></tr></thead>
+        <tbody>${rowsHtml}${fallbackNote}</tbody>
+      </table>
+    </div>`;
   }).join('');
-  const fallbackCols = extraction.headers.filter((h, i) => extraction.headerIsFallback[i]);
-  const fallbackNote = fallbackCols.length
-    ? `<tr><td colspan="7" class="muted" style="font-size:11px;">見出し未指定のため列記号を使用した列: ${fallbackCols.map(esc).join(', ')}</td></tr>`
-    : '';
-  tbody.innerHTML = rowsHtml + fallbackNote;
-  wrap.style.display = extraction.rows.length ? '' : 'none';
+  wrap.style.display = '';
 }
 
 // document/section/内容Node(直接入力)構築時に渡すtagVocabularyは、実際の取込(ingest)時点で
@@ -639,8 +682,8 @@ async function adaptDocument(side, mode, vocab, ingestedAt) {
       return await KnowledgeTraceJsonAdapter.adaptTraceJson(trace, { role, contentDigest: digest, ingestedAt });
     }
     const input = excelInputRef(side);
-    if (!input || !input.extraction) throw new Error('Excelのプレビュー取り込みが完了していません。先に「プレビュー取り込み」を行ってください。');
-    return await KnowledgeExcelDirectAdapter.buildKnowledgeNodesFromExcel(input.extraction, {
+    if (!input || !input.extractions || !input.extractions.length) throw new Error('Excelのプレビュー取り込みが完了していません。先に「プレビュー取り込み」を行ってください。');
+    return await KnowledgeExcelDirectAdapter.buildKnowledgeNodesFromExcelSheets(input.extractions, {
       fileName: input.file.name, contentDigest: input.contentDigest, ingestedAt, tagVocabulary: vocab
     });
   } catch (e) {
@@ -651,9 +694,9 @@ async function adaptDocument(side, mode, vocab, ingestedAt) {
 async function ingest() {
   const modeA = inputModeA, modeB = inputModeB;
   if (modeA === 'trace' && !$('fileA').files[0]) { $('ingestStatus').textContent = '文書AのTrace JSONファイルを選択してください。'; return; }
-  if (modeA === 'excel' && !(excelInputA && excelInputA.extraction)) { $('ingestStatus').textContent = '文書AのExcelプレビュー取り込みを先に行ってください。'; return; }
+  if (modeA === 'excel' && !(excelInputA && excelInputA.extractions && excelInputA.extractions.length)) { $('ingestStatus').textContent = '文書AのExcelプレビュー取り込みを先に行ってください。'; return; }
   if (modeB === 'trace' && !$('fileB').files[0]) { $('ingestStatus').textContent = '文書Bのtrace JSONファイルを選択してください。'; return; }
-  if (modeB === 'excel' && !(excelInputB && excelInputB.extraction)) { $('ingestStatus').textContent = '文書BのExcelプレビュー取り込みを先に行ってください。'; return; }
+  if (modeB === 'excel' && !(excelInputB && excelInputB.extractions && excelInputB.extractions.length)) { $('ingestStatus').textContent = '文書BのExcelプレビュー取り込みを先に行ってください。'; return; }
   if (dataset && !confirm('既存のNode/Relationはすべて破棄されます。取込を続けますか？')) return;
 
   $('ingestStatus').textContent = '取込中...';
@@ -2158,6 +2201,7 @@ for (const side of ['A', 'B']) {
   $('inputMode' + side).addEventListener('change', (ev) => setInputMode(side, ev.target.value));
   $('fileExcel' + side).addEventListener('change', () => onExcelFileChange(side));
   $('btnPreviewExcel' + side).addEventListener('click', () => previewExcel(side));
+  $('sheetList' + side).addEventListener('change', () => onSheetSelectionChange(side));
 }
 
 $('showStructural').addEventListener('change', renderNodeTable);

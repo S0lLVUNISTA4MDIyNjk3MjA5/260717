@@ -21,6 +21,7 @@ const FIXTURE_FORMULA_EMPTY = path.join(FIXTURES_DIR, 'excel_direct_fixture_form
 const FIXTURE_LONG_TITLE = path.join(FIXTURES_DIR, 'excel_direct_fixture_long_title.xlsx');
 const FIXTURE_DATE = path.join(FIXTURES_DIR, 'excel_direct_fixture_date.xlsx');
 const FIXTURE_RAW_ONLY = path.join(FIXTURES_DIR, 'excel_direct_fixture_raw_only.xlsx');
+const FIXTURE_MULTI = path.join(FIXTURES_DIR, 'excel_direct_fixture_multi.xlsx');
 
 const TAG_VOCAB = { allowed_tags: ['安全', '性能', '機能', '品質', 'インターフェース', '製造', '検査', '保守'], aliases: { 'けが防止': '安全' } };
 
@@ -276,6 +277,128 @@ async function main() {
       `固定警告(raw_value_without_display)が保存Nodeのprovenance.extensions.warningsにも記録される(実際: ${JSON.stringify(node.provenance.extensions.warnings)})`);
     assert(node.provenance.extensions.cell_range === 'A2:A2', `セル範囲が保持される(実際: ${node.provenance.extensions.cell_range})`);
     assert(node.provenance.locator.row === 2, `行番号が保持される(実際: ${node.provenance.locator.row})`);
+  }
+
+  // ================= Checkpoint 2b: 複数シート対応 =================
+  {
+    const abM = readAsArrayBuffer(FIXTURE_MULTI);
+    const { workbook: wbM, sheetNames } = Adapter.inspectWorkbook(abM);
+    assert(sheetNames.length === 4, `複数シートfixtureは4シート持つ(実際: ${sheetNames.length})`);
+    assert(sheetNames[0].hidden === false && sheetNames[1].hidden === false,
+      '先頭2シート(可視・データあり)はhidden=false');
+    assert(sheetNames[2].hidden === true && sheetNames[2].empty === false,
+      `3番目のシートは非表示だがデータあり(hidden=true, empty=false)(実際: hidden=${sheetNames[2].hidden}, empty=${sheetNames[2].empty})`);
+    assert(sheetNames[3].empty === true, `4番目のシートは空シート(empty=true)(実際: ${sheetNames[3].empty})`);
+
+    const ext0 = Adapter.extractSheetRows(wbM, '要件一覧2', 1, 2);
+    const ext1 = Adapter.extractSheetRows(wbM, '設計一覧2', 1, 2);
+
+    // ---- #1・#2: 2シート選択でdocument Node 1件、section Node 2件 ----
+    const r = await Adapter.buildKnowledgeNodesFromExcelSheets([ext0, ext1], {
+      fileName: 'excel_direct_fixture_multi.xlsx', contentDigest: 'm'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB
+    });
+    const docNodes = r.nodes.filter(n => n.node_type === 'document');
+    const secNodes = r.nodes.filter(n => n.node_type === 'section');
+    assert(docNodes.length === 1, `2シート選択でもdocument Nodeは1件だけ生成される(#1。実際: ${docNodes.length})`);
+    assert(secNodes.length === 2, `2シート選択でsection Nodeが2件生成される(#1。実際: ${secNodes.length})`);
+
+    // ---- #2: 各行Nodeが正しいsectionをparentに持つ ----
+    const sec0 = secNodes.find(n => n.title === '要件一覧2');
+    const sec1 = secNodes.find(n => n.title === '設計一覧2');
+    assert(!!sec0 && !!sec1, '両方のsection Nodeがシート名どおりのtitleで見つかる(前提条件)');
+    const contentNodes = r.nodes.filter(n => n.node_type === 'statement');
+    const contentFromSheet0 = contentNodes.filter(n => n.provenance.locator.sheet === '要件一覧2');
+    const contentFromSheet1 = contentNodes.filter(n => n.provenance.locator.sheet === '設計一覧2');
+    assert(contentFromSheet0.length === 2 && contentFromSheet0.every(n => n.parent_node_id === sec0.node_id),
+      `シート0の内容Nodeはすべてsection0をparentに持つ(#2。実際件数: ${contentFromSheet0.length})`);
+    assert(contentFromSheet1.length === 2 && contentFromSheet1.every(n => n.parent_node_id === sec1.node_id),
+      `シート1の内容Nodeはすべてsection1をparentに持つ(#2。実際件数: ${contentFromSheet1.length})`);
+    assert(sec0.parent_node_id === docNodes[0].node_id && sec1.parent_node_id === docNodes[0].node_id,
+      '両方のsection Nodeのparentは同一のdocument Node');
+
+    // ---- #3: SourceDocumentが重複しない ----
+    assert(r.sourceDocument && typeof r.sourceDocument.source_document_id === 'string',
+      'SourceDocumentは1件だけ返る(配列ではなく単一オブジェクト)(#3)');
+    assert(r.nodes.every(n => n.provenance.source_document_id === r.sourceDocument.source_document_id),
+      '全Node(document/section/内容、両シート分含む)のsource_document_idが同一SourceDocumentを指す(#3)');
+
+    // ---- #4: Node ID/edge_id重複0件 ----
+    const nodeIdSet = new Set(r.nodes.map(n => n.node_id));
+    assert(nodeIdSet.size === r.nodes.length, `Node IDの重複が0件(#4。総数: ${r.nodes.length}、ユニーク数: ${nodeIdSet.size})`);
+    const edgeIdSet = new Set(r.edges.map(e => e.edge_id));
+    assert(edgeIdSet.size === r.edges.length, `edge_idの重複が0件(#4。総数: ${r.edges.length}、ユニーク数: ${edgeIdSet.size})`);
+
+    // ---- #5: シート選択順を変えても正式ID集合が一致 ----
+    const rReversed = await Adapter.buildKnowledgeNodesFromExcelSheets([ext1, ext0], {
+      fileName: 'excel_direct_fixture_multi.xlsx', contentDigest: 'm'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB
+    });
+    const idsForward = r.nodes.map(n => n.node_id).sort();
+    const idsReversed = rReversed.nodes.map(n => n.node_id).sort();
+    assert(JSON.stringify(idsForward) === JSON.stringify(idsReversed),
+      `シート選択順(チェック順)を変えてもNode ID集合が一致する(#5。件数: ${idsForward.length})`);
+    const hashesForward = r.nodes.map(n => n.revision.knowledge_hash).sort();
+    const hashesReversed = rReversed.nodes.map(n => n.revision.knowledge_hash).sort();
+    assert(JSON.stringify(hashesForward) === JSON.stringify(hashesReversed),
+      'シート選択順を変えても保存JSONの正式内容(knowledge_hash集合)が一致する(#5)');
+    // 生成順自体はsheet index順に固定される(チェック順=[ext1,ext0]でもsection0が先)。
+    const secOrderReversed = rReversed.nodes.filter(n => n.node_type === 'section').map(n => n.title);
+    assert(JSON.stringify(secOrderReversed) === JSON.stringify(['要件一覧2', '設計一覧2']),
+      `Node生成順はチェック順ではなくsheet index順に固定される(実際: ${JSON.stringify(secOrderReversed)})`);
+
+    // ---- #6: 未選択シートのNodeが生成されない ----
+    const rSingle = await Adapter.buildKnowledgeNodesFromExcelSheets([ext0], {
+      fileName: 'excel_direct_fixture_multi.xlsx', contentDigest: 'm'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB
+    });
+    assert(rSingle.nodes.filter(n => n.node_type === 'section').length === 1, '1シートだけ選択するとsection Nodeも1件だけになる(#6)');
+    assert(!rSingle.nodes.some(n => n.provenance.locator.sheet === '設計一覧2'),
+      '未選択シート(設計一覧2)由来のNodeは1件も生成されない(#6)');
+
+    // ---- #7: 空シートは選択不可(extractSheetRows()がエラーになる) ----
+    let emptySheetThrew2b = false;
+    try { Adapter.extractSheetRows(wbM, '空シート2', 1, 2); } catch (e) { emptySheetThrew2b = true; }
+    assert(emptySheetThrew2b, '空シート(空シート2)はextractSheetRows()でエラーになり、選択できない(#7)');
+
+    // ---- #8: 選択シート0件はERROR ----
+    let zeroSheetsThrew = false, zeroSheetsMessage = '';
+    try { await Adapter.buildKnowledgeNodesFromExcelSheets([], { fileName: 'x.xlsx', contentDigest: 'z'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB }); }
+    catch (e) { zeroSheetsThrew = true; zeroSheetsMessage = e.message; }
+    assert(zeroSheetsThrew, `選択シート0件はエラーになる(#8。実際のメッセージ: "${zeroSheetsMessage}")`);
+
+    // ---- #9: 片方のシート失敗(Node候補0件)で文書全体がfail-closed ----
+    const extAllEmpty = JSON.parse(JSON.stringify(ext1));
+    extAllEmpty.rows = extAllEmpty.rows.map(row => ({ ...row, isEmpty: true }));
+    let mixedFailThrew = false, mixedFailMessage = '';
+    try {
+      await Adapter.buildKnowledgeNodesFromExcelSheets([ext0, extAllEmpty], {
+        fileName: 'excel_direct_fixture_multi.xlsx', contentDigest: 'm'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB
+      });
+    } catch (e) { mixedFailThrew = true; mixedFailMessage = e.message; }
+    assert(mixedFailThrew && mixedFailMessage.includes('設計一覧2'),
+      `一方のシートがNode候補0件なら、もう一方が正常でも文書全体がエラーになる(#9。実際のメッセージ: "${mixedFailMessage}")`);
+
+    // ---- #10: シート別の見出し行・データ開始行が反映される ----
+    // sheet1(設計一覧2)はdataStart=3を指定 -> 行2(室外機/安全)は取り込まれず、行3(基板/品質)だけがNode化される。
+    const ext1AltStart = Adapter.extractSheetRows(wbM, '設計一覧2', 1, 3);
+    const rAltStart = await Adapter.buildKnowledgeNodesFromExcelSheets([ext0, ext1AltStart], {
+      fileName: 'excel_direct_fixture_multi.xlsx', contentDigest: 'm'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB
+    });
+    const sheet1ContentAlt = rAltStart.nodes.filter(n => n.node_type === 'statement' && n.provenance.locator.sheet === '設計一覧2');
+    assert(sheet1ContentAlt.length === 1 && sheet1ContentAlt[0].provenance.locator.row === 3,
+      `シートごとに指定したデータ開始行が反映される(#10。設計一覧2のdataStart=3で行2が除外される。実際件数: ${sheet1ContentAlt.length})`);
+    const sheet0ContentAlt = rAltStart.nodes.filter(n => n.node_type === 'statement' && n.provenance.locator.sheet === '要件一覧2');
+    assert(sheet0ContentAlt.length === 2, `他方のシート(要件一覧2)は元のdataStart=2のまま2件生成される(実際: ${sheet0ContentAlt.length})`);
+
+    // ---- 警告にsheet_name/sheet_indexが含まれ、シート間で混同しない ----
+    assert(ext0.rows.every(row => row.warnings.every(w => w.sheet_name === '要件一覧2' && w.sheet_index === 0)),
+      'シート0で生成された警告はすべてsheet_name/sheet_indexがシート0のものになる');
+
+    // ---- node_type中立性・export_binding: 複数シートでも維持される ----
+    assert(contentNodes.every(n => n.node_type === 'statement'), '複数シートの内容Nodeもすべてstatement(A/B中立性維持)');
+    assert(r.nodes.every(n => n.export_binding === null), '複数シートでも全Nodeのexport_bindingがnull');
+
+    // ---- タグ: 全選択シートへ同じ共有辞書が適用される ----
+    assert(contentFromSheet0.some(n => n.tags.includes('安全')) && contentFromSheet1.some(n => n.tags.includes('安全')),
+      '両シートに対して同じ共有タグ辞書が適用される(区分列=安全のセルがどちらのシートでもタグ化される)');
   }
 
   console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);

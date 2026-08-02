@@ -26,6 +26,8 @@ function assert(cond, message) {
   else console.log(`PASS: ${message}`);
 }
 
+// 是正Checkpoint 2b: シート選択がドロップダウンからチェックボックス一覧へ変わったため、
+// 対象シートだけをチェックし(他は解除)、そのシート専用の見出し行/データ開始行入力欄へ書き込む。
 async function setExcelSide(page, side, fixturePath, sheetName, headerRow, dataStartRow) {
   await page.selectOption('#inputMode' + side, 'excel');
   // 同一ファイルを再選択する場合、ブラウザがchangeイベントを発火しないことがあるため、
@@ -33,9 +35,13 @@ async function setExcelSide(page, side, fixturePath, sheetName, headerRow, dataS
   await page.evaluate((s) => { document.getElementById('fileExcel' + s).value = ''; }, side);
   await page.setInputFiles('#fileExcel' + side, fixturePath);
   await page.waitForFunction((s) => document.getElementById('excelStatus' + s).textContent.includes('シート'), side, { timeout: 10000 });
-  await page.selectOption('#sheetSelect' + side, sheetName);
-  await page.fill('#headerRow' + side, String(headerRow));
-  await page.fill('#dataStartRow' + side, String(dataStartRow));
+  await page.evaluate((s) => {
+    document.querySelectorAll(`#sheetList${s} .excel-sheet-check`).forEach(cb => { if (!cb.disabled) cb.checked = false; });
+  }, side);
+  const rowSelector = `#sheetList${side} .excel-sheet-row[data-sheet-name="${sheetName}"]`;
+  await page.check(`${rowSelector} input.excel-sheet-check`);
+  await page.fill(`${rowSelector} input.excel-sheet-header`, String(headerRow));
+  await page.fill(`${rowSelector} input.excel-sheet-datastart`, String(dataStartRow));
   await page.click('#btnPreviewExcel' + side);
   await page.waitForFunction((s) => document.getElementById('excelStatus' + s).textContent.includes('プレビュー取り込み完了'), side, { timeout: 10000 });
 }
@@ -110,8 +116,8 @@ async function main() {
     // ---- #15: UI専用状態の保存混入0 ----
     assert(!savedText.includes('inputModeA') && !savedText.includes('inputModeB') &&
       !savedText.includes('excelInputA') && !savedText.includes('excelInputB') &&
-      !savedText.includes('excelPreview') && !savedText.includes('headerRowA') && !savedText.includes('dataStartRowA'),
-      '保存JSONにExcel直接入力のUI専用状態(入力方式・プレビュー状態)が混入しない(#15)');
+      !savedText.includes('excelPreview') && !savedText.includes('sheetListA') && !savedText.includes('excel-sheet-header'),
+      '保存JSONにExcel直接入力のUI専用状態(入力方式・シート選択・プレビュー状態)が混入しない(#15)');
     assert(!savedText.includes('nodeShortIds') && !savedText.includes('graphGranularity') && !savedText.includes('selectedGraphNodeId'),
       '保存JSONに既存(Alpha 0.1.3まで)のUI専用状態も引き続き混入しない(回帰確認)');
 
@@ -217,7 +223,7 @@ async function main() {
     const page = await browser.newPage();
     await page.goto('file://' + HTML_PATH);
     await setExcelSide(page, 'A', FIXTURE_A, '要件一覧', 1, 2);
-    const previewRows = await page.$$eval('#excelPreviewTableA tbody tr', rows => rows.map(r => [...r.children].map(td => td.textContent.trim())));
+    const previewRows = await page.$$eval('#excelPreviewWrapA .excel-preview-table tbody tr', rows => rows.map(r => [...r.children].map(td => td.textContent.trim())));
     const blankRowEntry = previewRows.find(r => r[1] === '3');
     assert(!!blankRowEntry && blankRowEntry[6].includes('空行'), `プレビューで空行に警告が表示される(実際: ${JSON.stringify(blankRowEntry)})`);
     const nonBlankRowEntry = previewRows.find(r => r[1] === '2');
@@ -225,8 +231,8 @@ async function main() {
       `プレビューにタイトル・初期タグが表示される(実際: ${JSON.stringify(nonBlankRowEntry)})`);
     // プレビュー入力欄は読み取り専用(編集用UIが存在しない)であることを確認する。
     const hasEditableCell = await page.evaluate(() => {
-      const table = document.getElementById('excelPreviewTableA');
-      return !!table.querySelector('input, textarea, [contenteditable="true"]');
+      const wrap = document.getElementById('excelPreviewWrapA');
+      return !!wrap.querySelector('input, textarea, [contenteditable="true"]');
     });
     assert(!hasEditableCell, 'プレビュー表に編集可能な入力欄が存在しない(読み取り専用)');
     await page.close();
@@ -237,7 +243,7 @@ async function main() {
     const page = await browser.newPage();
     await page.goto('file://' + HTML_PATH);
     await setExcelSide(page, 'A', FIXTURE_LONG_TITLE, '長いタイトル', 1, 2);
-    const previewTitleCell = await page.$eval('#excelPreviewTableA tbody tr td:nth-child(4)', td => td.textContent);
+    const previewTitleCell = await page.$eval('#excelPreviewWrapA .excel-preview-table tbody tr td:nth-child(4)', td => td.textContent);
     assert(previewTitleCell.length === 60 && previewTitleCell.endsWith('…'),
       `プレビュー表示のタイトルは60文字+省略記号に切り詰められる(実際の長さ: ${previewTitleCell.length}, 実際: "${previewTitleCell.slice(0, 20)}...")`);
 

@@ -184,6 +184,46 @@ function buildFixtureRawOnly() {
   return wb;
 }
 
+// 是正Checkpoint 2b: 複数シート対応の確認用workbook。
+// index0/1: 可視・データありの2シート(document Node重複なし・section分離・順序決定性の確認用)
+// index2: 非表示だがデータありのシート(一覧表示するが初期選択しないことの確認用)
+// index3: 空シート(選択不可であることの確認用)
+function buildFixtureMulti() {
+  const ws0 = {};
+  setCell(ws0, 'A1', '項目');
+  setCell(ws0, 'B1', '区分');
+  setCell(ws0, 'A2', '空調機');
+  setCell(ws0, 'B2', '安全');
+  setCell(ws0, 'A3', '制御盤');
+  setCell(ws0, 'B3', '性能');
+  ws0['!ref'] = 'A1:B3';
+
+  const ws1 = {};
+  setCell(ws1, 'A1', '部品');
+  setCell(ws1, 'B1', '区分');
+  setCell(ws1, 'A2', '室外機');
+  setCell(ws1, 'B2', '安全');
+  setCell(ws1, 'A3', '基板');
+  setCell(ws1, 'B3', '品質');
+  ws1['!ref'] = 'A1:B3';
+
+  const ws2 = {};
+  setCell(ws2, 'A1', '項目');
+  setCell(ws2, 'A2', '隠しデータ');
+  ws2['!ref'] = 'A1:A2';
+
+  const ws3 = XLSX.utils.aoa_to_sheet([]); // '!ref'が未設定になる(空シート)
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws0, '要件一覧2');
+  XLSX.utils.book_append_sheet(wb, ws1, '設計一覧2');
+  XLSX.utils.book_append_sheet(wb, ws2, '非表示シート');
+  XLSX.utils.book_append_sheet(wb, ws3, '空シート2');
+  wb.Workbook = wb.Workbook || {};
+  wb.Workbook.Sheets = [{ Hidden: 0 }, { Hidden: 0 }, { Hidden: 1 }, { Hidden: 0 }];
+  return wb;
+}
+
 function main() {
   const outDir = __dirname;
   writeWorkbook(buildFixtureA(), path.join(outDir, 'excel_direct_fixture_a.xlsx'));
@@ -194,9 +234,10 @@ function main() {
   writeWorkbook(buildFixtureLongTitle(), path.join(outDir, 'excel_direct_fixture_long_title.xlsx'));
   writeWorkbook(buildFixtureDate(), path.join(outDir, 'excel_direct_fixture_date.xlsx'));
   writeWorkbook(buildFixtureRawOnly(), path.join(outDir, 'excel_direct_fixture_raw_only.xlsx'));
+  writeWorkbook(buildFixtureMulti(), path.join(outDir, 'excel_direct_fixture_multi.xlsx'));
   console.log('Generated: excel_direct_fixture_a.xlsx, excel_direct_fixture_b.xlsx, excel_direct_fixture_empty.xlsx, ' +
     'excel_direct_fixture_c_start.xlsx, excel_direct_fixture_formula_empty.xlsx, excel_direct_fixture_long_title.xlsx, ' +
-    'excel_direct_fixture_date.xlsx, excel_direct_fixture_raw_only.xlsx');
+    'excel_direct_fixture_date.xlsx, excel_direct_fixture_raw_only.xlsx, excel_direct_fixture_multi.xlsx');
 }
 
 main();

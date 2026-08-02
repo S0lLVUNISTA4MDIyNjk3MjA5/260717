@@ -107,8 +107,10 @@
 
   /**
    * ワークブックを読み取り専用で解析する(inspectのみ・状態を変更しない)。UI非依存の純関数。
+   * 是正Checkpoint 2b: 複数シート選択UIのため、各シートのempty(空シート)/hidden(非表示シート)を
+   * ここで判定して返す(UI側で個別に判定ロジックを持たせない。判定はこの純関数だけの責務にする)。
    * @param {ArrayBuffer} arrayBuffer  .xlsxファイルの内容
-   * @returns {{ workbook: object, sheetNames: {name:string, index:number}[] }}
+   * @returns {{ workbook: object, sheetNames: {name:string, index:number, hidden:boolean, empty:boolean}[] }}
    */
   function inspectWorkbook(arrayBuffer) {
     const XLSX = resolveXLSX();
@@ -121,7 +123,15 @@
     if (!workbook || !Array.isArray(workbook.SheetNames) || workbook.SheetNames.length === 0) {
       throw new Error('ワークブックにシートがありません。');
     }
-    const sheetNames = workbook.SheetNames.map((name, index) => ({ name, index }));
+    const wbSheetMeta = (workbook.Workbook && Array.isArray(workbook.Workbook.Sheets)) ? workbook.Workbook.Sheets : [];
+    const sheetNames = workbook.SheetNames.map((name, index) => {
+      const worksheet = workbook.Sheets[name];
+      const empty = !worksheet || !worksheet['!ref'];
+      // Hidden: 0=表示, 1=非表示, 2=非常に非表示(いずれも1以上を「非表示」として扱う)。
+      const meta = wbSheetMeta[index];
+      const hidden = !!(meta && Number(meta.Hidden) >= 1);
+      return { name, index, hidden, empty };
+    });
     return { workbook, sheetNames };
   }
 
@@ -197,10 +207,12 @@
         // 是正Checkpoint 2a.1: raw値のみ持つセル(表示書式で非表示等)も空セル扱いにしない。
         if (cellHasContent(cellObj)) anyNonBlank = true;
         const displayIsBlank = String(display ?? '').trim() === '';
+        // 是正Checkpoint 2b: 複数シートを同時に扱うため、警告にもsheet_name/sheet_indexを含め、
+        // どのシートの警告かを一意に判別できるようにする(formula_no_display_value等をシート間で混同しない)。
         if (formula && displayIsBlank) {
-          warnings.push({ code: 'formula_no_display_value', ref, header: headers[ci] });
+          warnings.push({ code: 'formula_no_display_value', sheet_name: sheetName, sheet_index: sheetIndex, ref, header: headers[ci] });
         } else if (!formula && displayIsBlank && hasRawValue(cellObj)) {
-          warnings.push({ code: 'raw_value_without_display', ref, header: headers[ci] });
+          warnings.push({ code: 'raw_value_without_display', sheet_name: sheetName, sheet_index: sheetIndex, ref, header: headers[ci] });
         }
         cells.push(cellObj);
       }
@@ -306,8 +318,10 @@
   }
 
   /**
-   * extractSheetRows()の結果からKnowledgeNode/Edgeを構築する(UI非依存の純関数)。
-   * @param {object} extraction  extractSheetRows()の戻り値
+   * 複数シートのextractSheetRows()結果からKnowledgeNode/Edgeを構築する(UI非依存の純関数)。
+   * 是正Checkpoint 2b: 1つのworkbookから1つ以上のシートを選択し、同一文書内の複数sectionとして
+   * 変換する。選択シート数によらずdocument Node/SourceDocumentは常に1件だけ生成する。
+   * @param {object[]} extractions  extractSheetRows()の戻り値の配列(選択した各シート。1件以上必須)
    * @param {object} opts
    * @param {string} opts.fileName
    * @param {string} opts.contentDigest  実ファイルのSHA-256(64桁hex)
@@ -316,8 +330,14 @@
    * @param {string|null} [opts.documentNumber]
    * @param {string|null} [opts.revisionLabel]
    */
-  async function buildKnowledgeNodesFromExcel(extraction, opts) {
-    if (!extraction || !Array.isArray(extraction.rows)) throw new Error('extraction結果が不正です。');
+  async function buildKnowledgeNodesFromExcelSheets(extractions, opts) {
+    if (!Array.isArray(extractions) || extractions.length === 0) {
+      throw new Error('取り込むシートを1つ以上選択してください。');
+    }
+    for (const extraction of extractions) {
+      if (!extraction || !Array.isArray(extraction.rows)) throw new Error('extraction結果が不正です。');
+    }
+
     const producer = 'excel';
     const fileName = String(opts.fileName || 'unknown.xlsx');
     const sourceDocId = await sourceDocumentId(producer, fileName, opts.contentDigest);
@@ -331,7 +351,7 @@
     const nodes = [];
     const edges = [];
 
-    // document node (workbook)
+    // document node (workbook)。選択シート数によらず1回だけ生成する(SourceDocumentも1件のみ)。
     const docLocator = { kind: 'excel', sheet: fileName, row: 0, source_path: '$.document' };
     const docNodeId = await nodeId(sourceDocId, docLocator);
     const docLabel = fileName;
@@ -347,76 +367,101 @@
     });
     nodes.push(docNode);
 
-    // section node (選択sheet)
-    const secLocator = { kind: 'excel', sheet: extraction.sheetName, row: 0, source_path: `$.section[${extraction.sheetName}]` };
-    const secNodeId = await nodeId(sourceDocId, secLocator);
-    const secLabel = extraction.sheetName;
-    const sectionNode = await finalizeNode({
-      node_id: secNodeId, node_type: 'section', text: secLabel, title: secLabel,
-      tags: [], unregistered_tags: [], semantics: EMPTY_SEMANTICS(), quantities: [], parent_node_id: docNodeId,
-      provenance: {
-        source_document_id: sourceDocId, producer, locator: secLocator, verbatim: structuralVerbatim(secLabel),
-        extensions: { sheet_index: extraction.sheetIndex }
-      },
-      revision: { content_revision: 1, knowledge_hash: null, updated_by: { type: 'ai', id: 'excel-direct-adapter' }, updated_at: opts.ingestedAt },
-      review: DEFAULT_REVIEW(),
-      export_binding: null,
-      confidence: 1.0, extensions: {}
-    });
-    nodes.push(sectionNode);
-    edges.push(await makeContainsEdge(docNode, sectionNode, opts.ingestedAt));
+    // 決定性: Node生成順は利用者のチェック順ではなく、workbook内のsheet index順に固定する。
+    // これにより、シート選択順を変えても正式ID集合・保存JSONの内容は変わらない。
+    const sortedExtractions = [...extractions].sort((a, b) => a.sheetIndex - b.sheetIndex);
 
-    for (const row of extraction.rows) {
-      if (row.isEmpty) continue; // 空行はNode化しない
-
-      // fail-closed: 原データ(ref/header/raw/display)を再現できない行があれば、
-      // その行だけ飛ばすのではなく文書全体をエラーにする(指示どおり)。
-      for (const cell of row.cells) {
-        if (cell.ref == null || cell.header == null || cell.raw === undefined || cell.display === undefined) {
-          throw new Error(`行${row.rowNumber}のセル情報を再現できません。原データを保持できないため、この文書の取込を中止します。`);
-        }
-      }
-
-      const locator = { kind: 'excel', sheet: extraction.sheetName, row: row.rowNumber, source_path: `$.rows[${row.rowNumber}]` };
-      const contentNodeId = await nodeId(sourceDocId, locator);
-
-      const sourceRecord = {}, sourceRecordDisplay = {}, formulas = {};
-      for (const cell of row.cells) {
-        sourceRecord[cell.header] = cell.raw;
-        sourceRecordDisplay[cell.header] = cell.display;
-        formulas[cell.header] = cell.formula;
-      }
-
-      const nonBlankCells = row.cells.filter(cellHasContent);
-      const title = deriveTitle(nonBlankCells, row.rowNumber);
-      const text = deriveText(nonBlankCells);
-      const tags = matchInitialTags(nonBlankCells.map(c => cellTextValue(c)), opts.tagVocabulary);
-
-      const contentNode = await finalizeNode({
-        // node_type: A/B(文書の役割)によらず常に'statement'固定。requirement/design_itemには載せない。
-        node_id: contentNodeId, node_type: 'statement', text, title,
-        tags, unregistered_tags: [], semantics: EMPTY_SEMANTICS(), quantities: [], parent_node_id: sectionNode.node_id,
+    for (const extraction of sortedExtractions) {
+      // section node (選択sheet)
+      const secLocator = { kind: 'excel', sheet: extraction.sheetName, row: 0, source_path: `$.section[${extraction.sheetName}]` };
+      const secNodeId = await nodeId(sourceDocId, secLocator);
+      const secLabel = extraction.sheetName;
+      const sectionNode = await finalizeNode({
+        node_id: secNodeId, node_type: 'section', text: secLabel, title: secLabel,
+        tags: [], unregistered_tags: [], semantics: EMPTY_SEMANTICS(), quantities: [], parent_node_id: docNodeId,
         provenance: {
-          source_document_id: sourceDocId, producer, locator,
-          verbatim: { source_record: sourceRecord, source_record_display: sourceRecordDisplay, source_row: row.rowNumber },
-          extensions: {
-            sheet_index: extraction.sheetIndex, cell_range: row.cellRange,
-            column_headers: extraction.headers, formulas, input_mode: 'excel-direct',
-            // 是正Checkpoint 2a §2: 表示値のない数式セル等の固定警告(code形式)を保存JSONにも残す。
-            warnings: row.warnings
-          }
+          source_document_id: sourceDocId, producer, locator: secLocator, verbatim: structuralVerbatim(secLabel),
+          extensions: { sheet_index: extraction.sheetIndex }
         },
         revision: { content_revision: 1, knowledge_hash: null, updated_by: { type: 'ai', id: 'excel-direct-adapter' }, updated_at: opts.ingestedAt },
         review: DEFAULT_REVIEW(),
-        // 直接入力content Node: 既存Sidecar互換を主張しない(document/sectionと同じ扱い)。
         export_binding: null,
         confidence: 1.0, extensions: {}
       });
-      nodes.push(contentNode);
-      edges.push(await makeContainsEdge(sectionNode, contentNode, opts.ingestedAt));
+      nodes.push(sectionNode);
+      edges.push(await makeContainsEdge(docNode, sectionNode, opts.ingestedAt));
+
+      let sectionContentNodeCount = 0;
+      for (const row of extraction.rows) {
+        if (row.isEmpty) continue; // 空行はNode化しない
+
+        // fail-closed: 原データ(ref/header/raw/display)を再現できない行があれば、
+        // その行だけ飛ばすのではなく文書全体をエラーにする(指示どおり)。
+        for (const cell of row.cells) {
+          if (cell.ref == null || cell.header == null || cell.raw === undefined || cell.display === undefined) {
+            throw new Error(`シート「${extraction.sheetName}」行${row.rowNumber}のセル情報を再現できません。原データを保持できないため、この文書の取込を中止します。`);
+          }
+        }
+
+        const locator = { kind: 'excel', sheet: extraction.sheetName, row: row.rowNumber, source_path: `$.rows[${row.rowNumber}]` };
+        const contentNodeId = await nodeId(sourceDocId, locator);
+
+        const sourceRecord = {}, sourceRecordDisplay = {}, formulas = {};
+        for (const cell of row.cells) {
+          sourceRecord[cell.header] = cell.raw;
+          sourceRecordDisplay[cell.header] = cell.display;
+          formulas[cell.header] = cell.formula;
+        }
+
+        const nonBlankCells = row.cells.filter(cellHasContent);
+        const title = deriveTitle(nonBlankCells, row.rowNumber);
+        const text = deriveText(nonBlankCells);
+        const tags = matchInitialTags(nonBlankCells.map(c => cellTextValue(c)), opts.tagVocabulary);
+
+        const contentNode = await finalizeNode({
+          // node_type: A/B(文書の役割)によらず常に'statement'固定。requirement/design_itemには載せない。
+          node_id: contentNodeId, node_type: 'statement', text, title,
+          tags, unregistered_tags: [], semantics: EMPTY_SEMANTICS(), quantities: [], parent_node_id: sectionNode.node_id,
+          provenance: {
+            source_document_id: sourceDocId, producer, locator,
+            verbatim: { source_record: sourceRecord, source_record_display: sourceRecordDisplay, source_row: row.rowNumber },
+            extensions: {
+              sheet_index: extraction.sheetIndex, cell_range: row.cellRange,
+              column_headers: extraction.headers, formulas, input_mode: 'excel-direct',
+              // 是正Checkpoint 2a §2: 表示値のない数式セル等の固定警告(code形式)を保存JSONにも残す。
+              warnings: row.warnings
+            }
+          },
+          revision: { content_revision: 1, knowledge_hash: null, updated_by: { type: 'ai', id: 'excel-direct-adapter' }, updated_at: opts.ingestedAt },
+          review: DEFAULT_REVIEW(),
+          // 直接入力content Node: 既存Sidecar互換を主張しない(document/sectionと同じ扱い)。
+          export_binding: null,
+          confidence: 1.0, extensions: {}
+        });
+        nodes.push(contentNode);
+        edges.push(await makeContainsEdge(sectionNode, contentNode, opts.ingestedAt));
+        sectionContentNodeCount++;
+      }
+
+      // 是正Checkpoint 2b: 選択したシートのうち1つでもNode候補0件なら、文書全体を失敗させる
+      // (空行しかない/意図しないシートの選択ミスをそのままNode化しない)。
+      if (sectionContentNodeCount === 0) {
+        throw new Error(`シート「${extraction.sheetName}」から取込可能なNode候補が0件です。この文書の取込を中止します。`);
+      }
     }
 
     return { sourceDocument, nodes, edges };
+  }
+
+  /**
+   * extractSheetRows()の結果(単一シート)からKnowledgeNode/Edgeを構築する便宜関数。
+   * buildKnowledgeNodesFromExcelSheets([extraction], opts) への薄いラッパー(単一シート専用の
+   * 既存呼び出し元との後方互換のために残す)。
+   * @param {object} extraction  extractSheetRows()の戻り値
+   * @param {object} opts  buildKnowledgeNodesFromExcelSheets()と同じ
+   */
+  async function buildKnowledgeNodesFromExcel(extraction, opts) {
+    return buildKnowledgeNodesFromExcelSheets([extraction], opts);
   }
 
   /**
@@ -433,7 +478,7 @@
   }
 
   return Object.freeze({
-    inspectWorkbook, extractSheetRows, buildKnowledgeNodesFromExcel, adaptExcelDirect,
+    inspectWorkbook, extractSheetRows, buildKnowledgeNodesFromExcel, buildKnowledgeNodesFromExcelSheets, adaptExcelDirect,
     columnLetter, matchInitialTags, deriveTitle, deriveText,
     cellHasContent, cellTextValue, truncateForDisplay
   });
