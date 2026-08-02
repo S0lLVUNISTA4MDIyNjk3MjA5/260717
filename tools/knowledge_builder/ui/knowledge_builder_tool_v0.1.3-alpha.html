@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Knowledge Data Builder α0.1.2（早期評価用）</title>
+<title>Knowledge Data Builder α0.1.3（早期評価用）</title>
 <style>
   :root { color-scheme: light dark; }
   body { font-family: "Segoe UI", "Hiragino Sans", sans-serif; margin: 0; padding: 0; background: #f6f7f9; color: #1b1f23; }
@@ -81,18 +81,23 @@
   details#nodeAdvancedFilters summary::-webkit-details-marker { display: none; }
   details#nodeAdvancedFilters summary::before { content: "▶ "; font-size: 10px; }
   details#nodeAdvancedFilters[open] summary::before { content: "▼ "; }
+  .scope-banner { background: #fff6d8; border: 1px solid #e0c95a; border-radius: 6px; padding: 8px 10px; font-size: 12px; margin: 6px 0 10px; }
+  .detail-mini-table { border-collapse: collapse; width: 100%; font-size: 10px; margin-top: 6px; }
+  .detail-mini-table th, .detail-mini-table td { border: 1px solid #e2e6ea; padding: 3px 5px; text-align: left; }
+  .detail-mini-table th { background: #f0f2f5; }
+  select:disabled { opacity: .5; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Knowledge Data Builder — α0.1.2（早期評価用ビルド）</h1>
-  <p>Knowledge Data Contract 0.1 準拠 / 今回の改善テーマ: Node・Relation Candidate・EdgeをGraph/一覧で見やすく、少ない操作で確認できるように（詳細は同梱README参照）</p>
+  <h1>Knowledge Data Builder — α0.1.3（早期評価用ビルド）</h1>
+  <p>Knowledge Data Contract 0.1 準拠 / 今回の改善テーマ: Knowledge Graphで文書階層を折りたたみ・表示粒度調整し、粗い粒度で全体傾向を把握しつつ必要な範囲だけ詳細確認・Relation画面へ絞り込めるように（詳細は同梱README参照）</p>
 </header>
 <div class="banner">
   これは<strong>限定評価用の動作物</strong>です。正式な設計判断・成果物提出には使用しないでください。
-  評価目的: 目的のNodeへ短時間で絞り込めるか・短縮IDで識別できるか・Source Node単位でCandidateを比較できるか・
-  confidenceとevidenceで判断できるか・Graphで採用済み関係を追跡できるか・選択Node周辺だけを確認できるか・
-  文書内階層と文書間関連を区別できるか・件数が増えてもGraphが混雑しないか。
+  評価目的: 文書単位・章節単位・個別項目の3段階でGraphを把握できるか・document/sectionを個別に折りたたみ・展開できるか・
+  集約Edgeの件数と採用/未処理/stale内訳を確認できるか・気になる集約範囲からRelation画面へ絞り込めるか・
+  A/B表示基準を切り替えても対象Edgeが変わらないと理解できるか・折りたたんでも元のNode/Edgeが失われないか。
 </div>
 <main>
 
@@ -192,6 +197,7 @@
     「採用」または「却下」を選んでください。
     <br><span class="muted" style="font-size:11px;">採用した関連はナレッジグラフに表示されます。</span>
   </div>
+  <div class="scope-banner" id="edgeScopeBanner" style="display:none;"></div>
   <div class="toolbar" style="margin-bottom:4px;">
     <label style="font-size:12px; font-weight:600;">表示基準:
       <select id="edgeGroupBasis">
@@ -258,11 +264,20 @@
   <div class="explain">
     ノード同士のつながりを図で確認します。初期状態では<strong>採用済みの文書間の関連だけ</strong>を表示し、
     未処理候補・文書内の階層関係は非表示です。Nodeをクリックすると接続先が強調表示されます。
+    <br><span class="muted" style="font-size:11px;">「文書内の階層関係も表示」をONにすると、document/section単位で折りたたみ・展開でき、
+    折りたたんだ範囲の関連は集約線としてまとめて表示されます（元のNode/Edgeは失われません）。</span>
   </div>
   <div class="toolbar">
     <label style="font-size:12px;"><input type="checkbox" id="graphShowActive" checked> 採用済み文書間関連を表示</label>
     <label style="font-size:12px;"><input type="checkbox" id="graphShowCandidates"> 未処理候補も表示</label>
     <label style="font-size:12px;"><input type="checkbox" id="graphShowStructural"> 文書内の階層関係も表示</label>
+    <label style="font-size:12px;">表示する細かさ:
+      <select id="graphGranularity" disabled>
+        <option value="document">文書単位</option>
+        <option value="section">章・節単位</option>
+        <option value="item" selected>個別項目</option>
+      </select>
+    </label>
   </div>
   <div class="toolbar">
     <select id="graphDocFilter">
@@ -289,6 +304,7 @@
   </div>
   <div id="graphWrap"><svg id="graphSvg" width="1200" height="600"></svg></div>
   <div class="explain" id="graphSelectedInfo" style="display:none;"></div>
+  <div class="explain" id="graphAggregateInfo" style="display:none;"></div>
   <div class="legend">
     <span><span class="legend-swatch" style="border-color:#2e7d32;"></span>文書間の関連（採用済み）</span>
     <span><span class="legend-swatch" style="border-color:#e0a800; border-top-style:dashed;"></span>文書間の関連（未処理候補）</span>
@@ -298,6 +314,7 @@
     <span><span class="legend-shape sq-lg" style="background:#888;"></span>document</span>
     <span><span class="legend-shape sq-sm" style="background:#888;"></span>section</span>
     <span><span class="legend-shape circle" style="background:#888;"></span>内容Node</span>
+    <span><span class="legend-swatch" style="border-color:#7a4fd1; border-top-width:4px;"></span>集約線（複数の関連をまとめて表示。正式なEdgeではありません）</span>
   </div>
 </section>
 
@@ -369,6 +386,24 @@ let jumpHighlightNodeId = null;
 // 表示上のグループ化・列の並び順のみに影響し、edge.source_node_id/target_node_idは一切変更しない。
 let candidateGroupBasis = 'A';
 
+// ---- Knowledge Graph: 表示粒度・折りたたみ・集約(すべてUI専用。Knowledge Node/Edgeは一切変更しない) ----
+// 全体の表示粒度('document'|'section'|'item'。既定'item'=現行どおり全展開)。
+let graphGranularity = 'item';
+// 「文書内の階層関係も表示」を今回のNodeセットに対して一度でもONにしたか(初回ON時のみsection既定にするための判定)。
+let graphStructuralEverShown = false;
+// 折りたたまれているdocument/section Nodeのnode_id集合(UI専用)。粒度切替のたびに基準値へ再設定され、
+// その後は個別のトグル操作で上書きできる。ここに入っているNodeは「配下を折りたたみ中」を意味する
+// (Node自身が非表示になるわけではない)。
+let graphStructuralCollapsed = new Set();
+// Knowledge Graph: 選択中の集約Edge(UI専用。{ aId, bId, edges }形式。Nodeの選択とは排他)。
+let selectedAggregateInfo = null;
+// 折りたたみにより選択中Nodeが非表示になったため、代わりに祖先Nodeを選択状態にしたか(§17の案内文出し分け用)。
+let selectedGraphNodeIsCollapsedProxy = false;
+// Graphの「この範囲の関連候補を確認」からRelation画面へ渡す絞り込み範囲(UI専用)。
+// null=範囲指定なし。{ kind:'section', side:'A'|'B', nodeIds:Set<node_id>, label } または
+// { kind:'aggregate', edgeIds:Set<edge_id>, label }。
+let graphRelationScope = null;
+
 const NODE_QUICK_FILTERS = [
   { key: 'untagged', label: 'タグ未設定', test: n => n.tags.length === 0 },
   { key: 'unregistered', label: '未登録タグあり', test: n => (n.unregistered_tags || []).length > 0 },
@@ -438,7 +473,7 @@ async function ingest() {
     const resultA = await KnowledgeTraceJsonAdapter.adaptTraceJson(traceA, { role: 'requirement', contentDigest: digestA, ingestedAt });
     const resultB = await KnowledgeTraceJsonAdapter.adaptTraceJson(traceB, { role: 'design', contentDigest: digestB, ingestedAt });
 
-    dataset = KnowledgeStore.createEmptyDataset({ tool: 'knowledge_builder_tool', version: '0.1.2-alpha' });
+    dataset = KnowledgeStore.createEmptyDataset({ tool: 'knowledge_builder_tool', version: '0.1.3-alpha' });
     await KnowledgeStore.setTagVocabulary(dataset, vocab);
     await KnowledgeStore.ingestAdapterResult(dataset, resultA, { type: 'ai', id: 'trace-json-adapter' });
     await KnowledgeStore.ingestAdapterResult(dataset, resultB, { type: 'ai', id: 'trace-json-adapter' });
@@ -457,6 +492,22 @@ async function ingest() {
     jumpHighlightNodeId = null;
     candidateGroupBasis = 'A';
     $('edgeGroupBasis').value = 'A';
+    graphGranularity = 'item';
+    graphStructuralEverShown = false;
+    graphStructuralCollapsed = new Set();
+    selectedAggregateInfo = null;
+    selectedGraphNodeIsCollapsedProxy = false;
+    graphRelationScope = null;
+    $('graphGranularity').value = 'item';
+    $('graphGranularity').disabled = !$('graphShowStructural').checked;
+    // 「文書内の階層関係も表示」が(前回セッションから)ONのまま再取込された場合も、
+    // 新しいNodeセットに対しては初回ONと同じ扱いにし、密集した全展開状態を避ける(§6・§20)。
+    if ($('graphShowStructural').checked) {
+      graphStructuralEverShown = true;
+      graphGranularity = 'section';
+      $('graphGranularity').value = 'section';
+      applyGranularityBaseline('section');
+    }
     resetNodeFilters();
     resetEdgeFilters();
     resetGraphFilters();
@@ -506,6 +557,8 @@ function resetGraphFilters() {
   $('graphTagFilter').value = 'all';
   $('graphFocusMode').checked = false;
   selectedGraphNodeId = null;
+  selectedAggregateInfo = null;
+  selectedGraphNodeIsCollapsedProxy = false;
 }
 
 function contentNodes() {
@@ -529,6 +582,62 @@ function nodeStaleRelationCount(node) {
   return dataset.edges.filter(e => e.relation_category === 'semantic' &&
     (e.source_node_id === node.node_id || e.target_node_id === node.node_id) &&
     KnowledgeStore.isEdgeStale(dataset, e)).length;
+}
+
+// ---- 文書階層(document/section)のUI専用ヘルパー(§1: Knowledge Node/Edgeは変更しない、表示専用の導出) ----
+
+// 構造Edge(relation_category:'structural', relation_type:'contains')から child_id -> parent_id のMapを作る。
+function structuralParentMap() {
+  const map = new Map();
+  if (!dataset) return map;
+  for (const e of dataset.edges) {
+    if (e.relation_category === 'structural' && e.relation_type === 'contains') map.set(e.target_node_id, e.source_node_id);
+  }
+  return map;
+}
+
+// 子Nodeを持つ構造Nodeか(§3: 折りたたみ対象は子Nodeを持つStructural Nodeに限定)。
+function structuralHasChildren(nodeId) {
+  if (!dataset) return false;
+  return dataset.edges.some(e => e.relation_category === 'structural' && e.relation_type === 'contains' && e.source_node_id === nodeId);
+}
+
+// rootNodeId配下(document/sectionを再帰的に辿った先)の内容Node(document/section以外)のnode_id集合。
+// §13.1のRelationドリルダウン範囲や、将来のNode一覧配下ジャンプで使う。
+function descendantContentNodeIds(rootNodeId) {
+  const result = new Set();
+  if (!dataset) return result;
+  const childrenMap = new Map();
+  for (const e of dataset.edges) {
+    if (e.relation_category === 'structural' && e.relation_type === 'contains') {
+      if (!childrenMap.has(e.source_node_id)) childrenMap.set(e.source_node_id, []);
+      childrenMap.get(e.source_node_id).push(e.target_node_id);
+    }
+  }
+  const stack = [rootNodeId];
+  while (stack.length) {
+    const cur = stack.pop();
+    for (const childId of (childrenMap.get(cur) || [])) {
+      const childNode = dataset.nodes.find(n => n.node_id === childId);
+      if (!childNode) continue;
+      if (childNode.node_type === 'document' || childNode.node_type === 'section') stack.push(childId);
+      else result.add(childId);
+    }
+  }
+  return result;
+}
+
+// nodeIdがvisibleNodeIdsに含まれるまで構造上の親を辿って解決する(§8: 可視Ancestorへの対応付け)。
+// visibleNodeIdsに含まれない祖先が尽きた場合はnullを返す(表示対象なし)。
+function resolveVisibleAncestor(nodeId, visibleNodeIds, parentMap) {
+  let cur = nodeId;
+  const guard = new Set(); // 循環防止(通常のTrace階層では発生しないが念のため)
+  while (cur && !visibleNodeIds.has(cur)) {
+    if (guard.has(cur)) return null;
+    guard.add(cur);
+    cur = parentMap.get(cur);
+  }
+  return cur || null;
 }
 
 function populateNodeTagFilterOptions() {
@@ -917,6 +1026,15 @@ function isEdgeFilterActive() {
 function filteredEdges() {
   if (!dataset) return [];
   let rows = dataset.edges.filter(e => e.relation_category === 'semantic');
+  if (graphRelationScope) {
+    if (graphRelationScope.kind === 'section') {
+      rows = rows.filter(e => graphRelationScope.side === 'A'
+        ? graphRelationScope.nodeIds.has(e.source_node_id)
+        : graphRelationScope.nodeIds.has(e.target_node_id));
+    } else if (graphRelationScope.kind === 'aggregate') {
+      rows = rows.filter(e => graphRelationScope.edgeIds.has(e.edge_id));
+    }
+  }
   const statusFilter = $('edgeStatusFilter').value;
   if (statusFilter !== 'all') rows = rows.filter(e => e.lifecycle === statusFilter);
   const search = $('edgeSearch').value.trim();
@@ -954,7 +1072,26 @@ function updateEdgeSelectionUi() {
   $('edgeFilterActiveBadge').style.display = isEdgeFilterActive() ? 'inline-block' : 'none';
 }
 
+// Graphからの範囲指定バナー(§14)。範囲指定はA/B基準表示と独立(§15: edge_id/node_id集合は変えない)。
+function renderEdgeScopeBanner() {
+  const box = $('edgeScopeBanner');
+  if (!graphRelationScope || !dataset) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.style.display = 'block';
+  let bodyHtml;
+  if (graphRelationScope.kind === 'section') {
+    const count = dataset.edges.filter(e => e.relation_category === 'semantic' &&
+      (graphRelationScope.side === 'A' ? graphRelationScope.nodeIds.has(e.source_node_id) : graphRelationScope.nodeIds.has(e.target_node_id))).length;
+    bodyHtml = `${esc(graphRelationScope.label)}配下<br>対象Node ${graphRelationScope.nodeIds.size}件<br>対象Candidate ${count}件`;
+  } else {
+    bodyHtml = `${esc(graphRelationScope.label)}<br>対象Candidate ${graphRelationScope.edgeIds.size}件`;
+  }
+  box.innerHTML = `<strong>Graphからの確認範囲:</strong><br>${bodyHtml}<br>` +
+    `<button id="btnClearGraphScope" class="small secondary" style="margin-top:4px;">Graphからの範囲指定を解除</button>`;
+  $('btnClearGraphScope').addEventListener('click', () => { graphRelationScope = null; renderEdgeTable(); });
+}
+
 function renderEdgeTable() {
+  renderEdgeScopeBanner();
   $('edgeColFocusHeader').textContent = candidateGroupBasis === 'A' ? '文書Aの項目' : '文書Bの項目';
   $('edgeColCandidateHeader').textContent = candidateGroupBasis === 'A' ? '文書Bの関連候補' : '文書Aの関連候補';
   $('edgeBasisNote').style.display = candidateGroupBasis === 'B' ? 'inline' : 'none';
@@ -1195,44 +1332,153 @@ function graphCandidateNodes() {
   return rows;
 }
 
-function graphEdgesToDraw() {
+// 表示粒度・個別折りたたみを反映した、実際に描画するNodeのnode_id集合(§4-§5)。
+// 「文書内の階層関係も表示」がOFFの間はAlpha0.1.2までと同じ(折りたたみの概念自体を持ち込まない)。
+function computeVisibleGraphNodeIds(baseCandidates, parentMap) {
+  const baseIds = new Set(baseCandidates.map(n => n.node_id));
+  if (!$('graphShowStructural').checked) return baseIds;
+  const visible = new Set();
+  function isVisible(nodeId) {
+    let cur = parentMap.get(nodeId);
+    while (cur) {
+      if (graphStructuralCollapsed.has(cur)) return false;
+      cur = parentMap.get(cur);
+    }
+    return true;
+  }
+  for (const id of baseIds) if (isVisible(id)) visible.add(id);
+  return visible;
+}
+
+// 折りたたみによって選択中Nodeが非表示になった場合、可視Ancestorへ選択を委譲する(§17)。
+// フィルタ(文書/種別/タグ)によって対象外になった場合はAlpha0.1.2までと同じ挙動を維持し、ここでは扱わない。
+function reconcileGraphSelection(baseCandidateIds, visibleNodeIds, parentMap) {
+  selectedGraphNodeIsCollapsedProxy = false;
+  if (!selectedGraphNodeId) return;
+  if (!$('graphShowStructural').checked) return;
+  if (!baseCandidateIds.has(selectedGraphNodeId)) return;
+  if (visibleNodeIds.has(selectedGraphNodeId)) return;
+  const ancestor = resolveVisibleAncestor(selectedGraphNodeId, visibleNodeIds, parentMap);
+  if (ancestor && ancestor !== selectedGraphNodeId) {
+    selectedGraphNodeId = ancestor;
+    selectedGraphNodeIsCollapsedProxy = true;
+  } else {
+    selectedGraphNodeId = null;
+  }
+}
+
+// semantic Edgeを、可視Ancestアペア単位でグループ化する(§7-§10)。「文書内の階層関係も表示」OFF時は
+// 集約は発生せず、Alpha0.1.2までと同じ個別Edge描画になる(1ペアにつき常に1件のsemantic edgeしか
+// 存在しないため、edges.length>1にもならない)。
+function computeGraphEdgeGroups(visibleNodeIds, parentMap) {
   if (!dataset) return [];
-  let edges = [];
-  if ($('graphShowActive').checked) edges = edges.concat(dataset.edges.filter(e => e.relation_category === 'semantic' && e.lifecycle === 'active'));
-  if ($('graphShowCandidates').checked) edges = edges.concat(dataset.edges.filter(e => e.relation_category === 'semantic' && e.lifecycle === 'candidate'));
-  if ($('graphShowStructural').checked) edges = edges.concat(dataset.edges.filter(e => e.relation_category === 'structural'));
-  return edges;
+  const structuralOn = $('graphShowStructural').checked;
+  const showActive = $('graphShowActive').checked, showCandidates = $('graphShowCandidates').checked;
+  const resolve = id => structuralOn ? resolveVisibleAncestor(id, visibleNodeIds, parentMap) : (visibleNodeIds.has(id) ? id : null);
+  const pairMap = new Map();
+  for (const e of dataset.edges) {
+    if (e.relation_category !== 'semantic') continue;
+    const aId = resolve(e.source_node_id), bId = resolve(e.target_node_id);
+    if (!aId || !bId) continue;
+    const key = aId + ' ' + bId;
+    if (!pairMap.has(key)) pairMap.set(key, { aId, bId, edges: [] });
+    pairMap.get(key).edges.push(e);
+  }
+  const result = [];
+  for (const { aId, bId, edges } of pairMap.values()) {
+    const hasVisibleEdge = edges.some(e => (e.lifecycle === 'active' && showActive) || (e.lifecycle === 'candidate' && showCandidates));
+    if (!hasVisibleEdge) continue;
+    const isAggregate = edges.length > 1 || edges.some(e => e.source_node_id !== aId || e.target_node_id !== bId);
+    result.push({ aId, bId, edges, isAggregate });
+  }
+  return result;
+}
+
+// 集約Edgeの件数・状態内訳(§9)。全semantic edge(却下含む)をdedupなしのedge_idベースで数える。
+// confidenceは却下済みを除く個別値の最小/最大のみを参考情報として返す(単純平均はしない。§11)。
+function aggregateStats(edges) {
+  const total = edges.length;
+  const active = edges.filter(e => e.lifecycle === 'active').length;
+  const candidate = edges.filter(e => e.lifecycle === 'candidate').length;
+  const rejected = edges.filter(e => e.lifecycle === 'rejected').length;
+  const staleCount = edges.filter(e => KnowledgeStore.isEdgeStale(dataset, e)).length;
+  const confs = edges.filter(e => e.lifecycle !== 'rejected').map(e => e.confidence);
+  return {
+    total, active, candidate, rejected, staleCount,
+    confMin: confs.length ? Math.min(...confs) : null,
+    confMax: confs.length ? Math.max(...confs) : null,
+  };
+}
+
+function toggleStructuralCollapse(nodeId) {
+  if (graphStructuralCollapsed.has(nodeId)) graphStructuralCollapsed.delete(nodeId);
+  else graphStructuralCollapsed.add(nodeId);
+  renderGraph();
+}
+
+function selectAggregate(group) {
+  selectedAggregateInfo = group;
+  selectedGraphNodeId = null;
+  selectedGraphNodeIsCollapsedProxy = false;
+  renderGraph();
+}
+
+function applyGranularityBaseline(granularity) {
+  graphStructuralCollapsed = new Set();
+  if (!dataset) return;
+  if (granularity === 'document') {
+    dataset.nodes.filter(n => n.node_type === 'document').forEach(n => graphStructuralCollapsed.add(n.node_id));
+  } else if (granularity === 'section') {
+    dataset.nodes.filter(n => n.node_type === 'section').forEach(n => graphStructuralCollapsed.add(n.node_id));
+  }
+  // 'item'は折りたたみなし(現行どおり全展開)。
 }
 
 function renderGraph() {
   const svg = $('graphSvg');
   svg.innerHTML = '';
   $('graphFilterActiveBadge').style.display = isGraphFilterActive() ? 'inline-block' : 'none';
-  if (!dataset) { $('graphNodeCount').textContent = '0'; $('graphEdgeCount').textContent = '0'; return; }
+  if (!dataset) {
+    $('graphNodeCount').textContent = '0'; $('graphEdgeCount').textContent = '0';
+    renderGraphSelectedInfo(); renderGraphAggregateInfo();
+    return;
+  }
 
-  let nodeCandidates = graphCandidateNodes();
-  let edgeCandidates = graphEdgesToDraw();
+  const structuralOn = $('graphShowStructural').checked;
+  const baseCandidates = graphCandidateNodes();
+  const baseCandidateIds = new Set(baseCandidates.map(n => n.node_id));
+  const parentMap = structuralParentMap();
+  const visibleIdsFromCollapse = computeVisibleGraphNodeIds(baseCandidates, parentMap);
 
-  // 選択Nodeの周辺だけを表示するモード: 選択Node + 直接つながるNodeのみへ絞り込む。
+  reconcileGraphSelection(baseCandidateIds, visibleIdsFromCollapse, parentMap);
+
+  let nodeCandidates = baseCandidates.filter(n => visibleIdsFromCollapse.has(n.node_id));
+  let drawLines = computeGraphEdgeGroups(visibleIdsFromCollapse, parentMap);
+
+  // 選択Nodeの周辺だけを表示するモード: 選択Node + 直接つながるNode(集約後)のみへ絞り込む。
   const focusMode = $('graphFocusMode').checked && selectedGraphNodeId;
   if (focusMode) {
     const connected = new Set([selectedGraphNodeId]);
-    for (const e of edgeCandidates) {
-      if (e.source_node_id === selectedGraphNodeId) connected.add(e.target_node_id);
-      if (e.target_node_id === selectedGraphNodeId) connected.add(e.source_node_id);
+    for (const g of drawLines) {
+      if (g.aId === selectedGraphNodeId) connected.add(g.bId);
+      if (g.bId === selectedGraphNodeId) connected.add(g.aId);
     }
     nodeCandidates = nodeCandidates.filter(n => connected.has(n.node_id));
+    const focusIdSet = new Set(nodeCandidates.map(n => n.node_id));
+    drawLines = drawLines.filter(g => focusIdSet.has(g.aId) && focusIdSet.has(g.bId));
   }
+
   const nodeIdSet = new Set(nodeCandidates.map(n => n.node_id));
-  edgeCandidates = edgeCandidates.filter(e => nodeIdSet.has(e.source_node_id) && nodeIdSet.has(e.target_node_id));
+  let structuralEdges = structuralOn ? dataset.edges.filter(e => e.relation_category === 'structural') : [];
+  structuralEdges = structuralEdges.filter(e => nodeIdSet.has(e.source_node_id) && nodeIdSet.has(e.target_node_id));
 
   const listA = nodeCandidates.filter(n => n.provenance.source_document_id === docAId);
   const listB = nodeCandidates.filter(n => n.provenance.source_document_id === docBId);
 
   $('graphNodeCount').textContent = String(nodeCandidates.length);
-  $('graphEdgeCount').textContent = String(edgeCandidates.length);
+  $('graphEdgeCount').textContent = String(drawLines.length + structuralEdges.length);
 
-  const showStructural = $('graphShowStructural').checked;
+  const showStructural = structuralOn;
   const pos = new Map();
   const marginY = 30, stepY = Math.max(28, Math.min(60, 560 / Math.max(1, Math.max(listA.length, listB.length))));
   const baseA = 160, baseB = 900, indentStep = showStructural ? 24 : 0;
@@ -1252,29 +1498,82 @@ function renderGraph() {
   const connectedToSelection = new Set();
   if (selectedGraphNodeId) {
     connectedToSelection.add(selectedGraphNodeId);
-    for (const e of edgeCandidates) {
-      if (e.source_node_id === selectedGraphNodeId) connectedToSelection.add(e.target_node_id);
-      if (e.target_node_id === selectedGraphNodeId) connectedToSelection.add(e.source_node_id);
+    for (const g of drawLines) {
+      if (g.aId === selectedGraphNodeId) connectedToSelection.add(g.bId);
+      if (g.bId === selectedGraphNodeId) connectedToSelection.add(g.aId);
     }
   }
 
-  for (const edge of edgeCandidates) {
+  for (const edge of structuralEdges) {
     const p1 = pos.get(edge.source_node_id), p2 = pos.get(edge.target_node_id);
     if (!p1 || !p2) continue;
-    const stale = KnowledgeStore.isEdgeStale(dataset, edge);
     const isHighlighted = !selectedGraphNodeId || edge.source_node_id === selectedGraphNodeId || edge.target_node_id === selectedGraphNodeId;
-    const color = stale ? '#c62828' : (edge.relation_category === 'structural' ? '#bbb' : (edge.lifecycle === 'candidate' ? '#e0a800' : '#2e7d32'));
     const line = el('line', {
-      x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, stroke: color,
-      'stroke-width': (edge.lifecycle === 'active' ? 2 : 1) * (isHighlighted ? 1.6 : 1),
-      'stroke-dasharray': (edge.lifecycle === 'candidate' || stale) ? '4,3' : '',
-      opacity: isHighlighted ? '1' : '0.18'
+      x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, stroke: '#bbb',
+      'stroke-width': isHighlighted ? 1.6 : 1, opacity: isHighlighted ? '1' : '0.18'
     });
     const title = el('title', {});
-    const kindLabel = edge.relation_category === 'structural' ? '文書内の階層関係' : '文書間の関連';
-    title.textContent = `${kindLabel}: ${edge.relation_type} (${LIFECYCLE_LABEL[edge.lifecycle] || edge.lifecycle}${stale ? '・stale' : ''}) conf=${edge.confidence.toFixed(2)}`;
+    title.textContent = `文書内の階層関係: ${edge.relation_type}`;
     line.appendChild(title);
     svg.appendChild(line);
+  }
+
+  function drawAggregateLine(g, p1, p2, isHighlighted) {
+    const stats = aggregateStats(g.edges);
+    const isSelected = selectedAggregateInfo && selectedAggregateInfo.aId === g.aId && selectedAggregateInfo.bId === g.bId;
+    const color = stats.staleCount > 0 ? '#c62828' : (stats.active > 0 ? '#2e7d32' : '#e0a800');
+    const line = el('line', {
+      x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, stroke: '#7a4fd1',
+      'stroke-width': (isSelected ? 5 : 4) * (isHighlighted ? 1 : 0.6),
+      'stroke-dasharray': stats.active > 0 && stats.staleCount === 0 ? '' : '6,3',
+      opacity: isHighlighted ? '1' : '0.18'
+    });
+    const titleText = `${stats.total}件を集約（採用${stats.active}・候補${stats.candidate}` +
+      `${stats.rejected ? '・却下' + stats.rejected : ''}${stats.staleCount ? '・stale' + stats.staleCount : ''}）`;
+    const title = el('title', {}); title.textContent = titleText; line.appendChild(title);
+    line.style.cursor = 'pointer';
+    line.addEventListener('click', () => selectAggregate(g));
+    svg.appendChild(line);
+
+    const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+    const marker = el('circle', {
+      cx: mx, cy: my, r: isSelected ? 9 : 7, fill: '#fff', stroke: color, 'stroke-width': 2,
+      opacity: isHighlighted ? '1' : '0.3', style: 'cursor:pointer;'
+    });
+    const markerTitle = el('title', {}); markerTitle.textContent = titleText; marker.appendChild(markerTitle);
+    marker.addEventListener('click', () => selectAggregate(g));
+    svg.appendChild(marker);
+
+    const label = el('text', {
+      x: mx, y: my - 10, 'font-size': 10, 'text-anchor': 'middle', fill: '#333',
+      opacity: isHighlighted ? '1' : '0.3', style: 'cursor:pointer;'
+    });
+    label.textContent = `${stats.total}件`;
+    label.addEventListener('click', () => selectAggregate(g));
+    svg.appendChild(label);
+  }
+
+  for (const g of drawLines) {
+    const p1 = pos.get(g.aId), p2 = pos.get(g.bId);
+    if (!p1 || !p2) continue;
+    const isHighlighted = !selectedGraphNodeId || g.aId === selectedGraphNodeId || g.bId === selectedGraphNodeId;
+    if (!g.isAggregate) {
+      const edge = g.edges[0];
+      const stale = KnowledgeStore.isEdgeStale(dataset, edge);
+      const color = stale ? '#c62828' : (edge.lifecycle === 'candidate' ? '#e0a800' : '#2e7d32');
+      const line = el('line', {
+        x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, stroke: color,
+        'stroke-width': (edge.lifecycle === 'active' ? 2 : 1) * (isHighlighted ? 1.6 : 1),
+        'stroke-dasharray': (edge.lifecycle === 'candidate' || stale) ? '4,3' : '',
+        opacity: isHighlighted ? '1' : '0.18'
+      });
+      const title = el('title', {});
+      title.textContent = `文書間の関連: ${edge.relation_type} (${LIFECYCLE_LABEL[edge.lifecycle] || edge.lifecycle}${stale ? '・stale' : ''}) conf=${edge.confidence.toFixed(2)}`;
+      line.appendChild(title);
+      svg.appendChild(line);
+    } else {
+      drawAggregateLine(g, p1, p2, isHighlighted);
+    }
   }
 
   function drawNode(node, p) {
@@ -1296,8 +1595,9 @@ function renderGraph() {
     title.textContent = `[${shortId(node)}] ${node.node_type}: ${node.title || node.text}`;
     shapeEl.appendChild(title);
     shapeEl.addEventListener('click', () => {
+      selectedAggregateInfo = null;
       selectedGraphNodeId = (selectedGraphNodeId === node.node_id) ? null : node.node_id;
-      renderGraphSelectedInfo();
+      selectedGraphNodeIsCollapsedProxy = false;
       renderGraph();
     });
     svg.appendChild(shapeEl);
@@ -1308,9 +1608,26 @@ function renderGraph() {
     });
     label.textContent = `[${shortId(node)}] ${(node.title || node.text).slice(0, 18)}`;
     svg.appendChild(label);
+
+    // 折りたたみ・展開トグル(§3・§5): 子Nodeを持つdocument/sectionにのみ表示する。
+    if (showStructural && (node.node_type === 'document' || node.node_type === 'section') && structuralHasChildren(node.node_id)) {
+      const isCollapsed = graphStructuralCollapsed.has(node.node_id);
+      const tx = p.x < 500 ? p.x - 14 : p.x + 14;
+      const toggle = el('circle', { cx: tx, cy: p.y, r: 7, fill: '#fff', stroke: '#556', 'stroke-width': 1, style: 'cursor:pointer;' });
+      const toggleTitle = el('title', {}); toggleTitle.textContent = isCollapsed ? '展開' : '折りたたむ'; toggle.appendChild(toggleTitle);
+      toggle.addEventListener('click', (ev) => { ev.stopPropagation(); toggleStructuralCollapse(node.node_id); });
+      svg.appendChild(toggle);
+      const toggleLabel = el('text', { x: tx, y: p.y + 3, 'font-size': 9, 'text-anchor': 'middle', fill: '#334', style: 'cursor:pointer; user-select:none;' });
+      toggleLabel.textContent = isCollapsed ? '▶' : '▼';
+      toggleLabel.addEventListener('click', (ev) => { ev.stopPropagation(); toggleStructuralCollapse(node.node_id); });
+      svg.appendChild(toggleLabel);
+    }
   }
   for (const n of listA) drawNode(n, pos.get(n.node_id));
   for (const n of listB) drawNode(n, pos.get(n.node_id));
+
+  renderGraphSelectedInfo();
+  renderGraphAggregateInfo();
 }
 
 function renderGraphSelectedInfo() {
@@ -1320,13 +1637,91 @@ function renderGraphSelectedInfo() {
   if (!node) { box.style.display = 'none'; return; }
   box.style.display = 'block';
   box.dataset.selectedNodeId = node.node_id;
-  box.innerHTML = `<strong>選択中Node: [${esc(shortId(node))}] ${esc(node.title || '')}</strong><br>` +
-    `${esc(node.text)}<br><span class="muted" style="font-size:10px;">node_id: ${esc(node.node_id)}</span><br>` +
-    `<button id="btnJumpToNodeList" class="small secondary" style="margin-top:6px;">この項目を変換結果一覧で確認</button>`;
+  let html = `<strong>選択中Node: [${esc(shortId(node))}] ${esc(node.title || '')}</strong><br>` +
+    `${esc(node.text)}<br><span class="muted" style="font-size:10px;">node_id: ${esc(node.node_id)}</span>`;
+  if (selectedGraphNodeIsCollapsedProxy) {
+    html += `<br><span class="muted" style="font-size:11px;">配下の内容Nodeを集約表示中</span>`;
+  }
+  html += `<br><button id="btnJumpToNodeList" class="small secondary" style="margin-top:6px;">この項目を変換結果一覧で確認</button>`;
+  if (node.node_type === 'section') {
+    html += ` <button id="btnDrillDownFromSection" class="small secondary" style="margin-top:6px;">この範囲の関連候補を確認</button>`;
+  }
+  box.innerHTML = html;
   $('btnJumpToNodeList').addEventListener('click', () => jumpToNodeInList(node.node_id));
+  if (node.node_type === 'section') {
+    $('btnDrillDownFromSection').addEventListener('click', () => jumpToRelationScreenWithScope(sectionDrillDownScope(node)));
+  }
 }
 
-// Knowledge Graphの選択Nodeから「2. 変換結果を確認・修正」の該当行へ移動する(§12)。
+// section Node配下の内容Nodeへ絞り込むRelation画面用の範囲を作る(§13.1)。
+function sectionDrillDownScope(sectionNode) {
+  const side = sectionNode.provenance.source_document_id === docAId ? 'A' : 'B';
+  const nodeIds = descendantContentNodeIds(sectionNode.node_id);
+  const label = `文書${side}「${sectionNode.title || sectionNode.text}」`;
+  return { kind: 'section', side, nodeIds, label };
+}
+
+// 集約Edgeに含まれる元のedge_id集合へ絞り込むRelation画面用の範囲を作る(§13.2)。
+function aggregateDrillDownScope(group) {
+  const aNode = dataset.nodes.find(n => n.node_id === group.aId);
+  const bNode = dataset.nodes.find(n => n.node_id === group.bId);
+  const edgeIds = new Set(group.edges.map(e => e.edge_id));
+  const label = `「${esc(aNode ? (aNode.title || aNode.text) : group.aId)}」→「${esc(bNode ? (bNode.title || bNode.text) : group.bId)}」`;
+  return { kind: 'aggregate', edgeIds, label };
+}
+
+function renderGraphAggregateInfo() {
+  const box = $('graphAggregateInfo');
+  if (!selectedAggregateInfo || !dataset) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  const { aId, bId, edges } = selectedAggregateInfo;
+  const aNode = dataset.nodes.find(n => n.node_id === aId);
+  const bNode = dataset.nodes.find(n => n.node_id === bId);
+  const stats = aggregateStats(edges);
+  const confText = stats.confMin === null ? '該当なし' : `${stats.confMin.toFixed(2)}～${stats.confMax.toFixed(2)}`;
+  box.style.display = 'block';
+  box.innerHTML = `<strong>集約Edge: [${esc(shortId(aNode))}] ${esc(aNode ? (aNode.title || aNode.text) : aId)} → ` +
+    `[${esc(shortId(bNode))}] ${esc(bNode ? (bNode.title || bNode.text) : bId)}</strong><br>` +
+    `関連 ${stats.total}件<br>採用済み ${stats.active} / 未処理 ${stats.candidate} / 却下 ${stats.rejected} / stale ${stats.staleCount}<br>` +
+    `confidence ${confText}（参考値。単純平均ではなく、正式なRelation判定値でもありません）<br>` +
+    `<button id="btnToggleAggregateDetail" class="small secondary" style="margin-top:6px;">集約内容を確認</button> ` +
+    `<button id="btnDrillDownFromAggregate" class="small secondary" style="margin-top:6px;">この範囲の関連候補を確認</button>` +
+    `<div id="graphAggregateDetailTable" style="display:none; margin-top:6px;"></div>`;
+  $('btnToggleAggregateDetail').addEventListener('click', () => {
+    const detailBox = $('graphAggregateDetailTable');
+    if (detailBox.style.display !== 'none') { detailBox.style.display = 'none'; detailBox.innerHTML = ''; return; }
+    detailBox.innerHTML = renderAggregateDetailTableHtml(edges);
+    detailBox.style.display = 'block';
+  });
+  $('btnDrillDownFromAggregate').addEventListener('click', () => jumpToRelationScreenWithScope(aggregateDrillDownScope(selectedAggregateInfo)));
+}
+
+// §12: 「集約内容を確認」= 元の個別Edgeの一覧表示のみ。一括採用/却下・保存・relation type変更は追加しない。
+function renderAggregateDetailTableHtml(edges) {
+  const rows = edges.map(e => {
+    const s = dataset.nodes.find(n => n.node_id === e.source_node_id);
+    const t = dataset.nodes.find(n => n.node_id === e.target_node_id);
+    const stale = KnowledgeStore.isEdgeStale(dataset, e);
+    const evidenceText = e.evidence.features.map(f => f.feature).join(', ');
+    return `<tr><td><code class="small" title="${esc(e.edge_id)}">${esc(e.edge_id.slice(0, 10))}…</code></td>` +
+      `<td>${esc(shortId(s))}</td><td>${esc(shortId(t))}</td>` +
+      `<td>${esc(LIFECYCLE_LABEL[e.lifecycle] || e.lifecycle)}</td><td>${stale ? 'stale' : '-'}</td>` +
+      `<td>${e.confidence.toFixed(2)}</td><td>${esc(evidenceText)}</td></tr>`;
+  }).join('');
+  return `<table class="detail-mini-table"><thead><tr>` +
+    `<th>edge_id</th><th>Source短縮ID</th><th>Target短縮ID</th><th>lifecycle</th><th>freshness</th><th>confidence</th><th>evidence</th>` +
+    `</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// Graphの選択範囲から「3. 文書間の関連を確認」へ移動する(§13・§14)。edge_id/node_idの集合を渡すだけで、
+// Candidateの再生成やsource/targetの入れ替えは行わない。
+function jumpToRelationScreenWithScope(scope) {
+  graphRelationScope = scope;
+  renderEdgeTable();
+  const banner = $('edgeScopeBanner');
+  if (banner) banner.scrollIntoView({ block: 'start' });
+}
+
+// Knowledge Graphの選択Nodeから「2. 変換結果を確認・修正」の該当行へ移動する(§18)。
 // Node一覧の絞り込みを短縮ID検索へ切り替えるだけで、Knowledge JSONには一切影響しない。
 function jumpToNodeInList(nodeId) {
   const node = dataset && dataset.nodes.find(n => n.node_id === nodeId);
@@ -1344,7 +1739,6 @@ function jumpToNodeInList(nodeId) {
 
 function resetGraphFiltersAndRender() {
   resetGraphFilters();
-  renderGraphSelectedInfo();
   renderGraph();
 }
 
@@ -1418,7 +1812,6 @@ async function saveKnowledgeJson() {
 function renderAll() {
   renderNodeTable();
   renderEdgeTable();
-  renderGraphSelectedInfo();
   renderGraph();
   renderMetrics();
 }
@@ -1459,7 +1852,24 @@ $('btnEdgeResetFilter').addEventListener('click', resetEdgeFiltersAndRender);
 
 $('graphShowActive').addEventListener('change', renderGraph);
 $('graphShowCandidates').addEventListener('change', renderGraph);
-$('graphShowStructural').addEventListener('change', renderGraph);
+$('graphShowStructural').addEventListener('change', () => {
+  const on = $('graphShowStructural').checked;
+  $('graphGranularity').disabled = !on;
+  // §6: 「文書内の階層関係も表示」を今回のNodeセットに対して初めてONにした場合は、章・節単位を初期粒度にする
+  // (内容Nodeを全展開した混雑状態へ戻さない)。2回目以降のON/OFFでは、直前の粒度・折りたたみ状態を保つ。
+  if (on && !graphStructuralEverShown) {
+    graphStructuralEverShown = true;
+    graphGranularity = 'section';
+    $('graphGranularity').value = 'section';
+    applyGranularityBaseline('section');
+  }
+  renderGraph();
+});
+$('graphGranularity').addEventListener('change', () => {
+  graphGranularity = $('graphGranularity').value;
+  applyGranularityBaseline(graphGranularity);
+  renderGraph();
+});
 $('graphDocFilter').addEventListener('change', renderGraph);
 $('graphTypeFilter').addEventListener('change', renderGraph);
 $('graphTagFilter').addEventListener('change', renderGraph);

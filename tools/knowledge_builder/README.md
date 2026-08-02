@@ -1,11 +1,62 @@
-# Knowledge Data Builder — α0.1.2（早期評価用）
+# Knowledge Data Builder — α0.1.3（早期評価用）
 
 **状態**: 早期評価用の動作物。正式な設計判断・成果物提出には使用しないでください。
-**準拠Contract**: `design/knowledge_data_contract_0.1.md`（Knowledge Data Contract 0.1。α0.1.2でも変更していません）
+**準拠Contract**: `design/knowledge_data_contract_0.1.md`（Knowledge Data Contract 0.1。α0.1.3でも変更していません）
 
-このディレクトリは Knowledge Data Builder の最初の評価可能な動作物（α0.1）を、2回の人手評価結果を
-受けて改定したものです（α0.1.1 → α0.1.2）。既存α版ファイル・配布ZIP（`tools/alpha_release/`、
-`tools/release/`配下）は**一切変更していません**。この配下は新規系統です。
+このディレクトリは Knowledge Data Builder の最初の評価可能な動作物（α0.1）を、3回の人手評価結果を
+受けて改定したものです（α0.1.1 → α0.1.2 → α0.1.3）。既存α版ファイル・配布ZIP
+（`tools/alpha_release/`、`tools/release/`配下）は**一切変更していません**。この配下は新規系統です。
+
+## α0.1.3: 文書階層の折りたたみ・表示粒度調整・Relation連携
+
+α0.1.2の限定人手評価で、Knowledge Graphの「文書内の階層関係も表示」は直感的で分かりやすいと
+評価されましたが、document/section/内容Nodeを常にすべて展開して表示するため、**文書全体 →
+章・節 → 個別項目**という異なる粒度で文書構造・文書間の関係を切り替えて把握することが
+できませんでした。α0.1.3では、同じKnowledge Dataを粗い粒度で全体傾向として把握し、必要な
+箇所だけ展開して個別Node/Edgeまで確認できるようにする**表示粒度調整**を追加しました。
+今回の対応も**表示機能のみ**で、Knowledge Node/Edge・`edge_id`・`source_node_id`・
+`target_node_id`・lifecycle・freshness・confidence・evidence・relation type・採用/却下結果・
+Knowledge JSON・Knowledge Data Contract 0.1は一切変更していません。折りたたみによって元の
+Node/Edgeが削除・統合・置換されることはありません。
+
+- **表示粒度の一括切替**: Knowledge Graphに「文書単位」「章・節単位」「個別項目」の3段階の
+  表示粒度を追加した。文書単位ではdocument Nodeだけ、章・節単位ではdocument/section Nodeまで、
+  個別項目では従来どおり内容Nodeまで表示する。文書内階層をONにしていない間は選択肢自体を
+  無効化する
+- **document/sectionの個別折りたたみ**: 全体粒度の切替とは別に、子Nodeを持つdocument/section
+  Node(内容Nodeには表示しない)にそれぞれ展開/折りたたみのトグルを追加した。「文書Aの
+  『温度条件』だけ個別項目まで展開し、他のsectionは折りたたんだまま」といった調整ができる。
+  一括粒度切替後も個別調整は維持される
+- **既定粒度は章・節単位**: 「文書内の階層関係も表示」を今回のNodeセットに対して初めてONに
+  した場合は、章・節単位を初期粒度にする。内容Nodeを全展開した密集状態には戻らない
+  (2回目以降のON/OFFでは直前の粒度・折りたたみ状態を維持する)
+- **集約Edge(UI専用の表示)**: 折りたたまれた配下Node間にsemantic Edgeが存在する場合、
+  画面上では複数の個別Edgeを1本の集約線としてまとめて表示する。新しいKnowledge Edgeは
+  作成しない。集約線は個別Edgeと視覚的に区別できるようにし(太い線・件数ラベル・集約アイコン)、
+  採用/未処理/stale等の状態が混在する場合も色だけで単一状態と誤解されない表示にした。
+  各個別Edgeの接続先は、現在表示中の最も近い可視Ancestorへ対応付けて集約する
+- **集約Edgeの件数・内訳**: 集約線をクリックすると、全関連件数・採用済み件数・未処理候補件数・
+  却下件数・stale件数を表示する。confidenceは単純平均せず、最小〜最大の範囲を参考情報として
+  表示するのみで、この値による自動採用・集約Edge自体の一括採用/一括却下は行わない。
+  「集約内容を確認」で元の個別Edge(edge_id・Source短縮ID・Target短縮ID・lifecycle・
+  freshness・confidence・evidence)を一覧表示できる
+- **GraphからRelation画面への範囲指定**: Graph上のsection Nodeまたは集約Edgeから
+  「この範囲の関連候補を確認」を実行すると、「3. 文書間の関連を確認」へ移動し、対象範囲の
+  Relation Candidateだけに絞り込む。section Nodeからは配下の内容Nodeの正式なnode_id集合、
+  集約Edgeからは元の正式なedge_id集合で絞り込み、文字列一致(タイトル等)は使わない。範囲指定中は
+  「Graphからの確認範囲」バナーを表示し、「Graphからの範囲指定を解除」でいつでも通常の
+  Relation一覧へ戻せる。文書A/文書B表示基準を切り替えても、絞り込み対象のedge_id/node_id集合は
+  変わらない(候補の再生成やsource/targetの入れ替えは行わない)
+- **選択状態の整合性**: 内容Nodeを選択した状態でその親sectionを折りたたむと、非表示になった
+  内容Nodeの選択を解除し、代わりに折りたたんだ親sectionを選択状態にして「配下の内容Nodeを
+  集約表示中」と案内する。不可視Nodeが選択されたまま残ることはない
+- **既存のGraph→Node一覧ジャンプは維持**: α0.1.2の「この項目を変換結果一覧で確認」は
+  そのまま動作する。構造Node配下だけへ絞り込む追加ジャンプ(「配下の内容Nodeを一覧で確認」)は
+  実装コストが大きいため今回は見送り、次Checkpointの候補として残す
+- 表示粒度・折りたたみ状態・集約Edgeの選択・Graphから渡した範囲・Relation画面の範囲フィルタは
+  すべてUI専用の状態で、Knowledge JSON・Operation History・Human/AI Review・provenanceの
+  いずれにも保存されない。文書A/Bを再取込すると、これらのUI状態はすべて初期化され、新しい
+  Node集合に対して再構築される(短縮IDマッピングと同様の扱い)
 
 ## α0.1.2 追加改定: Node画面の作業設計・画面間Node識別改善 / Relation表示基準切替
 
@@ -88,7 +139,8 @@
 - Nodeラベルに短縮ID(`A-001`等)を併記し、長いラベルは省略・ホバーで全文表示
 - document(大きい四角)／section(小さい四角)／内容Node(丸)を形状で区別し、色は文書A(青)/
   文書B(緑)で統一。structural表示ONの場合は章→節→項目の階層をインデントで表現する
-  (階層の折りたたみ／展開は今回未実装。形状・サイズ・インデントによる区別を優先した)
+  (階層の折りたたみ／展開はα0.1.2時点では未実装だったが、**α0.1.3で実装済み**。
+  本ファイル冒頭の「文書階層の折りたたみ・表示粒度調整・Relation連携」を参照)
 - 色・線種・Node種別を説明する常設の凡例を追加
 
 ### 2. 文書間の関連確認画面（Relations / Edges）
@@ -151,20 +203,26 @@
 5. Edge採用/却下 — candidateをactive/rejectedへ。複数選択・一括採用/一括却下・グループ単位一括却下
 6. Relation一覧 — 文書A/文書B基準の表示切替(既存候補の再グループ化のみ)、グループ表示
    (折りたたみ可)・状態/stale/evidence/confidenceフィルタ・並べ替え
-7. Knowledge Graph — 採用済み/未処理候補/文書内階層の個別表示切替、Node選択強調、周辺表示
-   モード、文書/種別/タグ絞り込み、常設凡例
-8. Knowledge JSON保存 — Knowledge Data Contract 0.1形式でのJSON出力
-9. 作業量サマリ — 全Node数・操作対象にしたNode数・個別修正したNode数・関連候補総数・
-   人が個別判断した候補数・一括採用/却下件数・最終採用済みEdge数を表示
+7. Knowledge Graph — 採用済み/未処理候補/文書内階層の個別表示切替、表示粒度(文書単位/章・節
+   単位/個別項目)、document/sectionの個別折りたたみ、集約Edge(件数・内訳・confidence範囲・
+   元Edge一覧)、Node選択強調、周辺表示モード、文書/種別/タグ絞り込み、常設凡例
+8. GraphからRelation画面への範囲指定 — section Node配下または集約Edgeの元edge_id集合で
+   Relation Candidateを絞り込み、範囲指定バナー表示・解除操作
+9. Knowledge JSON保存 — Knowledge Data Contract 0.1形式でのJSON出力
+10. 作業量サマリ — 全Node数・操作対象にしたNode数・個別修正したNode数・関連候補総数・
+    人が個別判断した候補数・一括採用/却下件数・最終採用済みEdge数を表示
 
-意図的に含まないもの(次段階以降の課題。α0.1.2でも先回りして追加していません):
+意図的に含まないもの(次段階以降の課題。α0.1.3でも先回りして追加していません):
 
 - AIによる本格的なSemantic Tagging、完全なQuantity統合、Property Resolution
 - `satisfied_by`等の強いRelationの自動判定。タグ一致・文字列類似度だけでは「関係がありそう」
   までしか判定できず「要求を満足している」とまでは判定できないため
 - AI Agentによる自律操作、Graph DB／Vector DB、PDF/Excel直接取込の統合
 - 1000件級の性能最適化、Contractの全面改定
-- Knowledge Graphの階層折りたたみ／展開(形状・サイズ・インデントで代替)
+- 文書Bを起点とした新しいCandidate生成(B基準表示・section/集約Edgeからの範囲指定は、既存
+  Candidateの再グループ化・絞り込みに限定される)
+- 構造Node配下だけへ絞り込むNode一覧側の追加ジャンプ(「配下の内容Nodeを一覧で確認」。
+  既存の構造Node1件への単純ジャンプは維持。実装コストが大きいため次Checkpointの候補)
 - Human/AIレビュー確定(`review.human`/`review.ai`)のUI(内部engineには実装済み。
   `core/knowledge_store.js`の`reviewHuman`/`reviewAI`参照)
 
@@ -193,7 +251,7 @@ Knowledge Graphの選択Node情報パネルから「この項目を変換結果�
 
 ## 使い方
 
-1. `ui/knowledge_builder_tool_v0.1.2-alpha.html` をブラウザで直接開く(サーバ不要)
+1. `ui/knowledge_builder_tool_v0.1.3-alpha.html` をブラウザで直接開く(サーバ不要)
 2. 「1. データを読み込む」の「文書A(requirement側)」「文書B(design側)」に、既存PDF/Excel
    ツールが出力したtrace JSONファイルを指定する。動作確認用の小規模サンプルとして
    `samples/hvac_trace_sample_small/JSON_A_customer_requirements_trace.json` /
@@ -209,7 +267,12 @@ Knowledge Graphの選択Node情報パネルから「この項目を変換結果�
    再生成ではなく、既存候補の表示切替のみ)
 5. 「4. ナレッジグラフを確認」では、初期状態で採用済みの文書間関連だけが表示される。
    Nodeをクリックすると接続先が強調表示され、選択Node情報の「この項目を変換結果一覧で確認」
-   から「2. 変換結果を確認・修正」の該当行へ移動できる
+   から「2. 変換結果を確認・修正」の該当行へ移動できる。「文書内の階層関係も表示」をONにすると
+   (初回は章・節単位で表示)、「表示する細かさ」で文書単位/章・節単位/個別項目を切り替えたり、
+   document/sectionごとの▶/▼トグルで個別に展開・折りたたみできる。折りたたんだ範囲の関連は
+   集約線としてまとめて表示され、クリックすると件数・内訳・元Edge一覧を確認できる。section
+   Nodeまたは集約線の情報パネルから「この範囲の関連候補を確認」を押すと、対象範囲だけに
+   絞り込んだ状態で「3. 文書間の関連を確認」へ移動する(「Graphからの範囲指定を解除」で戻せる)
 6. 「5. ナレッジデータを保存」でKnowledge Data Contract 0.1形式のJSONをダウンロードする。
    同じ画面に作業量サマリを表示する
 
@@ -221,7 +284,7 @@ Knowledge Graphの選択Node情報パネルから「この項目を変換結果�
 タグ不足・1要求→複数設計項目等）・評価用ground truth(`expected_relations.json`)の使い方は
 `samples/knowledge_builder_alpha01/medium/README.md` を参照してください。
 
-## 評価していただきたい観点（α0.1.2）
+## 評価していただきたい観点（α0.1.3）
 
 1. 目的のNodeを短時間で絞り込めるか
 2. 同名Nodeを短縮IDで識別できるか
@@ -240,9 +303,16 @@ Knowledge Graphの選択Node情報パネルから「この項目を変換結果�
 13. Node一覧・Relation一覧・Graphで同じNodeが同じ短縮IDで識別できるか
 14. 文書Aを基準にした表示と文書Bを基準にした表示を切り替えても、混乱せず同じ候補を
     見ていると理解できるか
+15. 文書単位・章節単位・個別項目の3段階で、Graphの全体傾向と個別関係を切り替えて把握できるか
+16. document/sectionを個別に折りたたみ・展開して、必要な範囲だけ詳しく確認できるか
+17. 折りたたんでも元のNode/Edgeが失われていないと理解できるか(集約線が正式なEdgeではないと
+    分かるか)
+18. 集約線の件数・採用/未処理/stale内訳を見て、関連が集中している章・節を見つけられるか
+19. 気になる集約範囲やsectionからRelation画面へ移動し、対象Candidateだけを確認できるか
+20. Relation画面での採用/却下結果が、Graphの集約内訳へすぐ反映されると分かるか
 
 自動Semantic Tagging(Knowledge Builder自身によるタグ自動生成)、`satisfied_by`等の強い
-Relationの自動判定は今回のα0.1.2にも含まれないため評価対象外です。次Checkpoint以降で
+Relationの自動判定は今回のα0.1.3にも含まれないため評価対象外です。次Checkpoint以降で
 別途評価します。
 
 ## 内部構成
@@ -254,16 +324,18 @@ core/
   trace_json_adapter.js        既存trace JSON → KnowledgeNode/構造Edge(§10.1 Adapter)
   relation_candidate_engine.js タグ一致・文字列類似度によるsemantic candidate生成(§4.5)
   knowledge_store.js           Node/Edge編集・lifecycle・review・operation historyのreducer(§6.4)
-                               (α0.1.2では変更なし。表示改善はUI側のみ)
+                               (α0.1.2・α0.1.3とも変更なし。表示改善はUI側のみ)
 verification/
   knowledge_builder_core_verification.js         Node.js検証(losslessness・dual-hash・stale判定等)
   knowledge_builder_ui_smoke_test.js              Playwright検証(小規模サンプルでのUI一連操作)
   knowledge_builder_medium_sample_smoke_test.js   Playwright検証(中規模サンプルでの規模・一括操作)
   (いずれもNODE_PATH="$(npm root -g)"が必要なものはPlaywright使用箇所のみ)
 ui/
-  knowledge_builder_tool_v0.1.2-alpha.html  評価用ブラウザツール本体
+  knowledge_builder_tool_v0.1.3-alpha.html  評価用ブラウザツール本体
 design/
-  knowledge_data_contract_0.1.md          Knowledge Data Contract 0.1(設計文書。α0.1.2では未変更)
+  knowledge_data_contract_0.1.md          Knowledge Data Contract 0.1(設計文書。α0.1.2・α0.1.3とも未変更)
+manual/
+  knowledge_builder_detailed_operation_manual_v0.1.3_alpha.pdf  詳細操作説明書(α0.1.3)
 ```
 
 ## 検証の実行方法

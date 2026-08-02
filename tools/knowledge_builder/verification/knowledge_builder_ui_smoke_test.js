@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* Knowledge Data Builder alpha 0.1.2 - browser smoke test (Playwright/Chromium).
  * Exercises the full checkpoint scope end-to-end in a real browser against the
- * self-contained knowledge_builder_tool_v0.1.2-alpha.html, using the existing repo
+ * self-contained knowledge_builder_tool_v0.1.3-alpha.html, using the existing repo
  * fixtures samples/hvac_trace_sample_small/JSON_A_*.json / JSON_B_*.json:
  *   ingest -> Node list (search/filter/quick-filter chips/multi-select/bulk tag/
  *   simple-detail toggle) -> generate Relation Candidates -> Relation list (grouped,
@@ -15,7 +15,7 @@ const fs = require('fs');
 const os = require('os');
 const { chromium } = require('playwright');
 
-const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.1.2-alpha.html');
+const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.1.3-alpha.html');
 const SAMPLE_DIR = path.join(__dirname, '..', '..', '..', 'samples', 'hvac_trace_sample_small');
 const FILE_A = path.join(SAMPLE_DIR, 'JSON_A_customer_requirements_trace.json');
 const FILE_B = path.join(SAMPLE_DIR, 'JSON_B_design_review_trace.json');
@@ -383,14 +383,139 @@ async function main() {
   const edgeCountWithCandidates = await page.textContent('#graphEdgeCount');
   assert(Number(edgeCountWithCandidates) >= Number(activeEdgeCountText), '未処理候補も表示ONにするとGraph上のEdge数が増える(または同数)');
 
+  // ---- Alpha 0.1.3: 表示粒度・個別折りたたみ・集約Edge・Relationドリルダウン(§4-§18, §23) ----
+  assert(await page.isDisabled('#graphGranularity'), '文書内階層が非表示の間は表示粒度の選択が無効化されている');
+
   await page.check('#graphShowStructural');
   await page.waitForTimeout(30);
-  const nodeCountWithStructural = await page.textContent('#graphNodeCount');
-  assert(Number(nodeCountWithStructural) > contentRowCount, '文書内階層も表示ONにするとGraph上のNode数が増える(document/section)');
+  assert(!(await page.isDisabled('#graphGranularity')), '文書内階層表示ONで表示粒度の選択が有効になる');
+  assert((await page.inputValue('#graphGranularity')) === 'section',
+    '初めて文書内階層をONにすると章・節単位が初期粒度になる(全展開の密集状態に戻らない。§6)');
+  // Alpha 0.1.3: 既定粒度(章・節単位)では内容Nodeが折りたたまれるため、単純な総Node数は
+  // contentRowCountを上回るとは限らない。document/sectionが描画されることはrect数で確認する。
   const rectCount = await page.$$eval('#graphSvg rect', els => els.length);
   assert(rectCount > 0, '文書内階層表示ONでdocument/section Nodeが四角形として描画される(内容Nodeとの視覚的区別)');
+
+  const nodeCountSection = Number(await page.textContent('#graphNodeCount'));
+  await page.selectOption('#graphGranularity', 'document');
+  await page.waitForTimeout(50);
+  const nodeCountDocument = Number(await page.textContent('#graphNodeCount'));
+  assert(nodeCountDocument === 2, `文書単位ではdocument Node(2件)だけが表示される(実際: ${nodeCountDocument})`);
+  assert(nodeCountDocument < nodeCountSection, '文書単位のNode数は章・節単位より少ない(粗い粒度ほど少ない)');
+
+  await page.selectOption('#graphGranularity', 'item');
+  await page.waitForTimeout(50);
+  const nodeCountItem = Number(await page.textContent('#graphNodeCount'));
+  assert(nodeCountItem > nodeCountSection, '個別項目では章・節単位よりNode数が多い(全展開)');
+  assert(nodeCountItem > contentRowCount, '個別項目粒度まで展開すると、document/section分だけGraph上のNode数がcontentRowCountを上回る');
+  const aggLineAtItem = await page.evaluate(() => [...document.querySelectorAll('#graphSvg line')].some(l => l.getAttribute('stroke') === '#7a4fd1'));
+  assert(!aggLineAtItem, '個別項目粒度では集約線が出ない(常に個別Edge表示。既存Alpha0.1.2相当)');
+
+  await page.selectOption('#graphGranularity', 'section');
+  await page.waitForTimeout(50);
+
+  // 個別折りたたみ(§5): 子Nodeを持つdocument/sectionにのみトグルがある。
+  const toggleCircleCount = await page.$$eval('#graphSvg circle[stroke="#556"]', els => els.length);
+  assert(toggleCircleCount > 0, '子Nodeを持つdocument/sectionに折りたたみトグルが表示される');
+  const nodeCountBeforeToggle = Number(await page.textContent('#graphNodeCount'));
+  await page.locator('#graphSvg circle[stroke="#556"]').first().click({ force: true });
+  await page.waitForTimeout(50);
+  const nodeCountAfterToggle = Number(await page.textContent('#graphNodeCount'));
+  assert(nodeCountAfterToggle !== nodeCountBeforeToggle, '個別トグルの操作でNode数が変わる(一部だけ展開/折りたたみを調整できる)');
+  await page.locator('#graphSvg circle[stroke="#556"]').first().click({ force: true });
+  await page.waitForTimeout(50);
+  assert(Number(await page.textContent('#graphNodeCount')) === nodeCountBeforeToggle, '個別トグルをもう一度押すと元に戻る(元のNode/Edgeは失われない)');
+
+  // 折りたたみで選択中Nodeが非表示になった場合の選択委譲(§17)
+  await page.selectOption('#graphGranularity', 'item');
+  await page.waitForTimeout(50);
+  const contentCircle = page.locator('#graphSvg circle[r="6"]').first();
+  if (await contentCircle.count() > 0) {
+    await contentCircle.click({ force: true });
+    await page.waitForTimeout(50);
+    const selectedBeforeCollapse = await page.getAttribute('#graphSelectedInfo', 'data-selected-node-id');
+    await page.selectOption('#graphGranularity', 'document');
+    await page.waitForTimeout(50);
+    const selectedAfterCollapse = await page.getAttribute('#graphSelectedInfo', 'data-selected-node-id');
+    assert(selectedAfterCollapse !== selectedBeforeCollapse, '折りたたみで選択中Nodeが非表示になると、可視な祖先Nodeへ選択が委譲される');
+    const proxyInfoText = await page.textContent('#graphSelectedInfo');
+    assert(proxyInfoText.includes('配下の内容Nodeを集約表示中'), '選択が委譲された場合、その旨の案内が表示される');
+    await page.selectOption('#graphGranularity', 'section');
+    await page.waitForTimeout(50);
+  }
+
+  // section Nodeからのドリルダウン(§13.1・§14)
+  const sectionRect = page.locator('#graphSvg rect[width="9"]').first();
+  if (await sectionRect.count() > 0) {
+    await sectionRect.click({ force: true });
+    await page.waitForTimeout(50);
+    const drillBtn = page.locator('#btnDrillDownFromSection');
+    if (await drillBtn.count() > 0) {
+      await drillBtn.click();
+      await page.waitForTimeout(50);
+      assert(await page.isVisible('#edgeScopeBanner'), 'sectionから「この範囲の関連候補を確認」でRelation画面へ範囲指定が渡る');
+      const scopeBannerText = await page.textContent('#edgeScopeBanner');
+      assert(scopeBannerText.includes('Graphからの確認範囲'), '範囲指定バナーに「Graphからの確認範囲」と表示される');
+      assert(scopeBannerText.includes('対象Node') && scopeBannerText.includes('対象Candidate'),
+        '範囲指定バナーに対象Node数・対象Candidate数が表示される');
+
+      await page.selectOption('#edgeGroupBasis', 'B');
+      await page.waitForTimeout(50);
+      assert(await page.isVisible('#edgeScopeBanner'), 'A/B基準切替後も範囲指定バナーが維持される(§15)');
+      const scopeBannerTextAfterBasis = await page.textContent('#edgeScopeBanner');
+      assert(scopeBannerTextAfterBasis.replace(/\s/g, '') === scopeBannerText.replace(/\s/g, ''),
+        'A/B基準切替で範囲指定の対象件数が変わらない(edge_id/node_id集合を固定)');
+      await page.selectOption('#edgeGroupBasis', 'A');
+      await page.waitForTimeout(30);
+
+      await page.click('#btnClearGraphScope');
+      await page.waitForTimeout(50);
+      assert(!(await page.isVisible('#edgeScopeBanner')), '「Graphからの範囲指定を解除」で通常のRelation一覧へ戻る');
+    } else {
+      console.log('INFO: 選択したNodeがsection以外だったためsectionドリルダウン確認はスキップ');
+    }
+  } else {
+    console.log('INFO: 小規模サンプルにsection Node(rect width=9)が見つからないためsectionドリルダウン確認はスキップ');
+  }
+
+  // 集約Edge(小規模サンプルでは必ず発生するとは限らないため、検出できた場合のみ確認する。
+  // 中規模サンプルテストで集約件数・内訳の数値的な正しさを厳密に検証する)
+  const aggLineIndex = await page.evaluate(() =>
+    [...document.querySelectorAll('#graphSvg line')].findIndex(l => l.getAttribute('stroke') === '#7a4fd1'));
+  if (aggLineIndex >= 0) {
+    await page.locator('#graphSvg line').nth(aggLineIndex).click({ force: true });
+    await page.waitForTimeout(50);
+    assert(await page.isVisible('#graphAggregateInfo'), '集約線クリックで集約Edge情報パネルが表示される');
+    const aggText = await page.textContent('#graphAggregateInfo');
+    assert(/関連\s*\d+件/.test(aggText), '集約Edge情報に関連件数が表示される(§9)');
+    assert(aggText.includes('採用済み') && aggText.includes('未処理') && aggText.includes('却下') && aggText.includes('stale'),
+      '集約Edge情報に採用済み/未処理/却下/stale内訳が表示される(§9)');
+    assert(aggText.includes('単純平均ではなく'), '集約Edgeのconfidenceが単純平均ではないことが明記される(§11)');
+    assert(!aggText.includes('一括採用') && !aggText.includes('一括却下') && !aggText.includes('relation type'),
+      '集約Edgeに一括採用/一括却下/relation type変更操作は追加されていない(§12)');
+
+    await page.click('#btnToggleAggregateDetail');
+    await page.waitForTimeout(50);
+    const detailHtml = await page.innerHTML('#graphAggregateDetailTable');
+    assert(['edge_id', 'Source短縮ID', 'Target短縮ID', 'lifecycle', 'freshness', 'confidence', 'evidence'].every(h => detailHtml.includes(h)),
+      '「集約内容を確認」で元の個別Edge一覧(edge_id/Source短縮ID/Target短縮ID/lifecycle/freshness/confidence/evidence)が表示される(§12)');
+    const detailRowCount = await page.$$eval('#graphAggregateDetailTable tbody tr', rows => rows.length);
+    assert(detailRowCount >= 1, '集約内容の一覧に1件以上の元Edgeが表示される');
+
+    await page.click('#btnDrillDownFromAggregate');
+    await page.waitForTimeout(50);
+    assert(await page.isVisible('#edgeScopeBanner'), '集約Edgeから「この範囲の関連候補を確認」でRelation画面へ範囲指定が渡る(§13.2)');
+    const aggScopeCandidateCount = Number((await page.textContent('#edgeScopeBanner')).match(/対象Candidate\s*(\d+)件/)?.[1] ?? -1);
+    assert(aggScopeCandidateCount === detailRowCount, '集約Edgeからのドリルダウン対象件数が集約内容の件数と一致する');
+    await page.click('#btnClearGraphScope');
+    await page.waitForTimeout(50);
+  } else {
+    console.log('INFO: 小規模サンプルでは集約Edgeが発生する候補配置が揃わなかったため、集約Edge個別確認は中規模サンプルテストで実施');
+  }
+
   await page.uncheck('#graphShowStructural');
   await page.uncheck('#graphShowCandidates');
+  await page.waitForTimeout(50);
 
   // ---- Graphフィルタ(文書/種別/タグ) ----
   await page.selectOption('#graphDocFilter', 'A');
@@ -472,6 +597,12 @@ async function main() {
     !savedText.includes('selectedConfirmMenu') && !savedText.includes('candidatesGenerated') && !savedText.includes('candidateGroupBasis') &&
     !savedText.includes('jumpHighlightNodeId') && !savedText.includes('activeNodeQuickFilters'),
     '保存JSONに短縮ID対応表・Graph選択状態・グループ展開状態・確認メニュー選択・候補生成フラグ・表示基準・ジャンプ強調などのUI専用状態が含まれない(画面変更がKnowledge JSONへ影響しない)');
+  assert(!savedText.includes('graphGranularity') && !savedText.includes('graphStructuralCollapsed') &&
+    !savedText.includes('graphStructuralEverShown') && !savedText.includes('graphRelationScope') &&
+    !savedText.includes('selectedAggregateInfo') && !savedText.includes('selectedGraphNodeIsCollapsedProxy'),
+    '保存JSONに表示粒度・折りたたみ状態・集約Edge選択・Relationドリルダウン範囲などのUI専用状態が含まれない(Alpha 0.1.3。§19)');
+  assert(saved.nodes.filter(n => n.node_type === 'document' || n.node_type === 'section').length > 0,
+    '保存JSONには折りたたみ操作の有無にかかわらずStructural Node(document/section)がすべて含まれる(表示上の折りたたみでNode自体は失われない)');
 
   // ---- 表示基準切替がKnowledge JSONのsource/target・件数へ影響しないことの確認 ----
   const nodeDocMap = new Map(saved.nodes.map(n => [n.node_id, n.provenance.source_document_id]));

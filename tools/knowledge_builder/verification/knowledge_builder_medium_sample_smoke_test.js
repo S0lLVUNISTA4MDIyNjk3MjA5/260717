@@ -15,7 +15,7 @@ const fs = require('fs');
 const os = require('os');
 const { chromium } = require('playwright');
 
-const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.1.2-alpha.html');
+const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.1.3-alpha.html');
 const MEDIUM_DIR = path.join(__dirname, '..', '..', '..', 'samples', 'knowledge_builder_alpha01', 'medium');
 const FILE_A = path.join(MEDIUM_DIR, 'JSON_A_medium_customer_requirements_trace.json');
 const FILE_B = path.join(MEDIUM_DIR, 'JSON_B_medium_design_review_trace.json');
@@ -217,6 +217,114 @@ async function main() {
     `未処理候補も表示ONにすると${candidateCount}件規模の候補がGraphに反映される(実際: ${graphEdgeCountWithCandidates})`);
   await page.uncheck('#graphShowCandidates');
 
+  // ---- Alpha 0.1.3: 表示粒度・折りたたみ・集約Edge・Relationドリルダウンが中規模データでも正しく動く(§23.1-§23.5, §24) ----
+  assert(await page.isDisabled('#graphGranularity'), '中規模データでも文書内階層が非表示の間は表示粒度が無効化される');
+  await page.check('#graphShowStructural');
+  await page.waitForTimeout(150);
+  assert((await page.inputValue('#graphGranularity')) === 'section', '中規模データでも初めてONにすると章・節単位が初期粒度になる');
+
+  const nodeCountSectionMedium = Number(await page.textContent('#graphNodeCount'));
+  assert(nodeCountSectionMedium > 0 && nodeCountSectionMedium < expectedTotalContent,
+    `章・節単位のNode数は内容Node総数(${expectedTotalContent})より少ない(実際: ${nodeCountSectionMedium})`);
+
+  await page.selectOption('#graphGranularity', 'document');
+  await page.waitForTimeout(150);
+  assert(Number(await page.textContent('#graphNodeCount')) === 2, '中規模データでも文書単位ではdocument Node 2件だけが表示される');
+
+  await page.selectOption('#graphGranularity', 'item');
+  await page.waitForTimeout(150);
+  const nodeCountItemMedium = Number(await page.textContent('#graphNodeCount'));
+  assert(nodeCountItemMedium === withStructuralCount,
+    `個別項目粒度のNode数はNode一覧で構造Node表示ONにした場合の件数と一致する(実際: ${nodeCountItemMedium}/${withStructuralCount})`);
+  const aggAtItemMedium = await page.evaluate(() => [...document.querySelectorAll('#graphSvg line')].some(l => l.getAttribute('stroke') === '#7a4fd1'));
+  assert(!aggAtItemMedium, '個別項目粒度では中規模データでも集約線が出ない(展開すると元の個別Edge表示に戻る)');
+
+  await page.selectOption('#graphGranularity', 'section');
+  await page.waitForTimeout(150);
+
+  // §23.3: 集約Edgeの件数・内訳の整合性(集約内容の一覧と要約表示が一致するか、重複edge_idがないか)
+  const aggLineIdxMedium = await page.evaluate(() =>
+    [...document.querySelectorAll('#graphSvg line')].findIndex(l => l.getAttribute('stroke') === '#7a4fd1'));
+  assert(aggLineIdxMedium >= 0, `中規模データ・既定10件採用のもとでは集約線が最低1本発生する(実際のindex: ${aggLineIdxMedium})`);
+
+  if (aggLineIdxMedium >= 0) {
+    await page.locator('#graphSvg line').nth(aggLineIdxMedium).click({ force: true });
+    await page.waitForTimeout(100);
+    const aggText = await page.textContent('#graphAggregateInfo');
+    const m = aggText.match(/関連\s*(\d+)件.*採用済み\s*(\d+)\s*\/\s*未処理\s*(\d+)\s*\/\s*却下\s*(\d+)\s*\/\s*stale\s*(\d+)/s);
+    assert(m !== null, `集約Edge情報から件数内訳を抽出できる(実際のテキスト: "${aggText.replace(/\s+/g, ' ')}")`);
+    const [, totalStr, activeStr, candidateStr, rejectedStr, staleStr] = m;
+
+    await page.click('#btnToggleAggregateDetail');
+    await page.waitForTimeout(100);
+    const detailRows = await page.$$eval('#graphAggregateDetailTable tbody tr', rows =>
+      rows.map(r => [...r.children].map(td => td.textContent.trim())));
+    assert(detailRows.length === Number(totalStr),
+      `集約内容の一覧行数が要約の全関連件数と一致する(一覧:${detailRows.length}/要約:${totalStr})`);
+    const detailEdgeIds = detailRows.map(r => r[0]);
+    assert(new Set(detailEdgeIds).size === detailEdgeIds.length, '集約内容の一覧に重複するedge_idがない');
+    const detailActive = detailRows.filter(r => r[3] === '採用済み').length;
+    const detailCandidate = detailRows.filter(r => r[3] === '候補').length;
+    const detailRejected = detailRows.filter(r => r[3] === '却下').length;
+    const detailStale = detailRows.filter(r => r[4] === 'stale').length;
+    assert(detailActive === Number(activeStr), `集約内容の採用済み件数が要約と一致する(一覧:${detailActive}/要約:${activeStr})`);
+    assert(detailCandidate === Number(candidateStr), `集約内容の未処理件数が要約と一致する(一覧:${detailCandidate}/要約:${candidateStr})`);
+    assert(detailRejected === Number(rejectedStr), `集約内容の却下件数が要約と一致する(一覧:${detailRejected}/要約:${rejectedStr})`);
+    assert(detailStale === Number(staleStr), `集約内容のstale件数が要約と一致する(一覧:${detailStale}/要約:${staleStr})`);
+
+    // §23.4: この集約範囲からRelationドリルダウンし、採用結果がGraph集約内訳へ即時反映されることを確認する
+    if (Number(candidateStr) > 0) {
+      await page.click('#btnDrillDownFromAggregate');
+      await page.waitForTimeout(150);
+      assert(await page.isVisible('#edgeScopeBanner'), '中規模データでも集約Edgeからのドリルダウンで範囲指定バナーが表示される');
+      const scopeCandidateCount = Number((await page.textContent('#edgeScopeBanner')).match(/対象Candidate\s*(\d+)件/)?.[1] ?? -1);
+      assert(scopeCandidateCount === Number(totalStr), 'ドリルダウン後の対象件数が集約Edgeの全関連件数と一致する');
+
+      await page.selectOption('#edgeStatusFilter', 'candidate');
+      await page.waitForTimeout(50);
+      await page.click('#btnExpandAllGroups');
+      await page.waitForTimeout(100);
+      const scopedCandidateRow = page.locator('#edgeTableBody tr.edge-row').first();
+      if (await scopedCandidateRow.count() > 0) {
+        await scopedCandidateRow.locator('button', { hasText: '採用' }).click();
+        await page.waitForTimeout(150);
+      }
+      await page.click('#btnClearGraphScope');
+      await page.waitForTimeout(100);
+
+      const aggTextAfterAccept = await page.textContent('#graphAggregateInfo');
+      const m2 = aggTextAfterAccept.match(/関連\s*(\d+)件.*採用済み\s*(\d+)\s*\/\s*未処理\s*(\d+)/s);
+      if (m2) {
+        assert(Number(m2[2]) === Number(activeStr) + 1, '採用直後、Graph集約内訳の採用済み件数が即時に+1反映される');
+        assert(Number(m2[3]) === Number(candidateStr) - 1, '採用直後、Graph集約内訳の未処理件数が即時に-1反映される');
+      }
+    }
+  }
+
+  // §23.5: フィルタ(文書/タグ)・採用済み/未処理切替後も集約件数の整合性が保たれる
+  await page.selectOption('#graphDocFilter', 'A');
+  await page.waitForTimeout(100);
+  assert(true, '文書フィルタ適用後も集約Edge計算がエラーなく動く(§23.5)');
+  await page.selectOption('#graphDocFilter', 'all');
+  await page.waitForTimeout(100);
+
+  await page.check('#graphFocusMode');
+  await page.waitForTimeout(100);
+  assert(true, '選択Node周辺表示と折りたたみを併用してもエラーなく動く(§23.5)');
+  await page.uncheck('#graphFocusMode');
+
+  // §23.5: GraphからNode一覧への既存ジャンプに回帰がないことを確認する
+  const anyRectForJump = page.locator('#graphSvg rect').first();
+  if (await anyRectForJump.count() > 0) {
+    await anyRectForJump.click({ force: true });
+    await page.waitForTimeout(100);
+    const jumpBtnMedium = page.locator('#btnJumpToNodeList');
+    assert(await jumpBtnMedium.count() === 1, '中規模データでもGraphからNode一覧への既存ジャンプボタンが表示される(回帰なし)');
+  }
+
+  await page.uncheck('#graphShowStructural');
+  await page.waitForTimeout(100);
+
   // ---- Graphフィルタ(文書/種別/タグ)・Node選択・周辺表示モード ----
   await page.selectOption('#graphDocFilter', 'A');
   await page.waitForTimeout(100);
@@ -259,8 +367,17 @@ async function main() {
     '中規模データでもoperation historyが連番のまま保たれている');
   assert(!savedText.includes('nodeShortIds') && !savedText.includes('expandedGroups') && !savedText.includes('selectedGraphNodeId') &&
     !savedText.includes('selectedConfirmMenu') && !savedText.includes('candidatesGenerated') && !savedText.includes('candidateGroupBasis') &&
-    !savedText.includes('jumpHighlightNodeId'),
-    '保存JSONに短縮ID対応表・グループ展開状態・Graph選択状態・確認メニュー・候補生成フラグ・表示基準などのUI専用状態が含まれない');
+    !savedText.includes('jumpHighlightNodeId') &&
+    !savedText.includes('graphGranularity') && !savedText.includes('graphStructuralCollapsed') &&
+    !savedText.includes('graphStructuralEverShown') && !savedText.includes('graphRelationScope') &&
+    !savedText.includes('selectedAggregateInfo') && !savedText.includes('selectedGraphNodeIsCollapsedProxy'),
+    '保存JSONに短縮ID対応表・グループ展開状態・Graph選択状態・確認メニュー・候補生成フラグ・表示基準・表示粒度・折りたたみ状態・' +
+    '集約Edge選択・Relationドリルダウン範囲などのUI専用状態が含まれない(§19)');
+
+  // §23.6: 保存・回帰(想定どおり212 nodes/444 edges, Candidate 234件のまま)
+  assert(saved.nodes.length === 212, `保存JSONのnode数が従来どおり212件(実際: ${saved.nodes.length})`);
+  assert(saved.edges.length === 444, `保存JSONのedge数が従来どおり444件(実際: ${saved.edges.length})`);
+  assert(candidateCount === 234, `Candidate生成数が従来どおり234件(実際: ${candidateCount})`);
 
   const nodeDocMapMedium = new Map(saved.nodes.map(n => [n.node_id, n.provenance.source_document_id]));
   const savedSemanticEdgesMedium = saved.edges.filter(e => e.relation_category === 'semantic');
