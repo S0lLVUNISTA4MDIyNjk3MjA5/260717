@@ -109,11 +109,11 @@
   </div>
   <div class="row">
     <div class="field">
-      <label>文書A（requirement側。既存PDF/Excelツールが出力した *_trace_v1_3.json 等）</label>
+      <label>文書A（既存PDF/Excelツールが出力したTrace JSON）</label>
       <input type="file" id="fileA" accept=".json">
     </div>
     <div class="field">
-      <label>文書B（design側）</label>
+      <label>文書B（既存PDF/Excelツールが出力したTrace JSON）</label>
       <input type="file" id="fileB" accept=".json">
     </div>
     <div class="field">
@@ -1654,8 +1654,17 @@ function renderGraph() {
       'stroke-dasharray': stats.active > 0 && stats.staleCount === 0 ? '' : '6,3',
       opacity: isHighlighted ? '1' : '0.18', class: 'graph-agg-line'
     });
-    const titleText = `${stats.total}件を集約（採用${stats.active}・候補${stats.candidate}` +
-      `${stats.rejected ? '・却下' + stats.rejected : ''}${stats.staleCount ? '・stale' + stats.staleCount : ''}）`;
+    // ホバー時ツールチップ(§4): 全関連件数・採用済み・未処理・stale件数を最低限含める。
+    // 常時表示の件数ラベルは可読性優先で廃止し(是正Checkpoint)、内訳確認はホバー/クリックへ集約する。
+    const tooltipLines = [
+      `関連 ${stats.total}件`,
+      `採用済み ${stats.active}`,
+      `未処理 ${stats.candidate}`,
+      `stale ${stats.staleCount}`
+    ];
+    if (stats.rejected) tooltipLines.push(`却下 ${stats.rejected}`);
+    if (stats.confMin !== null) tooltipLines.push(`confidence ${stats.confMin.toFixed(2)}〜${stats.confMax.toFixed(2)}`);
+    const titleText = tooltipLines.join('\n');
     const title = el('title', {}); title.textContent = titleText; path.appendChild(title);
     path.style.cursor = 'pointer';
     path.addEventListener('click', () => selectAggregate(g));
@@ -1669,18 +1678,6 @@ function renderGraph() {
     const markerTitle = el('title', {}); markerTitle.textContent = titleText; marker.appendChild(markerTitle);
     marker.addEventListener('click', () => selectAggregate(g));
     svg.appendChild(marker);
-
-    // 件数ラベルはマーカーの右側に配置し、非色分けの視認性(背景・枠・padding)を確保する(§2.3)。
-    const labelText = `${stats.total}件`;
-    const lx = mx + markerR + 5, ly = my + 3;
-    drawLabelBackground(lx, ly, labelText, 10, 'start');
-    const label = el('text', {
-      x: lx, y: ly, 'font-size': 10, 'text-anchor': 'start', fill: '#333',
-      opacity: isHighlighted ? '1' : '0.3', style: 'cursor:pointer;', class: 'graph-agg-count-label'
-    });
-    label.textContent = labelText;
-    label.addEventListener('click', () => selectAggregate(g));
-    svg.appendChild(label);
   }
 
   for (const g of drawLines) {

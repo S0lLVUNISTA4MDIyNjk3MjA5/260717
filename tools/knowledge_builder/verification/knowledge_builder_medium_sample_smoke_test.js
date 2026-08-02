@@ -369,19 +369,24 @@ async function main() {
   await page.selectOption('#graphTagFilter', 'all');
   await page.waitForTimeout(100);
 
-  // ---- 是正Checkpoint: 章・節単位の集約Graphで、Nodeラベル・件数ラベル・マーカーが重ならないことを回帰確認する ----
+  // ---- 是正Checkpoint: 章・節単位の集約Graphで、Nodeラベル・マーカーが重ならないことを回帰確認する ----
+  // (可読性優先の簡素化Checkpointにより、マーカー横の常時件数表示は廃止した。§7)
   // 実 browser の getBBox() で座標矩形を取得し、決定的に衝突検出する(色分けだけに依存しない視認性の確認も兼ねる)。
   const layoutGeom = await page.evaluate(() => {
     const svg = document.getElementById('graphSvg');
     const toRect = (elm) => { const b = elm.getBBox(); return { x: b.x, y: b.y, width: b.width, height: b.height }; };
     const nodeLabelRects = [...svg.querySelectorAll('text.graph-node-label')].map(toRect);
-    const countLabelRects = [...svg.querySelectorAll('text.graph-agg-count-label')].map(toRect);
+    const countLabelCount = svg.querySelectorAll('text.graph-agg-count-label').length;
     const markerCircles = [...svg.querySelectorAll('circle.graph-agg-marker')].map(c => ({
       cx: Number(c.getAttribute('cx')), cy: Number(c.getAttribute('cy')), r: Number(c.getAttribute('r'))
     }));
+    const markerTitles = [...svg.querySelectorAll('circle.graph-agg-marker title')].map(t => t.textContent);
     const aggPaths = [...svg.querySelectorAll('path.graph-agg-line')].map(p => p.getAttribute('d'));
-    return { nodeLabelRects, countLabelRects, markerCircles, aggPaths };
+    return { nodeLabelRects, countLabelCount, markerCircles, markerTitles, aggPaths };
   });
+  assert(layoutGeom.countLabelCount === 0, `集約マーカー横の常時件数表示が削除されている(簡素化Checkpoint。実際の件数ラベル要素数: ${layoutGeom.countLabelCount})`);
+  assert(layoutGeom.markerTitles.length > 0 && layoutGeom.markerTitles.every(t => /^関連\s*\d+件/.test(t) && t.includes('採用済み') && t.includes('未処理') && t.includes('stale')),
+    `集約マーカーのホバー時ツールチップに関連件数・採用済み・未処理・stale件数が含まれる(簡素化Checkpoint§4。実際: "${(layoutGeom.markerTitles[0] || '').replace(/\n/g, ' / ')}")`);
   function rectsOverlapMedium(a, b) {
     return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
   }
@@ -413,12 +418,6 @@ async function main() {
       minMarkerDistMedium = Math.min(minMarkerDistMedium, Math.sqrt(dx * dx + dy * dy));
     }
   }
-  let labelLabelOverlapCount = 0;
-  for (let i = 0; i < layoutGeom.countLabelRects.length; i++) {
-    for (let j = i + 1; j < layoutGeom.countLabelRects.length; j++) {
-      if (rectsOverlapMedium(layoutGeom.countLabelRects[i], layoutGeom.countLabelRects[j])) labelLabelOverlapCount++;
-    }
-  }
   let nodeLabelMarkerOverlapCount = 0;
   for (const m of layoutGeom.markerCircles) {
     for (const l of layoutGeom.nodeLabelRects) {
@@ -436,7 +435,6 @@ async function main() {
   assert(layoutGeom.markerCircles.length >= 1, '章・節単位の集約Graphに衝突検出対象のマーカーが1件以上ある(前提条件)');
   assert(markerMarkerOverlapCount === 0, `集約マーカー同士が重ならない(是正Checkpoint。重複数: ${markerMarkerOverlapCount}, 最小マーカー間距離: ${minMarkerDistMedium.toFixed(2)}px)`);
   assert(minMarkerDistMedium > 0, `マーカー間の最小距離が正の値である(同一座標マーカーが存在しない。実際: ${minMarkerDistMedium.toFixed(2)}px)`);
-  assert(labelLabelOverlapCount === 0, `件数ラベル同士が重ならない(是正Checkpoint。重複数: ${labelLabelOverlapCount})`);
   assert(nodeLabelMarkerOverlapCount === 0, `Nodeラベルと集約マーカーが重ならない(是正Checkpoint。重複数: ${nodeLabelMarkerOverlapCount})`);
   assert(pathNodeLabelIntersectCount === 0, `集約Edgeの線がNodeラベルの矩形と交差しない(是正Checkpoint。交差数: ${pathNodeLabelIntersectCount})`);
 

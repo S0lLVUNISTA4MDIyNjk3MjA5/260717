@@ -35,6 +35,14 @@ async function main() {
 
   await page.goto('file://' + HTML_PATH);
 
+  // 是正Checkpoint: 文書A/文書Bの役割固定表記(requirement側/design側等)がUIに残っていないことを確認する。
+  const ingestPanelText = await page.textContent('#ingestPanel');
+  assert(!ingestPanelText.includes('requirement側') && !ingestPanelText.includes('design側') &&
+    !ingestPanelText.includes('要求側') && !ingestPanelText.includes('設計側'),
+    'データ読み込み画面に文書A/Bの役割を固定する表記(requirement側/design側等)が表示されない(是正Checkpoint)');
+  assert(!ingestPanelText.includes('文書Aは要求') && !ingestPanelText.includes('文書Bは設計'),
+    '一般説明に「文書Aは要求、文書Bは設計」という固定表現がない(是正Checkpoint)');
+
   await page.setInputFiles('#fileA', FILE_A);
   await page.setInputFiles('#fileB', FILE_B);
   await page.click('#btnIngest');
@@ -483,6 +491,18 @@ async function main() {
   // 中規模サンプルテストで集約件数・内訳の数値的な正しさを厳密に検証する)
   const aggLineIndex = await page.evaluate(() => document.querySelectorAll('#graphSvg path.graph-agg-line').length > 0 ? 0 : -1);
   if (aggLineIndex >= 0) {
+    // 簡素化Checkpoint(§1・§7): 集約マーカー横の常時件数表示は削除し、ホバー時ツールチップへ集約する。
+    const simplifiedMarkerCheck = await page.evaluate(() => {
+      const countLabelCount = document.querySelectorAll('#graphSvg text.graph-agg-count-label').length;
+      const marker = document.querySelector('#graphSvg circle.graph-agg-marker');
+      const markerTitle = marker ? marker.querySelector('title').textContent : '';
+      return { countLabelCount, markerTitle };
+    });
+    assert(simplifiedMarkerCheck.countLabelCount === 0, '集約マーカー横の常時件数表示が削除されている(簡素化Checkpoint)');
+    assert(/^関連\s*\d+件/.test(simplifiedMarkerCheck.markerTitle) && simplifiedMarkerCheck.markerTitle.includes('採用済み') &&
+      simplifiedMarkerCheck.markerTitle.includes('未処理') && simplifiedMarkerCheck.markerTitle.includes('stale'),
+      `集約マーカーのホバー時ツールチップに関連件数・採用済み・未処理・stale件数が含まれる(簡素化Checkpoint§4。実際: "${simplifiedMarkerCheck.markerTitle.replace(/\n/g, ' / ')}")`);
+
     await page.locator('#graphSvg path.graph-agg-line').nth(aggLineIndex).click({ force: true });
     await page.waitForTimeout(50);
     assert(await page.isVisible('#graphAggregateInfo'), '集約線クリックで集約Edge情報パネルが表示される');
