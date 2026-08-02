@@ -13,7 +13,7 @@ const fs = require('fs');
 const os = require('os');
 const { chromium } = require('playwright');
 
-const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.1.3-alpha.html');
+const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.2.0-alpha.html');
 const FIXTURES_DIR = path.join(__dirname, 'fixtures');
 const FIXTURE_B = path.join(FIXTURES_DIR, 'excel_direct_fixture_b.xlsx');
 const FIXTURE_MULTI = path.join(FIXTURES_DIR, 'excel_direct_fixture_multi.xlsx');

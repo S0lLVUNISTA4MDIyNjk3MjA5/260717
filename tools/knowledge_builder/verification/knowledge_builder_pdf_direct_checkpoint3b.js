@@ -12,7 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const { chromium } = require('playwright');
 
-const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.1.3-alpha.html');
+const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.2.0-alpha.html');
 const FIXTURES_DIR = path.join(__dirname, 'fixtures');
 const PDF_FX = n => path.join(FIXTURES_DIR, n);
 const PDF_1_NO_HEADING = PDF_FX('pdf_direct_fixture_1_no_heading_two_paragraphs.pdf');
@@ -83,6 +83,73 @@ async function setExcelSide(page, side, fixturePath, sheetName, headerRow, dataS
 async function setTraceSide(page, side, filePath) {
   await page.selectOption('#inputMode' + side, 'trace');
   await page.setInputFiles('#file' + side, filePath);
+}
+
+// ---- Checkpoint 3c §5: 原子性の恒久テスト用ヘルパー ----
+// 製品HTMLの<script>はモジュールではなく、トップレベルのlet/constは同じrealmのpage.evaluate()から
+// 素の識別子として参照できる(window.datasetではなくdataset)。これを使い、live datasetの主要
+// フィールドをcanonical化して失敗前後で完全一致比較する(表示件数だけを見ない)。
+async function snapshotDataset(page) {
+  return await page.evaluate(() => JSON.parse(JSON.stringify({
+    sources: dataset.sources, tag_vocabulary: dataset.tag_vocabulary, nodes: dataset.nodes,
+    edges: dataset.edges, operations: dataset.operations, diagnostics: dataset.diagnostics,
+    extensions: dataset.extensions
+  })));
+}
+
+async function snapshotGraphUiState(page) {
+  return await page.evaluate(() => ({
+    graphDocFilter: document.getElementById('graphDocFilter').value,
+    graphTypeFilter: document.getElementById('graphTypeFilter').value,
+    graphTagFilter: document.getElementById('graphTagFilter').value,
+    graphShowCandidates: document.getElementById('graphShowCandidates').checked,
+    graphShowStructural: document.getElementById('graphShowStructural').checked,
+    graphGranularity: graphGranularity,
+    graphStructuralCollapsed: [...graphStructuralCollapsed].sort(),
+    edgeGroupBasis: document.getElementById('edgeGroupBasis').value,
+    candidateGroupBasis: candidateGroupBasis,
+    expandedGroups: [...expandedGroups].sort(),
+    selectedGraphNodeId: selectedGraphNodeId,
+    graphRelationScope: graphRelationScope ? {
+      kind: graphRelationScope.kind, side: graphRelationScope.side || null, label: graphRelationScope.label || null,
+      nodeIds: graphRelationScope.nodeIds ? [...graphRelationScope.nodeIds].sort() : null,
+      edgeIds: graphRelationScope.edgeIds ? [...graphRelationScope.edgeIds].sort() : null
+    } : null,
+    candidateStatusText: document.getElementById('candidateStatus').textContent,
+    graphNodeCountText: document.getElementById('graphNodeCount').textContent,
+    graphEdgeCountText: document.getElementById('graphEdgeCount').textContent
+  }));
+}
+
+// 正常なlive datasetを準備する(Checkpoint 3c §5.1): 異なるPDF文書をA/Bへ取込 -> Candidate生成
+// (確実に2件以上生成されるfixture組合せ) -> 1件採用・別1件却下 -> Graph UI設定を複数変更する。
+async function prepareBaselineWithCandidatesAndGraphState(page) {
+  await setPdfSide(page, 'A', PDF_2_NUMBERED_HEADINGS);
+  await setPdfSide(page, 'B', PDF_4_BODY_BEFORE_HEADING);
+  await page.click('#btnIngest');
+  await page.waitForFunction(() => document.getElementById('ingestStatus').textContent.includes('取込完了'), null, { timeout: 15000 });
+  await page.click('#btnGenerateCandidates');
+  await page.waitForFunction(() => document.getElementById('candidateStatus').textContent.includes('候補'), null, { timeout: 10000 });
+  const candidateStatusText = await page.textContent('#candidateStatus');
+  const m = candidateStatusText.match(/候補 (\d+)件/);
+  const candidateCount = m ? Number(m[1]) : 0;
+  if (candidateCount < 2) throw new Error(`テスト前提が崩れている: 候補が2件未満(実際${candidateCount}件)。fixture組合せを見直す必要がある。`);
+
+  await page.selectOption('#edgeStatusFilter', 'all'); // lifecycle変更で行が一覧から消えないようにする
+  await page.click('#btnExpandAllGroups');
+  // 是正: :has-text()は部分一致のため、グループ見出し行の「このグループの候補をすべて却下」
+  // (グループ単位の一括却下ボタン)まで拾ってしまう。個別行の採用/却下ボタンだけを厳密一致で選ぶ。
+  await page.locator('#edgeTableBody button').filter({ hasText: /^採用$/ }).first().click();
+  await page.waitForTimeout(50);
+  await page.locator('#edgeTableBody button').filter({ hasText: /^却下$/ }).nth(1).click();
+  await page.waitForTimeout(50);
+
+  // Graph UI状態を意図的に複数変更する(既定値のままでは失敗注入前後の一致確認が弱くなるため)。
+  await page.check('#graphShowCandidates');
+  await page.check('#graphShowStructural');
+  await page.selectOption('#graphDocFilter', 'A');
+  await page.selectOption('#edgeGroupBasis', 'B');
+  await page.waitForTimeout(50);
 }
 
 async function main() {
@@ -495,6 +562,141 @@ async function main() {
     const saved = JSON.parse(fs.readFileSync(savedPath, 'utf8'));
     assert(saved.sources.length === 2 && saved.sources.every(s => !s.file_name.includes('fixture_1_no_heading')),
       `保存JSONのsourcesも以前ingestした2文書のまま(重複指定したfixture_1は含まれない)(実際: ${JSON.stringify(saved.sources.map(s => s.file_name))})`);
+    await page.close();
+  }
+
+  // ==== Checkpoint 3c §5-§7: 原子性の恒久テスト(canonical dataset + Graph UI状態の完全一致比較) ====
+  // 「表示件数が同じ」だけでは原子性PASSにしない。live datasetの主要フィールド全体
+  // (sources/tag_vocabulary/nodes/edges/operations/diagnostics/extensions)・Candidateの採否
+  // (activeになったEdge ID・rejectedになったEdge ID)・Graph UI状態・docAId/docBIdを
+  // 失敗注入の前後でcanonical JSONとして完全一致比較する。
+
+  // ---- シナリオA: Adapter処理は両側とも成功するが、取込時validation gate(同一PDFのA/B重複
+  // 指定によるnode_id/edge_id重複)でfail-closedする経路 ----
+  {
+    const page = await browser.newPage();
+    const { consoleErrors } = attachListeners(page);
+    await page.goto('file://' + HTML_PATH);
+
+    await prepareBaselineWithCandidatesAndGraphState(page);
+    const preEdgeLifecycle = await page.evaluate(() => ({
+      active: dataset.edges.filter(e => e.relation_category === 'semantic' && e.lifecycle === 'active').map(e => e.edge_id).sort(),
+      rejected: dataset.edges.filter(e => e.relation_category === 'semantic' && e.lifecycle === 'rejected').map(e => e.edge_id).sort()
+    }));
+    assert(preEdgeLifecycle.active.length === 1 && preEdgeLifecycle.rejected.length === 1,
+      `シナリオA前提: 候補を1件採用・別1件却下できている(実際: active=${preEdgeLifecycle.active.length}, rejected=${preEdgeLifecycle.rejected.length})`);
+
+    const before = await snapshotDataset(page);
+    const beforeGraphUi = await snapshotGraphUiState(page);
+    const beforeIds = await page.evaluate(() => ({ docAId, docBId }));
+
+    page.once('dialog', d => d.accept());
+    await setPdfSide(page, 'A', PDF_1_NO_HEADING);
+    await setPdfSide(page, 'B', PDF_1_NO_HEADING);
+    await page.click('#btnIngest');
+    await page.waitForFunction(() => document.getElementById('ingestStatus').textContent.includes('取込エラー'), null, { timeout: 15000 });
+    const errorStatus = await page.textContent('#ingestStatus');
+    assert(errorStatus.includes('検証エラー') || errorStatus.includes('重複'),
+      `シナリオA: validation errorが利用者向け固定文言で表示される(実際: "${errorStatus}")`);
+    assert(!errorStatus.includes('at ') && !errorStatus.includes('.js:') && !errorStatus.includes('TypeError'),
+      'シナリオA: stack traceが表示されない');
+
+    const after = await snapshotDataset(page);
+    const afterGraphUi = await snapshotGraphUiState(page);
+    const afterIds = await page.evaluate(() => ({ docAId, docBId }));
+    const afterEdgeLifecycle = await page.evaluate(() => ({
+      active: dataset.edges.filter(e => e.relation_category === 'semantic' && e.lifecycle === 'active').map(e => e.edge_id).sort(),
+      rejected: dataset.edges.filter(e => e.relation_category === 'semantic' && e.lifecycle === 'rejected').map(e => e.edge_id).sort()
+    }));
+
+    assert(JSON.stringify(before) === JSON.stringify(after),
+      'シナリオA: validation error後もlive datasetのcanonical JSON(sources/tag_vocabulary/nodes/edges/operations/diagnostics/extensions)が完全一致する');
+    assert(before.nodes.length === after.nodes.length && before.edges.length === after.edges.length && before.operations.length === after.operations.length,
+      `シナリオA: Node/Edge/Operation件数が個別にも不変(実際: nodes ${before.nodes.length}->${after.nodes.length}, edges ${before.edges.length}->${after.edges.length}, operations ${before.operations.length}->${after.operations.length})`);
+    assert(JSON.stringify(preEdgeLifecycle) === JSON.stringify(afterEdgeLifecycle),
+      `シナリオA: activeになったSemantic Edge ID・rejectedになったSemantic Edge IDが不変(実際: ${JSON.stringify(afterEdgeLifecycle)})`);
+    assert(JSON.stringify(beforeGraphUi) === JSON.stringify(afterGraphUi),
+      'シナリオA: Graph UI状態(フィルタ・表示ON/OFF・granularity・折りたたみ・選択Node・scope等)が完全一致する');
+    assert(beforeIds.docAId === afterIds.docAId && beforeIds.docBId === afterIds.docBId,
+      `シナリオA: docAId/docBIdが変化しない(実際: A一致=${beforeIds.docAId === afterIds.docAId}, B一致=${beforeIds.docBId === afterIds.docBId})`);
+    assert(consoleErrors.length === 0, `シナリオA: console errorが0件(実際: ${consoleErrors.length}件${consoleErrors.length ? ': ' + consoleErrors[0] : ''})`);
+    await page.close();
+  }
+
+  // ---- シナリオB: staging途中エラー。A側はnextDatasetへ正常に取り込まれた後、B側の
+  // ingestAdapterResult相当の処理で(検証コード内だけで)意図的にthrowする。製品コードは変更せず、
+  // window.KnowledgeStoreを元APIを保持した浅いラッパーへ一時的に差し替え、テスト後に必ず復元する。 ----
+  {
+    const page = await browser.newPage();
+    const { consoleErrors } = attachListeners(page);
+    await page.goto('file://' + HTML_PATH);
+
+    await prepareBaselineWithCandidatesAndGraphState(page);
+    const preEdgeLifecycle = await page.evaluate(() => ({
+      active: dataset.edges.filter(e => e.relation_category === 'semantic' && e.lifecycle === 'active').map(e => e.edge_id).sort(),
+      rejected: dataset.edges.filter(e => e.relation_category === 'semantic' && e.lifecycle === 'rejected').map(e => e.edge_id).sort()
+    }));
+    assert(preEdgeLifecycle.active.length === 1 && preEdgeLifecycle.rejected.length === 1,
+      `シナリオB前提: 候補を1件採用・別1件却下できている(実際: active=${preEdgeLifecycle.active.length}, rejected=${preEdgeLifecycle.rejected.length})`);
+
+    const before = await snapshotDataset(page);
+    const beforeGraphUi = await snapshotGraphUiState(page);
+    const beforeIds = await page.evaluate(() => ({ docAId, docBId }));
+
+    // window.KnowledgeStore(freeze済み)は再代入自体は可能(root.KnowledgeStore = apiという
+    // 通常のプロパティ代入で作られているため)。元の全メソッドを保持した浅いラッパーへ差し替え、
+    // ingestAdapterResult()の2回目呼び出し(このingest試行のB側)だけ意図的にthrowさせる。
+    await page.evaluate(() => {
+      const orig = window.KnowledgeStore;
+      window.__cp3cOrigKnowledgeStore = orig;
+      let callCount = 0;
+      window.KnowledgeStore = Object.assign({}, orig, {
+        ingestAdapterResult: async function(...args) {
+          callCount++;
+          if (callCount === 2) throw new Error('TEST_INJECTED_STAGING_FAILURE_SCENARIO_B');
+          return orig.ingestAdapterResult(...args);
+        }
+      });
+    });
+
+    try {
+      page.once('dialog', d => d.accept());
+      await setPdfSide(page, 'A', PDF_6_BLANK_PAGE);
+      await setPdfSide(page, 'B', PDF_10_TAG_MATCH);
+      await page.click('#btnIngest');
+      await page.waitForFunction(() => document.getElementById('ingestStatus').textContent.includes('取込エラー'), null, { timeout: 15000 });
+      const errorStatus = await page.textContent('#ingestStatus');
+      assert(errorStatus.includes('TEST_INJECTED_STAGING_FAILURE_SCENARIO_B'),
+        `シナリオB: staging途中の例外が利用者向けエラーとして表示される(実際: "${errorStatus}")`);
+      assert(!errorStatus.includes('at ') && !errorStatus.includes('.js:'),
+        'シナリオB: stack traceが表示されない');
+
+      const after = await snapshotDataset(page);
+      const afterGraphUi = await snapshotGraphUiState(page);
+      const afterIds = await page.evaluate(() => ({ docAId, docBId }));
+      const afterEdgeLifecycle = await page.evaluate(() => ({
+        active: dataset.edges.filter(e => e.relation_category === 'semantic' && e.lifecycle === 'active').map(e => e.edge_id).sort(),
+        rejected: dataset.edges.filter(e => e.relation_category === 'semantic' && e.lifecycle === 'rejected').map(e => e.edge_id).sort()
+      }));
+
+      assert(JSON.stringify(before) === JSON.stringify(after),
+        'シナリオB: staging途中throw後もlive datasetのcanonical JSONが完全一致する(A側だけがnextDatasetへ入った状態のまま破棄される)');
+      assert(before.nodes.length === after.nodes.length && before.edges.length === after.edges.length && before.operations.length === after.operations.length,
+        `シナリオB: Node/Edge/Operation件数が個別にも不変(実際: nodes ${before.nodes.length}->${after.nodes.length}, edges ${before.edges.length}->${after.edges.length}, operations ${before.operations.length}->${after.operations.length})`);
+      assert(JSON.stringify(preEdgeLifecycle) === JSON.stringify(afterEdgeLifecycle),
+        `シナリオB: activeになったSemantic Edge ID・rejectedになったSemantic Edge IDが不変(実際: ${JSON.stringify(afterEdgeLifecycle)})`);
+      assert(JSON.stringify(beforeGraphUi) === JSON.stringify(afterGraphUi), 'シナリオB: Graph UI状態が完全一致する');
+      assert(beforeIds.docAId === afterIds.docAId && beforeIds.docBId === afterIds.docBId,
+        `シナリオB: docAId/docBIdが変化しない(実際: A一致=${beforeIds.docAId === afterIds.docAId}, B一致=${beforeIds.docBId === afterIds.docBId})`);
+      assert(consoleErrors.length === 0, `シナリオB: console errorが0件(実際: ${consoleErrors.length}件${consoleErrors.length ? ': ' + consoleErrors[0] : ''})`);
+    } finally {
+      // 他のテストへ副作用を残さないよう、検証コード内だけで差し替えたKnowledgeStoreを必ず復元する。
+      await page.evaluate(() => {
+        if (window.__cp3cOrigKnowledgeStore) { window.KnowledgeStore = window.__cp3cOrigKnowledgeStore; delete window.__cp3cOrigKnowledgeStore; }
+      });
+    }
+    const restoredCorrectly = await page.evaluate(() => Object.isFrozen(window.KnowledgeStore) && typeof window.KnowledgeStore.ingestAdapterResult === 'function');
+    assert(restoredCorrectly, 'シナリオB: テスト後にKnowledgeStoreを元の(freeze済み)APIへ復元した(製品コードは変更していない)');
     await page.close();
   }
 

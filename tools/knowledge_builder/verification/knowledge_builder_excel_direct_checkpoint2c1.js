@@ -11,7 +11,7 @@ const path = require('path');
 const fs = require('fs');
 const { chromium } = require('playwright');
 
-const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.1.3-alpha.html');
+const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.2.0-alpha.html');
 const FIXTURES_DIR = path.join(__dirname, 'fixtures');
 const FIXTURE_MEANINGFUL_SMALL = path.join(FIXTURES_DIR, 'excel_direct_fixture_meaningful_small.xlsx');
 const FIXTURE_MEANINGFUL_TOO_LARGE = path.join(FIXTURES_DIR, 'excel_direct_fixture_meaningful_too_large.xlsx');

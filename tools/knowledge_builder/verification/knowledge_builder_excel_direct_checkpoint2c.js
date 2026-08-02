@@ -15,7 +15,7 @@ const path = require('path');
 const fs = require('fs');
 const { chromium } = require('playwright');
 
-const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.1.3-alpha.html');
+const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.2.0-alpha.html');
 const FIXTURES_DIR = path.join(__dirname, 'fixtures');
 const FIXTURE_DETECT_ROW1 = path.join(FIXTURES_DIR, 'excel_direct_fixture_detect_row1.xlsx');
 const FIXTURE_DETECT_ROW3 = path.join(FIXTURES_DIR, 'excel_direct_fixture_detect_row3.xlsx');

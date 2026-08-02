@@ -287,7 +287,7 @@ Knowledge Graphの選択Node情報パネルから「この項目を変換結果�
 
 ## 使い方
 
-1. `ui/knowledge_builder_tool_v0.1.3-alpha.html` をブラウザで直接開く(サーバ不要)
+1. `ui/knowledge_builder_tool_v0.2.0-alpha.html` をブラウザで直接開く(サーバ不要)
 2. 「1. データを読み込む」の「文書A」「文書B」に、既存PDF/Excelツールが出力したtrace JSON
    ファイルを指定する(文書A/Bの役割は固定していない。任意の2文書間の関連確認に使える)。
    動作確認用の小規模サンプルとして
@@ -369,7 +369,7 @@ verification/
   knowledge_builder_medium_sample_smoke_test.js   Playwright検証(中規模サンプルでの規模・一括操作)
   (いずれもNODE_PATH="$(npm root -g)"が必要なものはPlaywright使用箇所のみ)
 ui/
-  knowledge_builder_tool_v0.1.3-alpha.html  評価用ブラウザツール本体
+  knowledge_builder_tool_v0.2.0-alpha.html  評価用ブラウザツール本体
 design/
   knowledge_data_contract_0.1.md          Knowledge Data Contract 0.1(設計文書。α0.1.2・α0.1.3とも未変更)
 manual/

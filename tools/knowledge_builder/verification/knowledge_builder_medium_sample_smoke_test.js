@@ -15,7 +15,7 @@ const fs = require('fs');
 const os = require('os');
 const { chromium } = require('playwright');
 
-const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.1.3-alpha.html');
+const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.2.0-alpha.html');
 const MEDIUM_DIR = path.join(__dirname, '..', '..', '..', 'samples', 'knowledge_builder_alpha01', 'medium');
 const FILE_A = path.join(MEDIUM_DIR, 'JSON_A_medium_customer_requirements_trace.json');
 const FILE_B = path.join(MEDIUM_DIR, 'JSON_B_medium_design_review_trace.json');

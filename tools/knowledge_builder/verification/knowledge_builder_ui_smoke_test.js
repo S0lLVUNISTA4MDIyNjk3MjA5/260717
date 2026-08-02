@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* Knowledge Data Builder alpha 0.1.2 - browser smoke test (Playwright/Chromium).
  * Exercises the full checkpoint scope end-to-end in a real browser against the
- * self-contained knowledge_builder_tool_v0.1.3-alpha.html, using the existing repo
+ * self-contained knowledge_builder_tool_v0.2.0-alpha.html, using the existing repo
  * fixtures samples/hvac_trace_sample_small/JSON_A_*.json / JSON_B_*.json:
  *   ingest -> Node list (search/filter/quick-filter chips/multi-select/bulk tag/
  *   simple-detail toggle) -> generate Relation Candidates -> Relation list (grouped,
@@ -15,7 +15,7 @@ const fs = require('fs');
 const os = require('os');
 const { chromium } = require('playwright');
 
-const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.1.3-alpha.html');
+const HTML_PATH = path.join(__dirname, '..', 'ui', 'knowledge_builder_tool_v0.2.0-alpha.html');
 const SAMPLE_DIR = path.join(__dirname, '..', '..', '..', 'samples', 'hvac_trace_sample_small');
 const FILE_A = path.join(SAMPLE_DIR, 'JSON_A_customer_requirements_trace.json');
 const FILE_B = path.join(SAMPLE_DIR, 'JSON_B_design_review_trace.json');
