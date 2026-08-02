@@ -224,6 +224,119 @@ function buildFixtureMulti() {
   return wb;
 }
 
+// 是正Checkpoint 2c §1: 見出し行が1行目にある、判定しやすい単純なシート。
+function buildFixtureDetectRow1() {
+  const ws = {};
+  setCell(ws, 'A1', '項目');
+  setCell(ws, 'B1', '数量');
+  setCell(ws, 'A2', '部品P');
+  setCell(ws, 'B2', 2);
+  setCell(ws, 'A3', '部品Q');
+  setCell(ws, 'B3', 4);
+  ws['!ref'] = 'A1:B3';
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '見出し1行目');
+  return wb;
+}
+
+// 是正Checkpoint 2c §1: 先頭2行がタイトル・空行で、見出しは3行目にある(3列使い、
+// 単一セルだけのタイトル行が誤って見出し行と判定されないことを確認する)。
+function buildFixtureDetectRow3() {
+  const ws = {};
+  setCell(ws, 'A1', '点検表'); // タイトル行(A1だけ埋まっている。3列中1列=33% < 閾値50%)
+  // Row2: 空行のまま
+  setCell(ws, 'A3', '項目');
+  setCell(ws, 'B3', '結果');
+  setCell(ws, 'C3', '備考');
+  setCell(ws, 'A4', '部品X');
+  setCell(ws, 'B4', 'OK');
+  setCell(ws, 'C4', 'なし');
+  setCell(ws, 'A5', '部品Y');
+  setCell(ws, 'B5', 'NG');
+  setCell(ws, 'C5', '要確認');
+  ws['!ref'] = 'A1:C5';
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '見出し3行目');
+  return wb;
+}
+
+// 是正Checkpoint 2c §1: どの行も「使用範囲の列数の半分以上が埋まっている」状態にならない、
+// 見出し行を判定できないシート(5列中、各行1セルだけが散発的に埋まっている)。
+function buildFixtureDetectUnclear() {
+  const ws = {};
+  setCell(ws, 'A1', 'x');
+  setCell(ws, 'C2', 'y');
+  setCell(ws, 'E3', 'z');
+  ws['!ref'] = 'A1:E3';
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '見出し判定不能');
+  return wb;
+}
+
+// 是正Checkpoint 2c §2: '!ref'は範囲を主張するが、値・数式を持つセルが1つもない
+// (書式だけを適用した後に値を削除した等の実Excelでも起こり得る状態)。
+function buildFixtureFormatOnly() {
+  const ws = {};
+  ws['!ref'] = 'A1:C3'; // セルは1つも設定しない(書式だけが適用されたと仮定した状態を再現する)
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '書式だけ');
+  return wb;
+}
+
+// 是正Checkpoint 2c §2: データ行がすべて数式セルのみで構成されるシート
+// (数式結果が空でもformulaがあればデータとして扱われることを確認する)。
+function buildFixtureFormulaOnly() {
+  const ws = {};
+  setCell(ws, 'A1', '項目');
+  setCell(ws, 'B1', '計算結果');
+  // Row2: A列は空欄のまま、B列は表示値のある数式。
+  setCell(ws, 'B2', null, { formula: 'A2*2', value: 4, w: '4' });
+  // Row3: A列は空欄のまま、B列は表示値のない数式(是正Checkpoint 2a §2パターン)。
+  setCell(ws, 'B3', null, { formulaEmpty: 'IF(A3="","","x")' });
+  ws['!ref'] = 'A1:B3';
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '数式だけ');
+  return wb;
+}
+
+// 是正Checkpoint 2c §2: 非表示の行・列にも実データがあるシート(無言の行・列切捨てが
+// 起きていないことを確認する。行3(0-index 2)とC列(0-index 2)を非表示にする)。
+function buildFixtureHiddenRowsCols() {
+  const ws = {};
+  setCell(ws, 'A1', '項目');
+  setCell(ws, 'B1', '値');
+  setCell(ws, 'C1', '隠列');
+  setCell(ws, 'A2', '行2');
+  setCell(ws, 'B2', '通常2');
+  setCell(ws, 'C2', '隠しC2');
+  setCell(ws, 'A3', '行3隠');
+  setCell(ws, 'B3', '隠し行B3');
+  setCell(ws, 'C3', '隠し行C3隠列');
+  setCell(ws, 'A4', '行4');
+  setCell(ws, 'B4', '通常4');
+  setCell(ws, 'C4', '隠しC4');
+  ws['!ref'] = 'A1:C4';
+  ws['!rows'] = [{}, {}, { hidden: true }, {}];
+  ws['!cols'] = [{}, {}, { hidden: true }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '非表示行列あり');
+  return wb;
+}
+
+// 是正Checkpoint 2c §3: 既定タグ辞書には存在しないタグ("耐熱")がセル値に現れるシート。
+// カスタム辞書を使った場合にだけタグが付くことを確認する。
+function buildFixtureCustomTag() {
+  const ws = {};
+  setCell(ws, 'A1', '項目');
+  setCell(ws, 'B1', '区分');
+  setCell(ws, 'A2', '断熱材');
+  setCell(ws, 'B2', '耐熱');
+  ws['!ref'] = 'A1:B2';
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'カスタムタグ');
+  return wb;
+}
+
 function main() {
   const outDir = __dirname;
   writeWorkbook(buildFixtureA(), path.join(outDir, 'excel_direct_fixture_a.xlsx'));
@@ -235,9 +348,27 @@ function main() {
   writeWorkbook(buildFixtureDate(), path.join(outDir, 'excel_direct_fixture_date.xlsx'));
   writeWorkbook(buildFixtureRawOnly(), path.join(outDir, 'excel_direct_fixture_raw_only.xlsx'));
   writeWorkbook(buildFixtureMulti(), path.join(outDir, 'excel_direct_fixture_multi.xlsx'));
+  writeWorkbook(buildFixtureDetectRow1(), path.join(outDir, 'excel_direct_fixture_detect_row1.xlsx'));
+  writeWorkbook(buildFixtureDetectRow3(), path.join(outDir, 'excel_direct_fixture_detect_row3.xlsx'));
+  writeWorkbook(buildFixtureDetectUnclear(), path.join(outDir, 'excel_direct_fixture_detect_unclear.xlsx'));
+  writeWorkbook(buildFixtureFormatOnly(), path.join(outDir, 'excel_direct_fixture_format_only.xlsx'));
+  writeWorkbook(buildFixtureFormulaOnly(), path.join(outDir, 'excel_direct_fixture_formula_only.xlsx'));
+  writeWorkbook(buildFixtureHiddenRowsCols(), path.join(outDir, 'excel_direct_fixture_hidden_rows_cols.xlsx'));
+  writeWorkbook(buildFixtureCustomTag(), path.join(outDir, 'excel_direct_fixture_custom_tag.xlsx'));
+  const customVocab = {
+    schema: 'trace-tag-vocabulary/1.0',
+    vocabulary_id: 'custom-test-ja',
+    vocabulary_version: '1.0.0',
+    allowed_tags: ['耐熱'],
+    aliases: {}
+  };
+  fs.writeFileSync(path.join(outDir, 'excel_direct_custom_tag_vocab.json'), JSON.stringify(customVocab, null, 2));
   console.log('Generated: excel_direct_fixture_a.xlsx, excel_direct_fixture_b.xlsx, excel_direct_fixture_empty.xlsx, ' +
     'excel_direct_fixture_c_start.xlsx, excel_direct_fixture_formula_empty.xlsx, excel_direct_fixture_long_title.xlsx, ' +
-    'excel_direct_fixture_date.xlsx, excel_direct_fixture_raw_only.xlsx, excel_direct_fixture_multi.xlsx');
+    'excel_direct_fixture_date.xlsx, excel_direct_fixture_raw_only.xlsx, excel_direct_fixture_multi.xlsx, ' +
+    'excel_direct_fixture_detect_row1.xlsx, excel_direct_fixture_detect_row3.xlsx, excel_direct_fixture_detect_unclear.xlsx, ' +
+    'excel_direct_fixture_format_only.xlsx, excel_direct_fixture_formula_only.xlsx, excel_direct_fixture_hidden_rows_cols.xlsx, ' +
+    'excel_direct_fixture_custom_tag.xlsx, excel_direct_custom_tag_vocab.json');
 }
 
 main();

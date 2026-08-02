@@ -74,6 +74,25 @@
     return cell.raw !== null && cell.raw !== undefined && cell.raw !== '';
   }
 
+  // 是正Checkpoint 2c: SheetJSの生セル(cell.v/cell.f)が値または数式を持つかどうか(書式(z/s)だけの
+  // セルは対象外)。「意味のある使用範囲・空シート判定」「見出し行/データ開始行の簡易推定」の両方が
+  // これを基準にする(値または数式を持つセルだけを「データがある」とみなす)。
+  function cellHasRawOrFormula(cell) {
+    return !!cell && ((cell.v !== undefined && cell.v !== null && cell.v !== '') || !!cell.f);
+  }
+
+  // シート内に値または数式を持つセルが1つでもあるか(是正Checkpoint 2c §2)。
+  // '!ref'が存在していても、書式だけが適用され実データが1つもないシートはここでfalseになる
+  // (使用範囲の広さだけを見て「非空」と誤判定しない)。
+  function hasAnyMeaningfulCell(worksheet) {
+    if (!worksheet) return false;
+    for (const ref in worksheet) {
+      if (ref.charCodeAt(0) === 33) continue; // '!'始まりのメタキー(!ref, !rows, !cols, !merges等)は除く
+      if (cellHasRawOrFormula(worksheet[ref])) return true;
+    }
+    return false;
+  }
+
   // 是正Checkpoint 2a.1: SheetJSはcellDates:trueの日付セルを、シリアル値を「実行環境のローカル時刻」の
   // 暦要素として解釈したDateオブジェクトで返す(内部的にlocalなDateコンストラクタを使うため)。
   // そのため同じ.xlsxファイルでも、読み取るマシンのタイムゾーンが違うとraw値(延いてはknowledge_hash)が
@@ -126,7 +145,9 @@
     const wbSheetMeta = (workbook.Workbook && Array.isArray(workbook.Workbook.Sheets)) ? workbook.Workbook.Sheets : [];
     const sheetNames = workbook.SheetNames.map((name, index) => {
       const worksheet = workbook.Sheets[name];
-      const empty = !worksheet || !worksheet['!ref'];
+      // 是正Checkpoint 2c §2: '!ref'があるだけでは「データがある」とみなさない。書式だけが適用され
+      // 値・数式を持つセルが1つもないシート(例: 範囲だけ選択して太字にした等)も空シート扱いにする。
+      const empty = !worksheet || !worksheet['!ref'] || !hasAnyMeaningfulCell(worksheet);
       // Hidden: 0=表示, 1=非表示, 2=非常に非表示(いずれも1以上を「非表示」として扱う)。
       const meta = wbSheetMeta[index];
       const hidden = !!(meta && Number(meta.Hidden) >= 1);
@@ -150,7 +171,9 @@
     const sheetIndex = workbook.SheetNames.indexOf(sheetName);
     if (sheetIndex < 0) throw new Error(`シート「${sheetName}」が見つかりません。`);
     const worksheet = workbook.Sheets[sheetName];
-    if (!worksheet || !worksheet['!ref']) {
+    // 是正Checkpoint 2c §2: inspectWorkbook()のempty判定と同じ基準(値または数式を持つセルの有無)で
+    // 空シートを判定する('!ref'だけを見て「非空」と誤判定しない)。
+    if (!worksheet || !worksheet['!ref'] || !hasAnyMeaningfulCell(worksheet)) {
       throw new Error(`シート「${sheetName}」にデータがありません(空シート)。`);
     }
     if (!Number.isInteger(headerRowNumber) || headerRowNumber < 1) {
@@ -225,6 +248,70 @@
       sheetName, sheetIndex, headerRowNumber, dataStartRowNumber,
       headers, headerIsFallback, usedRange: worksheet['!ref'], rows,
       nonEmptyRowCount: rows.filter(r => !r.isEmpty).length
+    };
+  }
+
+  /**
+   * 見出し行・データ開始行を保守的に簡易推定する(UI非依存の純関数。是正Checkpoint 2c §1)。
+   * あくまでUI側の初期値提案であり、利用者はいつでも修正できる。誤判定・未判定の場合でも
+   * extractSheetRows()の列記号フォールバックはこの関数の判定に関係なく常に効く。
+   *
+   * 判定方法: 先頭から最大20行を走査し、「使用範囲の列数の半分以上のセルに値または数式がある」
+   * 最初の行を見出し行候補とする。見つからない場合は先頭行を見出し行とみなし、confidence='low'
+   * (固定code: header_detection_low_confidence)を返す。データ開始行は見出し行の直後で最初に
+   * 値または数式を持つ行とし、見つからない場合は見出し行の直後をそのまま採用してconfidence='low'
+   * にする。
+   * @param {object} workbook  inspectWorkbook()が返したworkbookそのもの
+   * @param {string} sheetName
+   * @returns {{ headerRow:number, dataStartRow:number, confidence:'high'|'low', code:string|null }}
+   */
+  function detectHeaderAndDataStart(workbook, sheetName) {
+    const XLSX = resolveXLSX();
+    if (!workbook || !Array.isArray(workbook.SheetNames)) throw new Error('workbookが不正です。');
+    const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet || !worksheet['!ref'] || !hasAnyMeaningfulCell(worksheet)) {
+      throw new Error(`シート「${sheetName}」にデータがありません(空シート)。`);
+    }
+
+    const range = XLSX.utils.decode_range(worksheet['!ref']);
+    const firstCol = range.s.c, lastCol = range.e.c, firstRow = range.s.r, lastRow = range.e.r;
+    const totalCols = lastCol - firstCol + 1;
+    const threshold = Math.ceil(totalCols / 2);
+
+    function rowNonBlankCount(r0) {
+      let count = 0;
+      for (let c = firstCol; c <= lastCol; c++) {
+        if (cellHasRawOrFormula(worksheet[XLSX.utils.encode_cell({ r: r0, c })])) count++;
+      }
+      return count;
+    }
+
+    const scanLimitRow = Math.min(lastRow, firstRow + 19); // 保守的: 先頭20行だけを走査する
+    let headerRow0 = null;
+    for (let r0 = firstRow; r0 <= scanLimitRow; r0++) {
+      if (rowNonBlankCount(r0) >= threshold) { headerRow0 = r0; break; }
+    }
+
+    let confidence = 'high';
+    if (headerRow0 === null) {
+      headerRow0 = firstRow; // 保守的フォールバック: 判定不能時は先頭行を見出しとみなす
+      confidence = 'low';
+    }
+
+    let dataStartRow0 = null;
+    for (let r0 = headerRow0 + 1; r0 <= lastRow; r0++) {
+      if (rowNonBlankCount(r0) > 0) { dataStartRow0 = r0; break; }
+    }
+    if (dataStartRow0 === null) {
+      dataStartRow0 = headerRow0 + 1; // 保守的フォールバック: 判定不能時は見出し直後をデータ開始行とみなす
+      confidence = 'low';
+    }
+
+    return {
+      headerRow: headerRow0 + 1,
+      dataStartRow: dataStartRow0 + 1,
+      confidence,
+      code: confidence === 'low' ? 'header_detection_low_confidence' : null
     };
   }
 
@@ -478,7 +565,8 @@
   }
 
   return Object.freeze({
-    inspectWorkbook, extractSheetRows, buildKnowledgeNodesFromExcel, buildKnowledgeNodesFromExcelSheets, adaptExcelDirect,
+    inspectWorkbook, extractSheetRows, detectHeaderAndDataStart,
+    buildKnowledgeNodesFromExcel, buildKnowledgeNodesFromExcelSheets, adaptExcelDirect,
     columnLetter, matchInitialTags, deriveTitle, deriveText,
     cellHasContent, cellTextValue, truncateForDisplay
   });

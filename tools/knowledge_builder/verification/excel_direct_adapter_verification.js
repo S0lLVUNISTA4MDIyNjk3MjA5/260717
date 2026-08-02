@@ -22,6 +22,14 @@ const FIXTURE_LONG_TITLE = path.join(FIXTURES_DIR, 'excel_direct_fixture_long_ti
 const FIXTURE_DATE = path.join(FIXTURES_DIR, 'excel_direct_fixture_date.xlsx');
 const FIXTURE_RAW_ONLY = path.join(FIXTURES_DIR, 'excel_direct_fixture_raw_only.xlsx');
 const FIXTURE_MULTI = path.join(FIXTURES_DIR, 'excel_direct_fixture_multi.xlsx');
+const FIXTURE_DETECT_ROW1 = path.join(FIXTURES_DIR, 'excel_direct_fixture_detect_row1.xlsx');
+const FIXTURE_DETECT_ROW3 = path.join(FIXTURES_DIR, 'excel_direct_fixture_detect_row3.xlsx');
+const FIXTURE_DETECT_UNCLEAR = path.join(FIXTURES_DIR, 'excel_direct_fixture_detect_unclear.xlsx');
+const FIXTURE_FORMAT_ONLY = path.join(FIXTURES_DIR, 'excel_direct_fixture_format_only.xlsx');
+const FIXTURE_FORMULA_ONLY = path.join(FIXTURES_DIR, 'excel_direct_fixture_formula_only.xlsx');
+const FIXTURE_HIDDEN_ROWS_COLS = path.join(FIXTURES_DIR, 'excel_direct_fixture_hidden_rows_cols.xlsx');
+const FIXTURE_CUSTOM_TAG = path.join(FIXTURES_DIR, 'excel_direct_fixture_custom_tag.xlsx');
+const CUSTOM_TAG_VOCAB = JSON.parse(fs.readFileSync(path.join(FIXTURES_DIR, 'excel_direct_custom_tag_vocab.json'), 'utf8'));
 
 const TAG_VOCAB = { allowed_tags: ['安全', '性能', '機能', '品質', 'インターフェース', '製造', '検査', '保守'], aliases: { 'けが防止': '安全' } };
 
@@ -399,6 +407,99 @@ async function main() {
     // ---- タグ: 全選択シートへ同じ共有辞書が適用される ----
     assert(contentFromSheet0.some(n => n.tags.includes('安全')) && contentFromSheet1.some(n => n.tags.includes('安全')),
       '両シートに対して同じ共有タグ辞書が適用される(区分列=安全のセルがどちらのシートでもタグ化される)');
+  }
+
+  // ================= Checkpoint 2c: Excel入力完成化 =================
+
+  // ---- §1: 見出し行・データ開始行の保守的な簡易自動推定 ----
+  {
+    const { workbook: wb1 } = Adapter.inspectWorkbook(readAsArrayBuffer(FIXTURE_DETECT_ROW1));
+    const d1 = Adapter.detectHeaderAndDataStart(wb1, '見出し1行目');
+    assert(d1.headerRow === 1 && d1.dataStartRow === 2 && d1.confidence === 'high' && d1.code === null,
+      `見出しが1行目にある単純なシートは正しく推定される(実際: ${JSON.stringify(d1)})`);
+
+    const { workbook: wb3 } = Adapter.inspectWorkbook(readAsArrayBuffer(FIXTURE_DETECT_ROW3));
+    const d3 = Adapter.detectHeaderAndDataStart(wb3, '見出し3行目');
+    assert(d3.headerRow === 3 && d3.dataStartRow === 4 && d3.confidence === 'high' && d3.code === null,
+      `単一セルだけのタイトル行(1行目)に惑わされず、3行目の見出しを正しく推定する(実際: ${JSON.stringify(d3)})`);
+
+    const { workbook: wbU } = Adapter.inspectWorkbook(readAsArrayBuffer(FIXTURE_DETECT_UNCLEAR));
+    const dU = Adapter.detectHeaderAndDataStart(wbU, '見出し判定不能');
+    assert(dU.confidence === 'low' && dU.code === 'header_detection_low_confidence',
+      `見出し行を判定できない場合はconfidence='low'・固定code(header_detection_low_confidence)を返す(実際: ${JSON.stringify(dU)})`);
+    assert(dU.headerRow === 1 && dU.dataStartRow === 2,
+      `判定不能時は先頭行を見出しとみなす保守的なフォールバックになる(実際: headerRow=${dU.headerRow}, dataStartRow=${dU.dataStartRow})`);
+
+    // 誤判定時でも列記号フォールバックは維持される(見出し判定不能fixtureのA1='x'は見出しとして
+    // 使えるが、B1は空欄のため列記号'B'にフォールバックする)。
+    const extU = Adapter.extractSheetRows(wbU, '見出し判定不能', dU.headerRow, dU.dataStartRow);
+    assert(extU.headers[1] === 'B' && extU.headerIsFallback[1] === true,
+      `誤判定/判定不能な見出し行を使ってもextractSheetRows()の列記号フォールバックは維持される(実際headers: ${JSON.stringify(extU.headers)})`);
+
+    // 推定結果を初期値として使っても、利用者は自由な値へ修正して再抽出できる(推定はあくまで初期値)。
+    const extOverride = Adapter.extractSheetRows(wb3, '見出し3行目', 1, 2);
+    assert(extOverride.nonEmptyRowCount >= 0,
+      '推定結果を無視して利用者が指定した見出し行/データ開始行でも抽出できる(修正を許可)');
+  }
+
+  // ---- §2: 意味のある使用範囲と空シート判定 ----
+  {
+    // 書式だけのシート: '!ref'はあるが値・数式を持つセルが1つもないため空シート扱いになる。
+    const { sheetNames: fmtSheetNames } = Adapter.inspectWorkbook(readAsArrayBuffer(FIXTURE_FORMAT_ONLY));
+    assert(fmtSheetNames[0].empty === true,
+      `'!ref'があるだけで値・数式セルが1つもないシートは空シートと判定される(実際: ${JSON.stringify(fmtSheetNames[0])})`);
+    let formatOnlyThrew = false;
+    try {
+      const { workbook } = Adapter.inspectWorkbook(readAsArrayBuffer(FIXTURE_FORMAT_ONLY));
+      Adapter.extractSheetRows(workbook, '書式だけ', 1, 2);
+    } catch (e) { formatOnlyThrew = true; }
+    assert(formatOnlyThrew, '書式だけのシートはextractSheetRows()でも空シートエラーになる');
+
+    // 数式だけのシート: 数式結果が空でもformulaがあればデータとして扱われる(空シートにならない)。
+    const { workbook: wbFormulaOnly, sheetNames: formulaOnlySheetNames } = Adapter.inspectWorkbook(readAsArrayBuffer(FIXTURE_FORMULA_ONLY));
+    assert(formulaOnlySheetNames[0].empty === false,
+      '数式だけのシートは(値セルが1つもなくても)空シート扱いにならない');
+    const extFormulaOnly = Adapter.extractSheetRows(wbFormulaOnly, '数式だけ', 1, 2);
+    assert(extFormulaOnly.nonEmptyRowCount === 2,
+      `数式だけの行もすべて非空データ行として扱われる(実際: ${extFormulaOnly.nonEmptyRowCount})`);
+    const resultFormulaOnly = await Adapter.buildKnowledgeNodesFromExcelSheets([extFormulaOnly], {
+      fileName: 'excel_direct_fixture_formula_only.xlsx', contentDigest: 'g'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB
+    });
+    assert(resultFormulaOnly.nodes.filter(n => n.node_type === 'statement').length === 2,
+      '数式だけのシートからも数式結果の有無によらず全データ行がNode化される');
+
+    // 非表示行・列にデータを持つシート: 無言の行・列切捨てが起きていないことを確認する。
+    const { workbook: wbHidden } = Adapter.inspectWorkbook(readAsArrayBuffer(FIXTURE_HIDDEN_ROWS_COLS));
+    const extHidden = Adapter.extractSheetRows(wbHidden, '非表示行列あり', 1, 2);
+    assert(extHidden.headers.length === 3 && extHidden.headers[2] === '隠列',
+      `非表示列(C列)の見出しも切り捨てられずに含まれる(実際: ${JSON.stringify(extHidden.headers)})`);
+    assert(extHidden.rows.length === 3 && extHidden.rows.every(r => !r.isEmpty),
+      `非表示行(行3)も含めて全データ行が抽出される(実際の行数: ${extHidden.rows.length})`);
+    const hiddenRow = extHidden.rows.find(r => r.rowNumber === 3);
+    assert(hiddenRow.cells.map(c => c.raw).join(',') === '行3隠,隠し行B3,隠し行C3隠列',
+      `非表示行(行3)のセル値も欠落なく抽出される(実際: ${JSON.stringify(hiddenRow.cells.map(c => c.raw))})`);
+    const resultHidden = await Adapter.buildKnowledgeNodesFromExcelSheets([extHidden], {
+      fileName: 'excel_direct_fixture_hidden_rows_cols.xlsx', contentDigest: 'h'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB
+    });
+    assert(resultHidden.nodes.filter(n => n.node_type === 'statement').length === 3,
+      `非表示行を含む全3行がNode化される(無言の行切捨てがない。実際: ${resultHidden.nodes.filter(n => n.node_type === 'statement').length}件)`);
+  }
+
+  // ---- §3: カスタムタグ辞書とプレビューの一致(Node生成側の確認。プレビュー側はPlaywrightで確認) ----
+  {
+    const { workbook } = Adapter.inspectWorkbook(readAsArrayBuffer(FIXTURE_CUSTOM_TAG));
+    const ext = Adapter.extractSheetRows(workbook, 'カスタムタグ', 1, 2);
+    const nonBlank = ext.rows[0].cells.filter(Adapter.cellHasContent);
+    const defaultTags = Adapter.matchInitialTags(nonBlank.map(c => Adapter.cellTextValue(c)), TAG_VOCAB);
+    const customTags = Adapter.matchInitialTags(nonBlank.map(c => Adapter.cellTextValue(c)), CUSTOM_TAG_VOCAB);
+    assert(defaultTags.length === 0, `既定タグ辞書には存在しないタグ("耐熱")は既定辞書では付与されない(実際: ${JSON.stringify(defaultTags)})`);
+    assert(JSON.stringify(customTags) === JSON.stringify(['耐熱']), `カスタム辞書を使うと"耐熱"タグが付与される(実際: ${JSON.stringify(customTags)})`);
+
+    const resultCustom = await Adapter.buildKnowledgeNodesFromExcelSheets([ext], {
+      fileName: 'excel_direct_fixture_custom_tag.xlsx', contentDigest: 'i'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: CUSTOM_TAG_VOCAB
+    });
+    const customNode = resultCustom.nodes.find(n => n.node_type === 'statement');
+    assert(customNode.tags.includes('耐熱'), 'Node生成時もカスタム辞書を渡せば同じタグが付与される(プレビューとNode生成で同じ辞書を使う設計)');
   }
 
   console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);

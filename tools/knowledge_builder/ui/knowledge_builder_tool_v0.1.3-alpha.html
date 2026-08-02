@@ -547,6 +547,15 @@ async function onExcelFileChange(side) {
 
 // 是正Checkpoint 2b: シート一覧をチェックボックスで表示する。空シートは選択不可(disabled)、
 // 非表示シートは一覧表示するが初期選択しない。初期選択は「先頭の非空・可視シート」だけ。
+// 是正Checkpoint 2c §1: 見出し行・データ開始行の初期値を保守的に自動推定して表示する。
+// 推定はあくまで初期値であり、利用者はいつでも数値を書き換えられる(disabledにしない)。
+// 低信頼/判定不能の場合は固定code(header_detection_low_confidence)を表示するだけで、
+// extractSheetRows()の列記号フォールバックはこの推定結果に関係なく常に効く。
+function headerDetectionWarningText(code) {
+  if (code === 'header_detection_low_confidence') return '見出し行を自動判定できませんでした(内容をご確認ください)';
+  return code;
+}
+
 function renderSheetList(side) {
   const input = excelInputRef(side);
   const container = $('sheetList' + side);
@@ -557,11 +566,19 @@ function renderSheetList(side) {
     const disabled = s.empty;
     const badge = s.empty ? '<span class="muted">(空シートのため選択不可)</span>'
       : (s.hidden ? '<span class="muted">(非表示シート)</span>' : '');
+    let detected = { headerRow: 1, dataStartRow: 2, confidence: 'high', code: null };
+    if (!s.empty) {
+      try { detected = KnowledgeExcelDirectAdapter.detectHeaderAndDataStart(input.workbook, s.name); }
+      catch (e) { /* 推定に失敗しても既定値(1/2)のまま利用者が修正できる */ }
+    }
+    const detectionBadge = detected.code
+      ? `<span class="muted excel-sheet-detect-badge">(${esc(headerDetectionWarningText(detected.code))})</span>` : '';
     return `<div class="excel-sheet-row" data-sheet-index="${s.index}" data-sheet-name="${esc(s.name)}">
       <label><input type="checkbox" class="excel-sheet-check" data-side="${side}" data-sheet-index="${s.index}"${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}> ${esc(s.name)}</label>
       ${badge}
-      <span>見出し行: <input type="number" class="excel-sheet-header" data-side="${side}" data-sheet-index="${s.index}" min="1" value="1"${disabled ? ' disabled' : ''}></span>
-      <span>データ開始行: <input type="number" class="excel-sheet-datastart" data-side="${side}" data-sheet-index="${s.index}" min="1" value="2"${disabled ? ' disabled' : ''}></span>
+      <span>見出し行: <input type="number" class="excel-sheet-header" data-side="${side}" data-sheet-index="${s.index}" min="1" value="${detected.headerRow}"${disabled ? ' disabled' : ''}></span>
+      <span>データ開始行: <input type="number" class="excel-sheet-datastart" data-side="${side}" data-sheet-index="${s.index}" min="1" value="${detected.dataStartRow}"${disabled ? ' disabled' : ''}></span>
+      ${detectionBadge}
     </div>`;
   }).join('');
   updatePreviewButtonState(side);
@@ -587,11 +604,34 @@ function onSheetSelectionChange(side) {
   if (input) $('excelStatus' + side).textContent = 'シート選択または見出し行/データ開始行を変更しました。「プレビュー取り込み」を押してください。';
 }
 
+// 是正Checkpoint 2c §3: 共有タグ辞書ファイルが変更されたら、A/B両方の既存プレビューを無効化し、
+// 再プレビューを要求する(プレビューとNode生成が異なる辞書を参照したままにならないようにする)。
+function onVocabFileChange() {
+  for (const side of ['A', 'B']) {
+    const input = excelInputRef(side);
+    if (input && input.extractions) {
+      input.extractions = null;
+      renderExcelPreview(side);
+      updatePreviewButtonState(side);
+      $('btnPreviewExcel' + side).textContent = 'プレビュー取り込み';
+      $('excelStatus' + side).textContent = '共有タグ辞書が変更されました。「プレビュー取り込み」を押し直してください。';
+    }
+  }
+}
+
+// 是正Checkpoint 2c §3: プレビューとNode生成で必ず同じ辞書を使う。未指定時は既定辞書、
+// 指定時はそのファイルを読み直す(ingest()が実際の取込時に読むのと同じロジック)。
+async function activeTagVocabularyForPreview() {
+  const vocabFile = $('fileVocab').files[0];
+  if (!vocabFile) return DEFAULT_TAG_VOCABULARY;
+  return await readJsonFile(vocabFile);
+}
+
 // 「プレビュー取り込み」: チェックした各シートについてextractSheetRows()を実行し、
 // 結果を読み取り専用プレビューとして表示する。この時点ではまだKnowledge Node化しない(Step 2へは進まない)。
 // 是正Checkpoint 2b: いずれか1シートでも抽出に失敗したら、プレビュー全体を取込エラーとして扱う
 // (実際のKnowledge Node生成時の文書全体fail-closedと挙動を合わせる)。
-function previewExcel(side) {
+async function previewExcel(side) {
   const input = excelInputRef(side);
   const status = $('excelStatus' + side);
   const btnPreview = $('btnPreviewExcel' + side);
@@ -608,14 +648,16 @@ function previewExcel(side) {
     // 決定性: プレビュー表示もsheet index順に揃える(実際のNode生成順と一致させる)。
     extractions.sort((a, b) => a.sheetIndex - b.sheetIndex);
     input.extractions = extractions;
+    // 是正Checkpoint 2c: DOM描画(非同期)を完了させてから完了ステータス文言を出す
+    // (先にステータスだけ更新すると、まだ表が描画されていない一瞬をテスト等が観測しうるため)。
+    await renderExcelPreview(side);
     const totalNonEmpty = extractions.reduce((sum, e) => sum + e.nonEmptyRowCount, 0);
     status.textContent = `プレビュー取り込み完了: ${extractions.length}シート、非空データ行 合計${totalNonEmpty}件。内容を確認し、問題なければ「Knowledge Nodeを生成してStep 2へ」を押してください。`;
     btnPreview.textContent = 'プレビューを取り込み直す';
-    renderExcelPreview(side);
   } catch (e) {
     input.extractions = null;
+    await renderExcelPreview(side);
     status.textContent = `プレビュー取り込みエラー: ${e.message || e}`;
-    renderExcelPreview(side);
   }
 }
 
@@ -628,13 +670,13 @@ function excelWarningText(w) {
 
 // 読み取り専用プレビュー表示(編集不可): シート単位で区切って表示する(是正Checkpoint 2b)。
 // 各シートブロック内は従来どおりシート名・行番号・セル範囲・タイトル・本文抜粋・初期タグ・警告。
-function renderExcelPreview(side) {
+// 是正Checkpoint 2c §3: プレビューとNode生成で同じ辞書を使うため、実際に選択されている
+// 共有タグ辞書ファイルを読み直す(未指定時のみ既定辞書を使う)。
+async function renderExcelPreview(side) {
   const input = excelInputRef(side);
   const wrap = $('excelPreviewWrap' + side);
   if (!input || !input.extractions || !input.extractions.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
-  // プレビュー時点では共有タグ辞書ファイルの読み込みは行わない(重い非同期処理を避けるため)。
-  // 未指定時の既定辞書のみでタグ一致を仮表示する(実際の取込時は指定辞書があればそちらを使う)。
-  const previewVocab = DEFAULT_TAG_VOCABULARY;
+  const previewVocab = await activeTagVocabularyForPreview();
   wrap.innerHTML = input.extractions.map(extraction => {
     const rowsHtml = extraction.rows.map(row => {
       const nonBlank = row.cells.filter(KnowledgeExcelDirectAdapter.cellHasContent);
@@ -2203,6 +2245,7 @@ for (const side of ['A', 'B']) {
   $('btnPreviewExcel' + side).addEventListener('click', () => previewExcel(side));
   $('sheetList' + side).addEventListener('change', () => onSheetSelectionChange(side));
 }
+$('fileVocab').addEventListener('change', onVocabFileChange);
 
 $('showStructural').addEventListener('change', renderNodeTable);
 $('nodeDetailMode').addEventListener('change', renderNodeTable);

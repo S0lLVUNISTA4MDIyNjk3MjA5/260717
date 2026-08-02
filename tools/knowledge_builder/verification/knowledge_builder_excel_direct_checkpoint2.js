@@ -81,13 +81,22 @@ async function main() {
     const candidateCount = m ? Number(m[1]) : 0;
     assert(candidateCount > 0, `Relation Candidateが生成できる(#12。実際: ${candidateCount}件。fixture A/Bは「安全」タグを共有するよう作成済み)`);
 
-    // ---- #13: Graph表示可能 ----
+    // ---- #13: Graph表示可能。是正Checkpoint 2c §4: カウンタ表示文字列だけでなく、
+    // 実際に描画されたDOM/SVG要素数も0件より多いこと・カウンタと一致することを確認する。
     const graphNodeCount = await page.textContent('#graphNodeCount');
-    assert(Number(graphNodeCount) >= 0, `Graphが表示できる(初期状態でエラーにならない。実際のNode数: ${graphNodeCount})`);
+    assert(Number(graphNodeCount) > 0, `Graph Node数は0件より多い(実際: ${graphNodeCount})`);
+    const graphNodeDomCount = await page.$$eval('#graphSvg .graph-node-shape', els => els.length);
+    assert(graphNodeDomCount > 0 && graphNodeDomCount === Number(graphNodeCount),
+      `GraphのNode DOM/SVG要素が実際に0件より多く描画され、カウンタ値と一致する(実際のDOM要素数: ${graphNodeDomCount}/カウンタ: ${graphNodeCount})`);
+
     await page.check('#graphShowCandidates');
     await page.waitForTimeout(100);
     const graphEdgeCountWithCandidates = await page.textContent('#graphEdgeCount');
     assert(Number(graphEdgeCountWithCandidates) === candidateCount, `Graphに未処理候補を表示するとCandidate数と一致する(#13。実際: ${graphEdgeCountWithCandidates}/${candidateCount})`);
+    const graphEdgeDomCount = await page.$$eval('#graphSvg .graph-edge-line, #graphSvg .graph-agg-line', els => els.length);
+    assert(graphEdgeDomCount > 0, `Candidate表示時のEdge DOM/SVG要素は0件より多い(実際: ${graphEdgeDomCount})`);
+    assert(graphEdgeDomCount === candidateCount,
+      `Edge DOM要素の表示件数もCandidate数と一致する(実際: ${graphEdgeDomCount}/${candidateCount})`);
     await page.uncheck('#graphShowCandidates');
 
     // node_type中立性: Excel直接入力の内容Nodeはrequirement/design_itemへ寄せられていない

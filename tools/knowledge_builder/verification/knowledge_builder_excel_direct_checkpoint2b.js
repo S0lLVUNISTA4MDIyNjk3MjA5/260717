@@ -145,13 +145,20 @@ async function main() {
     const candidateCount = m ? Number(m[1]) : 0;
     assert(candidateCount > 0, `複数シート取込後もRelation Candidateが生成できる(#15。実際: ${candidateCount}件)`);
 
-    // ---- #16: Graph表示 ----
+    // ---- #16: Graph表示。是正Checkpoint 2c §4: カウンタ文字列だけでなく実際のDOM/SVG要素数も確認する ----
     const graphNodeCount = await page.textContent('#graphNodeCount');
-    assert(Number(graphNodeCount) >= 0, `Graphが表示できる(初期状態でエラーにならない。実際のNode数: ${graphNodeCount})`);
+    assert(Number(graphNodeCount) > 0, `Graph Node数は0件より多い(実際: ${graphNodeCount})`);
+    const graphNodeDomCount = await page.$$eval('#graphSvg .graph-node-shape', els => els.length);
+    assert(graphNodeDomCount > 0 && graphNodeDomCount === Number(graphNodeCount),
+      `GraphのNode DOM/SVG要素が0件より多く描画され、カウンタ値と一致する(実際: ${graphNodeDomCount}/カウンタ: ${graphNodeCount})`);
+
     await page.check('#graphShowCandidates');
     await page.waitForTimeout(100);
     const graphEdgeCount = await page.textContent('#graphEdgeCount');
     assert(Number(graphEdgeCount) === candidateCount, `Graphの未処理候補表示がCandidate数と一致する(#16。実際: ${graphEdgeCount}/${candidateCount})`);
+    const graphEdgeDomCount = await page.$$eval('#graphSvg .graph-edge-line, #graphSvg .graph-agg-line', els => els.length);
+    assert(graphEdgeDomCount > 0 && graphEdgeDomCount === candidateCount,
+      `Candidate表示時のEdge DOM/SVG要素が0件より多く描画され、表示件数がCandidate数と一致する(実際: ${graphEdgeDomCount}/${candidateCount})`);
     await page.uncheck('#graphShowCandidates');
 
     // ---- #17: Knowledge JSON validation PASS + 複数シート構造の確認 ----
