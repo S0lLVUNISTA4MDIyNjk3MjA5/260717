@@ -236,19 +236,18 @@ async function main() {
   const nodeCountItemMedium = Number(await page.textContent('#graphNodeCount'));
   assert(nodeCountItemMedium === withStructuralCount,
     `個別項目粒度のNode数はNode一覧で構造Node表示ONにした場合の件数と一致する(実際: ${nodeCountItemMedium}/${withStructuralCount})`);
-  const aggAtItemMedium = await page.evaluate(() => [...document.querySelectorAll('#graphSvg line')].some(l => l.getAttribute('stroke') === '#7a4fd1'));
+  const aggAtItemMedium = await page.evaluate(() => document.querySelectorAll('#graphSvg path.graph-agg-line').length > 0);
   assert(!aggAtItemMedium, '個別項目粒度では中規模データでも集約線が出ない(展開すると元の個別Edge表示に戻る)');
 
   await page.selectOption('#graphGranularity', 'section');
   await page.waitForTimeout(150);
 
   // §23.3: 集約Edgeの件数・内訳の整合性(集約内容の一覧と要約表示が一致するか、重複edge_idがないか)
-  const aggLineIdxMedium = await page.evaluate(() =>
-    [...document.querySelectorAll('#graphSvg line')].findIndex(l => l.getAttribute('stroke') === '#7a4fd1'));
+  const aggLineIdxMedium = await page.evaluate(() => document.querySelectorAll('#graphSvg path.graph-agg-line').length > 0 ? 0 : -1);
   assert(aggLineIdxMedium >= 0, `中規模データ・既定10件採用のもとでは集約線が最低1本発生する(実際のindex: ${aggLineIdxMedium})`);
 
   if (aggLineIdxMedium >= 0) {
-    await page.locator('#graphSvg line').nth(aggLineIdxMedium).click({ force: true });
+    await page.locator('#graphSvg path.graph-agg-line').nth(aggLineIdxMedium).click({ force: true });
     await page.waitForTimeout(100);
     const aggText = await page.textContent('#graphAggregateInfo');
     const m = aggText.match(/関連\s*(\d+)件.*採用済み\s*(\d+)\s*\/\s*未処理\s*(\d+)\s*\/\s*却下\s*(\d+)\s*\/\s*stale\s*(\d+)/s);
@@ -301,6 +300,146 @@ async function main() {
     }
   }
 
+  // ---- 是正Checkpoint: 章・節単位とタグフィルタの併用で空Graphにならないことを回帰確認する ----
+  // dataset(生成済みcandidate含む)から直接、「温度」タグを持つ内容Nodeが少なくとも一方の端点である
+  // semantic edgeの集合を独立に計算し、Graph内部の集計(タグ対象edge集合→Node/Edge計算)と突き合わせる。
+  const tagGroundTruth = await page.evaluate(() => {
+    const taggedIds = new Set(dataset.nodes.filter(n => n.node_type !== 'document' && n.node_type !== 'section' && n.tags.includes('温度')).map(n => n.node_id));
+    const edges = dataset.edges.filter(e => e.relation_category === 'semantic' && (taggedIds.has(e.source_node_id) || taggedIds.has(e.target_node_id)));
+    return { taggedContentCount: taggedIds.size, edgeIds: edges.map(e => e.edge_id).sort() };
+  });
+  assert(tagGroundTruth.taggedContentCount > 0, '「温度」タグを持つ内容Nodeが中規模サンプルに存在する(前提条件)');
+
+  // 独立計算は採用/未処理を問わずタグ該当semantic edge全件を対象とするため、Graph側も
+  // 全lifecycleを表示(未処理候補も表示ON)にしてから比較する。
+  await page.check('#graphShowCandidates');
+  await page.waitForTimeout(100);
+  await page.selectOption('#graphTagFilter', '温度');
+  await page.waitForTimeout(150);
+  const nodeCountSectionTagged = Number(await page.textContent('#graphNodeCount'));
+  const edgeCountSectionTagged = Number(await page.textContent('#graphEdgeCount'));
+  assert(nodeCountSectionTagged > 0 && edgeCountSectionTagged > 0,
+    `章・節単位+タグフィルタ「温度」でGraphが空にならない(是正Checkpoint。実際: node=${nodeCountSectionTagged}/edge=${edgeCountSectionTagged})`);
+
+  const aggUnionTagged = await page.evaluate(() => {
+    const preTagCandidates = graphCandidateNodes();
+    const tagEligibleEdgeIds = graphTagFilterEligibleEdgeIds(preTagCandidates);
+    const baseCandidates = graphApplyTagFilter(preTagCandidates, tagEligibleEdgeIds);
+    const parentMap = structuralParentMap();
+    const visibleIds = computeVisibleGraphNodeIds(baseCandidates, parentMap);
+    const groups = computeGraphEdgeGroups(visibleIds, parentMap, tagEligibleEdgeIds);
+    const allIds = new Set();
+    groups.forEach(g => g.edges.forEach(e => allIds.add(e.edge_id)));
+    return [...allIds].sort();
+  });
+  assert(JSON.stringify(aggUnionTagged) === JSON.stringify(tagGroundTruth.edgeIds),
+    `タグフィルタ適用時の集約Edge内のedge_id集合が、datasetから独立計算した「温度」該当edge_id集合と完全一致する(是正Checkpoint。件数: 内部=${aggUnionTagged.length}/独立計算=${tagGroundTruth.edgeIds.length})`);
+
+  // 文書単位: タグ対象のsemantic edgeも正しく集約される(document Node 2件・集約1本に収束するはず)
+  await page.selectOption('#graphGranularity', 'document');
+  await page.waitForTimeout(150);
+  assert(Number(await page.textContent('#graphNodeCount')) === 2, '文書単位+タグフィルタでもdocument Node 2件だけが表示される(是正Checkpoint)');
+  assert(Number(await page.textContent('#graphEdgeCount')) >= 1, '文書単位+タグフィルタでタグ対象Edgeが集約されて表示される(是正Checkpoint)');
+
+  // 個別項目: タグ対象の内容Nodeと個別Edgeがそのまま表示される(集約されない)
+  await page.selectOption('#graphGranularity', 'item');
+  await page.waitForTimeout(150);
+  const itemTaggedContentCircles = await page.$$eval('#graphSvg circle.graph-node-shape', els => els.length);
+  assert(itemTaggedContentCircles === tagGroundTruth.taggedContentCount,
+    `個別項目+タグフィルタでは、タグ対象の内容Nodeの円がタグ付き件数と一致する(是正Checkpoint。実際: ${itemTaggedContentCircles}/${tagGroundTruth.taggedContentCount})`);
+  const itemTaggedAgg = await page.evaluate(() => document.querySelectorAll('#graphSvg path.graph-agg-line').length > 0);
+  assert(!itemTaggedAgg, '個別項目+タグフィルタでは集約されず個別Edgeのまま表示される(是正Checkpoint)');
+
+  await page.uncheck('#graphShowCandidates');
+  await page.waitForTimeout(100);
+
+  // タグ解除で通常の章・節単位表示に戻る(§4: タグクリアで通常表示に戻ることの確認)
+  await page.selectOption('#graphGranularity', 'section');
+  await page.selectOption('#graphTagFilter', 'all');
+  await page.waitForTimeout(150);
+  assert(Number(await page.textContent('#graphNodeCount')) === nodeCountSectionMedium,
+    'タグフィルタ解除で章・節単位のNode数がタグフィルタ適用前と一致する(通常表示に戻る)');
+
+  // タグフィルタはUI表示専用であり、保存されるKnowledge JSON(正式なNode/Edge集合)には一切影響しない
+  await page.selectOption('#graphTagFilter', '温度');
+  await page.waitForTimeout(100);
+  const savedNodeEdgeCountUnderTagFilter = await page.evaluate(() => ({ nodes: dataset.nodes.length, edges: dataset.edges.length }));
+  assert(savedNodeEdgeCountUnderTagFilter.nodes === 212 && savedNodeEdgeCountUnderTagFilter.edges === 444,
+    `Graphタグフィルタ適用中でも正式なNode/Edge集合(dataset)は変化しない(実際: node=${savedNodeEdgeCountUnderTagFilter.nodes}/edge=${savedNodeEdgeCountUnderTagFilter.edges})`);
+  await page.selectOption('#graphTagFilter', 'all');
+  await page.waitForTimeout(100);
+
+  // ---- 是正Checkpoint: 章・節単位の集約Graphで、Nodeラベル・件数ラベル・マーカーが重ならないことを回帰確認する ----
+  // 実 browser の getBBox() で座標矩形を取得し、決定的に衝突検出する(色分けだけに依存しない視認性の確認も兼ねる)。
+  const layoutGeom = await page.evaluate(() => {
+    const svg = document.getElementById('graphSvg');
+    const toRect = (elm) => { const b = elm.getBBox(); return { x: b.x, y: b.y, width: b.width, height: b.height }; };
+    const nodeLabelRects = [...svg.querySelectorAll('text.graph-node-label')].map(toRect);
+    const countLabelRects = [...svg.querySelectorAll('text.graph-agg-count-label')].map(toRect);
+    const markerCircles = [...svg.querySelectorAll('circle.graph-agg-marker')].map(c => ({
+      cx: Number(c.getAttribute('cx')), cy: Number(c.getAttribute('cy')), r: Number(c.getAttribute('r'))
+    }));
+    const aggPaths = [...svg.querySelectorAll('path.graph-agg-line')].map(p => p.getAttribute('d'));
+    return { nodeLabelRects, countLabelRects, markerCircles, aggPaths };
+  });
+  function rectsOverlapMedium(a, b) {
+    return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+  }
+  function circlesOverlapMedium(a, b) {
+    const dx = a.cx - b.cx, dy = a.cy - b.cy;
+    return Math.sqrt(dx * dx + dy * dy) < (a.r + b.r);
+  }
+  function circleRectOverlapMedium(c, r) {
+    const closestX = Math.max(r.x, Math.min(c.cx, r.x + r.width));
+    const closestY = Math.max(r.y, Math.min(c.cy, r.y + r.height));
+    const dx = c.cx - closestX, dy = c.cy - closestY;
+    return (dx * dx + dy * dy) < (c.r * c.r);
+  }
+  function segRectIntersectMedium(x1, y1, x2, y2, r) {
+    const steps = 40;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t;
+      if (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height) return true;
+    }
+    return false;
+  }
+  let markerMarkerOverlapCount = 0, minMarkerDistMedium = Infinity;
+  for (let i = 0; i < layoutGeom.markerCircles.length; i++) {
+    for (let j = i + 1; j < layoutGeom.markerCircles.length; j++) {
+      const a = layoutGeom.markerCircles[i], b = layoutGeom.markerCircles[j];
+      if (circlesOverlapMedium(a, b)) markerMarkerOverlapCount++;
+      const dx = a.cx - b.cx, dy = a.cy - b.cy;
+      minMarkerDistMedium = Math.min(minMarkerDistMedium, Math.sqrt(dx * dx + dy * dy));
+    }
+  }
+  let labelLabelOverlapCount = 0;
+  for (let i = 0; i < layoutGeom.countLabelRects.length; i++) {
+    for (let j = i + 1; j < layoutGeom.countLabelRects.length; j++) {
+      if (rectsOverlapMedium(layoutGeom.countLabelRects[i], layoutGeom.countLabelRects[j])) labelLabelOverlapCount++;
+    }
+  }
+  let nodeLabelMarkerOverlapCount = 0;
+  for (const m of layoutGeom.markerCircles) {
+    for (const l of layoutGeom.nodeLabelRects) {
+      if (circleRectOverlapMedium(m, l)) nodeLabelMarkerOverlapCount++;
+    }
+  }
+  let pathNodeLabelIntersectCount = 0;
+  for (const d of layoutGeom.aggPaths) {
+    const nums = d.match(/-?\d+(\.\d+)?/g).map(Number);
+    const [x1, y1, mx, my, x2, y2] = nums;
+    for (const r of layoutGeom.nodeLabelRects) {
+      if (segRectIntersectMedium(x1, y1, mx, my, r) || segRectIntersectMedium(mx, my, x2, y2, r)) pathNodeLabelIntersectCount++;
+    }
+  }
+  assert(layoutGeom.markerCircles.length >= 1, '章・節単位の集約Graphに衝突検出対象のマーカーが1件以上ある(前提条件)');
+  assert(markerMarkerOverlapCount === 0, `集約マーカー同士が重ならない(是正Checkpoint。重複数: ${markerMarkerOverlapCount}, 最小マーカー間距離: ${minMarkerDistMedium.toFixed(2)}px)`);
+  assert(minMarkerDistMedium > 0, `マーカー間の最小距離が正の値である(同一座標マーカーが存在しない。実際: ${minMarkerDistMedium.toFixed(2)}px)`);
+  assert(labelLabelOverlapCount === 0, `件数ラベル同士が重ならない(是正Checkpoint。重複数: ${labelLabelOverlapCount})`);
+  assert(nodeLabelMarkerOverlapCount === 0, `Nodeラベルと集約マーカーが重ならない(是正Checkpoint。重複数: ${nodeLabelMarkerOverlapCount})`);
+  assert(pathNodeLabelIntersectCount === 0, `集約Edgeの線がNodeラベルの矩形と交差しない(是正Checkpoint。交差数: ${pathNodeLabelIntersectCount})`);
+
   // §23.5: フィルタ(文書/タグ)・採用済み/未処理切替後も集約件数の整合性が保たれる
   await page.selectOption('#graphDocFilter', 'A');
   await page.waitForTimeout(100);
@@ -314,7 +453,7 @@ async function main() {
   await page.uncheck('#graphFocusMode');
 
   // §23.5: GraphからNode一覧への既存ジャンプに回帰がないことを確認する
-  const anyRectForJump = page.locator('#graphSvg rect').first();
+  const anyRectForJump = page.locator('#graphSvg rect.graph-node-shape').first();
   if (await anyRectForJump.count() > 0) {
     await anyRectForJump.click({ force: true });
     await page.waitForTimeout(100);
@@ -334,7 +473,7 @@ async function main() {
   await page.click('#btnGraphResetFilter');
   await page.waitForTimeout(100);
 
-  const anyShape = page.locator('#graphSvg circle, #graphSvg rect').first();
+  const anyShape = page.locator('#graphSvg .graph-node-shape').first();
   await anyShape.click();
   await page.waitForTimeout(50);
   assert(await page.isVisible('#graphSelectedInfo'), 'Node選択(強調表示)が中規模データでもエラーなく動作する');

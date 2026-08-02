@@ -393,7 +393,8 @@ async function main() {
     '初めて文書内階層をONにすると章・節単位が初期粒度になる(全展開の密集状態に戻らない。§6)');
   // Alpha 0.1.3: 既定粒度(章・節単位)では内容Nodeが折りたたまれるため、単純な総Node数は
   // contentRowCountを上回るとは限らない。document/sectionが描画されることはrect数で確認する。
-  const rectCount = await page.$$eval('#graphSvg rect', els => els.length);
+  // (ラベル背景もrectで描画されるため、Node本体を示すgraph-node-shapeクラスに限定する)
+  const rectCount = await page.$$eval('#graphSvg rect.graph-node-shape', els => els.length);
   assert(rectCount > 0, '文書内階層表示ONでdocument/section Nodeが四角形として描画される(内容Nodeとの視覚的区別)');
 
   const nodeCountSection = Number(await page.textContent('#graphNodeCount'));
@@ -408,7 +409,7 @@ async function main() {
   const nodeCountItem = Number(await page.textContent('#graphNodeCount'));
   assert(nodeCountItem > nodeCountSection, '個別項目では章・節単位よりNode数が多い(全展開)');
   assert(nodeCountItem > contentRowCount, '個別項目粒度まで展開すると、document/section分だけGraph上のNode数がcontentRowCountを上回る');
-  const aggLineAtItem = await page.evaluate(() => [...document.querySelectorAll('#graphSvg line')].some(l => l.getAttribute('stroke') === '#7a4fd1'));
+  const aggLineAtItem = await page.evaluate(() => document.querySelectorAll('#graphSvg path.graph-agg-line').length > 0);
   assert(!aggLineAtItem, '個別項目粒度では集約線が出ない(常に個別Edge表示。既存Alpha0.1.2相当)');
 
   await page.selectOption('#graphGranularity', 'section');
@@ -445,7 +446,7 @@ async function main() {
   }
 
   // section Nodeからのドリルダウン(§13.1・§14)
-  const sectionRect = page.locator('#graphSvg rect[width="9"]').first();
+  const sectionRect = page.locator('#graphSvg rect.graph-node-shape[width="9"]').first();
   if (await sectionRect.count() > 0) {
     await sectionRect.click({ force: true });
     await page.waitForTimeout(50);
@@ -480,10 +481,9 @@ async function main() {
 
   // 集約Edge(小規模サンプルでは必ず発生するとは限らないため、検出できた場合のみ確認する。
   // 中規模サンプルテストで集約件数・内訳の数値的な正しさを厳密に検証する)
-  const aggLineIndex = await page.evaluate(() =>
-    [...document.querySelectorAll('#graphSvg line')].findIndex(l => l.getAttribute('stroke') === '#7a4fd1'));
+  const aggLineIndex = await page.evaluate(() => document.querySelectorAll('#graphSvg path.graph-agg-line').length > 0 ? 0 : -1);
   if (aggLineIndex >= 0) {
-    await page.locator('#graphSvg line').nth(aggLineIndex).click({ force: true });
+    await page.locator('#graphSvg path.graph-agg-line').nth(aggLineIndex).click({ force: true });
     await page.waitForTimeout(50);
     assert(await page.isVisible('#graphAggregateInfo'), '集約線クリックで集約Edge情報パネルが表示される');
     const aggText = await page.textContent('#graphAggregateInfo');
@@ -529,7 +529,7 @@ async function main() {
   assert((await page.inputValue('#graphDocFilter')) === 'all', 'Graphの「フィルタ解除」で文書フィルタが既定へ戻る');
 
   // ---- Node選択時の強調 + 周辺表示モード ----
-  const anyShape = page.locator('#graphSvg circle, #graphSvg rect').first();
+  const anyShape = page.locator('#graphSvg .graph-node-shape').first();
   await anyShape.click();
   await page.waitForTimeout(30);
   const selectedInfoVisible = await page.isVisible('#graphSelectedInfo');

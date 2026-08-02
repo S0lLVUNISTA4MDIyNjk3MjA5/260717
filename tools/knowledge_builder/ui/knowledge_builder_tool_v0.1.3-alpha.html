@@ -302,7 +302,7 @@
   <div class="row" style="margin-bottom:8px;">
     <span class="muted" style="font-size:12px;">表示中Node: <span id="graphNodeCount">0</span>件 / 表示中Edge: <span id="graphEdgeCount">0</span>件</span>
   </div>
-  <div id="graphWrap"><svg id="graphSvg" width="1200" height="600"></svg></div>
+  <div id="graphWrap"><svg id="graphSvg" width="1300" height="600"></svg></div>
   <div class="explain" id="graphSelectedInfo" style="display:none;"></div>
   <div class="explain" id="graphAggregateInfo" style="display:none;"></div>
   <div class="legend">
@@ -1327,9 +1327,58 @@ function graphCandidateNodes() {
   }
   const typeFilter = $('graphTypeFilter').value;
   if (typeFilter !== 'all') rows = rows.filter(n => n.node_type === typeFilter);
-  const tagFilter = $('graphTagFilter').value;
-  if (tagFilter !== 'all') rows = rows.filter(n => n.tags.includes(tagFilter));
+  // タグフィルタはここでは適用しない(document/sectionは通常タグを持たないため、単純にtagを
+  // 要求すると可視Ancestorが失われGraphが空になる不具合があった)。実際の適用は
+  // graphApplyTagFilter()で、内容Nodeへタグ条件を適用したうえでAncestorを補って行う。
   return rows;
+}
+
+// タグフィルタ適用時の対象semantic edge集合を明示的に求める(不具合修正の処理順1-2)。
+// 1. baseNodes中の内容Nodeにタグ条件を適用する
+// 2. 一致した内容Nodeに関係するsemantic Edge(相手方がbaseNodesに含まれるもの)を対象とする
+// tagFilter==='all'の場合はnullを返す(呼び出し側で「制限なし」を表す)。
+// ここで確定したedge_id集合だけがGraph上のNode/Edge計算全体で使われるため、後続のAncestor解決が
+// 無関係な祖先を経由して他のNode/Edgeを巻き込むことはない。
+function graphTagFilterEligibleEdgeIds(baseNodes) {
+  const tagFilter = $('graphTagFilter').value;
+  if (tagFilter === 'all' || !dataset) return null;
+  const baseContentIds = new Set(baseNodes
+    .filter(n => n.node_type !== 'document' && n.node_type !== 'section')
+    .map(n => n.node_id));
+  const taggedIds = new Set(baseNodes
+    .filter(n => n.node_type !== 'document' && n.node_type !== 'section' && n.tags.includes(tagFilter))
+    .map(n => n.node_id));
+  const eligible = new Set();
+  for (const e of dataset.edges) {
+    if (e.relation_category !== 'semantic') continue;
+    if (!baseContentIds.has(e.source_node_id) || !baseContentIds.has(e.target_node_id)) continue;
+    if (taggedIds.has(e.source_node_id) || taggedIds.has(e.target_node_id)) eligible.add(e.edge_id);
+  }
+  return eligible;
+}
+
+// タグフィルタで一致した内容Node・そのsemantic Edge相手・双方のdocument/section Ancestorを
+// 表示対象へ追加する(不具合修正: 章・節/文書単位とタグフィルタの併用時にGraphが空になる問題への対応)。
+// section/document Node自身に内容Node用のタグ条件は要求しない(処理順3)。
+function graphApplyTagFilter(baseNodes, tagEligibleEdgeIds) {
+  if (!tagEligibleEdgeIds || !dataset) return baseNodes;
+  const baseIds = new Set(baseNodes.map(n => n.node_id));
+  const eligibleContentIds = new Set();
+  for (const e of dataset.edges) {
+    if (!tagEligibleEdgeIds.has(e.edge_id)) continue;
+    eligibleContentIds.add(e.source_node_id);
+    eligibleContentIds.add(e.target_node_id);
+  }
+  const parentMap = structuralParentMap();
+  const keepIds = new Set(eligibleContentIds);
+  for (const id of eligibleContentIds) {
+    let cur = parentMap.get(id);
+    while (cur) {
+      if (baseIds.has(cur)) keepIds.add(cur);
+      cur = parentMap.get(cur);
+    }
+  }
+  return baseNodes.filter(n => keepIds.has(n.node_id));
 }
 
 // 表示粒度・個別折りたたみを反映した、実際に描画するNodeのnode_id集合(§4-§5)。
@@ -1370,7 +1419,7 @@ function reconcileGraphSelection(baseCandidateIds, visibleNodeIds, parentMap) {
 // semantic Edgeを、可視Ancestアペア単位でグループ化する(§7-§10)。「文書内の階層関係も表示」OFF時は
 // 集約は発生せず、Alpha0.1.2までと同じ個別Edge描画になる(1ペアにつき常に1件のsemantic edgeしか
 // 存在しないため、edges.length>1にもならない)。
-function computeGraphEdgeGroups(visibleNodeIds, parentMap) {
+function computeGraphEdgeGroups(visibleNodeIds, parentMap, tagEligibleEdgeIds) {
   if (!dataset) return [];
   const structuralOn = $('graphShowStructural').checked;
   const showActive = $('graphShowActive').checked, showCandidates = $('graphShowCandidates').checked;
@@ -1378,6 +1427,10 @@ function computeGraphEdgeGroups(visibleNodeIds, parentMap) {
   const pairMap = new Map();
   for (const e of dataset.edges) {
     if (e.relation_category !== 'semantic') continue;
+    // タグフィルタ適用中は、事前に確定した対象edge_id集合だけを対象にする。これにより、
+    // Ancestor解決が無関係な祖先(例: 同じ文書内の別section)を経由して他のEdgeを
+    // 巻き込むことを防ぐ(不具合修正)。
+    if (tagEligibleEdgeIds && !tagEligibleEdgeIds.has(e.edge_id)) continue;
     const aId = resolve(e.source_node_id), bId = resolve(e.target_node_id);
     if (!aId || !bId) continue;
     const key = aId + ' ' + bId;
@@ -1445,7 +1498,9 @@ function renderGraph() {
   }
 
   const structuralOn = $('graphShowStructural').checked;
-  const baseCandidates = graphCandidateNodes();
+  const preTagCandidates = graphCandidateNodes();
+  const tagEligibleEdgeIds = graphTagFilterEligibleEdgeIds(preTagCandidates);
+  const baseCandidates = graphApplyTagFilter(preTagCandidates, tagEligibleEdgeIds);
   const baseCandidateIds = new Set(baseCandidates.map(n => n.node_id));
   const parentMap = structuralParentMap();
   const visibleIdsFromCollapse = computeVisibleGraphNodeIds(baseCandidates, parentMap);
@@ -1453,7 +1508,7 @@ function renderGraph() {
   reconcileGraphSelection(baseCandidateIds, visibleIdsFromCollapse, parentMap);
 
   let nodeCandidates = baseCandidates.filter(n => visibleIdsFromCollapse.has(n.node_id));
-  let drawLines = computeGraphEdgeGroups(visibleIdsFromCollapse, parentMap);
+  let drawLines = computeGraphEdgeGroups(visibleIdsFromCollapse, parentMap, tagEligibleEdgeIds);
 
   // 選択Nodeの周辺だけを表示するモード: 選択Node + 直接つながるNode(集約後)のみへ絞り込む。
   const focusMode = $('graphFocusMode').checked && selectedGraphNodeId;
@@ -1481,18 +1536,38 @@ function renderGraph() {
   const showStructural = structuralOn;
   const pos = new Map();
   const marginY = 30, stepY = Math.max(28, Math.min(60, 560 / Math.max(1, Math.max(listA.length, listB.length))));
-  const baseA = 160, baseB = 900, indentStep = showStructural ? 24 : 0;
+  // レイアウト(§2.1): 中央のEdge描画コーパスと、外側のNodeラベル帯を分離する。
+  // ラベル・折りたたみトグルはNodeの外側(左側=文書A/右側=文書B)、Edgeはコーパス側(内側)に接続する。
+  const svgWidth = 1300, centerX = svgWidth / 2;
+  const baseA = 230, baseB = 1070, indentStep = showStructural ? 24 : 0;
   listA.forEach((n, i) => pos.set(n.node_id, { x: baseA + (showStructural ? nodeTypeDepth(n) * indentStep : 0), y: marginY + i * stepY }));
   listB.forEach((n, i) => pos.set(n.node_id, { x: baseB - (showStructural ? nodeTypeDepth(n) * indentStep : 0), y: marginY + i * stepY }));
 
   const height = Math.max(600, marginY * 2 + Math.max(listA.length, listB.length) * stepY);
   svg.setAttribute('height', String(height));
+  svg.setAttribute('width', String(svgWidth));
 
   const ns = 'http://www.w3.org/2000/svg';
   function el(tag, attrs) {
     const e = document.createElementNS(ns, tag);
     for (const k in attrs) e.setAttribute(k, attrs[k]);
     return e;
+  }
+  function textApproxWidth(text, fontSize) {
+    let w = 0;
+    for (const ch of String(text)) w += /[　-ヿ㐀-鿿＀-￯]/.test(ch) ? fontSize : fontSize * 0.58;
+    return w;
+  }
+  function nodeOuterRadius(node) {
+    const { shape, size } = nodeShapeSize(node);
+    return shape === 'rect' ? size / 2 : size;
+  }
+  // outwardSign: Nodeから見てラベル帯側(中央コーパスの反対側)への方向。文書Aは左(-1)、文書Bは右(+1)。
+  function outwardSign(p) { return p.x < centerX ? -1 : 1; }
+  // Edgeが接続すべきNode境界点(中央コーパス側の境界。ラベル帯とは反対側なので、ラベル文字と交差しない)。
+  function corridorPoint(node, p) {
+    const r = nodeOuterRadius(node);
+    return { x: p.x - outwardSign(p) * r, y: p.y };
   }
 
   const connectedToSelection = new Set();
@@ -1504,13 +1579,17 @@ function renderGraph() {
     }
   }
 
+  const nodeById = new Map(nodeCandidates.map(n => [n.node_id, n]));
+
   for (const edge of structuralEdges) {
-    const p1 = pos.get(edge.source_node_id), p2 = pos.get(edge.target_node_id);
-    if (!p1 || !p2) continue;
+    const n1 = nodeById.get(edge.source_node_id), n2 = nodeById.get(edge.target_node_id);
+    const p1raw = pos.get(edge.source_node_id), p2raw = pos.get(edge.target_node_id);
+    if (!p1raw || !p2raw || !n1 || !n2) continue;
+    const p1 = corridorPoint(n1, p1raw), p2 = corridorPoint(n2, p2raw);
     const isHighlighted = !selectedGraphNodeId || edge.source_node_id === selectedGraphNodeId || edge.target_node_id === selectedGraphNodeId;
     const line = el('line', {
       x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, stroke: '#bbb',
-      'stroke-width': isHighlighted ? 1.6 : 1, opacity: isHighlighted ? '1' : '0.18'
+      'stroke-width': isHighlighted ? 1.6 : 1, opacity: isHighlighted ? '1' : '0.18', class: 'graph-structural-line'
     });
     const title = el('title', {});
     title.textContent = `文書内の階層関係: ${edge.relation_type}`;
@@ -1518,72 +1597,127 @@ function renderGraph() {
     svg.appendChild(line);
   }
 
-  function drawAggregateLine(g, p1, p2, isHighlighted) {
+  // レイアウト(§2.2): 集約線の自然な中点が近接/一致する場合に備え、決定的なレーンオフセットを割り当てる。
+  // グリッドで近接する集約線をまとめ、安定キー(可視Source/Target短縮ID)でソートしてから対称オフセットを与える。
+  function laneOffsets(n) {
+    if (n <= 1) return [0];
+    if (n === 2) return [-12, 12];
+    if (n === 3) return [-24, 0, 24];
+    const step = 16;
+    return Array.from({ length: n }, (_, i) => Math.round((i - (n - 1) / 2) * step));
+  }
+  const aggOffsetByGroup = new Map();
+  {
+    const aggItems = [];
+    for (const g of drawLines) {
+      if (!g.isAggregate) continue;
+      const p1 = pos.get(g.aId), p2 = pos.get(g.bId);
+      if (!p1 || !p2) continue;
+      aggItems.push({ g, mx: (p1.x + p2.x) / 2, my: (p1.y + p2.y) / 2 });
+    }
+    const buckets = new Map();
+    for (const item of aggItems) {
+      const key = Math.round(item.mx / 50) + ',' + Math.round(item.my / 20);
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(item);
+    }
+    for (const items of buckets.values()) {
+      items.sort((a, b) => {
+        const ka = shortId(nodeById.get(a.g.aId)) + '|' + shortId(nodeById.get(a.g.bId));
+        const kb = shortId(nodeById.get(b.g.aId)) + '|' + shortId(nodeById.get(b.g.bId));
+        return ka < kb ? -1 : ka > kb ? 1 : 0;
+      });
+      const offs = laneOffsets(items.length);
+      items.forEach((item, idx) => aggOffsetByGroup.set(item.g, offs[idx]));
+    }
+  }
+
+  function drawLabelBackground(x, y, text, fontSize, anchor) {
+    const w = textApproxWidth(text, fontSize) + 6;
+    const h = fontSize + 6;
+    const rx = anchor === 'end' ? x - w : (anchor === 'middle' ? x - w / 2 : x);
+    svg.appendChild(el('rect', {
+      x: rx, y: y - fontSize + 1, width: w, height: h, fill: '#fff', opacity: '0.85', rx: 2, class: 'graph-label-bg'
+    }));
+  }
+
+  function drawAggregateLine(g, p1raw, p2raw, n1, n2, isHighlighted, offsetY) {
     const stats = aggregateStats(g.edges);
     const isSelected = selectedAggregateInfo && selectedAggregateInfo.aId === g.aId && selectedAggregateInfo.bId === g.bId;
     const color = stats.staleCount > 0 ? '#c62828' : (stats.active > 0 ? '#2e7d32' : '#e0a800');
-    const line = el('line', {
-      x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, stroke: '#7a4fd1',
+    const p1 = corridorPoint(n1, p1raw), p2 = corridorPoint(n2, p2raw);
+    const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2 + offsetY;
+    const d = `M ${p1.x} ${p1.y} L ${mx} ${my} L ${p2.x} ${p2.y}`;
+    const path = el('path', {
+      d, fill: 'none', stroke: '#7a4fd1',
       'stroke-width': (isSelected ? 5 : 4) * (isHighlighted ? 1 : 0.6),
       'stroke-dasharray': stats.active > 0 && stats.staleCount === 0 ? '' : '6,3',
-      opacity: isHighlighted ? '1' : '0.18'
+      opacity: isHighlighted ? '1' : '0.18', class: 'graph-agg-line'
     });
     const titleText = `${stats.total}件を集約（採用${stats.active}・候補${stats.candidate}` +
       `${stats.rejected ? '・却下' + stats.rejected : ''}${stats.staleCount ? '・stale' + stats.staleCount : ''}）`;
-    const title = el('title', {}); title.textContent = titleText; line.appendChild(title);
-    line.style.cursor = 'pointer';
-    line.addEventListener('click', () => selectAggregate(g));
-    svg.appendChild(line);
+    const title = el('title', {}); title.textContent = titleText; path.appendChild(title);
+    path.style.cursor = 'pointer';
+    path.addEventListener('click', () => selectAggregate(g));
+    svg.appendChild(path);
 
-    const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+    const markerR = isSelected ? 9 : 7;
     const marker = el('circle', {
-      cx: mx, cy: my, r: isSelected ? 9 : 7, fill: '#fff', stroke: color, 'stroke-width': 2,
-      opacity: isHighlighted ? '1' : '0.3', style: 'cursor:pointer;'
+      cx: mx, cy: my, r: markerR, fill: '#fff', stroke: color, 'stroke-width': 2,
+      opacity: isHighlighted ? '1' : '0.3', style: 'cursor:pointer;', class: 'graph-agg-marker'
     });
     const markerTitle = el('title', {}); markerTitle.textContent = titleText; marker.appendChild(markerTitle);
     marker.addEventListener('click', () => selectAggregate(g));
     svg.appendChild(marker);
 
+    // 件数ラベルはマーカーの右側に配置し、非色分けの視認性(背景・枠・padding)を確保する(§2.3)。
+    const labelText = `${stats.total}件`;
+    const lx = mx + markerR + 5, ly = my + 3;
+    drawLabelBackground(lx, ly, labelText, 10, 'start');
     const label = el('text', {
-      x: mx, y: my - 10, 'font-size': 10, 'text-anchor': 'middle', fill: '#333',
-      opacity: isHighlighted ? '1' : '0.3', style: 'cursor:pointer;'
+      x: lx, y: ly, 'font-size': 10, 'text-anchor': 'start', fill: '#333',
+      opacity: isHighlighted ? '1' : '0.3', style: 'cursor:pointer;', class: 'graph-agg-count-label'
     });
-    label.textContent = `${stats.total}件`;
+    label.textContent = labelText;
     label.addEventListener('click', () => selectAggregate(g));
     svg.appendChild(label);
   }
 
   for (const g of drawLines) {
-    const p1 = pos.get(g.aId), p2 = pos.get(g.bId);
-    if (!p1 || !p2) continue;
+    const p1raw = pos.get(g.aId), p2raw = pos.get(g.bId);
+    const n1 = nodeById.get(g.aId), n2 = nodeById.get(g.bId);
+    if (!p1raw || !p2raw || !n1 || !n2) continue;
     const isHighlighted = !selectedGraphNodeId || g.aId === selectedGraphNodeId || g.bId === selectedGraphNodeId;
     if (!g.isAggregate) {
       const edge = g.edges[0];
       const stale = KnowledgeStore.isEdgeStale(dataset, edge);
       const color = stale ? '#c62828' : (edge.lifecycle === 'candidate' ? '#e0a800' : '#2e7d32');
+      const p1 = corridorPoint(n1, p1raw), p2 = corridorPoint(n2, p2raw);
       const line = el('line', {
         x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, stroke: color,
         'stroke-width': (edge.lifecycle === 'active' ? 2 : 1) * (isHighlighted ? 1.6 : 1),
         'stroke-dasharray': (edge.lifecycle === 'candidate' || stale) ? '4,3' : '',
-        opacity: isHighlighted ? '1' : '0.18'
+        opacity: isHighlighted ? '1' : '0.18', class: 'graph-edge-line'
       });
       const title = el('title', {});
       title.textContent = `文書間の関連: ${edge.relation_type} (${LIFECYCLE_LABEL[edge.lifecycle] || edge.lifecycle}${stale ? '・stale' : ''}) conf=${edge.confidence.toFixed(2)}`;
       line.appendChild(title);
       svg.appendChild(line);
     } else {
-      drawAggregateLine(g, p1, p2, isHighlighted);
+      drawAggregateLine(g, p1raw, p2raw, n1, n2, isHighlighted, aggOffsetByGroup.get(g) || 0);
     }
   }
 
   function drawNode(node, p) {
     const color = nodeColor(node);
     const { shape, size } = nodeShapeSize(node);
+    const r = nodeOuterRadius(node);
+    const sign = outwardSign(p);
     const isSelected = node.node_id === selectedGraphNodeId;
     const isDimmed = selectedGraphNodeId && !connectedToSelection.has(node.node_id);
     const commonAttrs = {
       fill: color, stroke: isSelected ? '#000' : '#fff', 'stroke-width': isSelected ? 3 : 1.5,
-      opacity: isDimmed ? '0.25' : '1', style: 'cursor:pointer;'
+      opacity: isDimmed ? '0.25' : '1', style: 'cursor:pointer;', class: 'graph-node-shape'
     };
     let shapeEl;
     if (shape === 'rect') {
@@ -1602,26 +1736,34 @@ function renderGraph() {
     });
     svg.appendChild(shapeEl);
 
-    const label = el('text', {
-      x: p.x + (p.x < 500 ? size + 6 : -(size + 6)), y: p.y + 4, 'font-size': 10,
-      fill: isDimmed ? '#bbb' : '#333', 'text-anchor': p.x < 500 ? 'start' : 'end'
-    });
-    label.textContent = `[${shortId(node)}] ${(node.title || node.text).slice(0, 18)}`;
-    svg.appendChild(label);
-
-    // 折りたたみ・展開トグル(§3・§5): 子Nodeを持つdocument/sectionにのみ表示する。
-    if (showStructural && (node.node_type === 'document' || node.node_type === 'section') && structuralHasChildren(node.node_id)) {
+    // 折りたたみ・展開トグル(§3・§5): Nodeとラベルの間(外側寄り)に表示する。子Nodeを持つdocument/sectionのみ。
+    const hasToggle = showStructural && (node.node_type === 'document' || node.node_type === 'section') && structuralHasChildren(node.node_id);
+    let toggleOuterEdge = r;
+    if (hasToggle) {
       const isCollapsed = graphStructuralCollapsed.has(node.node_id);
-      const tx = p.x < 500 ? p.x - 14 : p.x + 14;
-      const toggle = el('circle', { cx: tx, cy: p.y, r: 7, fill: '#fff', stroke: '#556', 'stroke-width': 1, style: 'cursor:pointer;' });
+      const tx = p.x + sign * (r + 12);
+      const toggle = el('circle', { cx: tx, cy: p.y, r: 7, fill: '#fff', stroke: '#556', 'stroke-width': 1, style: 'cursor:pointer;', class: 'graph-toggle-circle' });
       const toggleTitle = el('title', {}); toggleTitle.textContent = isCollapsed ? '展開' : '折りたたむ'; toggle.appendChild(toggleTitle);
       toggle.addEventListener('click', (ev) => { ev.stopPropagation(); toggleStructuralCollapse(node.node_id); });
       svg.appendChild(toggle);
-      const toggleLabel = el('text', { x: tx, y: p.y + 3, 'font-size': 9, 'text-anchor': 'middle', fill: '#334', style: 'cursor:pointer; user-select:none;' });
+      const toggleLabel = el('text', { x: tx, y: p.y + 3, 'font-size': 9, 'text-anchor': 'middle', fill: '#334', style: 'cursor:pointer; user-select:none;', class: 'graph-toggle-label' });
       toggleLabel.textContent = isCollapsed ? '▶' : '▼';
       toggleLabel.addEventListener('click', (ev) => { ev.stopPropagation(); toggleStructuralCollapse(node.node_id); });
       svg.appendChild(toggleLabel);
+      toggleOuterEdge = r + 24;
     }
+
+    // ラベル(§2.1): Nodeの外側(ラベル帯)に配置し、中央のEdge描画コーパスとは重ならない。背景を敷いてEdgeとの視覚的な交差を防ぐ。
+    const labelText = `[${shortId(node)}] ${(node.title || node.text).slice(0, 18)}`;
+    const lx = p.x + sign * (toggleOuterEdge + 6);
+    const ly = p.y + 4;
+    const anchor = sign < 0 ? 'end' : 'start';
+    drawLabelBackground(lx, ly, labelText, 10, anchor);
+    const label = el('text', {
+      x: lx, y: ly, 'font-size': 10, fill: isDimmed ? '#bbb' : '#333', 'text-anchor': anchor, class: 'graph-node-label'
+    });
+    label.textContent = labelText;
+    svg.appendChild(label);
   }
   for (const n of listA) drawNode(n, pos.get(n.node_id));
   for (const n of listB) drawNode(n, pos.get(n.node_id));
