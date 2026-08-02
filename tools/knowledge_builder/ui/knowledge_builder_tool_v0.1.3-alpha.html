@@ -107,7 +107,7 @@
 <main>
 
 <section class="panel" id="ingestPanel">
-  <h2>1. データを読み込む <span class="en">(Trace JSON / Excel)</span></h2>
+  <h2>1. データを読み込む</h2>
   <div class="explain">
     既存のPDF/Excelツールが出力した「照合用JSON（trace JSON）」、または .pdf／.xlsx ファイルそのものを
     直接読み込み、文書間の関連を確認します。文書A・文書Bは役割を固定していません(どちらもPDF／Excel／
@@ -998,15 +998,33 @@ async function ingest() {
     const vocab = vocabFile ? await readJsonFile(vocabFile) : DEFAULT_TAG_VOCABULARY;
     const ingestedAt = new Date().toISOString();
 
-    // 文書A・文書Bの双方がAdapter処理を正常に完了するまで、既存datasetは一切変更しない(原子性)。
-    // どちらかがthrowした場合はここでcatchへ抜け、以降のdataset再代入には到達しない。
+    // 是正Checkpoint 3b.1: 原子性はAdapter処理の成功だけでは保証できない(setTagVocabulary/
+    // ingestAdapterResult/validationのいずれかが失敗しうる)。live変数のdatasetは一切書き換えず、
+    // ローカルのnextDatasetだけを組み立て、validateDataset()でerror診断が0件になって初めて
+    // dataset(および関連するUI専用状態一式)を置き換える(commit)。途中で失敗した場合、
+    // liveのdataset・Candidate・採否・Graph状態は一切変更されない。
     const resultA = await adaptDocument('A', modeA, vocab, ingestedAt);
     const resultB = await adaptDocument('B', modeB, vocab, ingestedAt);
 
-    dataset = KnowledgeStore.createEmptyDataset({ tool: 'knowledge_builder_tool', version: '0.1.3-alpha' });
-    await KnowledgeStore.setTagVocabulary(dataset, vocab);
-    await KnowledgeStore.ingestAdapterResult(dataset, resultA, { type: 'ai', id: adapterIdForMode(modeA) });
-    await KnowledgeStore.ingestAdapterResult(dataset, resultB, { type: 'ai', id: adapterIdForMode(modeB) });
+    const nextDataset = KnowledgeStore.createEmptyDataset({ tool: 'knowledge_builder_tool', version: '0.1.3-alpha' });
+    await KnowledgeStore.setTagVocabulary(nextDataset, vocab);
+    await KnowledgeStore.ingestAdapterResult(nextDataset, resultA, { type: 'ai', id: adapterIdForMode(modeA) });
+    await KnowledgeStore.ingestAdapterResult(nextDataset, resultB, { type: 'ai', id: adapterIdForMode(modeB) });
+
+    // 取込時のvalidation gate(是正Checkpoint 3b.1 §2): error診断が1件でもあればcommitしない
+    // (例: 同一PDFを文書A/Bへ指定した場合のnode_id/edge_id重複=duplicate_node_id等)。
+    // warningのみの場合はStep 2への進行を妨げない(既存の保存時finalizeDataset()と同じ扱い)。
+    const ingestDiagnostics = KnowledgeStore.validateDataset(nextDataset);
+    nextDataset.diagnostics = ingestDiagnostics;
+    const ingestErrors = ingestDiagnostics.filter(d => d.severity === 'error');
+    if (ingestErrors.length) {
+      const err = new Error(`検証エラー ${ingestErrors.length}件のため取込を中止しました: ${ingestErrors[0].detail}`);
+      err.code = 'ingest_validation_failed';
+      throw err;
+    }
+
+    // ここまで到達して初めてlive状態をまとめて置き換える(commit)。
+    dataset = nextDataset;
     docAId = resultA.sourceDocument.source_document_id;
     docBId = resultB.sourceDocument.source_document_id;
 
@@ -1051,7 +1069,9 @@ async function ingest() {
       `文書B「${resultB.sourceDocument.file_name}」Node ${resultB.nodes.length}件`;
     renderAll();
   } catch (e) {
-    console.error(e);
+    // 是正Checkpoint 3b.1 §3: 利用者入力・Adapter・validation由来の取込失敗はいずれも想定内の
+    // エラーであり、console.errorへは流さない(入力パネル内の固定文言表示のみで完結させる)。
+    // e.messageはAdapter/validateDataset双方とも常に固定の日本語文であり、stack traceは含まない。
     $('ingestStatus').textContent = `取込エラー: ${e.message || e}`;
   }
 }

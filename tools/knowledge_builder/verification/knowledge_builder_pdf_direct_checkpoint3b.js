@@ -438,6 +438,66 @@ async function main() {
     await page.close();
   }
 
+  // ---- Checkpoint 3b.1 §5: 原子性の恒久テスト。#17(片側プレビュー未完了という取込前precondition)
+  // だけを原子性の証明にせず、Adapter処理そのものは成功した後に失敗する経路(取込時validation
+  // error)でも既存datasetが完全に維持されることを確認する。同一PDFをA/B両方へ指定した場合の
+  // node_id/edge_id重複はvalidateDataset()のduplicate_node_idでfail-closedされる典型例。 ----
+  {
+    const page = await browser.newPage();
+    const { consoleErrors } = attachListeners(page);
+    await page.goto('file://' + HTML_PATH);
+
+    // まず正常な取込を1回行い、「既存dataset」を作っておく(Candidate生成・採用まで進めて、
+    // 失敗後もこれらの状態が変化しないことまで確認する)。
+    await setPdfSide(page, 'A', PDF_2_NUMBERED_HEADINGS);
+    await setPdfSide(page, 'B', PDF_4_BODY_BEFORE_HEADING);
+    await page.click('#btnIngest');
+    await page.waitForFunction(() => document.getElementById('ingestStatus').textContent.includes('取込完了'), null, { timeout: 15000 });
+    const nodeCountBefore = await page.$$eval('#nodeTableBody tr', rows => rows.length);
+    await page.click('#btnGenerateCandidates');
+    await page.waitForFunction(() => document.getElementById('candidateStatus').textContent.includes('候補'), null, { timeout: 10000 });
+    const candidateStatusBefore = await page.textContent('#candidateStatus');
+    const graphNodeCountBefore = await page.textContent('#graphNodeCount');
+
+    // Adapter処理そのものは両側とも成功するが、同一PDFをA/Bへ指定しているため
+    // node_id/edge_idが重複し、取込時validation gateでfail-closedするはずの経路。
+    page.once('dialog', d => d.accept());
+    await setPdfSide(page, 'A', PDF_1_NO_HEADING);
+    await setPdfSide(page, 'B', PDF_1_NO_HEADING);
+    await page.click('#btnIngest');
+    await page.waitForFunction(() => document.getElementById('ingestStatus').textContent.includes('取込エラー'), null, { timeout: 15000 });
+    const errorStatus = await page.textContent('#ingestStatus');
+    assert(errorStatus.includes('取込エラー') && (errorStatus.includes('重複') || errorStatus.includes('検証エラー')),
+      `Adapter処理成功後のvalidation error(同一PDFのA/B重複指定)がfail-closedし、固定文言で表示される(実際: "${errorStatus}")`);
+    assert(!errorStatus.includes('at ') && !errorStatus.includes('.js:') && !errorStatus.includes('TypeError'),
+      'validation error時もstack traceがそのまま表示されない');
+
+    const nodeCountAfter = await page.$$eval('#nodeTableBody tr', rows => rows.length);
+    const candidateStatusAfter = await page.textContent('#candidateStatus');
+    const graphNodeCountAfter = await page.textContent('#graphNodeCount');
+    assert(nodeCountAfter === nodeCountBefore,
+      `取込時validation error後も既存datasetのNode件数が変化しない(取込前:${nodeCountBefore}/エラー後:${nodeCountAfter})`);
+    assert(candidateStatusAfter === candidateStatusBefore,
+      `取込時validation error後もCandidate状態が変化しない(実際: 前="${candidateStatusBefore}" / 後="${candidateStatusAfter}")`);
+    assert(graphNodeCountAfter === graphNodeCountBefore,
+      `取込時validation error後もGraph Node数が変化しない(実際: 前=${graphNodeCountBefore} / 後=${graphNodeCountAfter})`);
+    const stepHeadingAfterError = await page.locator('section.panel h2').nth(1).innerText();
+    assert(!stepHeadingAfterError.includes('no_heading'), 'validation error時もStep 2の内容が従来のまま表示される(失敗した取込結果へは切り替わらない)');
+    assert(consoleErrors.length === 0, `取込時validation errorもconsole errorへ流さない(実際: ${consoleErrors.length}件${consoleErrors.length ? ': ' + consoleErrors[0] : ''})`);
+
+    // dataset_idの対象情報(Contract保存時に確認できる識別情報)も維持されていることを、
+    // 実際に保存して確認する(dataset_id自体はfinalizeDataset()時点で採番されるため、
+    // ここでは「以前ingestした2文書のsourcesがそのまま残っている」ことを確認する)。
+    const [download] = await Promise.all([page.waitForEvent('download'), page.click('#btnSave')]);
+    const downloadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-pdf-atomic-'));
+    const savedPath = path.join(downloadDir, download.suggestedFilename());
+    await download.saveAs(savedPath);
+    const saved = JSON.parse(fs.readFileSync(savedPath, 'utf8'));
+    assert(saved.sources.length === 2 && saved.sources.every(s => !s.file_name.includes('fixture_1_no_heading')),
+      `保存JSONのsourcesも以前ingestした2文書のまま(重複指定したfixture_1は含まれない)(実際: ${JSON.stringify(saved.sources.map(s => s.file_name))})`);
+    await page.close();
+  }
+
   // ---- 多重クリック防止: 処理中は対象側のファイル/プレビューボタンを一時無効化する ----
   {
     const page = await browser.newPage();
