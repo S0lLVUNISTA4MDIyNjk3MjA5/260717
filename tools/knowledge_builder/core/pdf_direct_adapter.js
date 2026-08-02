@@ -21,9 +21,29 @@
  * TraceRecord/Sidecar binding to prove compatibility with. Same reasoning as
  * excel_direct_adapter.js's structural/content Nodes.
  *
- * Fail-closed rule: if a paragraph's raw text or page position cannot be captured in full,
- * this adapter throws rather than silently producing a lossy Node - aborting the whole
- * document's ingest (see buildKnowledgeNodesFromPdf).
+ * Fail-closed rule: if a paragraph's raw text, page position, or bbox cannot be captured in
+ * full, this adapter throws (code: pdf_text_position_unrecoverable / verbatim_or_page_unrecoverable)
+ * rather than silently producing a lossy Node or silently dropping the line - aborting the
+ * whole document's ingest. Coordinates are validated in multiple layers (per-line in
+ * extractPdfLayout, per-merged-paragraph in segmentPdfContent, and again per content Node in
+ * buildKnowledgeNodesFromPdf) via isValidBBox() (Checkpoint 3a.1 §3).
+ *
+ * locator.page contract (Checkpoint 3a.1 §1 - the canonical Node/Edge IDs as of this
+ * checkpoint): document Node -> page: null (a document has no single page); a normal
+ * (heading-based) section -> its heading line's 1-indexed page; a synthetic "本文" section ->
+ * its first child paragraph's 1-indexed page; a statement (content) Node -> its own
+ * 1-indexed page. locator.page is never 0 for any Node this adapter produces.
+ * provenance.extensions.page_index stays 0-indexed throughout, unchanged from Checkpoint 3a.
+ *
+ * pdf.js resource lifecycle (Checkpoint 3a.1 §2): every pdf.js PDFDocumentProxy this adapter
+ * opens (in inspectPdf() and, separately, in extractPdfLayout() - see the Checkpoint 3a
+ * "known constraint" about opening the PDF twice, which this checkpoint intentionally keeps)
+ * is destroyed via doc.destroy() in a finally block (withPdfDocument()), covering every exit
+ * path: successful completion, parse failure, encryption/password rejection, and any of the
+ * safety-limit errors below. inspectPdf() never returns the raw PDFDocumentProxy (only
+ * {numPages}), so no caller can accidentally hold a live Document past its destruction. Inside
+ * extractPdfLayout()'s per-page loop, each PDFPageProxy's cleanup() is also called as soon as
+ * that page's lines are extracted, before moving to the next page.
  *
  * ---- Reuse / porting notice ----
  * Source file for all ported logic: tools/alpha_release/pdf_excel_json_tools_alpha_v0.10.1_ai_review_handoff/
@@ -182,21 +202,9 @@
     return err;
   }
 
-  /**
-   * PDFを開き、基本情報だけを検証する軽量な事前チェック(UI非依存の純関数)。
-   * ページ数の安全上限もここで検証する(本格抽出の前に早期にfail-closedする)。
-   * @param {ArrayBuffer} arrayBuffer
-   * @returns {Promise<{pdfDocument:object, numPages:number}>}
-   */
-  async function inspectPdf(arrayBuffer) {
-    const pdfjsLib = resolvePdfJs();
-    let doc;
-    try {
-      doc = await pdfjsLib.getDocument(buildGetDocumentOptions(arrayBuffer)).promise;
-    } catch (e) {
-      throw classifyOpenError(e);
-    }
-    const numPages = doc.numPages;
+  // ---- 安全上限判定(Checkpoint 3a.1 §4: 純関数として分離し、巨大PDFを生成せずに
+  // 境界値(上限ちょうどはPASS・上限+1はERROR)をテストできるようにする) ----
+  function assertPageCountWithinLimit(numPages) {
     if (!Number.isInteger(numPages) || numPages < 1) {
       const err = new Error('PDFの総ページ数が0です。');
       err.code = 'pdf_zero_pages';
@@ -207,7 +215,74 @@
       err.code = 'page_count_limit_exceeded';
       throw err;
     }
-    return { pdfDocument: doc, numPages };
+  }
+
+  function assertTextItemCountWithinLimit(totalItems, page) {
+    if (totalItems > MAX_TEXT_ITEMS) {
+      const err = new Error(`抽出したtext item数が安全上限(${MAX_TEXT_ITEMS})を超えました(ページ${page}時点)。処理を中止しました。`);
+      err.code = 'text_item_limit_exceeded';
+      throw err;
+    }
+  }
+
+  function assertExtractedCharCountWithinLimit(totalChars, page) {
+    if (totalChars > MAX_EXTRACTED_CHARS) {
+      const err = new Error(`抽出した総文字数が安全上限(${MAX_EXTRACTED_CHARS})を超えました(ページ${page}時点)。処理を中止しました。`);
+      err.code = 'extracted_char_limit_exceeded';
+      throw err;
+    }
+  }
+
+  function assertStatementCountWithinLimit(totalParagraphs) {
+    if (totalParagraphs > MAX_STATEMENTS) {
+      const err = new Error(`生成予定のstatement数(${totalParagraphs})が安全上限(${MAX_STATEMENTS})を超えています。処理を中止しました。`);
+      err.code = 'statement_count_limit_exceeded';
+      throw err;
+    }
+  }
+
+  // ---- 座標のfail-closed検証(Checkpoint 3a.1 §3) ----
+  // bboxは正規化済み(0..1)の有限数4要素で、x0<=x1・top<=bottomを満たす必要がある。
+  function isValidBBox(bbox) {
+    if (!Array.isArray(bbox) || bbox.length !== 4) return false;
+    const [x0, top, x1, bottom] = bbox;
+    if (![x0, top, x1, bottom].every(Number.isFinite)) return false;
+    if (x0 < 0 || x0 > 1 || top < 0 || top > 1 || x1 < 0 || x1 > 1 || bottom < 0 || bottom > 1) return false;
+    if (x0 > x1 || top > bottom) return false;
+    return true;
+  }
+
+  // ---- pdf.jsリソースの確実な解放(Checkpoint 3a.1 §2) ----
+  // getDocument()に成功した場合、fn(doc)の実行が成功・失敗いずれの場合もfinallyでdoc.destroy()する。
+  // getDocument()自体が失敗した場合(解析失敗・暗号化等)はdocが存在しないため破棄対象もない。
+  async function withPdfDocument(arrayBuffer, fn) {
+    const pdfjsLib = resolvePdfJs();
+    let doc;
+    try {
+      doc = await pdfjsLib.getDocument(buildGetDocumentOptions(arrayBuffer)).promise;
+    } catch (e) {
+      throw classifyOpenError(e);
+    }
+    try {
+      return await fn(doc);
+    } finally {
+      try { await doc.destroy(); } catch (e) { /* 破棄失敗は握りつぶす(既に解放済み等) */ }
+    }
+  }
+
+  /**
+   * PDFを開き、基本情報だけを検証する軽量な事前チェック(UI非依存の純関数)。
+   * ページ数の安全上限もここで検証する(本格抽出の前に早期にfail-closedする)。
+   * 開いたpdf.js Documentは成功・失敗どちらの経路でも必ずdestroy()する(生のDocumentは返さない)。
+   * @param {ArrayBuffer} arrayBuffer
+   * @returns {Promise<{numPages:number}>}
+   */
+  async function inspectPdf(arrayBuffer) {
+    return withPdfDocument(arrayBuffer, async (doc) => {
+      const numPages = doc.numPages;
+      assertPageCountWithinLimit(numPages);
+      return { numPages };
+    });
   }
 
   /**
@@ -219,125 +294,116 @@
    *   Line = {text, rawText, segs, hasMultiSegment, page(1始まり), pageIndex(0始まり), bbox}
    */
   async function extractPdfLayout(arrayBuffer) {
-    const pdfjsLib = resolvePdfJs();
-    let doc;
-    try {
-      doc = await pdfjsLib.getDocument(buildGetDocumentOptions(arrayBuffer)).promise;
-    } catch (e) {
-      throw classifyOpenError(e);
-    }
-    const numPages = doc.numPages;
-    if (!Number.isInteger(numPages) || numPages < 1) {
-      const err = new Error('PDFの総ページ数が0です。');
-      err.code = 'pdf_zero_pages';
-      throw err;
-    }
-    if (numPages > MAX_PAGES) {
-      const err = new Error(`PDFの総ページ数(${numPages})が安全上限(${MAX_PAGES})を超えています。処理を中止しました。`);
-      err.code = 'page_count_limit_exceeded';
-      throw err;
-    }
+    return withPdfDocument(arrayBuffer, async (doc) => {
+      const numPages = doc.numPages;
+      assertPageCountWithinLimit(numPages);
 
-    const pages = [];
-    const warnings = [];
-    const perPageCharCounts = [];
-    let totalChars = 0;
-    let totalItems = 0;
+      const pages = [];
+      const warnings = [];
+      const perPageCharCounts = [];
+      let totalChars = 0;
+      let totalItems = 0;
 
-    for (let p = 1; p <= numPages; p++) {
-      const page = await doc.getPage(p);
-      const viewport = page.getViewport({ scale: 1 });
-      const tc = await page.getTextContent();
-      const rawItems = tc.items
-        .filter(it => String(it.str || '').trim() !== '')
-        .map(it => ({
-          str: String(it.str || ''),
-          x: it.transform[4],
-          y: it.transform[5],
-          w: it.width || 0,
-          h: it.height || Math.abs(it.transform[3]) || 10
-        }));
+      for (let p = 1; p <= numPages; p++) {
+        const page = await doc.getPage(p);
+        try {
+          const viewport = page.getViewport({ scale: 1 });
+          const tc = await page.getTextContent();
+          const rawItems = tc.items
+            .filter(it => String(it.str || '').trim() !== '')
+            .map(it => ({
+              str: String(it.str || ''),
+              x: it.transform[4],
+              y: it.transform[5],
+              w: it.width || 0,
+              h: it.height || Math.abs(it.transform[3]) || 10
+            }));
 
-      totalItems += rawItems.length;
-      if (totalItems > MAX_TEXT_ITEMS) {
-        const err = new Error(`抽出したtext item数が安全上限(${MAX_TEXT_ITEMS})を超えました(ページ${p}時点)。処理を中止しました。`);
-        err.code = 'text_item_limit_exceeded';
+          totalItems += rawItems.length;
+          assertTextItemCountWithinLimit(totalItems, p);
+
+          const pageChars = rawItems.reduce((a, i) => a + i.str.length, 0);
+          totalChars += pageChars;
+          perPageCharCounts.push(pageChars);
+          assertExtractedCharCountWithinLimit(totalChars, p);
+
+          // 是正: 元ツールextractPdfLayout()と同じy座標グルーピング(行判定の許容誤差)。
+          const lines = [];
+          for (const it of rawItems) {
+            const tol = Math.max(it.h * 0.6, 3);
+            let line = lines.find(L => Math.abs(L.y - it.y) <= tol);
+            if (!line) { line = { y: it.y, items: [] }; lines.push(line); }
+            line.items.push(it);
+          }
+          lines.sort((a, b) => b.y - a.y); // 上から下へ
+
+          const outLines = [];
+          if (rawItems.length === 0) {
+            warnings.push({ code: 'page_extracted_text_empty', page: p, block_id: null });
+          }
+
+          for (const L of lines) {
+            L.items.sort((a, b) => a.x - b.x);
+            const segs = [];
+            let cur = '', prevEnd = null, fh = L.items[0].h || 10;
+            for (const it of L.items) {
+              if (prevEnd !== null && it.x - prevEnd > Math.max(fh * 1.6, 12)) { segs.push(cur); cur = ''; }
+              cur += it.str;
+              prevEnd = it.x + it.w;
+              if (it.h) fh = it.h;
+            }
+            segs.push(cur);
+            const cleanSegs = segs.map(s => s.trim()).filter(s => s !== '');
+            if (cleanSegs.length === 0) continue; // 本当に文字が1つもない行(原文自体が存在しない)
+            // 是正Checkpoint 3a: 表・多段組みらしい配置(大きな水平ギャップ=複数segs)を検出しても、
+            // 元ツールのようにタブ結合してテーブル復元用に温存しない(表構造化は対象外)。単一の空白で
+            // 結合し、通常の本文として保持する。検出したこと自体は固定警告として記録する。
+            const text = cleanSegs.join(' ');
+            const hasMultiSegment = cleanSegs.length >= 2;
+
+            const xs = L.items.map(i => i.x);
+            const x1s = L.items.map(i => i.x + Math.max(0, i.w));
+            const ys = L.items.map(i => i.y - Math.max(1, i.h) * 0.25);
+            const y1s = L.items.map(i => i.y + Math.max(1, i.h));
+            // 是正Checkpoint 3a.1 §3: 原文(text)は存在するのに座標が復元できない場合、その行だけ
+            // 無言でcontinueして捨てるのではなく、文書全体をfail-closedする。
+            if (![...xs, ...x1s, ...ys, ...y1s].every(Number.isFinite)) {
+              const err = new Error(`ページ${p}の行(原文: "${text}")の座標を復元できません。原データを保持できないため、この文書の取込を中止します。`);
+              err.code = 'pdf_text_position_unrecoverable';
+              throw err;
+            }
+            const x0 = Math.min(...xs), x1 = Math.max(...x1s);
+            const y0pdf = Math.min(...ys), y1pdf = Math.max(...y1s);
+            const top = Math.max(0, Math.min(1, (viewport.height - y1pdf) / Math.max(1, viewport.height)));
+            const bottom = Math.max(0, Math.min(1, (viewport.height - y0pdf) / Math.max(1, viewport.height)));
+            const bbox = [
+              Math.max(0, Math.min(1, x0 / Math.max(1, viewport.width))),
+              top,
+              Math.max(0, Math.min(1, x1 / Math.max(1, viewport.width))),
+              bottom
+            ];
+            if (!isValidBBox(bbox)) {
+              const err = new Error(`ページ${p}の行(原文: "${text}")のbboxが不正です(実際: ${JSON.stringify(bbox)})。原データを保持できないため、この文書の取込を中止します。`);
+              err.code = 'pdf_text_position_unrecoverable';
+              throw err;
+            }
+            outLines.push({ text, rawText: text, segs: cleanSegs, hasMultiSegment, page: p, pageIndex: p - 1, bbox });
+          }
+          pages.push(outLines);
+        } finally {
+          // 是正Checkpoint 3a.1 §2: 処理済みpageのリソースを可能な限り都度解放する。
+          try { page.cleanup(); } catch (e) { /* cleanup失敗は無視(最終的にdoc.destroy()で解放される) */ }
+        }
+      }
+
+      if (totalChars === 0) {
+        const err = new Error('全ページで抽出テキストが0文字でした(画像PDF・スキャンPDFの可能性があります。OCRは対象外です)。');
+        err.code = 'no_extractable_text';
         throw err;
       }
 
-      const pageChars = rawItems.reduce((a, i) => a + i.str.length, 0);
-      totalChars += pageChars;
-      perPageCharCounts.push(pageChars);
-      if (totalChars > MAX_EXTRACTED_CHARS) {
-        const err = new Error(`抽出した総文字数が安全上限(${MAX_EXTRACTED_CHARS})を超えました(ページ${p}時点)。処理を中止しました。`);
-        err.code = 'extracted_char_limit_exceeded';
-        throw err;
-      }
-
-      // 是正: 元ツールextractPdfLayout()と同じy座標グルーピング(行判定の許容誤差)。
-      const lines = [];
-      for (const it of rawItems) {
-        const tol = Math.max(it.h * 0.6, 3);
-        let line = lines.find(L => Math.abs(L.y - it.y) <= tol);
-        if (!line) { line = { y: it.y, items: [] }; lines.push(line); }
-        line.items.push(it);
-      }
-      lines.sort((a, b) => b.y - a.y); // 上から下へ
-
-      const outLines = [];
-      if (rawItems.length === 0) {
-        warnings.push({ code: 'page_extracted_text_empty', page: p, block_id: null });
-      }
-
-      for (const L of lines) {
-        L.items.sort((a, b) => a.x - b.x);
-        const segs = [];
-        let cur = '', prevEnd = null, fh = L.items[0].h || 10;
-        for (const it of L.items) {
-          if (prevEnd !== null && it.x - prevEnd > Math.max(fh * 1.6, 12)) { segs.push(cur); cur = ''; }
-          cur += it.str;
-          prevEnd = it.x + it.w;
-          if (it.h) fh = it.h;
-        }
-        segs.push(cur);
-        const cleanSegs = segs.map(s => s.trim()).filter(s => s !== '');
-        if (cleanSegs.length === 0) continue;
-        // 是正Checkpoint 3a: 表・多段組みらしい配置(大きな水平ギャップ=複数segs)を検出しても、
-        // 元ツールのようにタブ結合してテーブル復元用に温存しない(表構造化は対象外)。単一の空白で
-        // 結合し、通常の本文として保持する。検出したこと自体は固定警告として記録する。
-        const text = cleanSegs.join(' ');
-        const hasMultiSegment = cleanSegs.length >= 2;
-
-        const xs = L.items.map(i => i.x);
-        const x1s = L.items.map(i => i.x + Math.max(0, i.w));
-        const ys = L.items.map(i => i.y - Math.max(1, i.h) * 0.25);
-        const y1s = L.items.map(i => i.y + Math.max(1, i.h));
-        if (xs.some(Number.isNaN) || x1s.some(Number.isNaN) || ys.some(Number.isNaN) || y1s.some(Number.isNaN)) {
-          warnings.push({ code: 'paragraph_split_incomplete_position', page: p, block_id: null });
-          continue;
-        }
-        const x0 = Math.min(...xs), x1 = Math.max(...x1s);
-        const y0pdf = Math.min(...ys), y1pdf = Math.max(...y1s);
-        const top = Math.max(0, Math.min(1, (viewport.height - y1pdf) / Math.max(1, viewport.height)));
-        const bottom = Math.max(0, Math.min(1, (viewport.height - y0pdf) / Math.max(1, viewport.height)));
-        const bbox = [
-          Math.max(0, Math.min(1, x0 / Math.max(1, viewport.width))),
-          top,
-          Math.max(0, Math.min(1, x1 / Math.max(1, viewport.width))),
-          bottom
-        ];
-        outLines.push({ text, rawText: text, segs: cleanSegs, hasMultiSegment, page: p, pageIndex: p - 1, bbox });
-      }
-      pages.push(outLines);
-    }
-
-    if (totalChars === 0) {
-      const err = new Error('全ページで抽出テキストが0文字でした(画像PDF・スキャンPDFの可能性があります。OCRは対象外です)。');
-      err.code = 'no_extractable_text';
-      throw err;
-    }
-
-    return { pages, numPages, totalChars, perPageCharCounts, warnings };
+      return { pages, numPages, totalChars, perPageCharCounts, warnings };
+    });
   }
 
   // ---- 段落結合(Checkpoint 3a §段落: 保守的。不確実なら結合しない) ----
@@ -387,6 +453,13 @@
       const xs0 = pendingLines.map(l => l.bbox[0]), ys0 = pendingLines.map(l => l.bbox[1]);
       const xs1 = pendingLines.map(l => l.bbox[2]), ys1 = pendingLines.map(l => l.bbox[3]);
       const bbox = [Math.min(...xs0), Math.min(...ys0), Math.max(...xs1), Math.max(...ys1)];
+      // 是正Checkpoint 3a.1 §3: 個々の行bboxはextractPdfLayout()で検証済みだが、結合後の
+      // 段落bboxもここで再検証する(多層防御。無言で欠落させず、不正ならfail-closedする)。
+      if (!isValidBBox(bbox)) {
+        const err = new Error(`ページ${pendingLines[0].page}の段落(原文冒頭: "${rawText.slice(0, 30)}")のbboxが不正です(実際: ${JSON.stringify(bbox)})。原データを保持できないため、この文書の取込を中止します。`);
+        err.code = 'pdf_text_position_unrecoverable';
+        throw err;
+      }
       const paraWarnings = [];
       if (pendingLines.some(l => l.hasMultiSegment)) {
         paraWarnings.push({ code: 'heading_or_table_layout_detected', page: pendingLines[0].page, block_id: blockId });
@@ -443,11 +516,7 @@
       err.code = 'no_node_candidates';
       throw err;
     }
-    if (totalParagraphs > MAX_STATEMENTS) {
-      const err = new Error(`生成予定のstatement数(${totalParagraphs})が安全上限(${MAX_STATEMENTS})を超えています。処理を中止しました。`);
-      err.code = 'statement_count_limit_exceeded';
-      throw err;
-    }
+    assertStatementCountWithinLimit(totalParagraphs);
 
     return { sections, warnings };
   }
@@ -568,7 +637,9 @@
     const edges = [];
 
     // document node (PDFファイル)。ページ数・section数によらず1回だけ生成する。
-    const docLocator = { kind: 'pdf', page: 0, source_path: '$.document', section_id: null, section_title: null, block_id: null };
+    // 是正Checkpoint 3a.1 §1: document Nodeはページに紐付かないため page=null とする
+    // (page=0を生成しない。0は「1ページ目」と誤読されうる不正な値のため使わない)。
+    const docLocator = { kind: 'pdf', page: null, source_path: '$.document', section_id: null, section_title: null, block_id: null };
     const docNodeId = await nodeId(sourceDocId, docLocator);
     const docLabel = fileName;
     const docNode = await finalizeNode({
@@ -585,8 +656,16 @@
     for (let secIndex = 0; secIndex < segmented.sections.length; secIndex++) {
       const sec = segmented.sections[secIndex];
       const sectionId = `sec-${secIndex}`;
+      // 是正Checkpoint 3a.1 §1: 通常sectionは見出し行の1始まりページ、synthetic sectionは
+      // 最初の子paragraphの1始まりページを使う(どちらも必ず1以上。0やnullは生成しない)。
+      const sectionPage = sec.synthetic ? (sec.paragraphs[0] && sec.paragraphs[0].page) : sec.headingPage;
+      if (!Number.isInteger(sectionPage) || sectionPage < 1) {
+        const err = new Error(`section[${secIndex}]のページ番号を決定できません(synthetic=${sec.synthetic})。原データを保持できないため、この文書の取込を中止します。`);
+        err.code = 'pdf_text_position_unrecoverable';
+        throw err;
+      }
       const secLocator = {
-        kind: 'pdf', page: sec.headingPage || 0, source_path: `$.sections[${secIndex}]`,
+        kind: 'pdf', page: sectionPage, source_path: `$.sections[${secIndex}]`,
         section_id: sectionId, section_title: sec.title, block_id: null
       };
       const secNodeId = await nodeId(sourceDocId, secLocator);
@@ -608,12 +687,17 @@
       for (let paraIndex = 0; paraIndex < sec.paragraphs.length; paraIndex++) {
         const para = sec.paragraphs[paraIndex];
 
-        // fail-closed: 原文またはページ位置を再現できない段落があれば、その段落だけ飛ばすのでは
-        // なく文書全体をエラーにする。
+        // fail-closed: 原文・ページ位置・bboxを再現できない段落があれば、その段落だけ飛ばすのでは
+        // なく文書全体をエラーにする(是正Checkpoint 3a.1 §3: bboxもここで再検証する)。
         if (typeof para.rawText !== 'string' || para.rawText === '' ||
           !Number.isInteger(para.page) || para.page < 1) {
           const err = new Error(`section[${secIndex}] paragraph[${paraIndex}]の原文またはページ位置を再現できません。原データを保持できないため、この文書の取込を中止します。`);
           err.code = 'verbatim_or_page_unrecoverable';
+          throw err;
+        }
+        if (!isValidBBox(para.bbox)) {
+          const err = new Error(`section[${secIndex}] paragraph[${paraIndex}]のbboxが不正です(実際: ${JSON.stringify(para.bbox)})。原データを保持できないため、この文書の取込を中止します。`);
+          err.code = 'pdf_text_position_unrecoverable';
           throw err;
         }
 
@@ -667,7 +751,9 @@
 
   return Object.freeze({
     inspectPdf, extractPdfLayout, segmentPdfContent, buildKnowledgeNodesFromPdf, adaptPdfDirect,
-    matchFixedHeadingLine, normalizePdfText, matchInitialTags,
+    matchFixedHeadingLine, normalizePdfText, matchInitialTags, isValidBBox,
+    assertPageCountWithinLimit, assertTextItemCountWithinLimit,
+    assertExtractedCharCountWithinLimit, assertStatementCountWithinLimit,
     MAX_PAGES, MAX_TEXT_ITEMS, MAX_EXTRACTED_CHARS, MAX_STATEMENTS
   });
 });

@@ -249,6 +249,146 @@ async function main() {
     assert(!okThrew, `MAX_STATEMENTSちょうど(${Adapter.MAX_STATEMENTS}件)は許容される(上限超過にならない)`);
   }
 
+  // ==== Checkpoint 3a.1: locator.pageの契約(document=null, section/statementは1始まり, 0は生成しない) ====
+
+  // ---- §1: document Nodeのlocator.pageはnull ----
+  assert(docNode1.provenance.locator.page === null,
+    `document Nodeのlocator.pageはnullである(実際: ${JSON.stringify(docNode1.provenance.locator.page)})`);
+
+  // ---- §1: synthetic sectionのpageは最初の子paragraphのpageと一致する(fixture 4) ----
+  {
+    const syntheticSec = secBodyBefore[0];
+    const firstChildStmt = rBodyBefore.nodes.find(n => n.node_type === 'statement' && n.parent_node_id === syntheticSec.node_id);
+    assert(!!firstChildStmt && syntheticSec.provenance.locator.page === firstChildStmt.provenance.locator.page,
+      `synthetic sectionのlocator.pageは最初の子paragraphのlocator.pageと一致する(実際: section=${syntheticSec.provenance.locator.page}, 子paragraph=${firstChildStmt && firstChildStmt.provenance.locator.page})`);
+  }
+
+  // ---- §1: locator.page===0のNodeは1件も生成されない ----
+  {
+    const allResults = [r1, r2, r3, rNoHeading, rBodyBefore, r5, r6, r9, r10];
+    const zeroPageNodes = allResults.flatMap(r => r.nodes).filter(n => n.provenance.locator.page === 0);
+    assert(zeroPageNodes.length === 0, `locator.page===0のNodeは1件も生成されない(実際: ${zeroPageNodes.length}件)`);
+  }
+
+  // ==== Checkpoint 3a.1 §3: 座標のfail-closed検証 ====
+
+  // ---- isValidBBox()の純関数テスト ----
+  assert(Adapter.isValidBBox([0, 0, 1, 1]) === true, 'isValidBBox: 境界値([0,0,1,1])はtrue');
+  assert(Adapter.isValidBBox([0.1, 0.1, 0.9, 0.9]) === true, 'isValidBBox: 通常の有効値はtrue');
+  assert(Adapter.isValidBBox([0.1, 0.1, 0.9]) === false, 'isValidBBox: 要素数3(不足)はfalse');
+  assert(Adapter.isValidBBox([0.1, 0.1, 0.9, 0.9, 0.5]) === false, 'isValidBBox: 要素数5(過剰)はfalse');
+  assert(Adapter.isValidBBox([NaN, 0.1, 0.9, 0.9]) === false, 'isValidBBox: NaNを含む場合はfalse');
+  assert(Adapter.isValidBBox([0.1, 0.1, Infinity, 0.9]) === false, 'isValidBBox: Infinityを含む場合はfalse');
+  assert(Adapter.isValidBBox([-0.1, 0.1, 0.9, 0.9]) === false, 'isValidBBox: 範囲外(x0<0)はfalse');
+  assert(Adapter.isValidBBox([0.1, 0.1, 1.1, 0.9]) === false, 'isValidBBox: 範囲外(x1>1)はfalse');
+  assert(Adapter.isValidBBox([0.5, 0.1, 0.2, 0.9]) === false, 'isValidBBox: x0>x1はfalse');
+  assert(Adapter.isValidBBox([0.1, 0.9, 0.5, 0.2]) === false, 'isValidBBox: top>bottomはfalse');
+  assert(Adapter.isValidBBox(null) === false, 'isValidBBox: 配列でない(null)はfalse');
+
+  // ---- 不正なbboxは文書全体をfail-closedする(該当行を無言でcontinueして捨てない) ----
+  {
+    const badLine = { text: 'x', rawText: 'x', segs: ['x'], hasMultiSegment: false, page: 1, pageIndex: 0, bbox: [0.5, 0.1, 0.2, 0.3] }; // x0>x1で不正
+    const badLayout = { pages: [[badLine]], numPages: 1, totalChars: 1, perPageCharCounts: [1], warnings: [] };
+    let threwSeg = false, errSeg = null;
+    try { Adapter.segmentPdfContent(badLayout); } catch (e) { threwSeg = true; errSeg = e; }
+    assert(threwSeg && errSeg.code === 'pdf_text_position_unrecoverable',
+      `segmentPdfContent()は不正なbbox(x0>x1)をfail-closedする(実際: threw=${threwSeg}, code=${errSeg && errSeg.code})`);
+
+    const badSegmented = {
+      sections: [{
+        title: '本文', synthetic: true, headingConfidence: null, headingPage: null,
+        paragraphs: [{ blockId: 'blk-0-0', page: 1, pageIndex: 0, bbox: [0.5, 0.1, 0.2, 0.3], lineCount: 1, rawText: 'x', normalizedText: 'x', warnings: [] }]
+      }],
+      warnings: []
+    };
+    let threwBuild = false, errBuild = null;
+    try {
+      await Adapter.buildKnowledgeNodesFromPdf(badSegmented, {
+        fileName: 'bad.pdf', contentDigest: crypto.createHash('sha256').update('bad').digest('hex'),
+        ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB
+      });
+    } catch (e) { threwBuild = true; errBuild = e; }
+    assert(threwBuild && errBuild.code === 'pdf_text_position_unrecoverable',
+      `buildKnowledgeNodesFromPdf()もbboxを再検証してfail-closedする(実際: threw=${threwBuild}, code=${errBuild && errBuild.code})`);
+  }
+
+  // ---- タグ: alias一致は語彙側の正式表記として付与される ----
+  assert(JSON.stringify(Adapter.matchInitialTags(['セーフティ'], { allowed_tags: ['安全'], aliases: { 'セーフティ': '安全' } })) === JSON.stringify(['安全']),
+    'alias一致(セーフティ→安全)は語彙側の正式表記(安全)として付与される');
+
+  // ==== Checkpoint 3a.1 §4: 安全上限の境界値テスト(ちょうどN件はPASS、N+1件はERROR) ====
+  {
+    let threw = false;
+    try { Adapter.assertPageCountWithinLimit(Adapter.MAX_PAGES); } catch (e) { threw = true; }
+    assert(!threw, `assertPageCountWithinLimit(${Adapter.MAX_PAGES})はPASSする`);
+    let err = null; threw = false;
+    try { Adapter.assertPageCountWithinLimit(Adapter.MAX_PAGES + 1); } catch (e) { threw = true; err = e; }
+    assert(threw && err.code === 'page_count_limit_exceeded',
+      `assertPageCountWithinLimit(${Adapter.MAX_PAGES + 1})はpage_count_limit_exceededでERRORになる(実際: threw=${threw}, code=${err && err.code})`);
+  }
+  {
+    let threw = false;
+    try { Adapter.assertTextItemCountWithinLimit(Adapter.MAX_TEXT_ITEMS, 1); } catch (e) { threw = true; }
+    assert(!threw, `assertTextItemCountWithinLimit(${Adapter.MAX_TEXT_ITEMS})はPASSする`);
+    let err = null; threw = false;
+    try { Adapter.assertTextItemCountWithinLimit(Adapter.MAX_TEXT_ITEMS + 1, 1); } catch (e) { threw = true; err = e; }
+    assert(threw && err.code === 'text_item_limit_exceeded',
+      `assertTextItemCountWithinLimit(${Adapter.MAX_TEXT_ITEMS + 1})はtext_item_limit_exceededでERRORになる(実際: threw=${threw}, code=${err && err.code})`);
+  }
+  {
+    let threw = false;
+    try { Adapter.assertExtractedCharCountWithinLimit(Adapter.MAX_EXTRACTED_CHARS, 1); } catch (e) { threw = true; }
+    assert(!threw, `assertExtractedCharCountWithinLimit(${Adapter.MAX_EXTRACTED_CHARS})はPASSする`);
+    let err = null; threw = false;
+    try { Adapter.assertExtractedCharCountWithinLimit(Adapter.MAX_EXTRACTED_CHARS + 1, 1); } catch (e) { threw = true; err = e; }
+    assert(threw && err.code === 'extracted_char_limit_exceeded',
+      `assertExtractedCharCountWithinLimit(${Adapter.MAX_EXTRACTED_CHARS + 1})はextracted_char_limit_exceededでERRORになる(実際: threw=${threw}, code=${err && err.code})`);
+  }
+  {
+    let threw = false;
+    try { Adapter.assertStatementCountWithinLimit(Adapter.MAX_STATEMENTS); } catch (e) { threw = true; }
+    assert(!threw, `assertStatementCountWithinLimit(${Adapter.MAX_STATEMENTS})はPASSする`);
+    let err = null; threw = false;
+    try { Adapter.assertStatementCountWithinLimit(Adapter.MAX_STATEMENTS + 1); } catch (e) { threw = true; err = e; }
+    assert(threw && err.code === 'statement_count_limit_exceeded',
+      `assertStatementCountWithinLimit(${Adapter.MAX_STATEMENTS + 1})はstatement_count_limit_exceededでERRORになる(実際: threw=${threw}, code=${err && err.code})`);
+  }
+
+  // ==== Checkpoint 3a.1 §2: pdf.jsリソース解放(destroy())の実測検証 ====
+  // pdf_direct_adapter.js自身がrequireするpdf.min.jsと同じ絶対パス(path.join(__dirname,'..','ui',
+  // 'vendor','pdfjs'))をこのテストからも計算してrequireすると、Nodeのモジュールキャッシュは解決後の
+  // 絶対パスをキーにするため、アダプタ内部のresolvePdfJs()が使っているのと同一のpdfjsLibオブジェクト
+  // を取得できる。pdfjsLib.getDocumentはgetterのみ(setterなし・非configurable)のexportのため
+  // 直接差し替えることはできないが、getDocument()が返すPDFDocumentProxyインスタンスのprototype上の
+  // destroy()は通常のwritable/configurableメソッドなので、そこにカウンタ付きラッパーを仕込めば、
+  // 同一プロトタイプを共有するアダプタ内部生成の全Documentのdestroy()呼び出しも同時に捕捉できる
+  // (プロトタイプはクラス単位で1つだけなので、後から生成されるインスタンスにも即座に適用される)。
+  {
+    const vendorDir = path.join(__dirname, '..', 'ui', 'vendor', 'pdfjs');
+    const pdfjsLib = require(path.join(vendorDir, 'pdf.min.js'));
+    // プロトタイプを得るためだけの探り用Document(これ自体もdestroy()し、カウントに含める)。
+    const probeDoc = await pdfjsLib.getDocument({
+      data: new Uint8Array(readAsArrayBuffer(FIXTURE_1)), disableWorker: true, useWorkerFetch: false, isEvalSupported: false
+    }).promise;
+    const proto = Object.getPrototypeOf(probeDoc);
+    const origDestroy = proto.destroy;
+    let destroyed = 0;
+    proto.destroy = function(...args) {
+      destroyed++;
+      return origDestroy.apply(this, args);
+    };
+    try {
+      await probeDoc.destroy(); // 探り用(1回)
+      await adaptFixture(FIXTURE_1); // 正常系: inspectPdf+extractPdfLayoutで2回open・2回destroy
+      await expectThrow(adaptFixture(FIXTURE_7)); // open成功後、抽出後にno_extractable_textでERROR(それでもdestroyされる。2回)
+      await expectThrow(adaptFixture(FIXTURE_11_ENCRYPTED)); // open自体が失敗(destroy対象のdocが存在しない=0回)
+    } finally {
+      proto.destroy = origDestroy;
+    }
+    assert(destroyed === 5,
+      `開いたpdf.js Documentは成功・失敗いずれの経路でも必ずdestroy()される(探り用1+FIXTURE_1の2+FIXTURE_7の2+暗号化PDFの0=期待5回。実際: ${destroyed}回)`);
+  }
+
   console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }
