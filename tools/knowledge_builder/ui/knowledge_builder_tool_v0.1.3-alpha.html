@@ -102,26 +102,77 @@
 <main>
 
 <section class="panel" id="ingestPanel">
-  <h2>1. データを読み込む <span class="en">(既存Trace JSON)</span></h2>
+  <h2>1. データを読み込む <span class="en">(Trace JSON / Excel)</span></h2>
   <div class="explain">
-    既存のPDF/Excelツールが出力した「照合用JSON（trace JSON）」を読み込みます。PDF/Excelファイルそのものは読み込めません。
-    先に既存ツールでtrace JSONを出力してから、ここへ読み込ませてください。
+    既存のPDF/Excelツールが出力した「照合用JSON（trace JSON）」、または .xlsx ファイルそのものを
+    直接読み込み、文書間の関連を確認します。PDF直接入力は今回未対応です。文書A・文書Bは役割を
+    固定していません(どちらもTrace JSON／Excelのどちらでも指定できます)。
   </div>
-  <div class="row">
-    <div class="field">
-      <label>文書A（既存PDF/Excelツールが出力したTrace JSON）</label>
-      <input type="file" id="fileA" accept=".json">
+  <div class="row" style="align-items:flex-start;">
+    <div class="field" id="docFieldA" style="min-width:300px; border:1px solid #e2e6ea; border-radius:6px; padding:8px;">
+      <label>文書A: 入力方式</label>
+      <select id="inputModeA"><option value="trace">Trace JSON</option><option value="excel">Excel(.xlsx)</option></select>
+
+      <div id="traceBlockA">
+        <label>文書A（既存PDF/Excelツールが出力したTrace JSON）</label>
+        <input type="file" id="fileA" accept=".json">
+      </div>
+
+      <div id="excelBlockA" style="display:none;">
+        <label>文書A（.xlsxファイル）</label>
+        <input type="file" id="fileExcelA" accept=".xlsx">
+        <label>シート</label>
+        <select id="sheetSelectA" disabled></select>
+        <label>見出し行番号</label>
+        <input type="number" id="headerRowA" min="1" value="1">
+        <label>データ開始行番号</label>
+        <input type="number" id="dataStartRowA" min="1" value="2">
+        <button type="button" class="secondary small" id="btnPreviewExcelA" disabled>プレビュー取り込み</button>
+        <div class="status-line" id="excelStatusA"></div>
+        <div id="excelPreviewWrapA" style="display:none; max-height:220px; overflow:auto; margin-top:6px;">
+          <table id="excelPreviewTableA">
+            <thead><tr><th>シート名</th><th>行番号</th><th>セル範囲</th><th>タイトル</th><th>本文抜粋</th><th>初期タグ</th><th>警告</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
     </div>
-    <div class="field">
-      <label>文書B（既存PDF/Excelツールが出力したTrace JSON）</label>
-      <input type="file" id="fileB" accept=".json">
+
+    <div class="field" id="docFieldB" style="min-width:300px; border:1px solid #e2e6ea; border-radius:6px; padding:8px;">
+      <label>文書B: 入力方式</label>
+      <select id="inputModeB"><option value="trace">Trace JSON</option><option value="excel">Excel(.xlsx)</option></select>
+
+      <div id="traceBlockB">
+        <label>文書B（既存PDF/Excelツールが出力したTrace JSON）</label>
+        <input type="file" id="fileB" accept=".json">
+      </div>
+
+      <div id="excelBlockB" style="display:none;">
+        <label>文書B（.xlsxファイル）</label>
+        <input type="file" id="fileExcelB" accept=".xlsx">
+        <label>シート</label>
+        <select id="sheetSelectB" disabled></select>
+        <label>見出し行番号</label>
+        <input type="number" id="headerRowB" min="1" value="1">
+        <label>データ開始行番号</label>
+        <input type="number" id="dataStartRowB" min="1" value="2">
+        <button type="button" class="secondary small" id="btnPreviewExcelB" disabled>プレビュー取り込み</button>
+        <div class="status-line" id="excelStatusB"></div>
+        <div id="excelPreviewWrapB" style="display:none; max-height:220px; overflow:auto; margin-top:6px;">
+          <table id="excelPreviewTableB">
+            <thead><tr><th>シート名</th><th>行番号</th><th>セル範囲</th><th>タイトル</th><th>本文抜粋</th><th>初期タグ</th><th>警告</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
     </div>
+
     <div class="field">
       <label>共有タグ辞書（任意。未指定時は既定辞書 trace-domain-ja を使用）</label>
       <input type="file" id="fileVocab" accept=".json">
     </div>
     <div class="field">
-      <button id="btnIngest">読み込んでノードを生成</button>
+      <button id="btnIngest">Knowledge Nodeを生成してStep 2へ</button>
     </div>
   </div>
   <div class="status-line" id="ingestStatus"></div>
@@ -334,6 +385,8 @@
 <script src="../../quantity_sidecar_binding_core.js"></script>
 <script src="../core/id_hash_utils.js"></script>
 <script src="../core/trace_json_adapter.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="../core/excel_direct_adapter.js"></script>
 <script src="../core/relation_candidate_engine.js"></script>
 <script src="../core/knowledge_store.js"></script>
 <script>
@@ -404,6 +457,14 @@ let selectedGraphNodeIsCollapsedProxy = false;
 // { kind:'aggregate', edgeIds:Set<edge_id>, label }。
 let graphRelationScope = null;
 
+// ---- Alpha 0.2.0 Checkpoint 2: Excel直接入力(すべてUI専用。Knowledge JSONには一切含めない) ----
+// 文書A/Bそれぞれの入力方式('trace'|'excel'。既定'trace'=既存どおり)。
+let inputModeA = 'trace', inputModeB = 'trace';
+// Excel直接入力のプレビュー状態(UI専用)。ファイル未選択時はnull。
+// { file, arrayBuffer, contentDigest, workbook, sheetNames, extraction }
+// extractionはプレビュー取り込みボタンを押すまでnull(プレビューを取り込むまでStep 2へは進めない)。
+let excelInputA = null, excelInputB = null;
+
 const NODE_QUICK_FILTERS = [
   { key: 'untagged', label: 'タグ未設定', test: n => n.tags.length === 0 },
   { key: 'unregistered', label: '未登録タグあり', test: n => (n.unregistered_tags || []).length > 0 },
@@ -457,26 +518,150 @@ function readJsonFile(file) {
   });
 }
 
+// ---- Alpha 0.2.0 Checkpoint 2: Excel直接入力 ----
+
+function excelInputRef(side) { return side === 'A' ? excelInputA : excelInputB; }
+function setExcelInputRef(side, value) { if (side === 'A') excelInputA = value; else excelInputB = value; }
+
+function setInputMode(side, mode) {
+  if (side === 'A') inputModeA = mode; else inputModeB = mode;
+  $('traceBlock' + side).style.display = mode === 'trace' ? '' : 'none';
+  $('excelBlock' + side).style.display = mode === 'excel' ? '' : 'none';
+}
+
+// ファイル選択直後: inspectWorkbook()でシート一覧だけを読む(まだNode化しない。読み取り専用)。
+async function onExcelFileChange(side) {
+  const file = $('fileExcel' + side).files[0];
+  const sheetSelect = $('sheetSelect' + side);
+  const btnPreview = $('btnPreviewExcel' + side);
+  const status = $('excelStatus' + side);
+  setExcelInputRef(side, null);
+  renderExcelPreview(side);
+  sheetSelect.innerHTML = '';
+  sheetSelect.disabled = true;
+  btnPreview.disabled = true;
+  btnPreview.textContent = 'プレビュー取り込み';
+  if (!file) { status.textContent = ''; return; }
+
+  status.textContent = 'ファイルを解析中...';
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const contentDigest = await sha256HexOfFile(file);
+    const { workbook, sheetNames } = KnowledgeExcelDirectAdapter.inspectWorkbook(arrayBuffer);
+    sheetSelect.innerHTML = sheetNames.map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join('');
+    sheetSelect.disabled = false;
+    btnPreview.disabled = false;
+    setExcelInputRef(side, { file, arrayBuffer, contentDigest, workbook, sheetNames, extraction: null });
+    status.textContent = `シート${sheetNames.length}件を検出しました。シート・見出し行・データ開始行を指定し、「プレビュー取り込み」を押してください。`;
+  } catch (e) {
+    status.textContent = `Excel解析エラー: ${e.message || e}`;
+  }
+}
+
+// 「プレビュー取り込み」: extractSheetRows()を実行し、結果を読み取り専用プレビューとして表示する。
+// この時点ではまだKnowledge Node化しない(Step 2へは進まない)。
+function previewExcel(side) {
+  const input = excelInputRef(side);
+  const status = $('excelStatus' + side);
+  const btnPreview = $('btnPreviewExcel' + side);
+  if (!input) { status.textContent = 'Excelファイルを選択してください。'; return; }
+  const sheetName = $('sheetSelect' + side).value;
+  const headerRow = Number($('headerRow' + side).value);
+  const dataStartRow = Number($('dataStartRow' + side).value);
+  try {
+    const extraction = KnowledgeExcelDirectAdapter.extractSheetRows(input.workbook, sheetName, headerRow, dataStartRow);
+    input.extraction = extraction;
+    input.sheetName = sheetName;
+    status.textContent = `プレビュー取り込み完了: 非空データ行 ${extraction.nonEmptyRowCount}件(全${extraction.rows.length}行中)。内容を確認し、問題なければ「Knowledge Nodeを生成してStep 2へ」を押してください。`;
+    btnPreview.textContent = 'プレビューを取り込み直す';
+    renderExcelPreview(side);
+  } catch (e) {
+    input.extraction = null;
+    status.textContent = `プレビュー取り込みエラー: ${e.message || e}`;
+    renderExcelPreview(side);
+  }
+}
+
+// 読み取り専用プレビュー表示(編集不可): シート名・行番号・セル範囲・タイトル・本文抜粋・初期タグ・警告。
+function renderExcelPreview(side) {
+  const input = excelInputRef(side);
+  const wrap = $('excelPreviewWrap' + side);
+  const tbody = $('excelPreviewTable' + side).querySelector('tbody');
+  if (!input || !input.extraction) { wrap.style.display = 'none'; tbody.innerHTML = ''; return; }
+  const extraction = input.extraction;
+  const vocabFile = $('fileVocab').files[0];
+  // プレビュー時点では共有タグ辞書ファイルの読み込みは行わない(重い非同期処理を避けるため)。
+  // 未指定時の既定辞書のみでタグ一致を仮表示する(実際の取込時は指定辞書があればそちらを使う)。
+  const previewVocab = DEFAULT_TAG_VOCABULARY;
+  const rowsHtml = extraction.rows.map(row => {
+    const nonBlank = row.cells.filter(c => String(c.display ?? '').trim() !== '');
+    const title = row.isEmpty ? '' : KnowledgeExcelDirectAdapter.deriveTitle(nonBlank, row.rowNumber);
+    const text = row.isEmpty ? '' : KnowledgeExcelDirectAdapter.deriveText(nonBlank);
+    const tags = row.isEmpty ? [] : KnowledgeExcelDirectAdapter.matchInitialTags(nonBlank.map(c => c.display), previewVocab);
+    const warnings = row.isEmpty ? ['空行のため取込対象外(Node化されません)'] : [];
+    return `<tr>
+      <td>${esc(extraction.sheetName)}</td>
+      <td>${row.rowNumber}</td>
+      <td>${esc(row.cellRange)}</td>
+      <td>${esc(title)}</td>
+      <td>${esc(text.slice(0, 60))}${text.length > 60 ? '…' : ''}</td>
+      <td>${tags.map(t => `<span class="tag-chip">${esc(t)}</span>`).join('') || '<span class="muted">-</span>'}</td>
+      <td>${warnings.map(w => esc(w)).join('; ') || ''}</td>
+    </tr>`;
+  }).join('');
+  const fallbackCols = extraction.headers.filter((h, i) => extraction.headerIsFallback[i]);
+  const fallbackNote = fallbackCols.length
+    ? `<tr><td colspan="7" class="muted" style="font-size:11px;">見出し未指定のため列記号を使用した列: ${fallbackCols.map(esc).join(', ')}</td></tr>`
+    : '';
+  tbody.innerHTML = rowsHtml + fallbackNote;
+  wrap.style.display = extraction.rows.length ? '' : 'none';
+}
+
+// document/section/内容Node(直接入力)構築時に渡すtagVocabularyは、実際の取込(ingest)時点で
+// 共有タグ辞書ファイルを読み直した最終版を使う(プレビュー表示の簡易版とは別)。
+async function adaptDocument(side, mode, vocab, ingestedAt) {
+  try {
+    if (mode === 'trace') {
+      const file = $('file' + side).files[0];
+      if (!file) throw new Error('Trace JSONファイルが選択されていません。');
+      const trace = await readJsonFile(file);
+      const digest = await sha256HexOfFile(file);
+      const role = side === 'A' ? 'requirement' : 'design';
+      return await KnowledgeTraceJsonAdapter.adaptTraceJson(trace, { role, contentDigest: digest, ingestedAt });
+    }
+    const input = excelInputRef(side);
+    if (!input || !input.extraction) throw new Error('Excelのプレビュー取り込みが完了していません。先に「プレビュー取り込み」を行ってください。');
+    return await KnowledgeExcelDirectAdapter.buildKnowledgeNodesFromExcel(input.extraction, {
+      fileName: input.file.name, contentDigest: input.contentDigest, ingestedAt, tagVocabulary: vocab
+    });
+  } catch (e) {
+    throw new Error(`文書${side}(${mode === 'excel' ? 'Excel' : 'Trace JSON'}): ${e.message || e}`);
+  }
+}
+
 async function ingest() {
-  const fA = $('fileA').files[0], fB = $('fileB').files[0];
-  if (!fA || !fB) { $('ingestStatus').textContent = '文書A・文書Bの両方を選択してください。'; return; }
+  const modeA = inputModeA, modeB = inputModeB;
+  if (modeA === 'trace' && !$('fileA').files[0]) { $('ingestStatus').textContent = '文書AのTrace JSONファイルを選択してください。'; return; }
+  if (modeA === 'excel' && !(excelInputA && excelInputA.extraction)) { $('ingestStatus').textContent = '文書AのExcelプレビュー取り込みを先に行ってください。'; return; }
+  if (modeB === 'trace' && !$('fileB').files[0]) { $('ingestStatus').textContent = '文書Bのtrace JSONファイルを選択してください。'; return; }
+  if (modeB === 'excel' && !(excelInputB && excelInputB.extraction)) { $('ingestStatus').textContent = '文書BのExcelプレビュー取り込みを先に行ってください。'; return; }
   if (dataset && !confirm('既存のNode/Relationはすべて破棄されます。取込を続けますか？')) return;
 
   $('ingestStatus').textContent = '取込中...';
   try {
-    const [traceA, traceB] = await Promise.all([readJsonFile(fA), readJsonFile(fB)]);
-    const [digestA, digestB] = await Promise.all([sha256HexOfFile(fA), sha256HexOfFile(fB)]);
     const vocabFile = $('fileVocab').files[0];
     const vocab = vocabFile ? await readJsonFile(vocabFile) : DEFAULT_TAG_VOCABULARY;
-
     const ingestedAt = new Date().toISOString();
-    const resultA = await KnowledgeTraceJsonAdapter.adaptTraceJson(traceA, { role: 'requirement', contentDigest: digestA, ingestedAt });
-    const resultB = await KnowledgeTraceJsonAdapter.adaptTraceJson(traceB, { role: 'design', contentDigest: digestB, ingestedAt });
+
+    // 文書A・文書Bの双方がAdapter処理を正常に完了するまで、既存datasetは一切変更しない(原子性)。
+    // どちらかがthrowした場合はここでcatchへ抜け、以降のdataset再代入には到達しない。
+    const resultA = await adaptDocument('A', modeA, vocab, ingestedAt);
+    const resultB = await adaptDocument('B', modeB, vocab, ingestedAt);
 
     dataset = KnowledgeStore.createEmptyDataset({ tool: 'knowledge_builder_tool', version: '0.1.3-alpha' });
     await KnowledgeStore.setTagVocabulary(dataset, vocab);
-    await KnowledgeStore.ingestAdapterResult(dataset, resultA, { type: 'ai', id: 'trace-json-adapter' });
-    await KnowledgeStore.ingestAdapterResult(dataset, resultB, { type: 'ai', id: 'trace-json-adapter' });
+    await KnowledgeStore.ingestAdapterResult(dataset, resultA, { type: 'ai', id: modeA === 'excel' ? 'excel-direct-adapter' : 'trace-json-adapter' });
+    await KnowledgeStore.ingestAdapterResult(dataset, resultB, { type: 'ai', id: modeB === 'excel' ? 'excel-direct-adapter' : 'trace-json-adapter' });
     docAId = resultA.sourceDocument.source_document_id;
     docBId = resultB.sourceDocument.source_document_id;
 
@@ -489,6 +674,7 @@ async function ingest() {
     activeNodeQuickFilters = new Set();
     selectedConfirmMenu = null;
     candidatesGenerated = false;
+    $('candidateStatus').textContent = '';
     jumpHighlightNodeId = null;
     candidateGroupBasis = 'A';
     $('edgeGroupBasis').value = 'A';
@@ -1958,6 +2144,12 @@ function renderAll() {
 $('btnIngest').addEventListener('click', ingest);
 $('btnGenerateCandidates').addEventListener('click', generateCandidates);
 $('btnSave').addEventListener('click', saveKnowledgeJson);
+
+for (const side of ['A', 'B']) {
+  $('inputMode' + side).addEventListener('change', (ev) => setInputMode(side, ev.target.value));
+  $('fileExcel' + side).addEventListener('change', () => onExcelFileChange(side));
+  $('btnPreviewExcel' + side).addEventListener('click', () => previewExcel(side));
+}
 
 $('showStructural').addEventListener('change', renderNodeTable);
 $('nodeDetailMode').addEventListener('change', renderNodeTable);
