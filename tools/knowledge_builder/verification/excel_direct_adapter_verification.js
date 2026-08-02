@@ -20,6 +20,7 @@ const FIXTURE_C_START = path.join(FIXTURES_DIR, 'excel_direct_fixture_c_start.xl
 const FIXTURE_FORMULA_EMPTY = path.join(FIXTURES_DIR, 'excel_direct_fixture_formula_empty.xlsx');
 const FIXTURE_LONG_TITLE = path.join(FIXTURES_DIR, 'excel_direct_fixture_long_title.xlsx');
 const FIXTURE_DATE = path.join(FIXTURES_DIR, 'excel_direct_fixture_date.xlsx');
+const FIXTURE_RAW_ONLY = path.join(FIXTURES_DIR, 'excel_direct_fixture_raw_only.xlsx');
 
 const TAG_VOCAB = { allowed_tags: ['安全', '性能', '機能', '品質', 'インターフェース', '製造', '検査', '保守'], aliases: { 'けが防止': '安全' } };
 
@@ -233,8 +234,48 @@ async function main() {
       `日付セルのdisplay値が書式どおりに保持される(実際: ${node.provenance.verbatim.source_record_display['納期']})`);
     assert(node.text.includes('納期: 2026/08/02'), 'textにも書式化された日付表示が使われる');
     const roundTripped = JSON.parse(JSON.stringify(node));
-    assert(typeof roundTripped.provenance.verbatim.source_record['納期'] === 'string',
-      `日付のraw値(Dateオブジェクト)はJSON化しても壊れずISO文字列になる(実際: ${JSON.stringify(roundTripped.provenance.verbatim.source_record['納期'])})`);
+    const EXPECTED_ISO = '2026-08-02T00:00:00.000Z';
+    assert(roundTripped.provenance.verbatim.source_record['納期'] === EXPECTED_ISO,
+      `日付のraw値(Dateオブジェクト)はJSON化すると期待どおりのISO文字列と完全一致する(是正Checkpoint 2a.1。実際: ${JSON.stringify(roundTripped.provenance.verbatim.source_record['納期'])})`);
+
+    // 同じ日付fixtureを2回取り込んでもknowledge_hashが一致する(決定性)。
+    const extraction2 = Adapter.extractSheetRows((await Adapter.inspectWorkbook(abD)).workbook, '日付あり', 1, 2);
+    const result2 = await Adapter.buildKnowledgeNodesFromExcel(extraction2, {
+      fileName: 'excel_direct_fixture_date.xlsx', contentDigest: 'd'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB
+    });
+    const node2 = result2.nodes.find(n => n.node_type === 'statement');
+    assert(node.revision.knowledge_hash === node2.revision.knowledge_hash,
+      `同じ日付fixtureを2回取り込んでもknowledge_hashが一致する(決定性。実際: ${node.revision.knowledge_hash} / ${node2.revision.knowledge_hash})`);
+  }
+
+  // ================= Checkpoint 2a.1 =================
+
+  // ---- raw値のみ(表示書式で非表示)のセルも空セル扱いにせず、行全体を無言で捨てない ----
+  {
+    const abR = readAsArrayBuffer(FIXTURE_RAW_ONLY);
+    const { workbook } = Adapter.inspectWorkbook(abR);
+    const extraction = Adapter.extractSheetRows(workbook, 'raw値のみ', 1, 2);
+    const row2 = extraction.rows.find(r => r.rowNumber === 2);
+    assert(row2 && row2.isEmpty === false,
+      `raw値はあるが表示値のないセルだけの行も空行扱いにしない(実際のisEmpty: ${row2 && row2.isEmpty})`);
+    assert(row2.warnings.length === 1 && row2.warnings[0].code === 'raw_value_without_display' && row2.warnings[0].header === '項目',
+      `固定code(raw_value_without_display)の警告が付与される(実際: ${JSON.stringify(row2.warnings)})`);
+
+    const result = await Adapter.buildKnowledgeNodesFromExcel(extraction, {
+      fileName: 'excel_direct_fixture_raw_only.xlsx', contentDigest: 'r'.repeat(64), ingestedAt: '2026-08-02T00:00:00.000Z', tagVocabulary: TAG_VOCAB
+    });
+    const contentNodes = result.nodes.filter(n => n.node_type === 'statement');
+    assert(contentNodes.length === 1, `content Nodeが1件生成される(実際: ${contentNodes.length}件)`);
+    const node = contentNodes[0];
+    assert(node.title === '123' || node.text.includes('123'),
+      `titleまたはtextにraw値(123)が使われる(実際のtitle: "${node.title}"/text: "${node.text}")`);
+    assert(node.provenance.verbatim.source_record['項目'] === 123 && typeof node.provenance.verbatim.source_record['項目'] === 'number',
+      `raw値は数値型のまま保持される(文字列化されない。実際: ${JSON.stringify(node.provenance.verbatim.source_record['項目'])}型: ${typeof node.provenance.verbatim.source_record['項目']})`);
+    assert(Array.isArray(node.provenance.extensions.warnings) && node.provenance.extensions.warnings.length === 1 &&
+      node.provenance.extensions.warnings[0].code === 'raw_value_without_display',
+      `固定警告(raw_value_without_display)が保存Nodeのprovenance.extensions.warningsにも記録される(実際: ${JSON.stringify(node.provenance.extensions.warnings)})`);
+    assert(node.provenance.extensions.cell_range === 'A2:A2', `セル範囲が保持される(実際: ${node.provenance.extensions.cell_range})`);
+    assert(node.provenance.locator.row === 2, `行番号が保持される(実際: ${node.provenance.locator.row})`);
   }
 
   console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);

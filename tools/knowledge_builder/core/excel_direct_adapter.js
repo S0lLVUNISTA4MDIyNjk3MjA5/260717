@@ -69,17 +69,39 @@
     return s;
   }
 
+  // rawが「値なし」でないかどうか(0や falseは正当な値として扱う。nullish/空文字列だけを「値なし」とする)。
+  function hasRawValue(cell) {
+    return cell.raw !== null && cell.raw !== undefined && cell.raw !== '';
+  }
+
+  // 是正Checkpoint 2a.1: SheetJSはcellDates:trueの日付セルを、シリアル値を「実行環境のローカル時刻」の
+  // 暦要素として解釈したDateオブジェクトで返す(内部的にlocalなDateコンストラクタを使うため)。
+  // そのため同じ.xlsxファイルでも、読み取るマシンのタイムゾーンが違うとraw値(延いてはknowledge_hash)が
+  // ずれてしまう。日付が本来タイムゾーンを持たない暦日である以上、返されたDateのローカル暦要素を
+  // そのままUTC基準へ組み直すことで、実行環境に依存しない安定したraw値にする。
+  function normalizeDateCellRaw(cell) {
+    if (cell && cell.t === 'd' && cell.v instanceof Date) {
+      const d = cell.v;
+      return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()));
+    }
+    return cell ? (cell.v ?? null) : null;
+  }
+
   // 是正Checkpoint 2a: 表示値(display)が空でも、数式(formula)を持つセルは「空セル」扱いにしない。
+  // 是正Checkpoint 2a.1: 表示書式で非表示になっているだけでraw値を持つセルも同様に「空セル」扱いにしない
+  // (原データを保持できる行を無言で捨てないため)。
   function cellHasContent(cell) {
-    return String(cell.display ?? '').trim() !== '' || !!cell.formula;
+    return String(cell.display ?? '').trim() !== '' || !!cell.formula || hasRawValue(cell);
   }
 
   // セルのtext表現。表示値があればそれを使い、表示値がない数式セルは"=数式"という固定表記にする
   // (是正Checkpoint 2a §2: 数式だけの行でも本文が不定にならないようにする)。
+  // 是正Checkpoint 2a.1: 表示値も数式もないがraw値を持つセルは、raw値をそのまま文字列化する。
   function cellTextValue(cell) {
     const disp = String(cell.display ?? '').trim();
     if (disp !== '') return disp;
     if (cell.formula) return `=${cell.formula}`;
+    if (hasRawValue(cell)) return String(cell.raw);
     return '';
   }
 
@@ -167,14 +189,18 @@
         const c = firstCol + ci;
         const ref = XLSX.utils.encode_cell({ r: r0, c });
         const cell = worksheet[ref];
-        const raw = cell ? (cell.v ?? null) : null;
+        const raw = normalizeDateCellRaw(cell);
         const display = cell ? (cell.w != null ? cell.w : (cell.v != null ? String(cell.v) : '')) : '';
         const formula = cell && cell.f ? String(cell.f) : null;
         const cellObj = { ref, header: headers[ci], raw, display, formula };
         // 是正Checkpoint 2a §2: 表示値が空でも数式を持つセルは空セル扱いにしない。
+        // 是正Checkpoint 2a.1: raw値のみ持つセル(表示書式で非表示等)も空セル扱いにしない。
         if (cellHasContent(cellObj)) anyNonBlank = true;
-        if (formula && String(display ?? '').trim() === '') {
+        const displayIsBlank = String(display ?? '').trim() === '';
+        if (formula && displayIsBlank) {
           warnings.push({ code: 'formula_no_display_value', ref, header: headers[ci] });
+        } else if (!formula && displayIsBlank && hasRawValue(cellObj)) {
+          warnings.push({ code: 'raw_value_without_display', ref, header: headers[ci] });
         }
         cells.push(cellObj);
       }

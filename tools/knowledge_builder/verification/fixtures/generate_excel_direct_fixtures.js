@@ -20,7 +20,8 @@ function writeWorkbook(wb, filePath) {
 
 function setCell(ws, ref, value, opts) {
   opts = opts || {};
-  if (!opts.formula && !opts.formulaEmpty && !opts.date && (value === '' || value === null || value === undefined)) return; // 意図的に空セルのまま(空欄・空行の再現)
+  if (!opts.formula && !opts.formulaEmpty && !opts.date && !opts.hiddenFormat &&
+    (value === '' || value === null || value === undefined)) return; // 意図的に空セルのまま(空欄・空行の再現)
   const cell = { v: value };
   if (typeof value === 'number') cell.t = 'n'; else cell.t = 's';
   if (opts.formula) { cell.f = opts.formula; cell.t = 'n'; cell.v = opts.value; }
@@ -28,6 +29,9 @@ function setCell(ws, ref, value, opts) {
   // 例えばIF()が""を返す場合)。t='str'+v=''でSheetJSの書き出し時にセル自体が消えるのを防ぐ。
   if (opts.formulaEmpty) { cell.t = 'str'; cell.v = ''; cell.f = opts.formulaEmpty; }
   if (opts.date) { cell.t = 'd'; cell.v = opts.date; cell.z = 'yyyy/mm/dd'; }
+  // 是正Checkpoint 2a.1用: raw値はあるが、表示書式(";;;"=正負・ゼロすべて非表示にする実Excelの
+  // 標準的なテクニック)によってdisplay値が空文字列になるセル。
+  if (opts.hiddenFormat) { cell.t = 'n'; cell.v = value; cell.z = ';;;'; }
   if (opts.w) cell.w = opts.w;
   ws[ref] = cell;
 }
@@ -167,6 +171,19 @@ function buildFixtureDate() {
   return wb;
 }
 
+// 是正Checkpoint 2a.1: 表示書式(";;;")によってdisplay値が空文字列になるが、raw値(123)を持つセル。
+// 行の唯一のデータセルがこの状態でも、行全体を空行扱いにせずNode化できることを確認する。
+function buildFixtureRawOnly() {
+  const ws = {};
+  setCell(ws, 'A1', '項目');
+  setCell(ws, 'A2', 123, { hiddenFormat: true });
+
+  ws['!ref'] = 'A1:A2';
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'raw値のみ');
+  return wb;
+}
+
 function main() {
   const outDir = __dirname;
   writeWorkbook(buildFixtureA(), path.join(outDir, 'excel_direct_fixture_a.xlsx'));
@@ -176,8 +193,10 @@ function main() {
   writeWorkbook(buildFixtureFormulaEmpty(), path.join(outDir, 'excel_direct_fixture_formula_empty.xlsx'));
   writeWorkbook(buildFixtureLongTitle(), path.join(outDir, 'excel_direct_fixture_long_title.xlsx'));
   writeWorkbook(buildFixtureDate(), path.join(outDir, 'excel_direct_fixture_date.xlsx'));
+  writeWorkbook(buildFixtureRawOnly(), path.join(outDir, 'excel_direct_fixture_raw_only.xlsx'));
   console.log('Generated: excel_direct_fixture_a.xlsx, excel_direct_fixture_b.xlsx, excel_direct_fixture_empty.xlsx, ' +
-    'excel_direct_fixture_c_start.xlsx, excel_direct_fixture_formula_empty.xlsx, excel_direct_fixture_long_title.xlsx, excel_direct_fixture_date.xlsx');
+    'excel_direct_fixture_c_start.xlsx, excel_direct_fixture_formula_empty.xlsx, excel_direct_fixture_long_title.xlsx, ' +
+    'excel_direct_fixture_date.xlsx, excel_direct_fixture_raw_only.xlsx');
 }
 
 main();

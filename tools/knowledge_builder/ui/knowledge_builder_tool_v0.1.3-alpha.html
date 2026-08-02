@@ -582,9 +582,10 @@ function previewExcel(side) {
   }
 }
 
-// row.warnings(固定code)を表示用の固定日本語文へ変換する(是正Checkpoint 2a §2)。
+// row.warnings(固定code)を表示用の固定日本語文へ変換する(是正Checkpoint 2a §2・2a.1)。
 function excelWarningText(w) {
   if (w.code === 'formula_no_display_value') return `数式の表示値がありません(列: ${w.header})`;
+  if (w.code === 'raw_value_without_display') return `表示値のないセルの元データを使用しています(列: ${w.header})`;
   return w.code;
 }
 
