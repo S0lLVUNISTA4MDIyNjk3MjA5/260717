@@ -1,0 +1,110 @@
+{
+  "file_name": "matrix_doc_b_trace.json",
+  "trace_format": "chapter-section-trace-v1",
+  "schema_version": "1.1",
+  "chapter_number": "第1章",
+  "chapter_title": "マトリクス評価",
+  "source": {
+    "document_number": null,
+    "revision": null,
+    "issue_date": null
+  },
+  "tag_policy": {
+    "mode": "controlled",
+    "vocabulary_id": "trace-domain-ja",
+    "tag_vocabulary_version": "1.0.0",
+    "allowed_tags": [
+      "安全",
+      "性能",
+      "機能",
+      "品質",
+      "インターフェース",
+      "製造",
+      "検査",
+      "保守"
+    ]
+  },
+  "_trace_records": [
+    {
+      "trace_id": "matrix-b-1",
+      "parent_id": "sec-matrix-1",
+      "trace_title": "筐体表面温度",
+      "trace_text": "項目: 筐体表面温度 / 内容: 通常運転時の筐体表面温度を60度以下に維持する設計とする / 区分: 温度管理",
+      "trace_content": [
+        "項目: 筐体表面温度 / 内容: 通常運転時の筐体表面温度を60度以下に維持する設計とする / 区分: 温度管理"
+      ],
+      "trace_category": "text",
+      "trace_key_text": "筐体表面温度 通常運転時の筐体表面温度を60度以下に維持する設計とする 温度管理",
+      "chapter_number": "第1章",
+      "chapter_title": "マトリクス評価",
+      "section_number": "1.1",
+      "section_title": "マトリクス項目",
+      "block_type": "text",
+      "source_file": "matrix_doc_b_trace.json",
+      "source_page": 1,
+      "source_path": "$.sections[0].content[0]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-matrix-1",
+      "source_section_title": "マトリクス項目",
+      "source_block_id": "block-matrix-1",
+      "source_raw_text": "項目: 筐体表面温度 / 内容: 通常運転時の筐体表面温度を60度以下に維持する設計とする / 区分: 温度管理",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "matrix-b-2",
+      "parent_id": "sec-matrix-1",
+      "trace_title": "運転音",
+      "trace_text": "項目: 運転音 / 内容: 通常運転時の運転音を45dB以下に抑える設計とする / 区分: 静音性",
+      "trace_content": [
+        "項目: 運転音 / 内容: 通常運転時の運転音を45dB以下に抑える設計とする / 区分: 静音性"
+      ],
+      "trace_category": "text",
+      "trace_key_text": "運転音 通常運転時の運転音を45dB以下に抑える設計とする 静音性",
+      "chapter_number": "第1章",
+      "chapter_title": "マトリクス評価",
+      "section_number": "1.1",
+      "section_title": "マトリクス項目",
+      "block_type": "text",
+      "source_file": "matrix_doc_b_trace.json",
+      "source_page": 1,
+      "source_path": "$.sections[0].content[1]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-matrix-1",
+      "source_section_title": "マトリクス項目",
+      "source_block_id": "block-matrix-2",
+      "source_raw_text": "項目: 運転音 / 内容: 通常運転時の運転音を45dB以下に抑える設計とする / 区分: 静音性",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": []
+    },
+    {
+      "trace_id": "matrix-b-3",
+      "parent_id": "sec-matrix-1",
+      "trace_title": "設置場所",
+      "trace_text": "項目: 設置場所 / 内容: 屋内の乾燥した場所への設置を前提とした構造とする / 区分: 設置条件",
+      "trace_content": [
+        "項目: 設置場所 / 内容: 屋内の乾燥した場所への設置を前提とした構造とする / 区分: 設置条件"
+      ],
+      "trace_category": "text",
+      "trace_key_text": "設置場所 屋内の乾燥した場所への設置を前提とした構造とする 設置条件",
+      "chapter_number": "第1章",
+      "chapter_title": "マトリクス評価",
+      "section_number": "1.1",
+      "section_title": "マトリクス項目",
+      "block_type": "text",
+      "source_file": "matrix_doc_b_trace.json",
+      "source_page": 1,
+      "source_path": "$.sections[0].content[2]",
+      "source_kind": "section_text",
+      "source_section_id": "sec-matrix-1",
+      "source_section_title": "マトリクス項目",
+      "source_block_id": "block-matrix-3",
+      "source_raw_text": "項目: 設置場所 / 内容: 屋内の乾燥した場所への設置を前提とした構造とする / 区分: 設置条件",
+      "review_status": "reviewed",
+      "tags": [],
+      "unregistered_tags": []
+    }
+  ]
+}
