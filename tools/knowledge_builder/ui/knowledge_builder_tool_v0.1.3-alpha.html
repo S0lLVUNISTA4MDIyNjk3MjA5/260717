@@ -109,14 +109,14 @@
 <section class="panel" id="ingestPanel">
   <h2>1. データを読み込む <span class="en">(Trace JSON / Excel)</span></h2>
   <div class="explain">
-    既存のPDF/Excelツールが出力した「照合用JSON（trace JSON）」、または .xlsx ファイルそのものを
-    直接読み込み、文書間の関連を確認します。PDF直接入力は今回未対応です。文書A・文書Bは役割を
-    固定していません(どちらもTrace JSON／Excelのどちらでも指定できます)。
+    既存のPDF/Excelツールが出力した「照合用JSON（trace JSON）」、または .pdf／.xlsx ファイルそのものを
+    直接読み込み、文書間の関連を確認します。文書A・文書Bは役割を固定していません(どちらもPDF／Excel／
+    Trace JSONのいずれでも指定できます)。
   </div>
   <div class="row" style="align-items:flex-start;">
     <div class="field" id="docFieldA" style="min-width:300px; border:1px solid #e2e6ea; border-radius:6px; padding:8px;">
       <label>文書A: 入力方式</label>
-      <select id="inputModeA"><option value="trace">Trace JSON</option><option value="excel">Excel(.xlsx)</option></select>
+      <select id="inputModeA"><option value="trace">Trace JSON</option><option value="excel">Excel(.xlsx)</option><option value="pdf">PDF(.pdf)</option></select>
 
       <div id="traceBlockA">
         <label>文書A（既存PDF/Excelツールが出力したTrace JSON）</label>
@@ -132,11 +132,19 @@
         <div class="status-line" id="excelStatusA"></div>
         <div id="excelPreviewWrapA" style="display:none; max-height:320px; overflow:auto; margin-top:6px;"></div>
       </div>
+
+      <div id="pdfBlockA" style="display:none;">
+        <label>文書A（.pdfファイル）</label>
+        <input type="file" id="filePdfA" accept=".pdf">
+        <button type="button" class="secondary small" id="btnPreviewPdfA" disabled>プレビュー取り込み</button>
+        <div class="status-line" id="pdfStatusA"></div>
+        <div id="pdfPreviewWrapA" style="display:none; max-height:320px; overflow:auto; margin-top:6px;"></div>
+      </div>
     </div>
 
     <div class="field" id="docFieldB" style="min-width:300px; border:1px solid #e2e6ea; border-radius:6px; padding:8px;">
       <label>文書B: 入力方式</label>
-      <select id="inputModeB"><option value="trace">Trace JSON</option><option value="excel">Excel(.xlsx)</option></select>
+      <select id="inputModeB"><option value="trace">Trace JSON</option><option value="excel">Excel(.xlsx)</option><option value="pdf">PDF(.pdf)</option></select>
 
       <div id="traceBlockB">
         <label>文書B（既存PDF/Excelツールが出力したTrace JSON）</label>
@@ -151,6 +159,14 @@
         <button type="button" class="secondary small" id="btnPreviewExcelB" disabled>プレビュー取り込み</button>
         <div class="status-line" id="excelStatusB"></div>
         <div id="excelPreviewWrapB" style="display:none; max-height:320px; overflow:auto; margin-top:6px;"></div>
+      </div>
+
+      <div id="pdfBlockB" style="display:none;">
+        <label>文書B（.pdfファイル）</label>
+        <input type="file" id="filePdfB" accept=".pdf">
+        <button type="button" class="secondary small" id="btnPreviewPdfB" disabled>プレビュー取り込み</button>
+        <div class="status-line" id="pdfStatusB"></div>
+        <div id="pdfPreviewWrapB" style="display:none; max-height:320px; overflow:auto; margin-top:6px;"></div>
       </div>
     </div>
 
@@ -374,10 +390,25 @@
 <script src="../core/trace_json_adapter.js"></script>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="../core/excel_direct_adapter.js"></script>
+<!-- Checkpoint 3b: ローカルpdf.js(ui/vendor/pdfjs/)のみを使用する。CDN参照・外部networkは行わない。
+     読込順はNode側resolvePdfJs()と揃える: cmaps-data.js / fonts-data.js / alpha-local-factories.js
+     (file://でのCORS制限を避けるBase64埋め込みCMap/標準フォントのローカル読み込み) -> pdf.min.js。 -->
+<script src="vendor/pdfjs/cmaps-data.js"></script>
+<script src="vendor/pdfjs/fonts-data.js"></script>
+<script src="vendor/pdfjs/alpha-local-factories.js"></script>
+<script src="vendor/pdfjs/pdf.min.js"></script>
+<script src="../core/pdf_direct_adapter.js"></script>
 <script src="../core/relation_candidate_engine.js"></script>
 <script src="../core/knowledge_store.js"></script>
 <script>
 'use strict';
+
+// Checkpoint 3b: pdf_direct_adapter.js のブラウザ向けresolvePdfJs()はworkerSrcを設定しないため
+// (Node側は require.resolve() で解決するが、ブラウザには対応する仕組みがない)、
+// ここで一度だけ、ローカルのpdf.worker.min.js(CDNではない)を指すworkerSrcを設定する。
+if (window.pdfjsLib) {
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdfjs/pdf.worker.min.js';
+}
 
 const DEFAULT_TAG_VOCABULARY = {
   schema: "trace-tag-vocabulary/1.0",
@@ -455,6 +486,16 @@ let inputModeA = 'trace', inputModeB = 'trace';
 // 是正Checkpoint 2b: シート選択・見出し行/データ開始行を変更した時点でもnullへ戻す)。
 let excelInputA = null, excelInputB = null;
 
+// ---- Alpha 0.2.0 Checkpoint 3b: PDF直接入力(すべてUI専用。Knowledge JSONには一切含めない) ----
+// PDF直接入力のプレビュー状態(UI専用)。ファイル未選択時はnull。
+// { file, arrayBuffer, contentDigest, layout, segmented, previewReady, previewVocabSignature }
+// layout/segmentedは pdf_direct_adapter.js の extractPdfLayout()/segmentPdfContent() の戻り値
+// (プレビュー時に1回だけ解析してキャッシュし、実際の取込時はこのsegmentedを再利用する。
+// PDFを2回解析しない)。previewVocabSignatureはプレビュー生成時点で使用した共有タグ辞書の
+// JSON文字列(取込直前に現在の辞書と一致するか照合するための識別情報)。
+// プレビュー取り込みボタンを押すまでpreviewReady=false(取込へは進めない)。
+let pdfInputA = null, pdfInputB = null;
+
 const NODE_QUICK_FILTERS = [
   { key: 'untagged', label: 'タグ未設定', test: n => n.tags.length === 0 },
   { key: 'unregistered', label: '未登録タグあり', test: n => (n.unregistered_tags || []).length > 0 },
@@ -517,6 +558,17 @@ function setInputMode(side, mode) {
   if (side === 'A') inputModeA = mode; else inputModeB = mode;
   $('traceBlock' + side).style.display = mode === 'trace' ? '' : 'none';
   $('excelBlock' + side).style.display = mode === 'excel' ? '' : 'none';
+  $('pdfBlock' + side).style.display = mode === 'pdf' ? '' : 'none';
+  // Checkpoint 3b: 入力方式を変更した場合、旧PDF状態(選択File・layout・segmented・previewReady等)を
+  // 無効化する(PDF以外へ切り替えた場合はもちろん、PDFへ切り替え直した場合もファイル選択からやり直す)。
+  if (mode !== 'pdf' && pdfInputRef(side)) {
+    setPdfInputRef(side, null);
+    $('filePdf' + side).value = '';
+    $('btnPreviewPdf' + side).disabled = true;
+    $('btnPreviewPdf' + side).textContent = 'プレビュー取り込み';
+    $('pdfStatus' + side).textContent = '';
+    renderPdfPreview(side);
+  }
 }
 
 // ファイル選択直後: inspectWorkbook()でシート一覧だけを読む(まだNode化しない。読み取り専用)。
@@ -629,13 +681,24 @@ function onSheetSelectionChange(side) {
 // 再プレビューを要求する(プレビューとNode生成が異なる辞書を参照したままにならないようにする)。
 function onVocabFileChange() {
   for (const side of ['A', 'B']) {
-    const input = excelInputRef(side);
-    if (input && input.extractions) {
-      input.extractions = null;
+    const excelInput = excelInputRef(side);
+    if (excelInput && excelInput.extractions) {
+      excelInput.extractions = null;
       renderExcelPreview(side);
       updatePreviewButtonState(side);
       $('btnPreviewExcel' + side).textContent = 'プレビュー取り込み';
       $('excelStatus' + side).textContent = '共有タグ辞書が変更されました。「プレビュー取り込み」を押し直してください。';
+    }
+    // Checkpoint 3b: PDF側も同様に無効化する(古いタグに基づくプレビューのままStep 2へ進ませない)。
+    const pdfInput = pdfInputRef(side);
+    if (pdfInput && pdfInput.previewReady) {
+      pdfInput.previewReady = false;
+      pdfInput.segmented = null;
+      pdfInput.layout = null;
+      pdfInput.previewVocabSignature = null;
+      renderPdfPreview(side);
+      $('btnPreviewPdf' + side).textContent = 'プレビュー取り込み';
+      $('pdfStatus' + side).textContent = '共有タグ辞書が変更されました。「プレビュー取り込み」を押し直してください。';
     }
   }
 }
@@ -732,6 +795,160 @@ async function renderExcelPreview(side) {
   wrap.style.display = '';
 }
 
+// ---- Alpha 0.2.0 Checkpoint 3b: PDF直接入力 ----
+
+function pdfInputRef(side) { return side === 'A' ? pdfInputA : pdfInputB; }
+function setPdfInputRef(side, value) { if (side === 'A') pdfInputA = value; else pdfInputB = value; }
+
+// PDF Adapterの固定codeを利用者向けの固定日本語文へ変換する(§エラー表示。最低限11種)。
+// stack traceや内部例外はそのまま表示しない(該当しないcodeはe.message、それも無ければ文字列化のみ)。
+function pdfErrorText(e) {
+  const code = e && e.code;
+  const map = {
+    pdf_encrypted_or_password_required: 'このPDFは暗号化されているか、パスワードが必要です。パスワード保護のないPDFをご利用ください。',
+    pdf_parse_failed: 'PDFを解析できませんでした。ファイルが壊れていないかご確認ください。',
+    pdf_zero_pages: 'このPDFの総ページ数が0です。',
+    page_count_limit_exceeded: 'PDFの総ページ数が安全上限を超えています。',
+    text_item_limit_exceeded: '抽出したテキスト量が安全上限を超えています。',
+    extracted_char_limit_exceeded: '抽出した総文字数が安全上限を超えています。',
+    statement_count_limit_exceeded: '生成予定のstatement数が安全上限を超えています。',
+    no_extractable_text: '全ページでテキストを抽出できませんでした(画像・スキャンPDFの可能性があります。OCRは対象外です)。',
+    no_node_candidates: '抽出できたNode候補が0件です。',
+    pdf_text_position_unrecoverable: '一部の文字の位置情報を復元できないため、この文書の取込を中止しました。',
+    verbatim_or_page_unrecoverable: '一部の段落の原文またはページ位置を復元できないため、この文書の取込を中止しました。'
+  };
+  if (code && map[code]) return map[code];
+  return String((e && e.message) || e);
+}
+
+// 固定warning code(pdf_direct_adapter.jsが返すsegmented.warnings/para.warnings)を
+// 利用者向けの固定日本語文へ変換する(最低限4種。paragraph_split_incomplete_positionは
+// Checkpoint 3a.1でfail-closedへ置き換え済みで現行Adapterは発生させないが、念のため文言は残す)。
+function pdfWarningText(w) {
+  const map = {
+    page_extracted_text_empty: 'このページからテキストを抽出できませんでした(空白ページの可能性があります)',
+    heading_candidate_low_confidence: '見出しの可能性がありますが、見出しとしては採用していません(内容をご確認ください)',
+    heading_or_table_layout_detected: '横方向に離れたテキストを検出しました(表・複数列レイアウトの可能性。1つの本文として結合しています)',
+    paragraph_split_incomplete_position: '段落の一部の位置情報を復元できませんでした'
+  };
+  return (w && map[w.code]) || (w && w.code) || '';
+}
+
+// PDFファイル選択直後: まだ解析しない(ファイルとダイジェストだけ保持し、プレビュー取り込みボタンを
+// 押すまでextractPdfLayout()を呼ばない)。
+async function onPdfFileChange(side) {
+  const file = $('filePdf' + side).files[0];
+  const btnPreview = $('btnPreviewPdf' + side);
+  const status = $('pdfStatus' + side);
+  setPdfInputRef(side, null);
+  renderPdfPreview(side);
+  btnPreview.disabled = true;
+  btnPreview.textContent = 'プレビュー取り込み';
+  if (!file) { status.textContent = ''; return; }
+
+  status.textContent = 'ファイルを読み込み中...';
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const contentDigest = await sha256HexOfFile(file);
+    setPdfInputRef(side, { file, arrayBuffer, contentDigest, layout: null, segmented: null, previewReady: false, previewVocabSignature: null });
+    btnPreview.disabled = false;
+    status.textContent = 'ファイルを選択しました。「プレビュー取り込み」を押してください。';
+  } catch (e) {
+    status.textContent = `PDF読み込みエラー: ${e.message || e}`;
+  }
+}
+
+// 多重クリック防止(Checkpoint 3b): 処理中は対象側のファイル選択・プレビューボタンを一時的に無効化する。
+function setPdfControlsDisabled(side, disabled) {
+  $('filePdf' + side).disabled = disabled;
+  $('btnPreviewPdf' + side).disabled = disabled || !pdfInputRef(side);
+}
+
+// 「プレビュー取り込み」: extractPdfLayout(arrayBuffer) -> segmentPdfContent(layout) を1回だけ実行し、
+// 結果(segmented)をキャッシュする。これ以降、実際の取込(ingest)ではこのキャッシュを再利用し、
+// 同じPDFを2度解析しない(adaptPdfDirect()はここでもingest()でも呼ばない)。
+async function previewPdf(side) {
+  const input = pdfInputRef(side);
+  const status = $('pdfStatus' + side);
+  const btnPreview = $('btnPreviewPdf' + side);
+  if (!input) { status.textContent = 'PDFファイルを選択してください。'; return; }
+
+  setPdfControlsDisabled(side, true);
+  status.textContent = 'PDFを解析中...';
+  try {
+    const vocab = await activeTagVocabularyForPreview();
+    const layout = await KnowledgePdfDirectAdapter.extractPdfLayout(input.arrayBuffer);
+    const segmented = KnowledgePdfDirectAdapter.segmentPdfContent(layout);
+    input.layout = layout;
+    input.segmented = segmented;
+    input.previewReady = true;
+    input.previewVocabSignature = JSON.stringify(vocab);
+    await renderPdfPreview(side);
+    const totalStatements = segmented.sections.reduce((a, s) => a + s.paragraphs.length, 0);
+    status.textContent = `プレビュー取り込み完了: 総ページ数${layout.numPages} / section${segmented.sections.length}件 / ` +
+      `statement候補${totalStatements}件 / 警告${segmented.warnings.length}件。内容を確認し、問題なければ「Knowledge Nodeを生成してStep 2へ」を押してください。`;
+    btnPreview.textContent = 'プレビューを取り込み直す';
+  } catch (e) {
+    input.layout = null; input.segmented = null; input.previewReady = false; input.previewVocabSignature = null;
+    await renderPdfPreview(side);
+    status.textContent = `プレビュー取り込みエラー: ${pdfErrorText(e)}`;
+  } finally {
+    setPdfControlsDisabled(side, false);
+  }
+}
+
+// 読み取り専用プレビュー表示(編集不可): 概要(ファイル名・総ページ数・section数・statement候補数・
+// 警告件数)、警告一覧(page・block_id・内容)、statementごとの行(ページ・section名・synthetic「本文」
+// かどうか・本文抜粋・初期タグ・警告)を表示する。PDFビューア・ページ画像・サムネイルは追加しない。
+async function renderPdfPreview(side) {
+  const input = pdfInputRef(side);
+  const wrap = $('pdfPreviewWrap' + side);
+  if (!input || !input.previewReady || !input.segmented) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  const vocab = await activeTagVocabularyForPreview();
+  const segmented = input.segmented;
+  const totalStatements = segmented.sections.reduce((a, s) => a + s.paragraphs.length, 0);
+
+  const warningsHtml = segmented.warnings.length ? `<table class="pdf-preview-warnings">
+      <thead><tr><th>ページ</th><th>block_id</th><th>内容</th></tr></thead>
+      <tbody>${segmented.warnings.map(w => `<tr><td>${w.page != null ? w.page : '-'}</td><td>${esc(w.block_id || '-')}</td><td>${esc(pdfWarningText(w))}</td></tr>`).join('')}</tbody>
+    </table>` : '<div class="muted" style="font-size:11px;">警告はありません。</div>';
+
+  const rowsHtml = [];
+  for (const sec of segmented.sections) {
+    for (const para of sec.paragraphs) {
+      const tags = KnowledgePdfDirectAdapter.matchInitialTags([para.normalizedText], vocab);
+      const excerpt = para.normalizedText.slice(0, 60) + (para.normalizedText.length > 60 ? '…' : '');
+      const warnTexts = (para.warnings || []).map(pdfWarningText);
+      rowsHtml.push(`<tr class="pdf-preview-statement-row" data-page="${para.page}" data-synthetic="${sec.synthetic}">
+        <td>${para.page}</td>
+        <td>${esc(sec.title)}${sec.synthetic ? ' <span class="muted">(見出しなしの本文)</span>' : ''}</td>
+        <td>${sec.synthetic ? 'synthetic' : '通常'}</td>
+        <td>${esc(excerpt)}</td>
+        <td>${tags.map(t => `<span class="tag-chip">${esc(t)}</span>`).join('') || '<span class="muted">-</span>'}</td>
+        <td>${warnTexts.map(esc).join('; ') || ''}</td>
+      </tr>`);
+    }
+  }
+
+  wrap.innerHTML = `
+    <div class="pdf-preview-summary muted" style="font-size:12px; margin-bottom:6px;">
+      ファイル名: ${esc(input.file.name)} / 総ページ数: ${input.layout ? input.layout.numPages : '-'} /
+      section数: ${segmented.sections.length} / statement候補数: ${totalStatements} / 警告件数: ${segmented.warnings.length}
+    </div>
+    ${warningsHtml}
+    <table class="pdf-preview-statements" style="margin-top:6px;">
+      <thead><tr><th>ページ</th><th>section</th><th>種別</th><th>本文抜粋</th><th>初期タグ</th><th>警告</th></tr></thead>
+      <tbody>${rowsHtml.join('')}</tbody>
+    </table>`;
+  wrap.style.display = '';
+}
+
+function adapterIdForMode(mode) {
+  if (mode === 'excel') return 'excel-direct-adapter';
+  if (mode === 'pdf') return 'pdf-direct-adapter';
+  return 'trace-json-adapter';
+}
+
 // document/section/内容Node(直接入力)構築時に渡すtagVocabularyは、実際の取込(ingest)時点で
 // 共有タグ辞書ファイルを読み直した最終版を使う(プレビュー表示の簡易版とは別)。
 async function adaptDocument(side, mode, vocab, ingestedAt) {
@@ -744,13 +961,24 @@ async function adaptDocument(side, mode, vocab, ingestedAt) {
       const role = side === 'A' ? 'requirement' : 'design';
       return await KnowledgeTraceJsonAdapter.adaptTraceJson(trace, { role, contentDigest: digest, ingestedAt });
     }
+    if (mode === 'pdf') {
+      const input = pdfInputRef(side);
+      if (!input || !input.previewReady || !input.segmented) throw new Error('PDFのプレビュー取り込みが完了していません。先に「プレビュー取り込み」を行ってください。');
+      // Checkpoint 3b §取込: 現在の共有タグ辞書とプレビュー時の辞書が一致する場合だけ取込可能とする。
+      if (input.previewVocabSignature !== JSON.stringify(vocab)) throw new Error('共有タグ辞書がプレビュー時から変更されています。「プレビュー取り込み」を押し直してください。');
+      return await KnowledgePdfDirectAdapter.buildKnowledgeNodesFromPdf(input.segmented, {
+        fileName: input.file.name, contentDigest: input.contentDigest, ingestedAt, tagVocabulary: vocab
+      });
+    }
     const input = excelInputRef(side);
     if (!input || !input.extractions || !input.extractions.length) throw new Error('Excelのプレビュー取り込みが完了していません。先に「プレビュー取り込み」を行ってください。');
     return await KnowledgeExcelDirectAdapter.buildKnowledgeNodesFromExcelSheets(input.extractions, {
       fileName: input.file.name, contentDigest: input.contentDigest, ingestedAt, tagVocabulary: vocab
     });
   } catch (e) {
-    throw new Error(`文書${side}(${mode === 'excel' ? 'Excel' : 'Trace JSON'}): ${e.message || e}`);
+    const modeLabel = mode === 'excel' ? 'Excel' : (mode === 'pdf' ? 'PDF' : 'Trace JSON');
+    const msg = mode === 'pdf' ? pdfErrorText(e) : (e.message || e);
+    throw new Error(`文書${side}(${modeLabel}): ${msg}`);
   }
 }
 
@@ -758,8 +986,10 @@ async function ingest() {
   const modeA = inputModeA, modeB = inputModeB;
   if (modeA === 'trace' && !$('fileA').files[0]) { $('ingestStatus').textContent = '文書AのTrace JSONファイルを選択してください。'; return; }
   if (modeA === 'excel' && !(excelInputA && excelInputA.extractions && excelInputA.extractions.length)) { $('ingestStatus').textContent = '文書AのExcelプレビュー取り込みを先に行ってください。'; return; }
+  if (modeA === 'pdf' && !(pdfInputA && pdfInputA.previewReady && pdfInputA.segmented)) { $('ingestStatus').textContent = '文書AのPDFプレビュー取り込みを先に行ってください。'; return; }
   if (modeB === 'trace' && !$('fileB').files[0]) { $('ingestStatus').textContent = '文書Bのtrace JSONファイルを選択してください。'; return; }
   if (modeB === 'excel' && !(excelInputB && excelInputB.extractions && excelInputB.extractions.length)) { $('ingestStatus').textContent = '文書BのExcelプレビュー取り込みを先に行ってください。'; return; }
+  if (modeB === 'pdf' && !(pdfInputB && pdfInputB.previewReady && pdfInputB.segmented)) { $('ingestStatus').textContent = '文書BのPDFプレビュー取り込みを先に行ってください。'; return; }
   if (dataset && !confirm('既存のNode/Relationはすべて破棄されます。取込を続けますか？')) return;
 
   $('ingestStatus').textContent = '取込中...';
@@ -775,8 +1005,8 @@ async function ingest() {
 
     dataset = KnowledgeStore.createEmptyDataset({ tool: 'knowledge_builder_tool', version: '0.1.3-alpha' });
     await KnowledgeStore.setTagVocabulary(dataset, vocab);
-    await KnowledgeStore.ingestAdapterResult(dataset, resultA, { type: 'ai', id: modeA === 'excel' ? 'excel-direct-adapter' : 'trace-json-adapter' });
-    await KnowledgeStore.ingestAdapterResult(dataset, resultB, { type: 'ai', id: modeB === 'excel' ? 'excel-direct-adapter' : 'trace-json-adapter' });
+    await KnowledgeStore.ingestAdapterResult(dataset, resultA, { type: 'ai', id: adapterIdForMode(modeA) });
+    await KnowledgeStore.ingestAdapterResult(dataset, resultB, { type: 'ai', id: adapterIdForMode(modeB) });
     docAId = resultA.sourceDocument.source_document_id;
     docBId = resultB.sourceDocument.source_document_id;
 
@@ -2265,6 +2495,8 @@ for (const side of ['A', 'B']) {
   $('fileExcel' + side).addEventListener('change', () => onExcelFileChange(side));
   $('btnPreviewExcel' + side).addEventListener('click', () => previewExcel(side));
   $('sheetList' + side).addEventListener('change', () => onSheetSelectionChange(side));
+  $('filePdf' + side).addEventListener('change', () => onPdfFileChange(side));
+  $('btnPreviewPdf' + side).addEventListener('click', () => previewPdf(side));
 }
 $('fileVocab').addEventListener('change', onVocabFileChange);
 
