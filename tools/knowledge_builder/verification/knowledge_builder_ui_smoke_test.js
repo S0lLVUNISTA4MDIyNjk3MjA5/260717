@@ -32,8 +32,24 @@ async function main() {
   const consoleErrors = [];
   page.on('console', msg => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
   page.on('pageerror', err => consoleErrors.push(String(err)));
+  const requests = [];
+  page.on('request', req => requests.push(req.url()));
 
   await page.goto('file://' + HTML_PATH);
+
+  // ---- Checkpoint 3c.1: 評価目的表示が現在版(PDF/Excel/Trace JSON直接入力)を反映している ----
+  const pageTitle = await page.title();
+  assert(pageTitle.includes('α0.2.0'), `<title>にα0.2.0が表示される(実際: "${pageTitle}")`);
+  const h1Text = await page.textContent('header h1');
+  assert(h1Text.includes('α0.2.0'), `<h1>にα0.2.0が表示される(実際: "${h1Text}")`);
+  const headerAndBannerText = (await page.textContent('header')) + (await page.textContent('.banner'));
+  assert(headerAndBannerText.includes('PDF') && headerAndBannerText.includes('Excel') && headerAndBannerText.includes('Trace JSON'),
+    `ヘッダーまたはバナーにPDF・Excel・Trace JSONが表示される(実際: "${headerAndBannerText.slice(0, 200)}...")`);
+  assert(headerAndBannerText.includes('原文') || headerAndBannerText.includes('出典'),
+    `ヘッダーまたはバナーに原文または出典の評価目的が表示される(実際: "${headerAndBannerText.slice(0, 200)}...")`);
+  assert(!headerAndBannerText.includes('3段階でGraphを把握') && !headerAndBannerText.includes('集約Edgeの件数と採用') &&
+    !headerAndBannerText.includes('A/B表示基準を切り替えても対象Edgeが変わらない') && !headerAndBannerText.includes('折りたたんでも元のNode/Edgeが失われない'),
+    'Alpha 0.1.3時点のGraph折りたたみ評価専用の旧文言が現在画面に残っていない(Checkpoint 3c.1)');
 
   // 是正Checkpoint: 文書A/文書Bの役割固定表記(requirement側/design側等)がUIに残っていないことを確認する。
   const ingestPanelText = await page.textContent('#ingestPanel');
@@ -603,6 +619,8 @@ async function main() {
   const saved = JSON.parse(savedText);
 
   assert(saved.schema_version === 'knowledge-data/0.1', '保存JSONのschema_versionがknowledge-data/0.1');
+  assert(saved.generator && saved.generator.version === '0.2.0-alpha',
+    `保存JSONのgenerator.versionが0.2.0-alphaのまま(Checkpoint 3c.1は画面文言のみの変更。実際: ${saved.generator && saved.generator.version})`);
   assert(typeof saved.dataset_id === 'string' && saved.dataset_id.startsWith('kd-'), '保存JSONにdataset_idが採番されている');
   assert(Array.isArray(saved.nodes) && saved.nodes.length >= expectedContentCount, '保存JSONにnodeが含まれる');
   assert(Array.isArray(saved.edges) && saved.edges.some(e => e.lifecycle === 'active'), '保存JSONにactive edgeが含まれる');
@@ -637,6 +655,9 @@ async function main() {
   assert(reverseDuplicates.length === 0, '保存JSON: 表示基準切替によって逆向きEdgeが重複生成されていない');
 
   assert(consoleErrors.length === 0, `ブラウザconsole errorが0件(実際: ${consoleErrors.length}件${consoleErrors.length ? ': ' + consoleErrors[0] : ''})`);
+
+  const externalRequests = requests.filter(u => !u.startsWith('file://'));
+  assert(externalRequests.length === 0, `file://起動でネットワークアクセスが発生しない(Checkpoint 3c.1。実際の非file://リクエスト数: ${externalRequests.length}${externalRequests.length ? ': ' + externalRequests[0] : ''})`);
 
   await browser.close();
   console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);

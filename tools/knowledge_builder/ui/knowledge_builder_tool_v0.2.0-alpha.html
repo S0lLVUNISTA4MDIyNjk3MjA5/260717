@@ -96,13 +96,13 @@
 <body>
 <header>
   <h1>Knowledge Data Builder — α0.2.0（早期評価用ビルド）</h1>
-  <p>Knowledge Data Contract 0.1 準拠 / 今回の改善テーマ: Knowledge Graphで文書階層を折りたたみ・表示粒度調整し、粗い粒度で全体傾向を把握しつつ必要な範囲だけ詳細確認・Relation画面へ絞り込めるように（詳細は同梱README参照）</p>
+  <p>Knowledge Data Contract 0.1 準拠 / 今回の改善テーマ: PDF・Excel・Trace JSONを直接読み込み、原文と出典を保持したKnowledge Nodeへ変換し、文書間の関連とKnowledge Graphを確認してKnowledge JSONとして保存する</p>
 </header>
 <div class="banner">
   これは<strong>限定評価用の動作物</strong>です。正式な設計判断・成果物提出には使用しないでください。
-  評価目的: 文書単位・章節単位・個別項目の3段階でGraphを把握できるか・document/sectionを個別に折りたたみ・展開できるか・
-  集約Edgeの件数と採用/未処理/stale内訳を確認できるか・気になる集約範囲からRelation画面へ絞り込めるか・
-  A/B表示基準を切り替えても対象Edgeが変わらないと理解できるか・折りたたんでも元のNode/Edgeが失われないか。
+  評価目的: 文書A・文書Bの役割を固定せず、PDF・Excel・Trace JSONを組み合わせて読み込めるか、
+  変換結果の原文・出典を確認・修正できるか、Relation CandidateとKnowledge Graphを確認できるか、
+  保存したKnowledge JSONがKnowledge Data Contract 0.1に適合するかを評価します。
 </div>
 <main>
 
