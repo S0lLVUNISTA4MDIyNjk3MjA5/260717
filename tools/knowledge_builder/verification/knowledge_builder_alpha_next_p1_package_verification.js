@@ -8,6 +8,19 @@
  * built ZIP extracts to content identical to the staging tree. Also checks that running the
  * build does not modify any git-tracked file (package generation must only add new,
  * git-ignored/untracked output under alpha_next_p1/package/).
+ *
+ * Codex Round 1 Finding 1 remediation: added §10, a TZ x umask determinism matrix. It rebuilds
+ * the package in a fresh child process for each of {TZ=UTC, TZ=Asia/Tokyo} x
+ * {umask=0022, umask=0002} and asserts ZIP size, ZIP SHA-256, manifest.json content,
+ * SHA256SUMS content, extracted file list, and every extracted file's SHA-256 are identical
+ * across all four combinations - not just identical to themselves on repeat runs in the same
+ * environment as the previous §9 check already covered.
+ *
+ * Codex Round 1 Finding 4 remediation: the ZIP-extraction temp directory now uses a
+ * configurable root (KB_ALPHA_NEXT_TMPDIR, falling back to TMPDIR / os.tmpdir()) and is always
+ * removed via try/finally, including the temp directories used by the new TZ x umask matrix.
+ * The pre-existing NOT TESTED note about no CI job for the tracked-file-unchanged check is
+ * removed - it is exercised here, in this permanent suite, on every run.
  * Run: node tools/knowledge_builder/verification/knowledge_builder_alpha_next_p1_package_verification.js
  */
 'use strict';
@@ -19,7 +32,8 @@ const { execFileSync } = require('child_process');
 
 const REPO_ROOT = path.join(__dirname, '..', '..', '..');
 const ALPHA_NEXT_P1_DIR = path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'alpha_next_p1');
-const builder = require(path.join(ALPHA_NEXT_P1_DIR, 'build_package.js'));
+const BUILD_SCRIPT = path.join(ALPHA_NEXT_P1_DIR, 'build_package.js');
+const builder = require(BUILD_SCRIPT);
 
 let failures = 0, passCount = 0;
 function assert(cond, message) {
@@ -36,16 +50,36 @@ function walk(dir) {
   }
   return out;
 }
-function gitStatusPorcelain() {
-  return execFileSync('git', ['status', '--porcelain'], { cwd: REPO_ROOT, encoding: 'utf8' });
-}
 function trackedDiffNames() {
   // 追跡中(既にcommit済み)ファイルの内容変更のみを抽出する。新規untrackedファイル(package生成物)は対象外。
   return execFileSync('git', ['diff', '--name-only'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
 }
 
+// ---- Finding 4: 設定可能な一時領域(不在なら作成、作成不能なら明確なエラー) ----
+function tmpRoot() {
+  const dir = process.env.KB_ALPHA_NEXT_TMPDIR || process.env.TMPDIR || os.tmpdir();
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (e) {
+    throw new Error(`一時ディレクトリのルートを作成できません(${dir}): ${e.message}。KB_ALPHA_NEXT_TMPDIRまたはTMPDIRで書き込み可能な場所を指定してください。`);
+  }
+  return dir;
+}
+
+function extractZipAndHash(zipPath, label) {
+  const extractDir = fs.mkdtempSync(path.join(tmpRoot(), `kb-anp1-${label}-`));
+  try {
+    execFileSync('unzip', ['-q', zipPath, '-d', extractDir], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const extractedRoot = path.join(extractDir, 'alpha_next_p1_package');
+    const files = walk(extractedRoot).map(f => path.relative(extractedRoot, f).split(path.sep).join('/')).sort();
+    const hashes = files.map(p => `${sha256File(path.join(extractedRoot, p))}  ${p}`);
+    return { extractedRoot: null, files, hashes }; // extractedRootは呼び出し元へ返さない(finallyで消すため)
+  } finally {
+    fs.rmSync(extractDir, { recursive: true, force: true });
+  }
+}
+
 function main() {
-  const statusBefore = gitStatusPorcelain();
   const trackedBefore = trackedDiffNames();
 
   const result = builder.main();
@@ -102,15 +136,11 @@ function main() {
     '§7 package README: 内部検証用・非公式リリースである旨が明記されている');
 
   // ZIP展開検査: 展開結果がstagingと一致する
-  const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-alpha-next-p1-extract-'));
-  execFileSync('unzip', ['-q', builder.ZIP_PATH, '-d', extractDir]);
-  const extractedRoot = path.join(extractDir, 'alpha_next_p1_package');
-  assert(fs.existsSync(extractedRoot), '§8 ZIP展開検査: 展開結果に想定のトップフォルダが存在する');
-  const extractedFiles = walk(extractedRoot).map(f => path.relative(extractedRoot, f).split(path.sep).join('/')).sort();
   const stagingFiles = walk(staging).map(f => path.relative(staging, f).split(path.sep).join('/')).sort();
-  assert(JSON.stringify(extractedFiles) === JSON.stringify(stagingFiles), '§8 ZIP展開検査: 展開後のファイル一覧がstagingと完全一致する');
-  assert(extractedFiles.every(p => sha256File(path.join(extractedRoot, p)) === sha256File(path.join(staging, p))), '§8 ZIP展開検査: 展開後の各ファイルのSHA-256がstagingと完全一致する(ZIP圧縮によるビット破損がない)');
-  fs.rmSync(extractDir, { recursive: true, force: true });
+  const extracted = extractZipAndHash(builder.ZIP_PATH, 'extract');
+  assert(JSON.stringify(extracted.files) === JSON.stringify(stagingFiles), '§8 ZIP展開検査: 展開後のファイル一覧がstagingと完全一致する');
+  const stagingHashes = stagingFiles.map(p => `${sha256File(path.join(staging, p))}  ${p}`);
+  assert(JSON.stringify(extracted.hashes) === JSON.stringify(stagingHashes), '§8 ZIP展開検査: 展開後の各ファイルのSHA-256がstagingと完全一致する(ZIP圧縮によるビット破損がない)');
 
   // 同一入力から生成した成果物(package容器)の再現性: manifest/SHA256SUMS/ZIPのタイムスタンプを
   // 固定しているため、同一のcase出力・同一のtool/入力から2回連続でbuildすればZIPはbit単位で一致する。
@@ -120,14 +150,104 @@ function main() {
   assert(firstZipHash === secondZipHash, '§9 再現性: 同一入力から連続で2回package buildした結果、ZIPのSHA-256が完全一致する(タイムスタンプ固定による決定的ビルド)');
   assert(result.sha256 === secondResult.sha256, '§9 再現性: build_package.jsが報告するSHA-256も2回とも一致する');
 
-  const statusAfterAll = gitStatusPorcelain();
-  const newUntrackedOnly = statusAfterAll.split('\n').filter(l => l && !l.startsWith('??'));
-  assert(newUntrackedOnly.length === 0, '§6 package生成後もgit statusに未追跡(??)以外の変更が発生しない(既存tracked fileへの書き込みがない)');
+  runTimezoneUmaskMatrix();
+  testExtractionCleanupOnFailure();
+
+  // package build(通常build・2回連続build・matrix4通り・matrix後の後始末build)を経ても、
+  // このテスト開始時点から追加でtracked fileが変化していないことを再確認する。
+  // (絶対的に「git statusが完全に綺麗であること」を求めるのではなく、このテスト実行が
+  // 新たな変更を持ち込んでいないことだけを見る - 呼び出し時点で既にtracked fileへの
+  // 未commit編集がある状態(開発中)でも誤検知しない)。
+  const trackedFinal = trackedDiffNames();
+  assert(trackedBefore === trackedFinal, '§6 package生成(通常build・再現性確認・TZ/umask matrixすべて含む)を経てもtracked fileの差分がテスト開始時点から変化しない');
 
   console.log(`\nzip=${result.zipPath} size=${result.size} sha256=${result.sha256}`);
   console.log(`${passCount} PASS, ${failures} FAIL`);
   if (failures > 0) { console.error('SOME TESTS FAILED'); process.exit(1); }
   console.log('ALL PASS');
+}
+
+// ---- §10 Finding 1: TZ x umask 決定性matrix ----
+// 子プロセスでbuild_package.jsを再実行し、環境(TZ・umask)を変えてもZIP/manifest/SHA256SUMS/
+// 展開結果がbit単位で一致することを検査する。umaskは呼び出し元プロセスに設定してから
+// spawnすることで子プロセスへ継承させる(Unixのfork/exec仕様どおり)。
+function runBuildInSubprocess(tz) {
+  execFileSync(process.execPath, [BUILD_SCRIPT], {
+    cwd: REPO_ROOT,
+    env: { ...process.env, TZ: tz },
+    stdio: 'pipe'
+  });
+}
+
+function snapshotCurrentBuild(label) {
+  const zipHash = sha256File(builder.ZIP_PATH);
+  const zipSize = fs.statSync(builder.ZIP_PATH).size;
+  const manifestText = fs.readFileSync(path.join(builder.STAGING, 'manifest.json'), 'utf8');
+  const sumsText = fs.readFileSync(path.join(builder.STAGING, 'SHA256SUMS'), 'utf8');
+  const extracted = extractZipAndHash(builder.ZIP_PATH, `matrix-${label}`);
+  return { zipHash, zipSize, manifestText, sumsText, extractedFiles: extracted.files, extractedHashes: extracted.hashes };
+}
+
+function runTimezoneUmaskMatrix() {
+  const combos = [
+    { tz: 'UTC', umask: 0o022 },
+    { tz: 'Asia/Tokyo', umask: 0o022 },
+    { tz: 'UTC', umask: 0o002 },
+    { tz: 'Asia/Tokyo', umask: 0o002 }
+  ];
+  const snapshots = [];
+  const previousUmask = process.umask();
+  try {
+    for (const combo of combos) {
+      process.umask(combo.umask);
+      runBuildInSubprocess(combo.tz);
+      const label = `${combo.tz.replace('/', '_')}-${combo.umask.toString(8).padStart(4, '0')}`;
+      snapshots.push({ ...combo, label, ...snapshotCurrentBuild(label) });
+    }
+  } finally {
+    process.umask(previousUmask);
+  }
+
+  const baseline = snapshots[0];
+  for (let i = 1; i < snapshots.length; i++) {
+    const s = snapshots[i];
+    const pair = `TZ=${baseline.tz}/umask=${baseline.umask.toString(8)} vs TZ=${s.tz}/umask=${s.umask.toString(8)}`;
+    assert(s.zipSize === baseline.zipSize, `§10 TZ/umask matrix: ZIP sizeが一致(${pair})`);
+    assert(s.zipHash === baseline.zipHash, `§10 TZ/umask matrix: ZIP SHA-256が一致(${pair})`);
+    assert(s.manifestText === baseline.manifestText, `§10 TZ/umask matrix: manifest.jsonの内容が一致(${pair})`);
+    assert(s.sumsText === baseline.sumsText, `§10 TZ/umask matrix: SHA256SUMSの内容が一致(${pair})`);
+    assert(JSON.stringify(s.extractedFiles) === JSON.stringify(baseline.extractedFiles), `§10 TZ/umask matrix: 展開後ファイル一覧が一致(${pair})`);
+    assert(JSON.stringify(s.extractedHashes) === JSON.stringify(baseline.extractedHashes), `§10 TZ/umask matrix: 展開後各ファイルSHA-256が一致(${pair})`);
+  }
+  console.log('\nDeterministic Package Matrix:');
+  for (const s of snapshots) {
+    console.log(`  TZ=${s.tz} umask=${s.umask.toString(8).padStart(4, '0')} size=${s.zipSize} sha256=${s.zipHash}`);
+  }
+
+  // matrix実行後、通常環境(既定TZ/umask)のbuildへ戻し、以降の(このプロセス内で行う)確認が
+  // 通常状態のZIP/stagingを見るようにする。
+  builder.main();
+}
+
+// ---- §11 Finding 4: 失敗注入時のcleanup検査 ----
+// 外部コマンド(unzip)がわざと失敗する状況(存在しないZIPパス)を注入し、
+// (a) extractZipAndHash()が例外を投げる, (b) それでも一時ディレクトリが残らない、の両方を確認する。
+function testExtractionCleanupOnFailure() {
+  const root = tmpRoot();
+  const before = new Set(fs.readdirSync(root).filter(n => n.startsWith('kb-anp1-')));
+
+  const bogusZipPath = path.join(builder.PACKAGE_DIR, 'this-zip-does-not-exist.zip');
+  let threw = false;
+  try {
+    extractZipAndHash(bogusZipPath, 'failure-injection');
+  } catch (e) {
+    threw = true;
+  }
+  assert(threw, '§11 失敗注入: 存在しないZIPを展開しようとするとextractZipAndHash()が例外を投げる(fail-closed)');
+
+  const after = new Set(fs.readdirSync(root).filter(n => n.startsWith('kb-anp1-')));
+  const leaked = [...after].filter(n => !before.has(n));
+  assert(leaked.length === 0, `§11 失敗注入: 例外発生後も一時ディレクトリが残らない(try/finallyでcleanup済み。残存: ${JSON.stringify(leaked)})`);
 }
 
 main();

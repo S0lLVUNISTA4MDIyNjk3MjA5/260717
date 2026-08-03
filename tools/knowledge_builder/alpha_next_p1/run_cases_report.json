@@ -18,6 +18,7 @@
       "ingest: 取込完了: 文書A「train_hvac_customer_requirements.pdf」Node 27件 / 文書B「train_hvac_design_review.xlsx」Node 15件"
     ],
     "not_tested": [],
+    "preview_ok": true,
     "ingest_ok": true,
     "node_breakdown_by_document": [
       {
@@ -38,13 +39,12 @@
     "total_nodes": 42,
     "structural_edge_count": 40,
     "candidate_count": 7,
-    "diagnostics_before_save": 0,
     "json_parse_ok": true,
     "json_reload_ok": true,
     "error_count": 0,
     "warning_count": 0,
     "output_file": "output/case_01_pdf_excel_dataset.json",
-    "output_sha256": "5c1764bcade49a621a77d3769f4bff7e069b05c5aae7e0ea1847842d5f34c5c9",
+    "output_sha256": "b00b8a55d0ef8dfedf48988ebd2ebe44b8c49981f92bb5d6c044962a78e25df7",
     "console_errors": [],
     "console_error_count": 0,
     "external_network_requests": [],
@@ -69,6 +69,7 @@
       "ingest: 取込完了: 文書A「train_hvac_customer_requirements.pdf」Node 27件 / 文書B「train_hvac_unit_purchase_specification.pdf」Node 30件"
     ],
     "not_tested": [],
+    "preview_ok": true,
     "ingest_ok": true,
     "node_breakdown_by_document": [
       {
@@ -89,13 +90,12 @@
     "total_nodes": 57,
     "structural_edge_count": 55,
     "candidate_count": 33,
-    "diagnostics_before_save": 0,
     "json_parse_ok": true,
     "json_reload_ok": true,
     "error_count": 0,
     "warning_count": 0,
     "output_file": "output/case_02_pdf_pdf_dataset.json",
-    "output_sha256": "e7ce06d3e93c77aa4321c8e08ada0f270d966e3fcd6a70bf7c62a9823f129dd2",
+    "output_sha256": "03f3c621e326e9c90d32f8318cc4fb7f69e8b88ecec6be342c49bbfa59689a4a",
     "console_errors": [],
     "console_error_count": 0,
     "external_network_requests": [],

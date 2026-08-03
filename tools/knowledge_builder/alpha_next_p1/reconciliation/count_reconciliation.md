@@ -52,13 +52,18 @@ sectionの子であるstatement Nodeになる。
 
 ## 補足: baseline上の既存資料はすでに一部訂正されている
 
-`claude/child-handover-qcycsj`ブランチのcommit `fc83f68`(このAlpha Next P1のbaseline commit
-`356c1f1`より後、かつ本作業の対象外)で、上記と同じ原因分析に基づき
+`claude/child-handover-qcycsj`ブランチのcommit `fc83f68`(人間評価baseline `356c1f1`より後)で、
+上記と同じ原因分析に基づき
 `tools/knowledge_builder/trial/trial_package/reference/expected_observations.md`が実測値に
-更新されている。ただし本作業は**baseline commit `356c1f1`から分岐**しており、`fc83f68`の内容は
-このbranchには含まれない(baselineを一切変更しないため意図的)。次版用の期待観察結果
-(`tools/knowledge_builder/alpha_next_p1/package/expected_observations_next.md`)は、本re-runの
-実測値から独立して新規作成している。
+更新されている。このAlpha Next P1作業は最初`356c1f1`上で作成されたが、その後PR base branchの
+誤り(誤って`main`向けに作成していた)を是正するため、元のP1 commitを現在の統合先である
+`claude/child-handover-qcycsj`(head SHA `fc83f68`)へcherry-pickした。そのため**現在のbranch
+(`claude/alpha-next-feedback-independent-p1-r2`)には`fc83f68`の内容(このexpected_observations.md
+是正を含む)がそのまま含まれている**(`git diff fc83f68..HEAD --
+tools/knowledge_builder/trial/`が空であることで確認済み)。人間評価baseline(`356c1f1`)
+そのものは、このAlpha Next P1作業のいずれの段階でも変更していない。次版用の期待観察結果
+(`tools/knowledge_builder/alpha_next_p1/package_src/expected_observations_next.md`)は、本re-run
+の実測値から独立して新規作成しており、`fc83f68`の是正内容と数値上一致することを確認済み。
 
 ## 製品runtimeへの変更
 
