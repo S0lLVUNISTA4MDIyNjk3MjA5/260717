@@ -61,7 +61,7 @@
 
 | Command | Exit Code | PASS | FAIL |
 |---|---:|---:|---:|
-| `node tools/knowledge_builder/verification/knowledge_builder_alpha_next_p1_evidence_verification.js` | 0 | 41 | 0 |
+| `node tools/knowledge_builder/verification/knowledge_builder_alpha_next_p1_evidence_verification.js` | 0 | 45 | 0 |
 
 検証内容: (§1)同一入力からの生成結果の再現性(PDF/Excel双方、Candidate含む)、(§2)必須識別子
 (node_id/edge_id/source_document_idの形式・重複0件・相互参照整合性)、(§3)provenance保持と
@@ -70,7 +70,22 @@ Candidate生成の決定性と**固定Case契約どおりの正確な件数**(Ca
 以前の`length >= 1`から強化)、(§6, 是正Finding 2)`run_cases.js`の`validateCaseResult()`に
 対するtamper/failure injection検査(golden実測値がPASSすることを確認したうえで、
 入力SHA/node数/structural edge/Candidate件数/parse/reload/diagnostics error/warning/
-console error/external request/ingest_okを1項目ずつ改変し、必ずrejectされることを確認)。
+console error/external request/ingest_ok/**preview_ok**(是正Round 1.1)を1項目ずつ改変し、
+必ずrejectされることを確認)。
+
+### Round 1.1で追加したfail-closed契約(previewエラー・Case識別・文書集合)
+
+- **preview_ok fail-closed検査**: `CASE_A_EXPECTED`/`CASE_B_EXPECTED`へ`preview_ok: true`を
+  追加し、`validateCaseResult()`で`actual.preview_ok === expected.preview_ok`を厳密一致
+  (`===`)で検査するようにした。`false`・`undefined`・`null`・文字列等、`true`以外の値は
+  すべてrejectされる。「previewエラーが1件でもあればPASSにしない」という公開契約を満たす。
+- **case_id検査**: `actual.case_id === expected.case_id`を追加。Case AとCase Bの実測値を
+  取り違えて比較してもPASSしないことを保証する。
+- **文書集合の完全一致検査**: `node_breakdown_by_document`のfile_name集合について、
+  (a)重複がないこと、(b)期待外のfile_nameが含まれていないこと、(c)期待集合と完全一致する
+  ことの3つを個別に検査する(いずれか1つでも違反すればreject)。
+- 上記4項目は§6のtamper検査に個別のケースとして追加した(golden(健全性確認)1件 + 既存11件
+  + preview_ok 1件 + Case識別・文書集合3件 = 16件)。
 
 `tools/knowledge_builder/verification/knowledge_builder_alpha_next_p1_package_verification.js`
 (Node-only、Playwright不使用。`build_package.js`実行後のpackage staging領域を検証)。

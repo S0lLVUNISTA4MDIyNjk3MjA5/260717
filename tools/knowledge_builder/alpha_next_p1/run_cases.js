@@ -92,6 +92,7 @@ const CASE_A_EXPECTED = {
   case_id: 'case_01_pdf_excel',
   input_a_sha256: '27a68f00ef94df9346735c712f794587281003ff1e98a1c6c0293aa9e785730c',
   input_b_sha256: 'e23a3349e19a65b2d411abf9bf5a4296bd037550495da59e8d4fba64fbfb2820',
+  preview_ok: true,
   node_breakdown: {
     'train_hvac_customer_requirements.pdf': { document: 1, section: 14, statement: 12 },
     'train_hvac_design_review.xlsx': { document: 1, section: 1, statement: 13 }
@@ -111,6 +112,7 @@ const CASE_B_EXPECTED = {
   case_id: 'case_02_pdf_pdf',
   input_a_sha256: '27a68f00ef94df9346735c712f794587281003ff1e98a1c6c0293aa9e785730c',
   input_b_sha256: '666765aa64013a601963442de5ed350da87c5fb8e81055ccef9deaad25c13796',
+  preview_ok: true,
   node_breakdown: {
     'train_hvac_customer_requirements.pdf': { document: 1, section: 14, statement: 12 },
     'train_hvac_unit_purchase_specification.pdf': { document: 1, section: 16, statement: 13 }
@@ -132,12 +134,33 @@ function validateCaseResult(actual, expected) {
   const failures = [];
   function check(cond, message) { if (!cond) failures.push(message); }
 
+  // 是正Round 1.1: Case取り違え防止(case_id完全一致)。
+  check(!!actual && actual.case_id === expected.case_id, `case_id mismatch: expected ${expected.case_id}, actual ${actual && actual.case_id}`);
+
   check(!!actual && actual.input_a && actual.input_a.sha256 === expected.input_a_sha256,
     `input_a.sha256 mismatch: expected ${expected.input_a_sha256}, actual ${actual && actual.input_a && actual.input_a.sha256}`);
   check(!!actual && actual.input_b && actual.input_b.sha256 === expected.input_b_sha256,
     `input_b.sha256 mismatch: expected ${expected.input_b_sha256}, actual ${actual && actual.input_b && actual.input_b.sha256}`);
 
+  // 是正Round 1.1: previewエラーをPASSにしない(既定はfalse/undefinedを含め全て厳密一致で判定)。
+  check(!!actual && actual.preview_ok === expected.preview_ok, `preview_ok mismatch: expected ${expected.preview_ok}, actual ${actual && actual.preview_ok}`);
+
   const breakdown = (actual && actual.node_breakdown_by_document) || [];
+  const actualFileNames = breakdown.map(d => d.file_name);
+  const expectedFileNames = Object.keys(expected.node_breakdown);
+
+  // 是正Round 1.1: file_nameの重複がないこと(重複があると集合比較・per-file検査をすり抜けうる)。
+  const duplicateFileNames = actualFileNames.filter((name, idx) => actualFileNames.indexOf(name) !== idx);
+  check(duplicateFileNames.length === 0, `node_breakdown_by_document: file_nameの重複がある(実際: ${JSON.stringify(actualFileNames)})`);
+
+  // 是正Round 1.1: 期待外のfile_name(文書)が含まれていないこと。
+  const unexpectedFileNames = actualFileNames.filter(name => !expectedFileNames.includes(name));
+  check(unexpectedFileNames.length === 0, `node_breakdown_by_document: 期待外の文書が含まれている(期待: ${JSON.stringify(expectedFileNames)}, 実際: ${JSON.stringify(actualFileNames)})`);
+
+  // 是正Round 1.1: 文書集合(file_name)が期待集合と完全一致すること(欠落・重複・余剰のいずれもない)。
+  check(new Set(actualFileNames).size === expectedFileNames.length && expectedFileNames.every(f => actualFileNames.includes(f)),
+    `node_breakdown_by_document: 文書集合が期待集合と完全一致しない(期待: ${JSON.stringify(expectedFileNames)}, 実際: ${JSON.stringify(actualFileNames)})`);
+
   for (const [fileName, exp] of Object.entries(expected.node_breakdown)) {
     const found = breakdown.find(d => d.file_name === fileName);
     check(!!found, `node_breakdown_by_document: ${fileName}のエントリが見つからない`);

@@ -155,6 +155,7 @@ function goldenActualForCaseA() {
     case_id: 'case_01_pdf_excel',
     input_a: { sha256: CASE_A_EXPECTED.input_a_sha256 },
     input_b: { sha256: CASE_A_EXPECTED.input_b_sha256 },
+    preview_ok: true,
     node_breakdown_by_document: [
       { file_name: 'train_hvac_customer_requirements.pdf', document: 1, section: 14, statement: 12 },
       { file_name: 'train_hvac_design_review.xlsx', document: 1, section: 1, statement: 13 }
@@ -188,7 +189,9 @@ function testValidatorTamperInjection() {
     ['warning', a => { a.warning_count = 1; }],
     ['console error', a => { a.console_error_count = 1; }],
     ['external request', a => { a.external_network_request_count = 1; }],
-    ['ingest_ok', a => { a.ingest_ok = false; }]
+    ['ingest_ok', a => { a.ingest_ok = false; }],
+    // 是正Round 1.1: preview tamper(既存11件とは別枠として数える)。
+    ['preview_ok', a => { a.preview_ok = false; }]
   ];
 
   for (const [label, mutate] of mutations) {
@@ -196,6 +199,19 @@ function testValidatorTamperInjection() {
     mutate(tampered);
     const result = validateCaseResult(tampered, CASE_A_EXPECTED);
     assert(!result.ok && result.failures.length >= 1, `§6 tamper検査: 「${label}」を改変するとvalidateCaseResult()が必ずreject(ok=false)する(実際: ok=${result.ok}, failures=${result.failures.length}件)`);
+  }
+
+  // 是正Round 1.1: Case識別・文書集合のtamper検査(preview tamperとは別枠として数える)。
+  const identityMutations = [
+    ['case_id改変', a => { a.case_id = 'case_99_wrong'; }],
+    ['期待外文書エントリ追加', a => { a.node_breakdown_by_document = [...a.node_breakdown_by_document, { file_name: 'unexpected_extra_document.pdf', document: 1, section: 1, statement: 1 }]; }],
+    ['file_name重複', a => { a.node_breakdown_by_document = [...a.node_breakdown_by_document, { ...a.node_breakdown_by_document[0] }]; }]
+  ];
+  for (const [label, mutate] of identityMutations) {
+    const tampered = JSON.parse(JSON.stringify(golden));
+    mutate(tampered);
+    const result = validateCaseResult(tampered, CASE_A_EXPECTED);
+    assert(!result.ok && result.failures.length >= 1, `§6 tamper検査(Case識別・文書集合): 「${label}」を改変するとvalidateCaseResult()が必ずreject(ok=false)する(実際: ok=${result.ok}, failures=${result.failures.length}件)`);
   }
 }
 
