@@ -1,6 +1,6 @@
 # Private Dictionary Rule Extraction — Input Projection Contract 0.1
 
-Checkpoint: P2-A2 / A2-2R（A2-2の未確定部分を確定するための修正版）
+Checkpoint: P2-A2 / A2-2R2（GitHub独立レビューの3件のblocking findingを解消した修正版）
 
 **本checkpointは、決定論的rule extraction処理そのものは実装しない。**
 ここで固定するのは「PDF/Excel adapter出力から、後続のterm候補・alias候補抽出処理
@@ -16,6 +16,22 @@ error contractを§13の完全な表として確定した。validationのTier構
 `MAX_CHILDREN_PER_PARENT`を追加した（§15）。occurrence_ordinalの割当アルゴリズムを
 §16で確定した。Constructor Trust Boundaryを§18として新設した。A2-2報告の
 未解決事項はすべて本版で解消した（§21）。
+
+**A2-2R2での変更点（サマリ・GitHub独立レビュー findings対応）**: Finding 1 —
+`normalized_text`に対するpath/URI様文字列拒否（`EXTRACTION_INPUT_PATH_LIKE_VALUE_REJECTED`）
+を廃止した（§10）。文書本文がpath/URLを含むことは正常なcontentであり、
+文字列の見た目とfilesystem/networkアクセスの可否は無関係であるため
+（constructorはいかなる場合もpath/URIをdereferenceしない。§2/§10）。
+Finding 2 — Excelの`source_record`/`source_record_display`読取りを、
+`Object.getOwnPropertyDescriptor()`ベースのdescriptor方式へ全面的に置換した
+（§11.2。旧`hasOwnProperty.call`方式を置換）。Finding 3 — Constructor Trust
+Boundary（§18）を、独立した防御層としてではなく、§13/§14の単一の固定error
+contractへ統合した。constructorが投げうる値も`{code,path}`の同一shapeのみで
+あり、既存Tier A codeの一部を再利用しつつ、constructor固有の7種を新規に
+定義した（§14.4 Tier C）。これに伴いerror code総数は30→36種（Tier A 6種
+[validator/constructor共用] + Tier B 23種 + Tier C固有7種）に更新した。
+top-level schema（§3）・unit schema（§4）・illustrative examples（§20）は
+変更していない。
 
 ---
 
@@ -376,25 +392,39 @@ parts に `'KEY'` / `'VALUE'` というrole token を含めることで、
 
 ---
 
-## 10. path／locator安全性
+## 10. path／locator安全性（確定。A2-2Rの設計から変更）
+
+**A2-2Rでは`normalized_text`に対してpath/URI様文字列を拒否する設計として
+いたが、これは誤りであったため撤回する（GitHub独立レビュー Finding 1）。**
+文字列の見た目（絶対パス・UNCパス・`file:`/`http(s):` URI等に似ている）と、
+実際にfilesystem/networkへアクセスするかどうかは**別の話**である。技術文書の
+本文が、設定ファイルのパスやマニュアルの参照URLを文言として含むことは
+ごく正常であり、それを理由にunit全体を拒否するのは行き過ぎた制約だった。
+
+**確定した契約**:
 
 - projection schema（top-level・unit level）のいずれにも `source_path` /
-  ファイルシステムpathに相当するfieldを**含めない**。
-- ただし、hostileな入力・不正なfixtureに対する多層防御として、validationは
-  **schemaに存在するすべての文字列値**に対し、次のパターンを検出したら
-  拒否する（`EXTRACTION_INPUT_PATH_LIKE_VALUE_REJECTED`）:
-  - 絶対Unixパス（`/`始まり）
-  - Windowsドライブパス（`C:\` 等）
-  - UNCパス（`\\`始まり）
-  - `..` パスセグメントを含むもの
-  - `file:` URI
-  - `http:` / `https:` URI
-  - モジュールパス（`./` / `../` で始まる相対パス、または `node_modules` を
-    含む文字列）
-- 実務上、ID系field（`source_unit_id`/`provenance_ref_id`/
-  `parent_source_unit_id`/`document_fingerprint`）は§9の固定正規表現で
-  既に上記パターンを排除できているため、このチェックが実際に発火するのは
-  主に `normalized_text` に対してである（§14参照）。
+  ファイルシステムpathに相当するfieldを**含めない**（この方針自体は変更
+  しない。§3/§4のschemaにこの種のfieldは存在しない）。
+- projection constructor・将来のrule extraction coreのいずれも、
+  `normalized_text`に含まれるpath/URI様の文字列を**一切dereferenceしない**
+  （ファイルを開かない・ネットワークへアクセスしない。§2の処理境界は
+  変更なし）。
+- `normalized_text`内にpath様・URL様の表記が含まれることは、通常の
+  文書contentとして問題なく保持できる。これを理由にunitを拒否する
+  validationルールは存在しない。
+- ただし、`normalized_text`はいかなる場合もerror・summary・conflict token
+  へ転記しない（§8の既存原則。これは変更していない。「pathを含むかどうか」
+  ではなく「private/raw contentを外部境界へ出さない」という一般原則の一部）。
+- ID系field（`source_document_id`/`source_unit_id`/`provenance_ref_id`/
+  `parent_source_unit_id`/`document_fingerprint`）は、引き続き§9/§7の
+  **それぞれの固定正規表現**でのみ検査する（`^sd-[0-9a-f]{32}$`等）。
+  これらの正規表現は元々hex文字と固定prefixだけで構成されるため、
+  path/URIに使われる文字（`/`, `\`, `:`, `.`等）を自然に排除できており、
+  path-like拒否ルールを廃止しても、ID系fieldに新たな抜け穴は生じない。
+
+`EXTRACTION_INPUT_PATH_LIKE_VALUE_REJECTED` は0.1 error code一覧から
+**削除する**（§13/§14参照。廃止理由は本節のとおり）。
 
 ---
 
@@ -414,54 +444,95 @@ key順序はnumeric-likeキー等で仕様上並び替えが起こりうるた�
 ではない。絶対列indexは最終KnowledgeNodeのextensionsに個別に
 保持されていないため、そもそも参照できない）。
 
-### 11.2 値の安全な取得（`__proto__` / `prototype` / `constructor` を含む）
+### 11.2 値の安全な取得（descriptor方式に確定。`__proto__` / `prototype` /
+`constructor` を含む。GitHub独立レビュー Finding 2への対応）
 
 各 `column_ordinal` について、対応する見出し文字列は
 `column_headers[column_ordinal]`（配列アクセス。常に安全）から得る。
 対応する生値・表示値は、`provenance.verbatim.source_record` /
-`source_record_display` に対して、**`Object.prototype.hasOwnProperty.call(
-source_record, header)` で存在確認したうえでのみ**読み取る
-（bracket直接アクセスや `in` 演算子、`for...in` によるキー列挙は行わない）。
+`source_record_display`（以下、まとめて`record`と呼ぶ。**両方に対して
+同一の手順を独立に適用する**）に対して、次の手順で**descriptorベースで
+のみ**読み取る。bracket直接アクセス（`record[header]`）は一切行わない。
+`in`演算子・`for...in`・`Object.keys(record)` は、列順決定にも値取得にも
+使用しない（列順は§11.1のとおり`column_headers`のみを正本とする）。
+
+**手順（`record`と`header`のペアごとに、この順序で適用する）**:
+
+1. `record`自体が安全に読み取れることを事前確認する（§18 Constructor
+   Trust Boundaryの一部。`Reflect.getPrototypeOf(record)`
+   / `Reflect.ownKeys(record)` の呼び出し自体が例外を投げないか、
+   プロトタイプが`Object.prototype`と厳密一致するか、own keyにsymbolが
+   含まれないかを検査する。違反があれば`record`全体をfail-closedで
+   拒否する。§18参照）。
+2. 次のように、descriptorを取得する。
+
+   ```js
+   const descriptor = Object.getOwnPropertyDescriptor(record, header);
+   ```
+
+3. この呼び出し自体が例外を投げた場合（hostileなProxy trapを含む）、
+   catchして拒否する。
+4. `descriptor === undefined` の場合（`header`という名前のown property
+   が存在しない）、拒否する（§11.3「欠落header」の判定はこの条件に
+   一本化する）。
+5. `descriptor`がaccessor descriptor（`'get' in descriptor` または
+   `'set' in descriptor` が真。すなわちdata descriptorではない）の場合、
+   拒否する。
+6. `descriptor.enumerable !== true` の場合（non-enumerable property）、
+   拒否する。
+7. 上記5点をすべて通過した場合のみ、`descriptor.value` から値を取得する
+   （`record[header]`のような再アクセスは行わない。descriptor取得時点の
+   値をそのまま用いる）。
+
+**`source_record`で拒否が発生した場合は`EXTRACTION_INPUT_MALFORMED_SOURCE_RECORD`、
+`source_record_display`で拒否が発生した場合は
+`EXTRACTION_INPUT_MALFORMED_SOURCE_RECORD_DISPLAY`を用いる（§14.4 Tier C）。**
 
 この方式により、次の3つの危険なproperty nameを、名前ごとの特別扱い
 （denylist）なしに、統一的かつ安全に処理できる:
 
 - **`__proto__`**: プレーンオブジェクトへ `obj['__proto__'] = v` で
-  代入した場合、`v` がobject/nullでない限り実際には own propertyが
-  作られない（accessorとしての `__proto__` の仕様上の挙動）。
-  この場合 `hasOwnProperty.call(source_record, '__proto__')` は
-  正しく `false` を返すため、「missing header」（§11.3）として
-  fail-closed拒否される。プロトタイプ汚染が万一発生していたとしても、
-  `hasOwnProperty.call` は継承propertyを拾わないため安全。
+  代入した場合、`v` がobjectまたはnullであれば実際に`record`自身の
+  プロトタイプが書き換わる（`__proto__`はown propertyを作らないため）。
+  この場合、手順1の「プロトタイプが`Object.prototype`と厳密一致するか」
+  の検査で`record`ごと拒否される。`v`がobject/nullでない場合は代入自体が
+  no-opとなり、`Object.getOwnPropertyDescriptor(record, '__proto__')`は
+  正しく`undefined`を返すため、手順4で拒否される。いずれの経路でも
+  安全側に倒れる。
 - **`prototype`** / **`constructor`**: これらはプレーンオブジェクトへの
-  bracket代入で通常どおりown propertyになるため、
-  `hasOwnProperty.call` は正しく `true` を返し、実際に代入された値を
-  安全に取得できる。
+  bracket代入で通常どおり自身のenumerableなown data propertyになるため、
+  手順2-7がそのまま正しく通過し、実際に代入された値を安全に取得できる。
 
-いずれの場合も、名前で分岐する特別なコードパスは持たない
-（`hasOwnProperty.call` を一律に使うだけで正しく振る舞う）。
+いずれの場合も、名前で分岐する特別なコードパスは持たない（descriptorの
+検査を一律に適用するだけで正しく振る舞う）。
 
 ### 11.3 空key・空value・重複header・欠落headerの扱い
 
 - **空header（見出し文字列が空）**: 現行adapterは見出し欠落時に
   `columnLetter()`（列記号: A, B, C...）へフォールバックするため、
   `column_headers` の要素が空文字列になることは adapter仕様上ない。
-  もし空文字列を検出した場合、adapter契約違反とみなし、
-  projection構築自体をfail-closedで中止する（新規のvalidationコードは
-  設けず、構築時例外として扱う。§18のConstructor Trust Boundaryに
-  含める）。
+  もし空文字列を検出した場合、`EXTRACTION_INPUT_INVALID_COLUMN_HEADERS`
+  （§14.4 Tier C）でprojection構築自体をfail-closedで中止する。
 - **重複header（正規化後に同一文字列が2列以上に存在）**: 現行adapterは
   重複見出しに `(列記号)` を付与して一意化するため、adapter仕様上
-  発生しない。防御的に再検証し、検出した場合は空headerと同様に
-  構築時fail-closedとする。
+  発生しない。防御的に再検証し、検出した場合は空headerと同じ
+  `EXTRACTION_INPUT_INVALID_COLUMN_HEADERS` で構築時fail-closedとする。
 - **欠落header（`column_headers` の要素数が実際の列数と一致しない）**:
   同様に adapter仕様上発生しないはずだが、防御的に
   `column_headers.length` を列範囲の期待値と照合し、不一致なら
-  構築時fail-closedとする。
-- **空key**: 上記のとおり空headerは発生しない前提のため、「空key」は
-  実質的に発生しない。万一 `normalized_text` が空になるKEY unitが
-  生成されようとした場合は、通常の空text拒否（§14
-  `EXTRACTION_INPUT_EMPTY_NORMALIZED_TEXT`）で拒否する。
+  同じく `EXTRACTION_INPUT_INVALID_COLUMN_HEADERS` で構築時fail-closedと
+  する。
+- **空key（個々の列について、`column_headers[column_ordinal]`という
+  headerがそもそも`record`のown propertyとして存在しない場合）**: §11.2の
+  手順4により `EXTRACTION_INPUT_MALFORMED_SOURCE_RECORD`（または
+  `_DISPLAY`）として拒否される。`column_headers`自体が空文字列を含む
+  ケースは上記の`INVALID_COLUMN_HEADERS`で既に排除されているため、
+  「headerは非空だが対応するown propertyがない」ケースのみがこの経路に
+  残る。
+- **正規化後に`normalized_text`が空文字列になるKEY/VALUE unit**: 通常の
+  空text拒否（§14 `EXTRACTION_INPUT_EMPTY_NORMALIZED_TEXT`）で拒否する
+  （こちらはvalidation側のTier Bで検出する。ペア生成自体を行わない
+  ケースは次項）。
 - **空value（KEY/VALUEペアの生成可否）**: 列の表示値（`cellTextValue()`
   相当を正規化した結果）が空文字列になる列については、**KEYとVALUEの
   ペアをまるごと生成しない**（KEYだけを残す、VALUEだけを残すという
@@ -521,6 +592,14 @@ content_export_included, units, source_unit_id, structural_role,
 normalized_text, occurrence_ordinal, provenance_ref_id,
 parent_source_unit_id
 ```
+
+**本Contractのerror codeは、validator（既に構築済みのprojection候補を
+検査する。§14.2/14.3のTier A/B）とconstructor（adapter出力からprojectionを
+構築する過程。§14.4のTier C）の両方が、この単一の`{code,path}`契約から
+共有する。「constructor errorはvalidation codeとは別」という区別は
+本Contractには存在しない（GitHub独立レビュー Finding 3。詳細は§14.4）。
+Tier Cのerrorは、`path`に常に固定値`$`を用いる（構築途中の時点では
+`$.units[i]`のような添字付きpathを安全に特定できないため。§14.4参照）。
 
 **禁止事項**（すべて）: `Error` インスタンス, `message`, `stack`, `name`,
 raw term（正規化前後を問わず抽出対象の生テキスト）, raw alias,
@@ -599,24 +678,75 @@ Tier Aを全ノードで通過した場合のみ実行する。次の固定順�
 | B-12 | `structural_role`が未対応（§5.5含む） | `EXTRACTION_INPUT_UNSUPPORTED_STRUCTURAL_ROLE` | `$.units[i].structural_role` |
 | B-13 | `normalized_text`が空文字列 | `EXTRACTION_INPUT_EMPTY_NORMALIZED_TEXT` | `$.units[i].normalized_text` |
 | B-14 | `normalized_text`長さ超過（§15） | `EXTRACTION_INPUT_TEXT_LENGTH_LIMIT_EXCEEDED` | `$.units[i].normalized_text` |
-| B-15 | path様文字列値（§10。実務上`normalized_text`のみで発火） | `EXTRACTION_INPUT_PATH_LIKE_VALUE_REJECTED` | `$.units[i].normalized_text` |
-| B-16 | `occurrence_ordinal`が非負整数でない、またはindexと不一致（§16） | `EXTRACTION_INPUT_INVALID_OCCURRENCE_ORDINAL` | `$.units[i].occurrence_ordinal` |
-| B-17 | `provenance_ref_id`形式不正 | `EXTRACTION_INPUT_PROVENANCE_REF_ID_FORMAT_INVALID` | `$.units[i].provenance_ref_id` |
-| B-18 | `parent_source_unit_id`が自己参照 | `EXTRACTION_INPUT_SELF_PARENT_REJECTED` | `$.units[i].parent_source_unit_id` |
-| B-19 | `parent_source_unit_id`が存在しないunitを指す | `EXTRACTION_INPUT_INVALID_PARENT_REFERENCE` | `$.units[i].parent_source_unit_id` |
-| B-20 | 親の`occurrence_ordinal`が子以上（循環含む） | `EXTRACTION_INPUT_PARENT_CYCLE_DETECTED` | `$.units[i].parent_source_unit_id` |
-| B-21 | 親子連鎖の深さ超過（§15） | `EXTRACTION_INPUT_NESTING_LIMIT_EXCEEDED` | `$.units[i].parent_source_unit_id` |
+| B-15 | `occurrence_ordinal`が非負整数でない、またはindexと不一致（§16） | `EXTRACTION_INPUT_INVALID_OCCURRENCE_ORDINAL` | `$.units[i].occurrence_ordinal` |
+| B-16 | `provenance_ref_id`形式不正 | `EXTRACTION_INPUT_PROVENANCE_REF_ID_FORMAT_INVALID` | `$.units[i].provenance_ref_id` |
+| B-17 | `parent_source_unit_id`が自己参照 | `EXTRACTION_INPUT_SELF_PARENT_REJECTED` | `$.units[i].parent_source_unit_id` |
+| B-18 | `parent_source_unit_id`が存在しないunitを指す | `EXTRACTION_INPUT_INVALID_PARENT_REFERENCE` | `$.units[i].parent_source_unit_id` |
+| B-19 | 親の`occurrence_ordinal`が子以上（循環含む） | `EXTRACTION_INPUT_PARENT_CYCLE_DETECTED` | `$.units[i].parent_source_unit_id` |
+| B-20 | 親子連鎖の深さ超過（§15） | `EXTRACTION_INPUT_NESTING_LIMIT_EXCEEDED` | `$.units[i].parent_source_unit_id` |
 
 **projection全体（すべての個別チェックを終えた後、最後にまとめて）**
 
 | 順序 | 検査 | code | path |
 |---|---|---|---|
-| B-22 | 同一`parent_source_unit_id`を持つunit数が上限超過（§15） | `EXTRACTION_INPUT_EXCESSIVE_CHILDREN_PER_PARENT` | `$.units` |
-| B-23 | 相異なる`provenance_ref_id`数が上限超過（§15） | `EXTRACTION_INPUT_DISTINCT_PROVENANCE_REFERENCES_LIMIT_EXCEEDED` | `$.units` |
-| B-24 | projection全体のUTF-8バイト数上限超過（§15。B-1〜B-23がすべて通過した場合のみ計算する） | `EXTRACTION_INPUT_UTF8_BYTES_LIMIT_EXCEEDED` | `$` |
+| B-21 | 同一`parent_source_unit_id`を持つunit数が上限超過（§15） | `EXTRACTION_INPUT_EXCESSIVE_CHILDREN_PER_PARENT` | `$.units` |
+| B-22 | 相異なる`provenance_ref_id`数が上限超過（§15） | `EXTRACTION_INPUT_DISTINCT_PROVENANCE_REFERENCES_LIMIT_EXCEEDED` | `$.units` |
+| B-23 | projection全体のUTF-8バイト数上限超過（§15。B-1〜B-22がすべて通過した場合のみ計算する） | `EXTRACTION_INPUT_UTF8_BYTES_LIMIT_EXCEEDED` | `$` |
 
-### 14.4 優先順位に関する一般原則
+Tier Bは合計23種（B-1〜B-23）。旧A2-2R案にあった`EXTRACTION_INPUT_PATH_LIKE_VALUE_REJECTED`
+（旧B-15）は、GitHub独立レビューFinding 1により廃止した（§10参照）。
 
+### 14.4 Tier C（constructor時。短絡・単一エラー。GitHub独立レビュー
+Finding 3への対応）
+
+projection constructorが、adapter出力（KnowledgeNode等）からprojectionを
+構築する過程で検出する事象にも、**Tier A/Bと同一の`{code,path}`契約**を
+適用する。constructor errorを「validation codeとは別の独立した仕組み」
+として記述しない（§13参照）。
+
+**Tier Cの性質はTier Aと同様、常に短絡・単一エラーである**（construction
+は単一の線形処理であり、最初に検出した1件で構築全体を即座に中止する。
+部分的なprojectionを返さない。個々のNode/行だけを黙ってスキップしない）。
+`path`は常に固定値`$`を用いる。
+
+**Tier A由来の6種（validator/constructor共用。同一codeをconstructorが
+adapter入力読取り時にも用いる）**
+
+| code | 発生条件（constructor視点） | 優先順位 |
+|---|---|---|
+| `EXTRACTION_INPUT_ROOT_NOT_OBJECT` | 読み取り対象のadapter object（Node/verbatim等）がplainなobjectとして読み取れない。Proxy trap失敗を含む（instruction「unsafe adapter object」「proxy trap failure」の両方をこのcodeへ統合する） | C-1 |
+| `EXTRACTION_INPUT_CYCLIC_OBJECT_REJECTED` | 読み取り対象が循環参照を持つ（instruction「cyclic input」） | C-2 |
+| `EXTRACTION_INPUT_SYMBOL_KEY_REJECTED` | 読み取り対象own keyにsymbolが含まれる | C-3 |
+| `EXTRACTION_INPUT_NON_ENUMERABLE_FIELD_REJECTED` | 読み取り対象に非enumerableな追加own propertyが存在する | C-4 |
+| `EXTRACTION_INPUT_ACCESSOR_PROPERTY_REJECTED` | 読み取り対象にaccessor property（getter/setter）が存在する（instruction「accessor property」） | C-5 |
+| `EXTRACTION_INPUT_CUSTOM_PROTOTYPE_REJECTED` | 読み取り対象のプロトタイプが`Object.prototype`と厳密一致しない | C-6 |
+
+**Tier C固有の新規7種（constructorのみが使用する）**
+
+| code | 発生条件 | 優先順位 |
+|---|---|---|
+| `EXTRACTION_INPUT_MALFORMED_SOURCE_RECORD` | `provenance.verbatim.source_record`からのKEY値読取りが§11.2の手順2-6のいずれかで拒否される（instruction「malformed source_record」） | C-7 |
+| `EXTRACTION_INPUT_MALFORMED_SOURCE_RECORD_DISPLAY` | `provenance.verbatim.source_record_display`からのVALUE値読取りが§11.2の手順2-6のいずれかで拒否される（instruction「malformed source_record_display」） | C-8 |
+| `EXTRACTION_INPUT_INVALID_COLUMN_HEADERS` | `column_headers`が配列でない、空文字列要素を含む、正規化後に重複する、列範囲の期待長と一致しない（§11.3。instruction「invalid column_headers」） | C-9 |
+| `EXTRACTION_INPUT_UNSUPPORTED_LOCATOR_SHAPE` | `provenance.locator.kind`が`'pdf'`/`'excel'`以外、または期待するfieldが欠落している（instruction「unsupported locator」） | C-10 |
+| `EXTRACTION_INPUT_DEPENDENCY_RESOLUTION_FAILED` | `id_hash_utils.js`（`KnowledgeIdHashUtils`）等、必須の内部依存モジュールが解決できない（instruction「dependency resolution failure」。既存adapterの`resolveIdHashUtils()`同様の失敗を、native Errorのまま伝播させずここで吸収する） | C-11 |
+| `EXTRACTION_INPUT_ID_GENERATION_FAILED` | `id128()`/`hashParts()`の呼び出しが失敗する（例外・非string戻り値・不正な長さ等。P2-A1の`safeHashParts()`と同種の吸収をここで行う。instruction「ID generation failure」） | C-12 |
+| `EXTRACTION_INPUT_NORMALIZATION_FAILED` | §6の正規化処理（NFKC正規化等）が失敗する（instruction「normalization failure」） | C-13 |
+
+Tier Cは合計13種（Tier A由来6種 + 固有7種）。これらはいずれも§13の
+単一`{code,path}`契約に従う（`Error`インスタンス・`message`・`stack`・
+raw text・header名・sheet名・filesystem pathを一切含まない）。
+
+### 14.5 優先順位に関する一般原則
+
+- **Tier CはTier A/Bより時間的に先に発生する**（constructorがprojectionを
+  構築できて初めて、そのprojection候補がvalidatorのTier A/B検査対象になる。
+  Tier Cで構築が中止された場合、Tier A/Bの検査対象となる候補自体が
+  存在しない）。したがって「Tier C > Tier A > Tier B」という優先順位では
+  なく、**Tier Cは別の処理段階（構築時）、Tier A/Bはそれに後続する別の
+  処理段階（検査時）**であり、両者が同時に競合することはない。
+- Tier CはTier A同様、走査順・サブ順序で**最初に見つかった1件だけ**を
+  報告する（§14.4）。
 - Tier AはTier Bに常に優先する（Tier A違反があればTier Bは実行しない）。
 - Tier A内では、§14.2の走査順・サブ順序で**最初に見つかった1件だけ**を
   報告する。
@@ -624,13 +754,15 @@ Tier Aを全ノードで通過した場合のみ実行する。次の固定順�
   field・1つの条件について複数のcodeが理論上該当しうる場合
   （例: `parent_source_unit_id`の自己参照・不存在参照・循環は互いに
   排他的なサブ判定として順番に検査するため、1つのunitについて
-  B-18/B-19/B-20のうち最大1つだけが発火する）、表の順序が優先順位を
+  B-17/B-18/B-19のうち最大1つだけが発火する）、表の順序が優先順位を
   兼ねる。
 - `EXTRACTION_INPUT_DUPLICATE_OCCURRENCE_ORDINAL`（A2-2案に存在したcode）は
   **本版で廃止する**。§16の構築アルゴリズムにより
-  `occurrence_ordinal`は配列indexと厳密一致する設計（B-16）となったため、
-  重複は「index不一致」として既にB-16で捕捉され、独立したcodeとして
+  `occurrence_ordinal`は配列indexと厳密一致する設計（B-15）となったため、
+  重複は「index不一致」として既にB-15で捕捉され、独立したcodeとして
   存在させる必要がなくなったため。
+- `EXTRACTION_INPUT_PATH_LIKE_VALUE_REJECTED`（A2-2R案に存在したcode）は
+  **本版で廃止する**（GitHub独立レビュー Finding 1。§10参照）。
 
 ---
 
@@ -749,23 +881,44 @@ adapterの `sortedExtractions`（`sheetIndex`昇順）と各シートの `rows`
 
 ## 18. Constructor Trust Boundary
 
+**本sectionはconstructorが従うべき「読み取り時の振る舞い」を定義する。
+throwするerrorの形・code一覧そのものは、独立した防御層としてではなく、
+§13/§14（特に§14.4 Tier C）の単一のerror contractに統合済みである
+（GitHub独立レビュー Finding 3）。**
+
 projection constructorがadapter output（KnowledgeNode等）を読み取る際、
-次を拒否する（構築時fail-closed。§14のvalidation error codeとは別の、
-構築処理自体の防御層）。
+次の事象を拒否する（構築時fail-closed）。各事象に対応する固定codeは
+§14.4のTier C表を参照すること（本sectionではcode自体を重複して定義
+しない）。
 
 - custom prototype（読み取り対象のNode/verbatimオブジェクトの
-  prototypeが`Object.prototype`と一致しない）
-- accessor property（getter/setterとして実装されたfield）
-- symbol key
-- non-enumerable extra field
-- Proxy trap failure（property読み取りが例外を投げる）
-- cyclic object（Node自身やそのprovenance構造が循環参照を持つ）
-- malformed `source_record`（§11.3の空/重複/欠落header検出を含む）
+  prototypeが`Object.prototype`と一致しない。§14.4
+  `EXTRACTION_INPUT_CUSTOM_PROTOTYPE_REJECTED`）
+- accessor property（getter/setterとして実装されたfield。§14.4
+  `EXTRACTION_INPUT_ACCESSOR_PROPERTY_REJECTED`）
+- symbol key（§14.4 `EXTRACTION_INPUT_SYMBOL_KEY_REJECTED`）
+- non-enumerable extra field（§14.4
+  `EXTRACTION_INPUT_NON_ENUMERABLE_FIELD_REJECTED`）
+- Proxy trap failure（property読み取りが例外を投げる。§14.4
+  `EXTRACTION_INPUT_ROOT_NOT_OBJECT`に統合）
+- cyclic object（Node自身やそのprovenance構造が循環参照を持つ。§14.4
+  `EXTRACTION_INPUT_CYCLIC_OBJECT_REJECTED`）
+- malformed `source_record` / `source_record_display`（§11.2のdescriptor
+  手順による拒否、§11.3の空/重複/欠落header検出を含む。§14.4
+  `EXTRACTION_INPUT_MALFORMED_SOURCE_RECORD` /
+  `EXTRACTION_INPUT_MALFORMED_SOURCE_RECORD_DISPLAY` /
+  `EXTRACTION_INPUT_INVALID_COLUMN_HEADERS`）
 - unsupported locator shape（`locator.kind`が`'pdf'`/`'excel'`以外、
-  または期待するfieldが欠落している）
+  または期待するfieldが欠落している。§14.4
+  `EXTRACTION_INPUT_UNSUPPORTED_LOCATOR_SHAPE`）
+- 依存モジュール解決失敗・ID生成失敗・正規化処理失敗（§14.4
+  `EXTRACTION_INPUT_DEPENDENCY_RESOLUTION_FAILED` /
+  `EXTRACTION_INPUT_ID_GENERATION_FAILED` /
+  `EXTRACTION_INPUT_NORMALIZATION_FAILED`）
 
 いずれかを検出した場合、projection構築全体を中止する（部分的な
-projectionを返さない。個々のNode/行だけを黙ってスキップしない）。
+projectionを返さない。個々のNode/行だけを黙ってスキップしない。§14.4の
+とおりTier Cは常に短絡・単一エラーである）。
 
 **入力adapter objectは変更しない**（§17と同一の原則をここでも適用する。
 読み取り専用アクセスのみ行う）。
@@ -899,7 +1052,18 @@ projectionを返さない。個々のNode/行だけを黙ってスキップし�
 | `heading_confidence`をunit schemaへ反映すべきか | **反映しない**まま確定（§5.3）。既存adapter実装の帰結として、追加ロジックなしに方針が満たされることを確認した。 |
 | fixtureを独立ファイルとして切り出すか | **A2-2Rでも作成しない**。設計doc内埋め込み例のみ（§20）。 |
 | `MAX_ID_LENGTH`の正確な正規表現形式 | **確定**（§9.1の表）。 |
-| `EXTRACTION_INPUT_*` エラーコード一覧の最終確定 | **確定**（§13/§14。全30種、Tier A 6種+Tier B 24種）。 |
+| `EXTRACTION_INPUT_*` エラーコード一覧の最終確定 | A2-2Rで一旦確定（全30種、Tier A 6種+Tier B 24種）。**A2-2R2でさらに更新**（§22参照）。 |
 
 本版時点で、A2-2報告に記載していた未解決事項はすべて解消した。
-新たな未解決事項は生じていない。
+
+## 22. A2-2R2 修正記録（GitHub独立レビュー 3件のblocking finding）
+
+| finding | 内容 | 対応 |
+|---|---|---|
+| Finding 1 | `normalized_text`に対するpath/URI様文字列拒否が、文書本文の正常なcontentと、実際のfilesystem/networkアクセス可否を混同していた | `EXTRACTION_INPUT_PATH_LIKE_VALUE_REJECTED`を廃止。projection schemaにfilesystem locator fieldを含めない方針・constructorがpath/URIをdereferenceしない方針は維持（§10）。 |
+| Finding 2 | Excelの`source_record`/`source_record_display`読取りが`hasOwnProperty.call`ベースで、accessor/non-enumerable propertyを明示的に区別していなかった | `Object.getOwnPropertyDescriptor()`ベースのdescriptor手順へ全面置換。data descriptor・enumerable:trueのみを許可し、`descriptor.value`からのみ値を取得する（§11.2）。 |
+| Finding 3 | Constructor Trust Boundary（§18）が、validationのerror contract（§13/§14）とは別の独立した防御層として記述されていた | Tier C（§14.4）として単一のerror contractへ統合。Tier Aの6 codeを再利用しつつ、constructor固有の7 codeを新設した。 |
+
+本版時点で、GitHub独立レビューの3件のblocking findingはすべて解消した。
+新たな未解決事項は生じていない。error code総数は36種（Tier A 6種
+[validator/constructor共用] + Tier B 23種 + Tier C固有7種）で確定する。
