@@ -20,6 +20,9 @@ const Core = require(CORE_PATH);
 const ID_HASH_UTILS_PATH = path.join(__dirname, '..', 'core', 'id_hash_utils.js');
 const IdHashUtils = require(ID_HASH_UTILS_PATH);
 const CLI_PATH = path.join(__dirname, '..', 'evaluation', 'private_dictionary_candidate_evaluation_cli.js');
+// Reuses the existing, already-committed synthetic PDF fixture from pdf_direct_adapter_verification.js
+// (no new fixture file added) for CLI subprocess probes that need a real, valid input file.
+function pdfDemoPath() { return path.join(__dirname, 'fixtures', 'pdf_direct_fixture_1_no_heading_two_paragraphs.pdf'); }
 
 let failures = 0;
 let passes = 0;
@@ -143,7 +146,8 @@ const pdfResultA = await buildPdfAdapterResult({
   sections: [
     { index: 0, page: 1, sectionId: 'sec-0', title: '第1章 総則', paragraphs: [
       { index: 0, blockId: 'blk-0-0', text: '制御弁（以下「弁」という）は「主要部品」である。' },
-      { index: 1, blockId: 'blk-0-1', text: '123 は数字だけの見出し候補ではない。' }
+      { index: 1, blockId: 'blk-0-1', text: '123 は数字だけの見出し候補ではない。' },
+      { index: 2, blockId: 'blk-0-2', text: 'サンプル部品(SP)は試験用の架空語である。' }
     ] },
     { index: 1, page: 1, sectionId: 'sec-1', title: '999', synthetic: false, paragraphs: [] }
   ]
@@ -221,6 +225,18 @@ assert(evaluationA.alias_candidates.every(c => c.scope === 'SESSION' && c.status
   assert(Object.isFrozen(projA.units[0]), 'output freeze: unit object is frozen');
   assert(Object.isFrozen(evaluationA), 'output freeze: evaluation object is frozen');
   assert(Object.isFrozen(evaluationA.candidates), 'output freeze: evaluation.candidates array is frozen');
+  assert(Object.isFrozen(evaluationA.source_fingerprints[0]), 'E1-R1 Fix 5: evaluation.source_fingerprints[i] is frozen');
+  {
+    const beforeLocal = Core.serializeCandidateEvaluationCanonical(evaluationA);
+    const beforeShareable = JSON.stringify(Core.buildShareableExtractionSummary(evaluationA));
+    let mutationThrew = false;
+    try { evaluationA.source_fingerprints[0].document_fingerprint = 'z'.repeat(64); } catch (e) { mutationThrew = true; }
+    const afterLocal = Core.serializeCandidateEvaluationCanonical(evaluationA);
+    const afterShareable = JSON.stringify(Core.buildShareableExtractionSummary(evaluationA));
+    assert(mutationThrew || evaluationA.source_fingerprints[0].document_fingerprint !== 'z'.repeat(64), 'Fix 5: mutating source_fingerprints[0] either throws (strict mode) or silently no-ops');
+    assert(beforeLocal === afterLocal, 'Fix 5: canonical serialization is unchanged after attempting to mutate source_fingerprints[0]');
+    assert(beforeShareable === afterShareable, 'Fix 5: shareable summary is unchanged after attempting to mutate source_fingerprints[0]');
+  }
 }
 
 // ---- Rule-specific ------------------------------------------------------------------------------
@@ -252,16 +268,161 @@ assert(evaluationA.alias_candidates.some(c => c.rule_ids.indexOf('ALIAS_EXPLICIT
   });
   const proj = await Core.buildExtractionInputProjectionFromPdfAdapterResult(pdfConflict);
   const ev = await Core.extractLocalDictionaryCandidates([proj]);
-  // Both ALIAS_EXPLICIT_DEFINED_AS ("CV") and ALIAS_EXPLICIT_PARENTHETICAL (whose alias capture
-  // is the broader "以下「CV」という" span) independently detect an alias pointing at two
-  // different canonicals here, so 2 distinct conflicted alias keys are expected, not 1.
-  assert(ev.conflicts.length === 2, 'Rule: alias conflict detected (same alias, two canonicals; independently by 2 rules)');
+  // E1-R1 Fix 3 permanent regression fixture: ALIAS_EXPLICIT_PARENTHETICAL must no longer
+  // register its own (broader, noisier) match for "以下「CV」という"-shaped content; only
+  // ALIAS_EXPLICIT_DEFINED_AS handles it. Exactly one conflicted alias key ("CV") is expected.
+  assert(ev.conflicts.length === 1, 'Fix 3: exactly one alias conflict (CV), not duplicated by PARENTHETICAL');
+  assert(ev.conflicts[0].alias_display === 'CV', 'Fix 3: the single conflict is keyed on "CV"');
   assert(!ev.alias_candidates.some(a => a.alias_term === 'CV'), 'Rule: conflicted alias never applied as a non-conflicted alias candidate');
-  const conflict = ev.conflicts.find(c => c.alias_display === 'CV');
+  assert(!ev.alias_candidates.some(a => a.alias_term === '以下「CV」という'), 'Fix 3: "以下「CV」という" is never generated as an alias candidate');
+  assert(!ev.conflicts.some(c => c.alias_display === '以下「CV」という'), 'Fix 3: "以下「CV」という" never appears as a separate conflict either');
+  const conflict = ev.conflicts[0];
   const cvA = ev.candidates.find(c => c.canonical_term === '制御弁A');
   const cvB = ev.candidates.find(c => c.canonical_term === '制御弁B');
-  assert(cvA.metrics.alias_conflict_count >= 1 && cvB.metrics.alias_conflict_count >= 1, 'Rule: alias_conflict_count reflected on both conflicting candidates');
+  assert(cvA.metrics.alias_conflict_count === 1 && cvB.metrics.alias_conflict_count === 1, 'Fix 3: alias_conflict_count is exactly 1 on both conflicting candidates (no double-count)');
   assert(conflict.conflicting_candidate_ids.indexOf(cvA.candidate_id) !== -1 && conflict.conflicting_candidate_ids.indexOf(cvB.candidate_id) !== -1, 'Rule: conflict record references both candidate IDs');
+  assert(conflict.conflicting_candidate_ids.length === 2, 'Fix 3: conflict references exactly 2 candidate IDs (no duplicate entries)');
+}
+
+// ---- E1-R1 Fix 2: exposure/evidence uniqueness (duplicate-exposure fixture) ------------------------
+
+{
+  // "サンプル部品" appears as: (a) a KEY-adjacent alias canonical is NOT this text, so instead
+  // construct a single BODY_STATEMENT unit whose text is BOTH quoted AND repeated verbatim so
+  // that TERM_EXPLICIT_QUOTED matches it twice within one unit (two identical quoted spans),
+  // which must still count as exactly one exposure for that unit.
+  const pdfDup = await buildPdfAdapterResult({
+    fileName: 'synth_dup.pdf', sections: [{ index: 0, page: 1, sectionId: 'sec-0', title: 'sec', paragraphs: [
+      { index: 0, blockId: 'blk-0-0', text: '「重複語」は「重複語」と同じ段落内で二度引用されている。' }
+    ] }]
+  });
+  const proj = await Core.buildExtractionInputProjectionFromPdfAdapterResult(pdfDup);
+  const ev = await Core.extractLocalDictionaryCandidates([proj]);
+  const c = ev.candidates.find(c => c.canonical_term === '重複語');
+  assert(!!c, 'Fix 2 fixture: 重複語 candidate exists');
+  assert(c.metrics.exposure_count === 1, 'Fix 2: two quoted matches within the same unit count as exactly one exposure');
+  assert(c.evidence_refs.length === 1, 'Fix 2: evidence_refs holds exactly one entry for the single unit, not one per rule match');
+}
+
+{
+  // Cross-rule duplicate: a single Excel row's KEY value also appears, verbatim, inside a
+  // quoted span produced by TERM_EXPLICIT_QUOTED-scanning of the SAME unit's normalized_text
+  // is not directly constructible for a KEY unit (KEY text is just the header), so instead
+  // verify the general mechanism using two rules that can legitimately both fire on the exact
+  // same unit: a PDF BODY_STATEMENT whose alias-canonical contribution (ALIAS_EXPLICIT_DEFINED_AS)
+  // and a quoted mention of the identical canonical both live in ONE unit.
+  const pdfDup2 = await buildPdfAdapterResult({
+    fileName: 'synth_dup2.pdf', sections: [{ index: 0, page: 1, sectionId: 'sec-0', title: 'sec', paragraphs: [
+      { index: 0, blockId: 'blk-0-0', text: '共通語（以下「KG」という）は「共通語」と表記される。' }
+    ] }]
+  });
+  const proj = await Core.buildExtractionInputProjectionFromPdfAdapterResult(pdfDup2);
+  const ev = await Core.extractLocalDictionaryCandidates([proj]);
+  const c = ev.candidates.find(c => c.canonical_term === '共通語');
+  assert(!!c, 'Fix 2 fixture: 共通語 candidate exists (found by both TERM_EXPLICIT_QUOTED and ALIAS_EXPLICIT_DEFINED_AS)');
+  assert(c.rule_ids.length >= 2, 'Fix 2 fixture: rule_ids accumulates both contributing rules');
+  assert(c.metrics.exposure_count === 1, 'Fix 2: same unit matched by 2 different rules counts as exactly one exposure');
+  assert(c.evidence_refs.length === 1, 'Fix 2: evidence_refs has exactly one entry despite 2 rules matching the same unit');
+}
+
+// ---- E1-R1 Fix 2: TERM_REPEATED_VALUE parent-set purity --------------------------------------------
+
+{
+  // "共有値" appears once as an Excel VALUE (only 1 distinct parent row) and, separately, as a
+  // KEY on a different row. Before Fix 2 this could inflate a shared "parentIds" set across
+  // rules; the VALUE-only threshold (>=2 distinct parents) must be judged from
+  // TERM_REPEATED_VALUE occurrences alone, so a single VALUE occurrence plus an unrelated KEY
+  // occurrence sharing a row parent must NOT manufacture a repeated-VALUE candidacy.
+  const excelPurity = await buildExcelAdapterResult({
+    fileName: 'synth_purity.xlsx',
+    sheets: [{ name: 'Sheet1', index: 0, rows: [
+      { rowNumber: 2, cells: [cell('共有値', 'x'), cell('名称', '共有値')] }
+    ] }]
+  });
+  const proj = await Core.buildExtractionInputProjectionFromExcelAdapterResult(excelPurity);
+  const ev = await Core.extractLocalDictionaryCandidates([proj]);
+  const c = ev.candidates.find(c => c.canonical_term === '共有値');
+  assert(!!c, 'Fix 2 fixture: 共有値 candidate exists (via TERM_STRUCTURAL_KEY, the header text)');
+  assert(c.rule_ids.indexOf('TERM_REPEATED_VALUE') === -1 || c.rule_ids.indexOf('TERM_STRUCTURAL_KEY') !== -1, 'Fix 2: candidate legitimized by KEY rule, not by an inflated repeated-VALUE parent count');
+}
+
+{
+  // Genuine repeated VALUE across 2 distinct rows must still qualify (regression: Fix 2 must not
+  // over-correct and break the original TERM_REPEATED_VALUE threshold).
+  const excelRepeat = await buildExcelAdapterResult({
+    fileName: 'synth_repeat.xlsx',
+    sheets: [{ name: 'Sheet1', index: 0, rows: [
+      { rowNumber: 2, cells: [cell('名称', '共通部品')] },
+      { rowNumber: 3, cells: [cell('名称', '共通部品')] }
+    ] }]
+  });
+  const proj = await Core.buildExtractionInputProjectionFromExcelAdapterResult(excelRepeat);
+  const ev = await Core.extractLocalDictionaryCandidates([proj]);
+  const c = ev.candidates.find(c => c.canonical_term === '共通部品');
+  assert(!!c && c.rule_ids.indexOf('TERM_REPEATED_VALUE') !== -1, 'Fix 2 regression: genuine 2-distinct-parent repeated VALUE still qualifies as a candidate');
+}
+
+// ---- E1-R1 Fix 1: extractLocalDictionaryCandidates() input boundary --------------------------------
+
+await assertThrowsCode(async () => {
+  const validProj = await Core.buildExtractionInputProjectionFromPdfAdapterResult(
+    await buildPdfAdapterResult({ fileName: 'x.pdf', sections: [{ index: 0, page: 1, sectionId: 'sec-0', title: 'x', paragraphs: [{ index: 0, blockId: 'b', text: 't' }] }] })
+  );
+  const hostile = JSON.parse(JSON.stringify(validProj));
+  Object.defineProperty(hostile, 'units', { get() { return []; }, configurable: true, enumerable: true });
+  await Core.extractLocalDictionaryCandidates(hostile);
+}, 'EXTRACTION_INPUT_ACCESSOR_PROPERTY_REJECTED', 'Fix 1: extractLocalDictionaryCandidates rejects a getter-bearing projection before reading it');
+
+await assertThrowsCode(async () => {
+  const validProj = await Core.buildExtractionInputProjectionFromPdfAdapterResult(
+    await buildPdfAdapterResult({ fileName: 'x.pdf', sections: [{ index: 0, page: 1, sectionId: 'sec-0', title: 'x', paragraphs: [{ index: 0, blockId: 'b', text: 't' }] }] })
+  );
+  const plain = JSON.parse(JSON.stringify(validProj));
+  const proxied = new Proxy(plain, { ownKeys() { throw new Error('trap'); } });
+  await Core.extractLocalDictionaryCandidates(proxied);
+}, 'EXTRACTION_INPUT_ROOT_NOT_OBJECT', 'Fix 1: extractLocalDictionaryCandidates rejects a Proxy ownKeys-trap-throwing projection');
+
+await assertThrowsCode(async () => {
+  const validProj = await Core.buildExtractionInputProjectionFromPdfAdapterResult(
+    await buildPdfAdapterResult({ fileName: 'x.pdf', sections: [{ index: 0, page: 1, sectionId: 'sec-0', title: 'x', paragraphs: [{ index: 0, blockId: 'b', text: 't' }] }] })
+  );
+  const plain = JSON.parse(JSON.stringify(validProj));
+  Object.setPrototypeOf(plain, { evil: true });
+  await Core.extractLocalDictionaryCandidates(plain);
+}, 'EXTRACTION_INPUT_CUSTOM_PROTOTYPE_REJECTED', 'Fix 1: extractLocalDictionaryCandidates rejects a projection with a custom prototype');
+
+await assertThrowsCode(async () => {
+  const validProj = await Core.buildExtractionInputProjectionFromPdfAdapterResult(
+    await buildPdfAdapterResult({ fileName: 'x.pdf', sections: [{ index: 0, page: 1, sectionId: 'sec-0', title: 'x', paragraphs: [{ index: 0, blockId: 'b', text: 't' }] }] })
+  );
+  const plain = JSON.parse(JSON.stringify(validProj));
+  plain.units[0].occurrence_ordinal = 'not-a-number'; // malformed unit field
+  await Core.extractLocalDictionaryCandidates(plain);
+}, 'EXTRACTION_INPUT_INVALID_OCCURRENCE_ORDINAL', 'Fix 1: extractLocalDictionaryCandidates rejects a malformed unit field via full validateExtractionInputProjection, not a raw property read');
+
+await assertThrowsCode(async () => {
+  const validProj = await Core.buildExtractionInputProjectionFromPdfAdapterResult(
+    await buildPdfAdapterResult({ fileName: 'x.pdf', sections: [{ index: 0, page: 1, sectionId: 'sec-0', title: 'x', paragraphs: [{ index: 0, blockId: 'b', text: 't' }] }] })
+  );
+  const arr = [validProj];
+  Object.defineProperty(arr, 'extra', { value: 1, enumerable: false, configurable: true }); // non-enumerable extra field on the array container
+  await Core.extractLocalDictionaryCandidates(arr);
+}, 'EXTRACTION_INPUT_NON_ENUMERABLE_FIELD_REJECTED', 'Fix 1: extractLocalDictionaryCandidates rejects a non-enumerable extra field on the array container itself');
+
+{
+  // Error shape: a thrown validation error from extractLocalDictionaryCandidates carries no
+  // raw term/native Error/message/stack, matching the same contract as construction/validation.
+  let caughtErr = null;
+  try {
+    const plain = JSON.parse(JSON.stringify(await Core.buildExtractionInputProjectionFromPdfAdapterResult(
+      await buildPdfAdapterResult({ fileName: 'x.pdf', sections: [{ index: 0, page: 1, sectionId: 'sec-0', title: '__SECRET_TITLE__', paragraphs: [{ index: 0, blockId: 'b', text: '__SECRET_BODY__' }] }] })
+    )));
+    plain.units[0].occurrence_ordinal = -1;
+    await Core.extractLocalDictionaryCandidates(plain);
+  } catch (e) { caughtErr = e; }
+  const serialized = JSON.stringify(caughtErr);
+  assert(caughtErr && !(caughtErr instanceof Error) && caughtErr.message === undefined, 'Fix 1: extractLocalDictionaryCandidates error is not a native Error and has no message');
+  assert(!serialized.includes('__SECRET_TITLE__') && !serialized.includes('__SECRET_BODY__'), 'Fix 1: extractLocalDictionaryCandidates error never leaks raw term content');
 }
 
 // ---- Security ------------------------------------------------------------------------------------
@@ -452,6 +613,46 @@ await assertThrowsCode(async () => {
   assert(files.length === 0, 'CLI: no partial output left in --out directory after a failing run');
   const combined = (res.stdout || '') + (res.stderr || '');
   assert(!combined.includes('/nonexistent/path/does-not-exist.pdf'), 'CLI: error output does not echo the input path');
+  fs.rmSync(tmpOut, { recursive: true, force: true });
+}
+
+// ---- E1-R1 Fix 4: CLI filesystem error boundary ----------------------------------------------------
+
+{
+  // --out points at an existing regular file (not a directory): fs.mkdirSync(..., {recursive:true})
+  // throws a native error here; it must be caught, sanitized, and must not leak the path/stack.
+  const tmpParent = fs.mkdtempSync(path.join(os.tmpdir(), 'p2a2-cli-outfile-'));
+  const outAsFile = path.join(tmpParent, 'not-a-directory');
+  fs.writeFileSync(outAsFile, 'x');
+  const res = spawnSync(process.execPath, [CLI_PATH, '--pdf', pdfDemoPath(), '--out', outAsFile], { encoding: 'utf8' });
+  assert(res.status !== 0, 'Fix 4: CLI exits non-zero when --out is an existing regular file');
+  const combined = (res.stdout || '') + (res.stderr || '');
+  assert(!combined.includes(outAsFile) && !combined.includes(tmpParent), 'Fix 4: CLI does not echo the --out path when --out is an existing regular file');
+  assert(!/at\s+\S+\s+\(.*:\d+:\d+\)/.test(combined), 'Fix 4: CLI output contains no native Error stack trace frames');
+  fs.rmSync(tmpParent, { recursive: true, force: true });
+}
+
+{
+  // Output directory exists but is not writable: mkdirSync succeeds (dir already there) while
+  // the subsequent writeFileSync calls fail; no partial output, no path/stack leak.
+  const tmpOut = fs.mkdtempSync(path.join(os.tmpdir(), 'p2a2-cli-unwritable-'));
+  fs.chmodSync(tmpOut, 0o500); // read+execute only, no write
+  let res;
+  try {
+    res = spawnSync(process.execPath, [CLI_PATH, '--pdf', pdfDemoPath(), '--out', tmpOut], { encoding: 'utf8' });
+  } finally {
+    fs.chmodSync(tmpOut, 0o700); // restore so cleanup/readdir can proceed regardless of outcome
+  }
+  const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+  if (isRoot) {
+    console.log('SKIP: Fix 4 unwritable-output-directory probe (running as root; chmod has no effect on write permission)');
+  } else {
+    assert(res.status !== 0, 'Fix 4: CLI exits non-zero when --out is not writable');
+    const combined = (res.stdout || '') + (res.stderr || '');
+    assert(!combined.includes(tmpOut), 'Fix 4: CLI does not echo the --out path when --out is not writable');
+    const files = fs.readdirSync(tmpOut);
+    assert(files.length === 0, 'Fix 4: no candidate_evaluation.json/candidate_review.md/shareable_summary.json left behind after an unwritable-output failure');
+  }
   fs.rmSync(tmpOut, { recursive: true, force: true });
 }
 

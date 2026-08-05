@@ -84,26 +84,36 @@ async function buildExcelProjection(filePath) {
   return Core.buildExtractionInputProjectionFromExcelAdapterResult(adapterResult);
 }
 
+// E1-R1 Fix 4: every filesystem operation this CLI performs (input stat/read, output path
+// resolve, mkdir, existing-output check, write, cleanup) lives inside this single outer
+// try/catch, so no native fs exception (permission denied, --out colliding with an existing
+// regular file, an unwritable parent directory, etc.) can ever reach the top level and print
+// a raw Node.js Error/stack/path. targetPaths is declared outside the try so the catch's
+// cleanup step always has a defined (possibly empty) array to work with, however early the
+// failure occurred.
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
-  if (args.pdf.length === 0 && args.excel.length === 0) fail('at least one --pdf or --excel input is required');
-  if (!args.out) fail('--out <directory> is required (no default output location)');
-
-  for (const p of [...args.pdf, ...args.excel]) {
-    if (!fs.existsSync(p) || !fs.statSync(p).isFile()) fail('one of the specified input files does not exist or is not a regular file');
-  }
-
-  const outDir = path.resolve(args.out);
-  fs.mkdirSync(outDir, { recursive: true });
-  const targetPaths = OUTPUT_FILE_NAMES.map(name => path.join(outDir, name));
-  for (const tp of targetPaths) {
-    if (fs.existsSync(tp)) fail('the output directory already contains a previous evaluation artifact; choose an empty --out directory or remove the existing files first');
-  }
-
-  // ---- All computation happens in memory before any file is written, so a mid-run failure
-  // ---- never leaves partial output on disk. ----
-  const projections = [];
+  let targetPaths = [];
   try {
+    const args = parseArgs(process.argv.slice(2));
+    if (args.pdf.length === 0 && args.excel.length === 0) fail('at least one --pdf or --excel input is required');
+    if (!args.out) fail('--out <directory> is required (no default output location)');
+
+    for (const p of [...args.pdf, ...args.excel]) {
+      if (!fs.existsSync(p) || !fs.statSync(p).isFile()) fail('one of the specified input files does not exist or is not a regular file');
+    }
+
+    const outDir = path.resolve(args.out);
+    fs.mkdirSync(outDir, { recursive: true });
+    targetPaths = OUTPUT_FILE_NAMES.map(name => path.join(outDir, name));
+    for (const tp of targetPaths) {
+      let exists;
+      try { exists = fs.existsSync(tp); } catch (_) { exists = true; } // fail closed: treat an unreadable check as "exists"
+      if (exists) fail('the output directory already contains a previous evaluation artifact, or the output path is not usable; choose an empty, writable --out directory');
+    }
+
+    // ---- All computation happens in memory before any file is written, so a mid-run
+    // ---- failure never leaves partial output on disk. ----
+    const projections = [];
     for (const p of args.pdf) projections.push(await buildPdfProjection(p));
     for (const p of args.excel) projections.push(await buildExcelProjection(p));
 
@@ -127,7 +137,7 @@ async function main() {
   } catch (e) {
     // Never surface a native Error, its message/stack, or any raw path/term. Only our own
     // sanitized {code,path} contract (if applicable) is safe to name.
-    for (const tp of targetPaths) { try { fs.unlinkSync(tp); } catch (_) { /* not written yet, ignore */ } }
+    for (const tp of targetPaths) { try { fs.unlinkSync(tp); } catch (_) { /* not written yet, or already gone, ignore */ } }
     if (e && typeof e === 'object' && typeof e.code === 'string' && typeof e.path === 'string' && Object.keys(e).length === 2) {
       fail(`extraction failed (${e.code})`);
     } else {

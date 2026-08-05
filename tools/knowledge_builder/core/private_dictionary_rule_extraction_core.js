@@ -767,11 +767,31 @@
   const PARENTHETICAL_ALIAS_RE = /([^\s、。,.!?！?()（）]{1,64})[\s　]*[（(]([^()（）]{1,32})[)）]/g;
   const DEFINED_AS_JA_RE = /([^\s()（）]{1,64})[（(]\s*以下\s*[「"“]([^」"”]{1,32})[」"”]\s*という\s*[)）]/g;
   const DEFINED_AS_EN_RE = /([^\s(]{1,64})\(\s*hereinafter\s+["“]([^"”]{1,32})["”]\s*\)/gi;
+  // E1-R1 Fix 3: content shaped like an explicit defined-as parenthetical ("...以下「X」という"
+  // or "...hereinafter "X"") is handled exclusively by ALIAS_EXPLICIT_DEFINED_AS; the generic
+  // ALIAS_EXPLICIT_PARENTHETICAL rule must not also register its own (broader, noisier) match
+  // for the same span.
+  const DEFINED_AS_CONTENT_RE = /^\s*以下\s*[「"“][^」"”]{1,32}[」"”]\s*という\s*$/;
+  const DEFINED_AS_CONTENT_EN_RE = /^\s*hereinafter\s+["“][^"”]{1,32}["”]\s*$/i;
 
-  function toArray(projections) {
-    if (Array.isArray(projections)) return projections;
-    if (projections && typeof projections === 'object') return [projections];
-    throwErr('EXTRACTION_INPUT_ROOT_NOT_OBJECT', '$');
+  // extractLocalDictionaryCandidates() input boundary (E1-R1 Fix 1): the array/single-value
+  // container itself is shape-checked before any property access, and every element is run
+  // through the full validateExtractionInputProjection() before this module ever reads a
+  // property off it, sorts it, or slices it. No unvalidated projection is ever dereferenced.
+  function toValidatedProjectionArray(projections) {
+    let arr;
+    if (Array.isArray(projections)) {
+      assertSafeShape(projections, true);
+      arr = projections;
+    } else {
+      if (projections === null || typeof projections !== 'object') throwErr('EXTRACTION_INPUT_ROOT_NOT_OBJECT', '$');
+      arr = [projections];
+    }
+    for (const candidate of arr) {
+      const result = validateExtractionInputProjection(candidate);
+      if (!result.valid) throw result.errors[0];
+    }
+    return arr;
   }
 
   function evidenceRef(sourceDocumentId, unit) {
@@ -784,25 +804,40 @@
     });
   }
 
+  // E1-R1 Fix 2: exposure/evidence are keyed by unique source occurrence
+  // (source_document_id + source_unit_id), so the same unit matching more than one rule (or
+  // matched twice by the same rule, e.g. two identical quoted spans in one paragraph) counts
+  // as exactly one exposure - only rule_ids accumulates across such repeats.
+  // valueParentKeys is populated ONLY by TERM_REPEATED_VALUE occurrences, kept deliberately
+  // separate from any other rule's parent references, so KEY/QUOTED/alias-canonical mentions
+  // sharing a parent never inflate the repeated-VALUE distinct-parent threshold (Fix 2).
   function newTermBucket() {
-    return { canonical: null, exposure_count: 0, documentIds: new Set(), parentIds: new Set(), ruleIds: new Set(), evidence: [] };
+    return { canonical: null, exposureKeys: new Set(), documentIds: new Set(), valueParentKeys: new Set(), ruleIds: new Set(), evidence: [] };
   }
 
   function addOccurrence(map, comparisonKey, displayText, sourceDocumentId, unit, ruleId, parentUnitId) {
     let bucket = map.get(comparisonKey);
     if (!bucket) { bucket = newTermBucket(); bucket.canonical = displayText; map.set(comparisonKey, bucket); }
-    bucket.exposure_count += 1;
-    bucket.documentIds.add(sourceDocumentId);
-    if (parentUnitId != null) bucket.parentIds.add(sourceDocumentId + '|' + parentUnitId);
     bucket.ruleIds.add(ruleId);
-    if (bucket.evidence.length < MAX_EVIDENCE_REFS_PER_CANDIDATE) bucket.evidence.push(evidenceRef(sourceDocumentId, unit));
+    bucket.documentIds.add(sourceDocumentId);
+    const exposureKey = sourceDocumentId + '|' + unit.source_unit_id;
+    if (!bucket.exposureKeys.has(exposureKey)) {
+      bucket.exposureKeys.add(exposureKey);
+      if (bucket.evidence.length < MAX_EVIDENCE_REFS_PER_CANDIDATE) bucket.evidence.push(evidenceRef(sourceDocumentId, unit));
+    }
+    if (ruleId === 'TERM_REPEATED_VALUE' && parentUnitId != null) {
+      bucket.valueParentKeys.add(sourceDocumentId + '|' + parentUnitId);
+    }
   }
 
   // extractLocalDictionaryCandidates(projections): the E1 pipeline. Accepts a single projection
   // or an array of projections (S16.3-consistent determinism: input sorted by source_document_id
   // before processing so array order supplied by the caller never affects the result).
   function extractLocalDictionaryCandidates(projections) {
-    const list = toArray(projections).slice().sort((a, b) => ordinalCompare(a.source_document_id, b.source_document_id));
+    // Fix 1: every element is fully validated (Tier A + Tier B) before this function ever
+    // reads a property off it. No sort/slice/property access happens on unvalidated input.
+    const validated = toValidatedProjectionArray(projections);
+    const list = validated.slice().sort((a, b) => ordinalCompare(a.source_document_id, b.source_document_id));
 
     const termMap = new Map(); // comparisonKey -> bucket
     const aliasMap = new Map(); // aliasComparisonKey -> Map(canonicalComparisonKey -> {display, occurrences:[]})
@@ -867,6 +902,9 @@
         while ((pm = PARENTHETICAL_ALIAS_RE.exec(unit.normalized_text)) !== null) {
           const canonicalText = (pm[1] || '').trim();
           const aliasText = (pm[2] || '').trim();
+          if (DEFINED_AS_CONTENT_RE.test(pm[2] || '') || DEFINED_AS_CONTENT_EN_RE.test(pm[2] || '')) {
+            continue; // handled exclusively by ALIAS_EXPLICIT_DEFINED_AS below; not a rejection
+          }
           if (!canonicalText || !aliasText || canonicalText.length > MAX_ALIAS_CANONICAL_LENGTH || aliasText.length > MAX_ALIAS_TERM_LENGTH) {
             rejectedCount++; continue;
           }
@@ -906,7 +944,7 @@
     // if the same comparison key was ALSO reached by another rule, it remains a candidate via that rule.
     for (const [key, bucket] of termMap.entries()) {
       const onlyRepeatedValue = bucket.ruleIds.size === 1 && bucket.ruleIds.has('TERM_REPEATED_VALUE');
-      if (onlyRepeatedValue && bucket.parentIds.size < 2) {
+      if (onlyRepeatedValue && bucket.valueParentKeys.size < 2) {
         termMap.delete(key);
         rejectedCount += 1;
       }
@@ -953,7 +991,7 @@
         status: 'PROBATION',
         rule_ids: Array.from(bucket.ruleIds).sort(ordinalCompare),
         evidence_refs: bucket.evidence.slice(),
-        metrics: { exposure_count: bucket.exposure_count, document_support_count: bucket.documentIds.size, alias_conflict_count: 0 },
+        metrics: { exposure_count: bucket.exposureKeys.size, document_support_count: bucket.documentIds.size, alias_conflict_count: 0 },
         unmeasured_metrics: ['match_opportunity_count', 'candidate_gain', 'ranking_gain', 'candidate_noise_increase']
       });
     }
@@ -1038,6 +1076,7 @@
     for (const a of evaluation.alias_candidates) { Object.freeze(a.rule_ids); Object.freeze(a.evidence_refs); Object.freeze(a); }
     for (const cf of evaluation.conflicts) { Object.freeze(cf.conflicting_candidate_ids); Object.freeze(cf.rule_ids); Object.freeze(cf.evidence_refs); Object.freeze(cf); }
     Object.freeze(evaluation.candidates); Object.freeze(evaluation.alias_candidates); Object.freeze(evaluation.conflicts);
+    for (const sf of evaluation.source_fingerprints) Object.freeze(sf); // E1-R1 Fix 5
     Object.freeze(evaluation.source_fingerprints); Object.freeze(evaluation.summary.counts_by_rule); Object.freeze(evaluation.summary);
     return Object.freeze(evaluation);
   }
