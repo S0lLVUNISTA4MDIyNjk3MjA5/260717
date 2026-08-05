@@ -1,6 +1,6 @@
 # Private Dictionary Rule Extraction — Input Projection Contract 0.1
 
-Checkpoint: P2-A2 / A2-2R2（GitHub独立レビューの3件のblocking findingを解消した修正版）
+Checkpoint: P2-A2 / A2-2R3（constructor bounds error contractの欠落を解消した修正版）
 
 **本checkpointは、決定論的rule extraction処理そのものは実装しない。**
 ここで固定するのは「PDF/Excel adapter出力から、後続のterm候補・alias候補抽出処理
@@ -32,6 +32,21 @@ contractへ統合した。constructorが投げうる値も`{code,path}`の同一
 [validator/constructor共用] + Tier B 23種 + Tier C固有7種）に更新した。
 top-level schema（§3）・unit schema（§4）・illustrative examples（§20）は
 変更していない。
+
+**A2-2R3での変更点（サマリ・constructor bounds error contractの確定）**:
+GitHub独立確認により、constructorが§15.1のbounds違反（`MAX_UNITS`分解前
+見積り超過・分解中実件数超過、`MAX_COLUMNS_PER_ROW`超過、構築時canonical
+UTF-8サイズ超過）を検出した際の固定codeが未定義であることが判明した。
+`EXTRACTION_INPUT_UNITS_LIMIT_EXCEEDED`と
+`EXTRACTION_INPUT_UTF8_BYTES_LIMIT_EXCEEDED`をvalidator/constructor共用に、
+新規`EXTRACTION_INPUT_COLUMNS_PER_ROW_LIMIT_EXCEEDED`をconstructor専用に
+追加した（§13/§14.3/§14.4/§15.1/§23）。§15.1の見積りアルゴリズムを、
+列数チェック先行・残容量比較後加算・短絡による安全な逐次処理へ確定した。
+`MAX_CHILDREN_PER_PARENT`の説明にあった「B-22」の誤記を「B-21」へ訂正
+した（§15）。error code総数は36→37種に更新した（Tier A 6種
+[validator/constructor共用] + Tier B 23種[うち2種はconstructorとも共用]
++ Tier C固有8種）。top-level schema（§3）・unit schema（§4）は変更
+していない。
 
 ---
 
@@ -601,6 +616,14 @@ parent_source_unit_id
 Tier Cのerrorは、`path`に常に固定値`$`を用いる（構築途中の時点では
 `$.units[i]`のような添字付きpathを安全に特定できないため。§14.4参照）。
 
+**Tier B由来でconstructorとも共用するcodeが2つ存在する（A2-2R3で確定。
+§14.3/§14.4/§15.1参照）**: `EXTRACTION_INPUT_UNITS_LIMIT_EXCEEDED`
+（`MAX_UNITS`の分解前見積り超過・分解中実件数超過にも用いる）と
+`EXTRACTION_INPUT_UTF8_BYTES_LIMIT_EXCEEDED`（constructorが構築時に
+canonical UTF-8サイズを逐次検査する場合に用いる）。これらはTier Bの
+表（B-8/B-23）にもTier Cの表（§14.4）にも同一codeとして現れる、
+validator/constructor共用のcodeである。
+
 **禁止事項**（すべて）: `Error` インスタンス, `message`, `stack`, `name`,
 raw term（正規化前後を問わず抽出対象の生テキスト）, raw alias,
 シート名・セクション名そのものの値, filesystem path, module path,
@@ -666,7 +689,7 @@ Tier Aを全ノードで通過した場合のみ実行する。次の固定順�
 | B-5 | `document_fingerprint`形式不正（§7の正規表現） | `EXTRACTION_INPUT_INVALID_FINGERPRINT` | `$.document_fingerprint` |
 | B-6 | `content_export_included`が`false`以外 | `EXTRACTION_INPUT_CONTENT_EXPORT_INCLUDED_INVALID` | `$.content_export_included` |
 | B-7 | `units`が空配列 | `EXTRACTION_INPUT_UNITS_EMPTY_REJECTED` | `$.units` |
-| B-8 | `units.length > MAX_UNITS`（§15。分解後の最終件数に適用） | `EXTRACTION_INPUT_UNITS_LIMIT_EXCEEDED` | `$.units` |
+| B-8 | `units.length > MAX_UNITS`（§15。分解後の最終件数に適用）。**このcodeはconstructorとも共用**（§14.4/§15.1: 分解前の見積り超過・分解中の逐次件数超過のいずれも同じcodeを用いる） | `EXTRACTION_INPUT_UNITS_LIMIT_EXCEEDED` | `$.units` |
 
 **各unit（配列index順。各unit内はこの順序）**
 
@@ -691,7 +714,7 @@ Tier Aを全ノードで通過した場合のみ実行する。次の固定順�
 |---|---|---|---|
 | B-21 | 同一`parent_source_unit_id`を持つunit数が上限超過（§15） | `EXTRACTION_INPUT_EXCESSIVE_CHILDREN_PER_PARENT` | `$.units` |
 | B-22 | 相異なる`provenance_ref_id`数が上限超過（§15） | `EXTRACTION_INPUT_DISTINCT_PROVENANCE_REFERENCES_LIMIT_EXCEEDED` | `$.units` |
-| B-23 | projection全体のUTF-8バイト数上限超過（§15。B-1〜B-22がすべて通過した場合のみ計算する） | `EXTRACTION_INPUT_UTF8_BYTES_LIMIT_EXCEEDED` | `$` |
+| B-23 | projection全体のUTF-8バイト数上限超過（§15。B-1〜B-22がすべて通過した場合のみ計算する）。**このcodeはconstructorとも共用**（§14.4/§15.1: 構築時に逐次UTF-8サイズを検査する場合、任意でこのcodeを用いる） | `EXTRACTION_INPUT_UTF8_BYTES_LIMIT_EXCEEDED` | `$` |
 
 Tier Bは合計23種（B-1〜B-23）。旧A2-2R案にあった`EXTRACTION_INPUT_PATH_LIKE_VALUE_REJECTED`
 （旧B-15）は、GitHub独立レビューFinding 1により廃止した（§10参照）。
@@ -721,21 +744,33 @@ adapter入力読取り時にも用いる）**
 | `EXTRACTION_INPUT_ACCESSOR_PROPERTY_REJECTED` | 読み取り対象にaccessor property（getter/setter）が存在する（instruction「accessor property」） | C-5 |
 | `EXTRACTION_INPUT_CUSTOM_PROTOTYPE_REJECTED` | 読み取り対象のプロトタイプが`Object.prototype`と厳密一致しない | C-6 |
 
-**Tier C固有の新規7種（constructorのみが使用する）**
+**Tier B由来の2種（validator/constructor共用。A2-2R3で追加。§15.1の
+bounds違反に対応）**
+
+| code | 発生条件（constructor視点） | 優先順位 |
+|---|---|---|
+| `EXTRACTION_INPUT_UNITS_LIMIT_EXCEEDED` | (a) 分解前の推定unit数（§15.1段階1）が`MAX_UNITS`を超える、または(b) 分解中の実生成unit数（§15.1段階2）が`MAX_UNITS`を超える。いずれもTier B B-8と同一code | C-7 |
+| `EXTRACTION_INPUT_UTF8_BYTES_LIMIT_EXCEEDED` | constructorが構築時にcanonical UTF-8サイズを逐次検査する場合（§15.1任意の段階3）、累積バイト数が`MAX_INPUT_UTF8_BYTES`を超える。Tier B B-23と同一code | C-8 |
+
+**Tier C固有の新規8種（constructorのみが使用する）**
 
 | code | 発生条件 | 優先順位 |
 |---|---|---|
-| `EXTRACTION_INPUT_MALFORMED_SOURCE_RECORD` | `provenance.verbatim.source_record`からのKEY値読取りが§11.2の手順2-6のいずれかで拒否される（instruction「malformed source_record」） | C-7 |
-| `EXTRACTION_INPUT_MALFORMED_SOURCE_RECORD_DISPLAY` | `provenance.verbatim.source_record_display`からのVALUE値読取りが§11.2の手順2-6のいずれかで拒否される（instruction「malformed source_record_display」） | C-8 |
-| `EXTRACTION_INPUT_INVALID_COLUMN_HEADERS` | `column_headers`が配列でない、空文字列要素を含む、正規化後に重複する、列範囲の期待長と一致しない（§11.3。instruction「invalid column_headers」） | C-9 |
-| `EXTRACTION_INPUT_UNSUPPORTED_LOCATOR_SHAPE` | `provenance.locator.kind`が`'pdf'`/`'excel'`以外、または期待するfieldが欠落している（instruction「unsupported locator」） | C-10 |
-| `EXTRACTION_INPUT_DEPENDENCY_RESOLUTION_FAILED` | `id_hash_utils.js`（`KnowledgeIdHashUtils`）等、必須の内部依存モジュールが解決できない（instruction「dependency resolution failure」。既存adapterの`resolveIdHashUtils()`同様の失敗を、native Errorのまま伝播させずここで吸収する） | C-11 |
-| `EXTRACTION_INPUT_ID_GENERATION_FAILED` | `id128()`/`hashParts()`の呼び出しが失敗する（例外・非string戻り値・不正な長さ等。P2-A1の`safeHashParts()`と同種の吸収をここで行う。instruction「ID generation failure」） | C-12 |
-| `EXTRACTION_INPUT_NORMALIZATION_FAILED` | §6の正規化処理（NFKC正規化等）が失敗する（instruction「normalization failure」） | C-13 |
+| `EXTRACTION_INPUT_COLUMNS_PER_ROW_LIMIT_EXCEEDED` | `column_headers.length`が`MAX_COLUMNS_PER_ROW`を超える（§15.1段階1(a)。A2-2R3で新規追加。見積り算術で使う前に必ずこのcheckが先行する） | C-9 |
+| `EXTRACTION_INPUT_MALFORMED_SOURCE_RECORD` | `provenance.verbatim.source_record`からのKEY値読取りが§11.2の手順2-6のいずれかで拒否される（instruction「malformed source_record」） | C-10 |
+| `EXTRACTION_INPUT_MALFORMED_SOURCE_RECORD_DISPLAY` | `provenance.verbatim.source_record_display`からのVALUE値読取りが§11.2の手順2-6のいずれかで拒否される（instruction「malformed source_record_display」） | C-11 |
+| `EXTRACTION_INPUT_INVALID_COLUMN_HEADERS` | `column_headers`が配列でない、空文字列要素を含む、正規化後に重複する、列範囲の期待長と一致しない（§11.3。instruction「invalid column_headers」） | C-12 |
+| `EXTRACTION_INPUT_UNSUPPORTED_LOCATOR_SHAPE` | `provenance.locator.kind`が`'pdf'`/`'excel'`以外、または期待するfieldが欠落している（instruction「unsupported locator」） | C-13 |
+| `EXTRACTION_INPUT_DEPENDENCY_RESOLUTION_FAILED` | `id_hash_utils.js`（`KnowledgeIdHashUtils`）等、必須の内部依存モジュールが解決できない（instruction「dependency resolution failure」。既存adapterの`resolveIdHashUtils()`同様の失敗を、native Errorのまま伝播させずここで吸収する） | C-14 |
+| `EXTRACTION_INPUT_ID_GENERATION_FAILED` | `id128()`/`hashParts()`の呼び出しが失敗する（例外・非string戻り値・不正な長さ等。P2-A1の`safeHashParts()`と同種の吸収をここで行う。instruction「ID generation failure」） | C-15 |
+| `EXTRACTION_INPUT_NORMALIZATION_FAILED` | §6の正規化処理（NFKC正規化等）が失敗する（instruction「normalization failure」） | C-16 |
 
-Tier Cは合計13種（Tier A由来6種 + 固有7種）。これらはいずれも§13の
-単一`{code,path}`契約に従う（`Error`インスタンス・`message`・`stack`・
-raw text・header名・sheet名・filesystem pathを一切含まない）。
+Tier Cは合計**16種**（Tier A由来6種 + Tier B由来2種 + 固有8種）。これらは
+いずれも§13の単一`{code,path}`契約に従う（`Error`インスタンス・
+`message`・`stack`・raw text・header名・sheet名・filesystem pathを
+一切含まない）。**constructorが起こしうるfail-closed事象は、以上の
+16種のいずれか1つに必ず対応する（native Errorへfallbackする経路は
+存在しない）。**
 
 ### 14.5 優先順位に関する一般原則
 
@@ -772,36 +807,81 @@ raw text・header名・sheet名・filesystem pathを一切含まない）。
 
 | 定数 | 値 | 理由 |
 |---|---|---|
-| `MAX_INPUT_UTF8_BYTES` | 8,388,608（8 MiB） | 個々のunit数・text長の上限から積み上げた安全側の総量backstop。主たる制御は`MAX_UNITS`/`MAX_NORMALIZED_TEXT_LENGTH`。 |
-| `MAX_UNITS` | 200,000 | **KEY/VALUE分解後の最終projection unit数**に適用する（入力Node数ではない。§15.1参照）。SESSION scopeでの人間レビューが現実的に成立する規模を基準に、adapter側上限（Excel 500,000セル等）より意図的に厳しく設定する。 |
+| `MAX_INPUT_UTF8_BYTES` | 8,388,608（8 MiB） | 個々のunit数・text長の上限から積み上げた安全側の総量backstop。主たる制御は`MAX_UNITS`/`MAX_NORMALIZED_TEXT_LENGTH`。超過時のcodeは`EXTRACTION_INPUT_UTF8_BYTES_LIMIT_EXCEEDED`（validator/constructor共用。§14.3 B-23/§14.4）。 |
+| `MAX_UNITS` | 200,000 | **KEY/VALUE分解後の最終projection unit数**に適用する（入力Node数ではない。§15.1参照）。SESSION scopeでの人間レビューが現実的に成立する規模を基準に、adapter側上限（Excel 500,000セル等）より意図的に厳しく設定する。超過時のcodeは`EXTRACTION_INPUT_UNITS_LIMIT_EXCEEDED`（validator/constructor共用。§14.3 B-8/§14.4/§15.1）。 |
 | `MAX_NORMALIZED_TEXT_LENGTH` | 4,000（文字数） | 一般的な技術文書の段落・セル値を十分収める長さ。超過は切り詰めず拒否する（切り詰めはevidenceを損なうため）。 |
 | `MAX_ID_LENGTH` | 80（文字数） | §9の実際のID長（最大37文字）に対する安全余裕。正規表現評価前の安価な事前ゲート。 |
 | `MAX_PARENT_DEPTH` | 6 | 現行adapterが生成しうる実際の最大深さは3（`document(0)→sheet(1)→row_record(2)→key/value(3)`）。将来の軽微な拡張余地を見込み2倍の余裕を持たせた。 |
 | `MAX_DISTINCT_PROVENANCE_REFERENCES` | `MAX_UNITS`と同値（200,000） | §9.3の変更（KEY/VALUEが`provenance_ref_id`を共有しない）により、実質的に`provenance_ref_id`はunitごとに一意となるため、本boundは事実上`MAX_UNITS`と等価になる。契約上は独立した定数として維持するが、値は`MAX_UNITS`と同一に固定する。 |
-| `MAX_COLUMNS_PER_ROW`（新規） | 1,000 | Excelの1行あたりの列数上限。Excel自体の物理列上限（16,384）より大幅に低いが、実務上のBOM/部品表等の技術文書シートを十分収める規模であり、`MAX_UNITS`と組み合わせた見積り（§15.1）を現実的に保つための上限。 |
-| `MAX_CHILDREN_PER_PARENT`（新規） | 2,000（`2 × MAX_COLUMNS_PER_ROW`） | 1つの`ROW_RECORD`から生成されるKEY+VALUEの組の上限（列数上限の2倍）。validation時（B-22）にも再検証する。 |
+| `MAX_COLUMNS_PER_ROW`（新規） | 1,000 | Excelの1行あたりの列数上限。Excel自体の物理列上限（16,384）より大幅に低いが、実務上のBOM/部品表等の技術文書シートを十分収める規模であり、`MAX_UNITS`と組み合わせた見積り（§15.1）を現実的に保つための上限。超過時のcodeは`EXTRACTION_INPUT_COLUMNS_PER_ROW_LIMIT_EXCEEDED`（constructor専用の新規code。§14.4）。 |
+| `MAX_CHILDREN_PER_PARENT`（新規） | 2,000（`2 × MAX_COLUMNS_PER_ROW`） | 1つの`ROW_RECORD`から生成されるKEY+VALUEの組の上限（列数上限の2倍）。validation時（B-21。**A2-2R3で誤記訂正**: 旧版はB-22と誤記していたが、B-21が`EXCESSIVE_CHILDREN_PER_PARENT`でありB-22は`DISTINCT_PROVENANCE_REFERENCES_LIMIT_EXCEEDED`であるため、正しくはB-21である）にも再検証する。 |
 
 **全unit間の全直積（総当たり）を前提にした上限設計は行わない。** 上記は
 いずれも「1projectionあたりの単純な件数・長さ上限」であり、A2-3以降の
 候補抽出ロジックが独自にO(n²)的な組合せ処理を行う場合は、そちらの
 checkpointで別途、対象を絞る仕組みを設計する。
 
-### 15.1 分解前の見積りと逐次上限検査
+### 15.1 分解前の見積りと逐次上限検査（安全な見積りアルゴリズムに確定）
 
 `MAX_UNITS` はKEY/VALUE分解後の最終unit数に適用するが、次の2段階の
-防御を併用する。
+防御を併用する。**`1 + 2 × column_headers.length` や `Σ(...)` を無制御に
+一括評価すること（全行分の中間配列や全unitを先に生成してから検出する
+こと）は禁止する。** 必ず次の逐次アルゴリズムに従う。
 
-1. **分解前の上限見積り（構築開始前のゲート）**: 入力Node集合から、
-   `estimated_units = (行Node以外のNode数) + Σ_行Node(1 + 2 × その行の
-   column_headers.length)` を計算し、`MAX_UNITS` を超える場合は
-   分解処理を一切開始せずに構築時fail-closedで中止する。
-2. **分解中の逐次上限検査**: 実際にunitを1件生成するたびに、その時点の
-   累積件数を `MAX_UNITS` と比較し、超過した瞬間に構築を中止する
-   （見積りが誤っていた場合や、悪意ある/破損した入力による想定外の
-   拡大を防ぐため）。
+**段階1: 分解前の上限見積り（構築開始前のゲート。行ごとの逐次処理）**
 
-`MAX_COLUMNS_PER_ROW` は、上記の見積り計算自体が発散しないようにする
-ための、行あたり列数の独立した上限として機能する。
+```
+runningEstimate = 行Node以外のNode数   // adapterのNode一覧から数えるだけの小さい値
+if runningEstimate > MAX_UNITS:
+    abort with EXTRACTION_INPUT_UNITS_LIMIT_EXCEEDED
+
+for each 行Node in 行Node一覧（adapterの決定的順序で）:
+    columnCount = その行の column_headers.length
+
+    // (a) 列数チェックを、その値を算術式へ使う前に必ず先に行う
+    if columnCount > MAX_COLUMNS_PER_ROW:
+        abort with EXTRACTION_INPUT_COLUMNS_PER_ROW_LIMIT_EXCEEDED
+
+    // (b) columnCount は既に MAX_COLUMNS_PER_ROW（1,000）以下と保証された
+    //     後にのみ掛け算する。EXTRACTION_INPUT_UNITS_LIMIT_EXCEEDED
+    rowContribution = 1 + 2 * columnCount   // 高々2,001。桁あふれの余地なし
+
+    // (c) 加算する「前」に残容量と比較する（加算してから比較しない）
+    remaining = MAX_UNITS - runningEstimate
+    if rowContribution > remaining:
+        abort with EXTRACTION_INPUT_UNITS_LIMIT_EXCEEDED
+
+    runningEstimate = runningEstimate + rowContribution
+    // ここで runningEstimate は常に MAX_UNITS 以下であることが保証される
+```
+
+この手順により: `column_headers.length` を上限確認前に算術式で使わない
+（`MAX_COLUMNS_PER_ROW`確認が常に先行する）。`runningEstimate`は
+`MAX_UNITS`（200,000）を一度も超えないよう、加算前に残容量と比較して
+から加算する（超えてから気づく設計にしない）。`Number.MAX_SAFE_INTEGER`
+（約9×10^15）を超える計算は、`runningEstimate`が常に`MAX_UNITS`以下・
+`rowContribution`が常に`1 + 2 × MAX_COLUMNS_PER_ROW`（2,001）以下という
+2つの上限に既に縛られているため、構造的に発生しない。上限超過を検出
+した時点（列数超過・行寄与超過のいずれか）で、残りの行を処理せず
+即座に短絡する。全行を走査し終えてから合計を判定することはしない。
+
+**段階2: 分解中の逐次上限検査**: 実際にunitを1件生成するたびに、その
+時点の累積件数を `MAX_UNITS` と比較し、超過した瞬間に構築を中止する
+（`EXTRACTION_INPUT_UNITS_LIMIT_EXCEEDED`。見積りが誤っていた場合や、
+悪意ある/破損した入力による想定外の拡大を防ぐため）。
+
+**任意の段階3: canonical UTF-8サイズの構築時逐次検査（optional）**:
+constructorは、unit生成のたびにそのunitのUTF-8バイト長を加算し、
+累積が`MAX_INPUT_UTF8_BYTES`を超えた瞬間に構築を中止することができる
+（必須ではない早期防御。validator側のB-23が本来の権威的な検査である
+ことに変わりはない）。この検査を行う場合は、全unit生成後に一括で
+canonical文字列を作ってから長さを測るのではなく、生成のたびに逐次
+加算し、超過した時点で即座に短絡する。用いるcodeは
+`EXTRACTION_INPUT_UTF8_BYTES_LIMIT_EXCEEDED`（validator/constructor共用）。
+
+`MAX_COLUMNS_PER_ROW`は、上記の見積り計算自体が発散しないようにする
+ための、行あたり列数の独立した上限として機能する
+（`EXTRACTION_INPUT_COLUMNS_PER_ROW_LIMIT_EXCEEDED`）。
 
 ---
 
@@ -1065,5 +1145,51 @@ projectionを返さない。個々のNode/行だけを黙ってスキップし�
 | Finding 3 | Constructor Trust Boundary（§18）が、validationのerror contract（§13/§14）とは別の独立した防御層として記述されていた | Tier C（§14.4）として単一のerror contractへ統合。Tier Aの6 codeを再利用しつつ、constructor固有の7 codeを新設した。 |
 
 本版時点で、GitHub独立レビューの3件のblocking findingはすべて解消した。
-新たな未解決事項は生じていない。error code総数は36種（Tier A 6種
-[validator/constructor共用] + Tier B 23種 + Tier C固有7種）で確定する。
+error code総数は36種（Tier A 6種[validator/constructor共用] + Tier B 23種
++ Tier C固有7種）としていたが、**この総数はA2-2R3でさらに更新された
+（§23参照。constructorのbounds違反に対応するcodeが未定義だったため）**。
+
+## 23. A2-2R3 修正記録（GitHub独立確認: constructor bounds error contract）
+
+**背景**: A2-2R2までの版では、constructorが§15.1のbounds（`MAX_UNITS`の
+分解前見積り超過・分解中実件数超過、`MAX_COLUMNS_PER_ROW`超過、構築時に
+canonical UTF-8サイズを検査する場合の超過）を検出した際にthrowすべき
+固定codeが定義されていなかった。GitHub独立確認でこれを検出した。
+
+**必須修正1（constructor bounds code）への対応**:
+
+- `EXTRACTION_INPUT_UNITS_LIMIT_EXCEEDED`をvalidator（Tier B B-8）と
+  constructor（Tier C C-7）の共用codeとして明記した（§13/§14.3/§14.4/
+  §15.1）。分解前の見積り超過・分解中の実件数超過のいずれもこのcodeを
+  用いる。
+- `EXTRACTION_INPUT_UTF8_BYTES_LIMIT_EXCEEDED`も同様にvalidator（Tier B
+  B-23）とconstructor（Tier C C-8）の共用codeとして明記した。constructor
+  が構築時に逐次UTF-8サイズを検査する場合（任意）に用いる。
+- `EXTRACTION_INPUT_COLUMNS_PER_ROW_LIMIT_EXCEEDED`をTier C固有の新規code
+  （C-9）として追加した。
+
+**必須修正2（安全な見積り）への対応**: §15.1を全面改稿し、
+`column_headers.length`を`MAX_COLUMNS_PER_ROW`と比較してから初めて算術式
+（`1 + 2 × columnCount`）へ使う、行ごとに残容量（`MAX_UNITS -
+runningEstimate`）と比較してから加算する、`runningEstimate`が
+`MAX_UNITS`を一度も超えない設計にする、上限超過を検出した時点で残りの
+行を処理せず短絡する、という逐次アルゴリズムに確定した。`columnCount`が
+`MAX_COLUMNS_PER_ROW`（1,000）以下、`rowContribution`が高々2,001に
+既に縛られているため、`Number.MAX_SAFE_INTEGER`を超える計算は構造的に
+発生しない。
+
+**必須修正3（B番号誤記）への対応**: §15の`MAX_CHILDREN_PER_PARENT`の説明
+にあった「validation時（B-22）」を「B-21」に訂正した（B-21が
+`EXCESSIVE_CHILDREN_PER_PARENT`、B-22は`DISTINCT_PROVENANCE_REFERENCES_LIMIT_EXCEEDED`
+であるため）。
+
+**更新後の総数**: Tier C合計16種（Tier A由来6種 + Tier B由来2種 + 固有
+8種）。error code総数は37種（Tier A 6種[validator/constructor共用] +
+Tier B 23種[うち2種はconstructorとも共用] + Tier C固有8種）で確定する。
+`EXTRACTION_INPUT_DUPLICATE_OCCURRENCE_ORDINAL`・
+`EXTRACTION_INPUT_PATH_LIKE_VALUE_REJECTED`の2種は引き続き廃止済みの
+まま（文書内には廃止理由の記録としてのみ残る）。
+
+本版時点で、GitHub独立確認で指摘されたconstructor bounds error
+contractの欠落は解消した。新たな未解決事項は生じていない。
+top-level schema（§3）・unit schema（§4）は変更していない。
