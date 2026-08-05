@@ -22,7 +22,10 @@ const vm = require('vm');
 
 const CORE_PATH = path.join(__dirname, '..', 'core', 'private_dictionary_learning_core.js');
 const Core = require(CORE_PATH);
-const IdHashUtils = require(path.join(__dirname, '..', 'core', 'id_hash_utils.js'));
+const ID_HASH_UTILS_PATH = path.join(__dirname, '..', 'core', 'id_hash_utils.js');
+const IdHashUtils = require(ID_HASH_UTILS_PATH);
+const BINDING_CORE_PATH = path.join(__dirname, '..', '..', 'quantity_sidecar_binding_core.js');
+const DESIGN_DOC_PATH = path.join(__dirname, '..', 'design', 'private_dictionary_learning_contract_0.1.md');
 
 let failures = 0;
 function assert(cond, message) {
@@ -1189,10 +1192,57 @@ async function main() {
   // additional permanent checks.
   // ======================================================================
 
-  function assertSanitizedErrorContract(err, label) {
-    assert(err instanceof Error, `${label}: thrown value is an Error instance`);
-    assert(Object.keys(err).sort().join(',') === 'code,path', `${label}: Object.keys(error) is exactly code,path (no isDictionaryError or other marker)`);
+  // Step 10 audit remediation: thrown "errors" are plain frozen objects, NOT
+  // Error instances - `instanceof Error` must be false, `.message`/`.stack`/
+  // `.name` must be undefined, and own keys (enumerable or not, string or
+  // symbol) must be exactly ['code','path'].
+  // `crossRealm`: set true when `err` was caught from a different vm
+  // Context (a sandboxed core instance). Own-property descriptor checks and
+  // Reflect.ownKeys/JSON.stringify/instanceof-Error are realm-agnostic
+  // generic algorithms and remain fully strict either way, but a strict
+  // `Object.getPrototypeOf(err) === Object.prototype` identity comparison is
+  // NOT meaningful across realms (a sandbox-native plain object's prototype
+  // is that OTHER realm's Object.prototype, never strictly `===` to this
+  // realm's Object.prototype, even though it genuinely is "a" realm's
+  // Object.prototype with no intermediate custom prototype). For
+  // cross-realm callers, verify the same property in a realm-agnostic way
+  // instead: the prototype itself has a null prototype (true for every
+  // realm's genuine Object.prototype) AND is not itself null (rules out
+  // `Object.create(null)`) AND has no own enumerable properties one would
+  // not expect on a bare Object.prototype snapshot check is intentionally
+  // conservative - this still rejects a custom intermediate prototype
+  // object (its own prototype would be Object.prototype, not null).
+  function assertSanitizedErrorContract(err, label, crossRealm) {
+    assert(!(err instanceof Error), `${label}: thrown value is NOT an Error instance (plain frozen object)`);
+    assert(err !== null && typeof err === 'object', `${label}: thrown value is a plain object`);
+    assert(Object.keys(err).sort().join(',') === 'code,path', `${label}: Object.keys(error) is exactly code,path`);
+    assert(Reflect.ownKeys(err).slice().sort().join(',') === 'code,path', `${label}: Reflect.ownKeys(error) is exactly code,path (no symbol keys, no hidden fields)`);
     assert(JSON.stringify(err) === JSON.stringify({ code: err.code, path: err.path }), `${label}: JSON.stringify(error) contains exactly {code,path}`);
+    assert(err.message === undefined, `${label}: error has no message field`);
+    assert(err.stack === undefined, `${label}: error has no stack field`);
+    assert(err.name === undefined, `${label}: error has no name field`);
+    assert(Object.isFrozen(err), `${label}: error object is frozen`);
+    // Step 10R1 hardening: exact prototype + exact-order own keys + exact
+    // per-property descriptor (enumerable:true, writable:false,
+    // configurable:false, data property - not accessor).
+    if (crossRealm) {
+      const proto = Object.getPrototypeOf(err);
+      assert(proto !== null && Object.getPrototypeOf(proto) === null,
+        `${label}: error prototype is a genuine (possibly cross-realm) Object.prototype, with no intermediate custom prototype`);
+    } else {
+      assert(Object.getPrototypeOf(err) === Object.prototype, `${label}: error prototype is exactly Object.prototype (no custom/null prototype)`);
+    }
+    const ownKeysOrdered = Reflect.ownKeys(err);
+    assert(ownKeysOrdered.length === 2 && ownKeysOrdered[0] === 'code' && ownKeysOrdered[1] === 'path',
+      `${label}: Reflect.ownKeys(error) is exactly ['code','path'] in that insertion order`);
+    for (const key of ['code', 'path']) {
+      const desc = Object.getOwnPropertyDescriptor(err, key);
+      assert(!!desc && Object.prototype.hasOwnProperty.call(desc, 'value'), `${label}: ${key} is a data property (not an accessor)`);
+      assert(desc && typeof desc.value === 'string', `${label}: ${key} value is a string`);
+      assert(desc && desc.enumerable === true, `${label}: ${key} descriptor is enumerable:true`);
+      assert(desc && desc.writable === false, `${label}: ${key} descriptor is writable:false`);
+      assert(desc && desc.configurable === false, `${label}: ${key} descriptor is configurable:false`);
+    }
   }
 
   // ---- 修正1: thrown error external contract is exactly {code,path} ----
@@ -1289,7 +1339,7 @@ async function main() {
     } catch (err) {
       assert(err.code === 'DICTIONARY_SHA256_UNAVAILABLE' && err.path === '$', 'Step6R2#3 SHA-256 unavailable in crypto-less sandbox sanitized to DICTIONARY_SHA256_UNAVAILABLE');
       assert(Object.keys(err).sort().join(',') === 'code,path', 'Step6R2#3 SHA-256-unavailable error carries no extra fields');
-      assert(err.message === 'DICTIONARY_SHA256_UNAVAILABLE', 'Step6R2#3 SHA-256-unavailable error message is exactly the sanitized code, never a native crypto error string');
+      assert(err.message === undefined, 'Step6R2#3 SHA-256-unavailable error has no message field (plain object, never a native crypto error string)');
     }
   }
 
@@ -1436,6 +1486,498 @@ async function main() {
         assert(err.code === 'DICTIONARY_DEPENDENCY_UNAVAILABLE' && err.path === '$', `Step6R3 dependency ${fnName} non-function sanitized to DICTIONARY_DEPENDENCY_UNAVAILABLE`);
         assert(Object.keys(err).sort().join(',') === 'code,path', `Step6R3 dependency ${fnName} non-function error carries no extra fields`);
       }
+    }
+  }
+
+  // ======================================================================
+  // Step 10 "Remediate Independent Audit Findings" - additional permanent
+  // checks.
+  // ======================================================================
+
+  // ---- Error privacy: additional representative throw sites (structural,
+  // dependency init, direct SHA-256, hashParts runtime). Parser syntax error
+  // and a validation-error relay are already covered above (Step6R2#1). ----
+
+  {
+    const secretMarker = 'SECRET_STRUCTURAL_MARKER_e61a';
+    const contaminated = { dictionary_id: 'pdict-' + '0'.repeat(32), version: '1', scope: 'DOMAIN', sha256: 'a'.repeat(64), entry_count: 1, content_included: false };
+    Object.defineProperty(contaminated, 'hiddenField', { value: secretMarker, enumerable: false, configurable: true });
+    try {
+      Core.createKnowledgeDictionaryBinding(contaminated);
+      failures++; console.error('FAIL: setup for Step10 error-privacy (structural)');
+    } catch (err) {
+      assertSanitizedErrorContract(err, 'Step10 error contract (structural error via createKnowledgeDictionaryBinding)');
+      assert(!JSON.stringify(err).includes(secretMarker), 'Step10 error contract (structural error): secret marker never leaks');
+    }
+  }
+
+  {
+    const sandbox = {};
+    sandbox.globalThis = sandbox;
+    sandbox.module = { exports: {} };
+    sandbox.require = () => { throw new Error('SECRET_DEP_INIT_MARKER_71bd'); };
+    const err = loadCoreInSandboxExpectingThrow(sandbox, 'Step10 error contract (dependency initialization error)');
+    if (err) assertSanitizedErrorContract(err, 'Step10 error contract (dependency initialization error)', true);
+  }
+
+  {
+    const sandbox = {};
+    sandbox.globalThis = sandbox;
+    sandbox.TextEncoder = TextEncoder;
+    sandbox.KnowledgeIdHashUtils = IdHashUtils;
+    vm.createContext(sandbox);
+    vm.runInContext(fs.readFileSync(CORE_PATH, 'utf8'), sandbox, { filename: 'private_dictionary_learning_core.js (Step10 no-crypto sandbox)' });
+    const jsonText = JSON.stringify(makeDictionary([makeEntry({})]));
+    sandbox.__json = jsonText;
+    try {
+      await vm.runInContext('(async () => { const parsed = PrivateDictionaryLearningCore.parsePrivateDictionaryJson(__json); return await PrivateDictionaryLearningCore.hashPrivateDictionaryCanonical(parsed); })()', sandbox);
+      failures++; console.error('FAIL: setup for Step10 error-privacy (direct SHA-256)');
+    } catch (err) {
+      assertSanitizedErrorContract(err, 'Step10 error contract (direct SHA-256 failure)', true);
+    }
+  }
+
+  {
+    const sandbox = {};
+    sandbox.globalThis = sandbox;
+    sandbox.KnowledgeIdHashUtils = { normalize: IdHashUtils.normalize, canonicalJson: IdHashUtils.canonicalJson, hashParts: async () => { throw new Error('SECRET_HP_FAIL_9c31'); } };
+    vm.createContext(sandbox);
+    vm.runInContext(fs.readFileSync(CORE_PATH, 'utf8'), sandbox, { filename: 'private_dictionary_learning_core.js (Step10 hashParts-throws sandbox)' });
+    const vocabJson = JSON.stringify(makeStandardVocabulary({}));
+    sandbox.__vocab = vocabJson;
+    try {
+      await vm.runInContext('(async () => { const vocab = JSON.parse(__vocab); return await PrivateDictionaryLearningCore.createStandardDictionaryLayerView(vocab); })()', sandbox);
+      failures++; console.error('FAIL: setup for Step10 error-privacy (hashParts runtime)');
+    } catch (err) {
+      assertSanitizedErrorContract(err, 'Step10 error contract (hashParts runtime failure)', true);
+    }
+  }
+
+  // ---- hashParts() runtime boundary: failure-mode matrix across all 3
+  // internal call sites (STANDARD fingerprint, STANDARD entry_ref_id,
+  // conflict normalized_key_token), plus at least one run through the REAL
+  // KnowledgeIdHashUtils dependency chain forced into a rejecting
+  // crypto.subtle.digest(). ----
+
+  function makeSelectiveHashPartsFailure(failingNamespace, failMode) {
+    return async (namespace, parts) => {
+      if (namespace !== failingNamespace) return IdHashUtils.hashParts(namespace, parts);
+      switch (failMode) {
+        case 'throw-string': throw 'SECRET_HP_THROW_STRING_4b1a';
+        case 'throw-error': throw new Error('SECRET_HP_THROW_ERROR_4b1a');
+        case 'reject-secret-object': return Promise.reject({ secret: 'SECRET_HP_REJECT_OBJECT_4b1a' });
+        case 'non-string': return 12345;
+        case 'uppercase-hex': return 'A'.repeat(64);
+        case 'short-hex': return '0'.repeat(63);
+        case 'long-hex': return '0'.repeat(65);
+        default: throw new Error('unknown failMode: ' + failMode);
+      }
+    };
+  }
+
+  function buildSandboxCoreWithHashParts(hashPartsImpl) {
+    const sandbox = {};
+    sandbox.globalThis = sandbox;
+    sandbox.KnowledgeIdHashUtils = { normalize: IdHashUtils.normalize, canonicalJson: IdHashUtils.canonicalJson, hashParts: hashPartsImpl };
+    vm.createContext(sandbox);
+    vm.runInContext(fs.readFileSync(CORE_PATH, 'utf8'), sandbox, { filename: 'private_dictionary_learning_core.js (hashParts-matrix sandbox)' });
+    return sandbox;
+  }
+
+  {
+    const FAIL_MODES = ['throw-string', 'throw-error', 'reject-secret-object', 'non-string', 'uppercase-hex', 'short-hex', 'long-hex'];
+    for (const mode of FAIL_MODES) {
+      const sandbox = buildSandboxCoreWithHashParts(makeSelectiveHashPartsFailure('tag-vocabulary-v1', mode));
+      const vocabJson = JSON.stringify(makeStandardVocabulary({}));
+      sandbox.__vocab = vocabJson;
+      try {
+        await vm.runInContext('(async () => { const vocab = JSON.parse(__vocab); return await PrivateDictionaryLearningCore.createStandardDictionaryLayerView(vocab); })()', sandbox);
+        failures++; console.error(`FAIL: Step10 hashParts matrix expected reject (STANDARD fingerprint, ${mode})`);
+      } catch (err) {
+        assert(err.code === 'DICTIONARY_HASH_PARTS_UNAVAILABLE' && err.path === '$', `Step10 hashParts matrix: STANDARD fingerprint call site rejects on ${mode}`);
+      }
+    }
+  }
+
+  {
+    for (const mode of ['throw-error', 'non-string']) {
+      const sandbox = buildSandboxCoreWithHashParts(makeSelectiveHashPartsFailure('private-dictionary-standard-entry-v1', mode));
+      const vocabJson = JSON.stringify(makeStandardVocabulary({}));
+      sandbox.__vocab = vocabJson;
+      try {
+        await vm.runInContext('(async () => { const vocab = JSON.parse(__vocab); return await PrivateDictionaryLearningCore.createStandardDictionaryLayerView(vocab); })()', sandbox);
+        failures++; console.error(`FAIL: Step10 hashParts matrix expected reject (STANDARD entry_ref_id, ${mode})`);
+      } catch (err) {
+        assert(err.code === 'DICTIONARY_HASH_PARTS_UNAVAILABLE' && err.path === '$', `Step10 hashParts matrix: STANDARD entry_ref_id call site rejects on ${mode}`);
+      }
+    }
+  }
+
+  {
+    for (const mode of ['throw-error', 'non-string']) {
+      const sandbox = buildSandboxCoreWithHashParts(makeSelectiveHashPartsFailure('private-dictionary-lookup-key-v1', mode));
+      const layerA = makeLayerView('DOMAIN', [makeLayerEntry('DOMAIN', { canonical_display: 'Conflict Canon A', aliases: [makeLayerAlias('Shared Token')] })]);
+      const layerB = makeLayerView('PROJECT', [makeLayerEntry('PROJECT', { canonical_display: 'Conflict Canon B', aliases: [makeLayerAlias('Shared Token')] })]);
+      sandbox.__layerViews = JSON.stringify([layerA, layerB]);
+      try {
+        await vm.runInContext('(async () => { const layerViews = JSON.parse(__layerViews); return await PrivateDictionaryLearningCore.detectDictionaryLookupConflicts(layerViews); })()', sandbox);
+        failures++; console.error(`FAIL: Step10 hashParts matrix expected reject (conflict token, ${mode})`);
+      } catch (err) {
+        assert(err.code === 'DICTIONARY_HASH_PARTS_UNAVAILABLE' && err.path === '$', `Step10 hashParts matrix: conflict normalized_key_token call site rejects on ${mode}`);
+      }
+    }
+  }
+
+  {
+    const bindingSource = fs.readFileSync(BINDING_CORE_PATH, 'utf8');
+    const idHashSource = fs.readFileSync(ID_HASH_UTILS_PATH, 'utf8');
+    const coreSource = fs.readFileSync(CORE_PATH, 'utf8');
+    const secretMarker = 'SECRET_SUBTLE_DIGEST_REJECT_a7c3';
+    const sandbox = {};
+    sandbox.globalThis = sandbox;
+    sandbox.TextEncoder = TextEncoder;
+    sandbox.crypto = { subtle: { digest: () => Promise.reject(new Error(secretMarker)) } };
+    vm.createContext(sandbox);
+    vm.runInContext(bindingSource, sandbox, { filename: 'quantity_sidecar_binding_core.js (Step10 real-crypto-subtle-reject sandbox)' });
+    vm.runInContext(idHashSource, sandbox, { filename: 'id_hash_utils.js (Step10 real-crypto-subtle-reject sandbox)' });
+    vm.runInContext(coreSource, sandbox, { filename: 'private_dictionary_learning_core.js (Step10 real-crypto-subtle-reject sandbox)' });
+    assert(typeof sandbox.process === 'undefined', 'Step10 real hashParts crypto.subtle path: sandbox forces browser dispatch (no process)');
+
+    const vocabJson = JSON.stringify(makeStandardVocabulary({}));
+    sandbox.__vocab = vocabJson;
+    try {
+      await vm.runInContext('(async () => { const vocab = JSON.parse(__vocab); return await PrivateDictionaryLearningCore.createStandardDictionaryLayerView(vocab); })()', sandbox);
+      failures++; console.error('FAIL: Step10 real KnowledgeIdHashUtils crypto.subtle.digest rejection expected to reject');
+    } catch (err) {
+      assert(err.code === 'DICTIONARY_HASH_PARTS_UNAVAILABLE' && err.path === '$', 'Step10 real KnowledgeIdHashUtils via browser crypto.subtle.digest rejection sanitized to DICTIONARY_HASH_PARTS_UNAVAILABLE');
+      assertSanitizedErrorContract(err, 'Step10 real KnowledgeIdHashUtils crypto.subtle.digest rejection error contract', true);
+      assert(!JSON.stringify(err).includes(secretMarker), 'Step10 real crypto.subtle.digest rejection: secret marker never leaks');
+    }
+  }
+
+  // ---- STANDARD alias validation (§5.6) ----
+
+  {
+    const vocabDup = makeStandardVocabulary({
+      allowed_tags: ['Synthetic Standard Tag A', 'Synthetic Standard Tag B'],
+      aliases: { 'Dup Standard Alias': 'Synthetic Standard Tag A', 'Dup  Standard Alias': 'Synthetic Standard Tag A' }
+    });
+    await assertThrowsCode(() => Core.createStandardDictionaryLayerView(vocabDup), 'DICTIONARY_STANDARD_ALIAS_DUPLICATE',
+      'Step10 STANDARD alias: normalized duplicate alias within same target canonical rejected');
+  }
+
+  {
+    const canonicalDisplay = 'Self Reference Tag';
+    const selfAliasDisplay = 'Self  Reference Tag'; // double space, same normalized key as canonical
+    const vocabSelfRef = makeStandardVocabulary({
+      allowed_tags: [canonicalDisplay],
+      aliases: { [selfAliasDisplay]: canonicalDisplay }
+    });
+    await assertThrowsCode(() => Core.createStandardDictionaryLayerView(vocabSelfRef), 'DICTIONARY_STANDARD_ALIAS_CANONICAL_DUPLICATE',
+      'Step10 STANDARD alias: normalized alias key equal to its own canonical normalized key rejected');
+  }
+
+  {
+    const vocabCrossTarget = makeStandardVocabulary({
+      allowed_tags: ['Cross Target Tag A', 'Cross Target Tag B'],
+      aliases: { 'Cross Shared Alias': 'Cross Target Tag A', 'Cross  Shared Alias': 'Cross Target Tag B' }
+    });
+    const view = await Core.createStandardDictionaryLayerView(vocabCrossTarget);
+    assert(Array.isArray(view.entries) && view.entries.length === 2, 'Step10 STANDARD alias: same normalized alias across different canonical targets allowed at creation');
+    const conflictResult = await Core.detectDictionaryLookupConflicts([view]);
+    assert(conflictResult.conflicts.length === 1 && conflictResult.conflicts[0].code === 'DICTIONARY_LOOKUP_CONFLICT',
+      'Step10 STANDARD alias: cross-target same normalized alias is flagged as a lookup conflict by detectDictionaryLookupConflicts');
+  }
+
+  // ---- Internal layer alias validation (§5.5/§8), STANDARD and private scope ----
+
+  for (const scopeName of ['STANDARD', 'PROJECT']) {
+    {
+      const canonicalDisplay = 'Layer Term ' + scopeName;
+      const aliasDisplay = 'Layer  Term ' + scopeName; // double space -> same normalized key as canonical
+      const entry = makeLayerEntry(scopeName, { canonical_display: canonicalDisplay, aliases: [makeLayerAlias(aliasDisplay)] });
+      const layerView = makeLayerView(scopeName, [entry]);
+      await assertThrowsCode(() => Core.mergeDictionaryLayers([layerView]), 'DICTIONARY_LAYER_ALIAS_CANONICAL_DUPLICATE',
+        `Step10 internal layer alias (${scopeName}): alias.key equal to entry.canonical_key rejected`);
+    }
+
+    {
+      const dupA = 'Layer Dup ' + scopeName;
+      const dupB = 'Layer  Dup ' + scopeName;
+      const entry = makeLayerEntry(scopeName, { aliases: [makeLayerAlias(dupA), makeLayerAlias(dupB)] });
+      const layerView = makeLayerView(scopeName, [entry]);
+      await assertThrowsCode(() => Core.mergeDictionaryLayers([layerView]), 'DICTIONARY_LAYER_ALIAS_DUPLICATE',
+        `Step10 internal layer alias (${scopeName}): same-entry normalized alias duplicate rejected`);
+    }
+
+    {
+      const secretMarker = 'SECRET_LAYER_TERM_' + scopeName + '_c4e1';
+      const entry = makeLayerEntry(scopeName, {
+        canonical_display: secretMarker, canonical_key: IdHashUtils.normalize(secretMarker),
+        aliases: [{ display: secretMarker, key: IdHashUtils.normalize(secretMarker) }]
+      });
+      const layerView = makeLayerView(scopeName, [entry]);
+      try {
+        await Core.mergeDictionaryLayers([layerView]);
+        failures++; console.error(`FAIL: Step10 internal layer alias (${scopeName}) secret-bearing reject expected`);
+      } catch (err) {
+        assert(err.code === 'DICTIONARY_LAYER_ALIAS_CANONICAL_DUPLICATE', `Step10 internal layer alias (${scopeName}): secret-bearing self-duplicate rejected with correct code`);
+        assert(!String(err.path).includes(secretMarker) && !JSON.stringify(err).includes(secretMarker), `Step10 internal layer alias (${scopeName}): raw term never leaks into error`);
+      }
+    }
+
+    {
+      const displayA = 'Dedup Layer Canonical ' + scopeName;
+      const displayB = 'Dedup  Layer Canonical ' + scopeName; // double space, same normalized key
+      const entryA = makeLayerEntry(scopeName, { canonical_display: displayA, aliases: [] });
+      const entryB = makeLayerEntry(scopeName, { canonical_display: displayB, aliases: [] });
+      const layerView = makeLayerView(scopeName, [entryA, entryB]);
+      const merged = await Core.mergeDictionaryLayers([layerView]);
+      assert(merged.conflicts.length === 0, `Step10 internal layer (${scopeName}): cross-entry same normalized canonical key dedups without conflict`);
+      assert(merged.effective_vocabulary.allowed_tags.length === 1 && (merged.effective_vocabulary.allowed_tags[0] === displayA || merged.effective_vocabulary.allowed_tags[0] === displayB),
+        `Step10 internal layer (${scopeName}): cross-entry same normalized canonical key merges into a single canonical group`);
+    }
+
+    {
+      const displayA = 'Conflict Layer Canonical A ' + scopeName;
+      const displayB = 'Conflict Layer Canonical B ' + scopeName;
+      const sharedAliasDisplay = 'Conflict Layer Shared Alias ' + scopeName;
+      const entryA = makeLayerEntry(scopeName, { canonical_display: displayA, aliases: [makeLayerAlias(sharedAliasDisplay)] });
+      const entryB = makeLayerEntry(scopeName, { canonical_display: displayB, aliases: [makeLayerAlias(sharedAliasDisplay)] });
+      const layerView = makeLayerView(scopeName, [entryA, entryB]);
+      const merged = await Core.mergeDictionaryLayers([layerView]);
+      assert(merged.conflicts.length === 1 && merged.conflicts[0].code === 'DICTIONARY_LOOKUP_CONFLICT',
+        `Step10 internal layer (${scopeName}): cross-entry same normalized alias key to different canonicals is a conflict`);
+    }
+  }
+
+  // ---- mergeDictionaryLayers() exact top-level field set (§14.4, Step 10 provenance boundary) ----
+
+  {
+    const view = await Core.createStandardDictionaryLayerView(makeStandardVocabulary({}));
+    const merged = await Core.mergeDictionaryLayers([view]);
+    assert(Object.keys(merged).sort().join(',') === 'conflicts,effective_vocabulary,excluded_lookup_key_tokens,source_fingerprints',
+      'Step10 provenance boundary: mergeDictionaryLayers() result has exactly the fixed top-level field set (no entry-level provenance fields)');
+  }
+
+  // ---- allowed_tags empty array contract (§5.6, Step 10) ----
+
+  {
+    const emptyVocab = { schema: 'tag-vocabulary/0.1', vocabulary_id: 'synthetic-empty-vocab', vocabulary_version: '1', allowed_tags: [], aliases: {} };
+    const view = await Core.createStandardDictionaryLayerView(emptyVocab);
+    assert(Array.isArray(view.entries) && view.entries.length === 0, 'Step10 allowed_tags empty array: STANDARD vocabulary with empty allowed_tags/aliases is accepted (0 entries)');
+  }
+
+  {
+    const emptyAllowedNonEmptyAlias = { schema: 'tag-vocabulary/0.1', vocabulary_id: 'synthetic-empty-vocab-2', vocabulary_version: '1', allowed_tags: [], aliases: { 'Orphan Alias': 'Nonexistent Tag' } };
+    await assertThrowsCode(() => Core.createStandardDictionaryLayerView(emptyAllowedNonEmptyAlias), 'DICTIONARY_STANDARD_ALIAS_TARGET_UNRESOLVED',
+      'Step10 allowed_tags empty array: non-empty aliases with unresolved target still fail-closed when allowed_tags is empty');
+  }
+
+  // ---- Contract consistency: design document read-back ----
+
+  {
+    const designText = fs.readFileSync(DESIGN_DOC_PATH, 'utf8');
+    const titleLine = designText.split('\n')[0];
+    assert(!titleLine.includes('提案'), 'Step10 contract consistency: design doc title does not contain 提案');
+    assert(!designText.includes('未実装・未固定'), 'Step10 contract consistency: design doc has no 未実装・未固定 status text');
+    assert(!designText.includes('このStepでは実装しない'), 'Step10 contract consistency: design doc has no このStepでは実装しない text');
+    assert(designText.includes('tools/knowledge_builder/core/private_dictionary_learning_core.js'),
+      'Step10 contract consistency: design doc references core file name as part of the implemented file set');
+    assert(designText.includes('tools/knowledge_builder/verification/private_dictionary_learning_core_verification.js'),
+      'Step10 contract consistency: design doc references verification file name as part of the implemented file set');
+    assert(designText.includes('"effective_vocabulary"') && designText.includes('"conflicts"') &&
+      designText.includes('"excluded_lookup_key_tokens"') && designText.includes('"source_fingerprints"'),
+      'Step10 contract consistency: design doc documents the exact merge result schema field names');
+    assert(designText.includes('provenance境界'), 'Step10 contract consistency: design doc explicitly documents the provenance boundary');
+    assert(designText.includes('allowed_tags: []'), 'Step10 contract consistency: design doc explicitly documents the empty allowed_tags contract');
+  }
+
+  // ======================================================================
+  // Step 10R1 "Exact Sanitized Error Recognition Hardening" - additional
+  // permanent checks.
+  // ======================================================================
+
+  // ---- Impersonation-object rejection: parsePrivateDictionaryJson()'s
+  // catch block must never re-throw a look-alike object that merely has
+  // string `code`/`path` properties. Injection technique: load the core
+  // source into a fresh vm sandbox per case and monkey-patch
+  // String.prototype.startsWith() (used only by parseValue()'s true/false/
+  // null literal branch, never by the outer byte-limit/BOM checks that run
+  // before the try/catch) to throw a crafted impersonation object built
+  // entirely with sandbox-native Object/Array/Proxy/Symbol/Error
+  // constructors - not objects built in the outer Node realm, so this is a
+  // faithful in-realm injection, not a cross-realm artifact. ----
+
+  function runParserImpersonationCase(caseLabel, injectionBody, secretMarker) {
+    const sandbox = {};
+    sandbox.globalThis = sandbox;
+    sandbox.TextEncoder = TextEncoder;
+    sandbox.KnowledgeIdHashUtils = IdHashUtils;
+    vm.createContext(sandbox);
+    vm.runInContext(fs.readFileSync(CORE_PATH, 'utf8'), sandbox, { filename: 'private_dictionary_learning_core.js (Step10R1 impersonation: ' + caseLabel + ')' });
+    vm.runInContext('String.prototype.startsWith = function() { ' + injectionBody + ' };', sandbox, { filename: 'inject (' + caseLabel + ')' });
+    try {
+      vm.runInContext("PrivateDictionaryLearningCore.parsePrivateDictionaryJson('true')", sandbox, { filename: 'call (' + caseLabel + ')' });
+      failures++; console.error(`FAIL: Step10R1 impersonation case (${caseLabel}) expected parse to throw`);
+      return;
+    } catch (err) {
+      assert(err.code === 'DICTIONARY_JSON_SYNTAX_INVALID' && err.path === '$',
+        `Step10R1 impersonation (${caseLabel}): sanitized to DICTIONARY_JSON_SYNTAX_INVALID/$ (impersonation object never re-thrown as-is)`);
+      assert(Object.isFrozen(err), `Step10R1 impersonation (${caseLabel}): resulting error is frozen`);
+      assert(Object.keys(err).sort().join(',') === 'code,path', `Step10R1 impersonation (${caseLabel}): Object.keys is exactly code,path`);
+      assert(Reflect.ownKeys(err).slice().sort().join(',') === 'code,path', `Step10R1 impersonation (${caseLabel}): Reflect.ownKeys is exactly code,path`);
+      assert(err.message === undefined && err.stack === undefined && err.name === undefined,
+        `Step10R1 impersonation (${caseLabel}): no message/stack/name field`);
+      if (secretMarker) {
+        const serialized = JSON.stringify(err);
+        assert(!serialized.includes(secretMarker), `Step10R1 impersonation (${caseLabel}): synthetic marker never leaks into the sanitized error`);
+      }
+    }
+  }
+
+  {
+    const IMPERSONATION_CASES = [
+      ['unfrozen {code,path}', "throw { code: 'FAKE_CODE_UNFROZEN_1', path: '$' };", 'FAKE_CODE_UNFROZEN_1'],
+      ['frozen but custom prototype', "throw Object.freeze(Object.assign(Object.create({ x: 1 }), { code: 'FAKE_CODE_PROTO_2', path: '$' }));", 'FAKE_CODE_PROTO_2'],
+      ['non-enumerable code/path', `
+        var o3 = {};
+        Object.defineProperty(o3, 'code', { value: 'FAKE_CODE_NONENUM_3', enumerable: false, writable: false, configurable: false });
+        Object.defineProperty(o3, 'path', { value: '$', enumerable: false, writable: false, configurable: false });
+        Object.freeze(o3);
+        throw o3;
+      `, 'FAKE_CODE_NONENUM_3'],
+      ['writable code', `
+        var o4 = {};
+        Object.defineProperty(o4, 'code', { value: 'FAKE_CODE_WRITABLE_4', enumerable: true, writable: true, configurable: false });
+        Object.defineProperty(o4, 'path', { value: '$', enumerable: true, writable: false, configurable: false });
+        throw o4;
+      `, 'FAKE_CODE_WRITABLE_4'],
+      ['writable path', `
+        var o5 = {};
+        Object.defineProperty(o5, 'code', { value: 'FAKE_CODE_5', enumerable: true, writable: false, configurable: false });
+        Object.defineProperty(o5, 'path', { value: '$', enumerable: true, writable: true, configurable: false });
+        throw o5;
+      `, 'FAKE_CODE_5'],
+      ['configurable code', `
+        var o6 = {};
+        Object.defineProperty(o6, 'code', { value: 'FAKE_CODE_CONFIG_6', enumerable: true, writable: false, configurable: true });
+        Object.defineProperty(o6, 'path', { value: '$', enumerable: true, writable: false, configurable: false });
+        throw o6;
+      `, 'FAKE_CODE_CONFIG_6'],
+      ['configurable path', `
+        var o7 = {};
+        Object.defineProperty(o7, 'code', { value: 'FAKE_CODE_7', enumerable: true, writable: false, configurable: false });
+        Object.defineProperty(o7, 'path', { value: '$', enumerable: true, writable: false, configurable: true });
+        throw o7;
+      `, 'FAKE_CODE_7'],
+      ['code accessor', `
+        var o8 = {};
+        Object.defineProperty(o8, 'code', { get: function() { return 'FAKE_CODE_ACCESSOR_8'; }, enumerable: true, configurable: false });
+        Object.defineProperty(o8, 'path', { value: '$', enumerable: true, writable: false, configurable: false });
+        Object.freeze(o8);
+        throw o8;
+      `, 'FAKE_CODE_ACCESSOR_8'],
+      ['path accessor', `
+        var o9 = {};
+        Object.defineProperty(o9, 'code', { value: 'FAKE_CODE_9', enumerable: true, writable: false, configurable: false });
+        Object.defineProperty(o9, 'path', { get: function() { return '$'; }, enumerable: true, configurable: false });
+        Object.freeze(o9);
+        throw o9;
+      `, 'FAKE_CODE_9'],
+      ['extra string property', "throw Object.freeze({ code: 'FAKE_CODE_EXTRA_STR_10', path: '$', extra: 'x' });", 'FAKE_CODE_EXTRA_STR_10'],
+      ['extra symbol property', `
+        var o11 = { code: 'FAKE_CODE_EXTRA_SYM_11', path: '$' };
+        o11[Symbol('extra')] = 'x';
+        Object.freeze(o11);
+        throw o11;
+      `, 'FAKE_CODE_EXTRA_SYM_11'],
+      ['null prototype object', "throw Object.freeze(Object.assign(Object.create(null), { code: 'FAKE_CODE_NULLPROTO_12', path: '$' }));", 'FAKE_CODE_NULLPROTO_12'],
+      ['Array with code/path', `
+        var o13 = [];
+        o13.code = 'FAKE_CODE_ARRAY_13';
+        o13.path = '$';
+        Object.freeze(o13);
+        throw o13;
+      `, 'FAKE_CODE_ARRAY_13'],
+      ['hostile Proxy', `
+        var target14 = Object.freeze({ code: 'FAKE_CODE_PROXY_14', path: '$' });
+        var o14 = new Proxy(target14, { getPrototypeOf: function() { throw new Error('hostile trap 14'); } });
+        throw o14;
+      `, 'FAKE_CODE_PROXY_14'],
+      ['native Error with code/path', `
+        var o15 = new Error('SECRET_NATIVE_ERROR_MESSAGE_15');
+        o15.code = 'FAKE_CODE_NATIVEERR_15';
+        o15.path = '$';
+        Object.freeze(o15);
+        throw o15;
+      `, 'SECRET_NATIVE_ERROR_MESSAGE_15']
+    ];
+    for (const [label, body, marker] of IMPERSONATION_CASES) {
+      runParserImpersonationCase(label, body, marker);
+    }
+  }
+
+  // ---- Legitimate re-throw: parseJsonNoDuplicates()'s OWN sanitized errors
+  // must pass through parsePrivateDictionaryJson()'s catch unchanged (code
+  // and path preserved), not collapsed to the generic syntax-invalid code. ----
+
+  {
+    const cases = [
+      ['{"a":1,"a":2}', 'DICTIONARY_JSON_DUPLICATE_KEY'],
+      ['[' + '['.repeat(20) + '1' + ']'.repeat(20) + ']', 'DICTIONARY_MAX_NESTING_DEPTH_EXCEEDED'],
+      ['{not valid json', 'DICTIONARY_JSON_SYNTAX_INVALID']
+    ];
+    for (const [text, expectedCode] of cases) {
+      try {
+        Core.parsePrivateDictionaryJson(text);
+        failures++; console.error(`FAIL: Step10R1 legitimate re-throw setup (${expectedCode}) expected to throw`);
+      } catch (err) {
+        assert(err.code === expectedCode && err.path === '$',
+          `Step10R1 legitimate re-throw: parseJsonNoDuplicates()'s own ${expectedCode} passes through parsePrivateDictionaryJson() unchanged`);
+      }
+    }
+  }
+
+  // ======================================================================
+  // Step 10R2 "Parser Error Value Allowlist Hardening" - additional
+  // permanent checks.
+  // ======================================================================
+
+  // ---- Exact-shape impersonation: objects that satisfy isSanitizedDictionary
+  // Error()'s full STRUCTURAL contract (frozen, Object.prototype, own keys
+  // exactly ['code','path'] with exact descriptors) byte-for-byte, but whose
+  // `code` and/or `path` VALUES are not the parser's own recognized values.
+  // These must still be converted to the generic sanitized error, never
+  // re-thrown as-is - reuses the same runParserImpersonationCase() injection
+  // harness (String.prototype.startsWith patched inside a fresh vm sandbox)
+  // as the Step 10R1 structural-impersonation cases above. ----
+
+  {
+    const EXACT_SHAPE_VALUE_CASES = [
+      ['exact shape, secret code', "throw Object.freeze({ code: 'PRIVATE_SECRET_EXACT_CODE', path: '$' });", 'PRIVATE_SECRET_EXACT_CODE'],
+      ['exact shape, secret path', "throw Object.freeze({ code: 'DICTIONARY_JSON_SYNTAX_INVALID', path: 'PRIVATE_SECRET_EXACT_PATH' });", 'PRIVATE_SECRET_EXACT_PATH'],
+      ['exact shape, secret code and path', "throw Object.freeze({ code: 'PRIVATE_SECRET_EXACT_CODE', path: 'PRIVATE_SECRET_EXACT_PATH' });", 'PRIVATE_SECRET_EXACT_CODE']
+    ];
+    for (const [label, body, marker] of EXACT_SHAPE_VALUE_CASES) {
+      runParserImpersonationCase(label, body, marker);
+    }
+  }
+
+  // ---- isRecognizedParserErrorCode() / path allowlist: direct behavioral
+  // confirmation via the same injection harness, checked one more time with
+  // both a disallowed code (structurally perfect, well-known-sounding but
+  // NOT one of the 3 recognized codes) and a disallowed path, to make the
+  // allowlist boundary explicit and not merely incidental to the "secret"
+  // framing above. ----
+
+  {
+    const ALLOWLIST_BOUNDARY_CASES = [
+      ['well-formed but unrecognized code', "throw Object.freeze({ code: 'DICTIONARY_JSON_BOM_INVALID', path: '$' });", null],
+      ['recognized code, non-root path', "throw Object.freeze({ code: 'DICTIONARY_JSON_DUPLICATE_KEY', path: '$.entries[0]' });", null]
+    ];
+    for (const [label, body, marker] of ALLOWLIST_BOUNDARY_CASES) {
+      runParserImpersonationCase(label, body, marker);
     }
   }
 

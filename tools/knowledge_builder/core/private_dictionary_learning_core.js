@@ -21,35 +21,98 @@
   // ---- Error contract (§11): {code, path} only, never raw content ----
   //
   // Declared before dependency resolution (below) so resolveIdHashUtils() can
-  // itself throw a sanitized error - a module-private class, not hoisted like
-  // a function declaration, so it MUST be defined before first use to avoid a
-  // temporal-dead-zone ReferenceError at the top-level resolveIdHashUtils()
-  // call site.
+  // itself throw a sanitized error.
+  //
+  // A thrown "error" here is a plain, frozen, ordinary object - NOT an Error
+  // instance. It has exactly two own-enumerable fields (`code`, `path`); it
+  // has no `message`, `stack`, `name`, symbol brand, or non-enumerable marker
+  // of any kind, and no exotic prototype. Object.keys()/Reflect.ownKeys()/
+  // JSON.stringify() all surface exactly {code, path} and nothing else -
+  // there is no separate "external shape" vs. "internal representation" to
+  // keep in sync, because the thrown value IS the external shape.
 
   function dictError(code, path) {
     return Object.freeze({ code: String(code), path: String(path) });
   }
 
-  // Module-private Error subclass (not exported): the external contract for a
-  // thrown error is exactly two own-enumerable fields, `code` and `path` -
-  // Object.keys(err) and JSON.stringify(err) must both surface only those two.
-  // `message` remains present (inherited via `super()`, non-enumerable per the
-  // native Error contract) so `String(err)`/`.message` still show the code for
-  // local debugging, but it never appears in Object.keys()/JSON.stringify().
-  // Callers distinguish an already-sanitized, deliberately-thrown error from an
-  // unexpected native exception (RangeError, a hostile Proxy trap throwing,
-  // etc.) via `instanceof DictionaryError` - a module-private check with no
-  // externally-visible marker field.
-  class DictionaryError extends Error {
-    constructor(code, path) {
-      super(String(code));
-      this.code = String(code);
-      this.path = String(path);
-    }
+  function makeDictionaryError(code, path) {
+    return dictError(code, path);
   }
 
-  function makeDictionaryError(code, path) {
-    return new DictionaryError(code, path);
+  // Callers (parsePrivateDictionaryJson()'s catch block) distinguish an
+  // already-sanitized, deliberately-thrown error from an unexpected native
+  // exception (RangeError, a hostile Proxy trap throwing, a look-alike
+  // object crafted to impersonate a sanitized error, etc.) by checking the
+  // caught value's SHAPE against an EXACT contract - not merely "has code/
+  // path string properties" (Step 10R1 hardening; the looser check used in
+  // Step 10 could be spoofed by an unfrozen object, a custom-prototype
+  // object, non-enumerable/writable/configurable code|path, an accessor
+  // standing in for code|path, or an object carrying extra string/symbol
+  // properties alongside code|path). No module-level state, WeakSet, symbol
+  // brand, or hidden marker is used - the check is purely structural,
+  // computed fresh from the value's own shape every time.
+
+  function exactFrozenStringDescriptor(desc) {
+    return !!desc &&
+      Object.prototype.hasOwnProperty.call(desc, 'value') &&
+      typeof desc.value === 'string' &&
+      desc.enumerable === true &&
+      desc.writable === false &&
+      desc.configurable === false;
+  }
+
+  // Step 10R2 hardening: the exact structural contract alone (frozen,
+  // Object.prototype, own keys exactly ['code','path'], exact descriptors)
+  // is not sufficient - it says nothing about the VALUES. An object that
+  // satisfies every structural check byte-for-byte but carries an arbitrary
+  // `code`/`path` string (e.g. a caller-supplied secret, or a value smuggled
+  // in via some other code path) must still not be re-thrown as-is by
+  // parsePrivateDictionaryJson(). Only the parser's own three legitimate
+  // error codes, always paired with path "$", are recognized. Direct
+  // comparison against a fixed literal set - no module-level mutable Set,
+  // WeakSet, symbol brand, or hidden marker.
+  function isRecognizedParserErrorCode(code) {
+    return code === 'DICTIONARY_JSON_SYNTAX_INVALID' ||
+      code === 'DICTIONARY_JSON_DUPLICATE_KEY' ||
+      code === 'DICTIONARY_MAX_NESTING_DEPTH_EXCEEDED';
+  }
+
+  // Wrapped in try/catch so that a hostile Proxy throwing during shape
+  // inspection (its own `getPrototypeOf`/`ownKeys`/`getOwnPropertyDescriptor`
+  // trap, `Object.isFrozen()` internally calling `[[IsExtensible]]`, etc.)
+  // can never leak a native error out of this check - it is simply treated
+  // as "not a sanitized error" (returns false), same as any other
+  // non-matching shape.
+  function isSanitizedDictionaryError(value) {
+    try {
+      if (value === null || typeof value !== 'object') return false;
+      if (Object.getPrototypeOf(value) !== Object.prototype) return false;
+      if (!Object.isFrozen(value)) return false;
+
+      const keys = Reflect.ownKeys(value);
+      if (
+        keys.length !== 2 ||
+        keys[0] !== 'code' ||
+        keys[1] !== 'path'
+      ) {
+        return false;
+      }
+
+      const codeDesc = Object.getOwnPropertyDescriptor(value, 'code');
+      const pathDesc = Object.getOwnPropertyDescriptor(value, 'path');
+      if (!exactFrozenStringDescriptor(codeDesc) || !exactFrozenStringDescriptor(pathDesc)) {
+        return false;
+      }
+
+      // Step 10R2: exact-shape alone is not enough - the values themselves
+      // must be within the parser's own recognized allowlist.
+      if (!isRecognizedParserErrorCode(codeDesc.value)) return false;
+      if (pathDesc.value !== '$') return false;
+
+      return true;
+    } catch (err) {
+      return false;
+    }
   }
 
   // ---- §7.2 dependency resolution: normalize()/hashParts()/canonicalJson()
@@ -155,6 +218,34 @@
 
   function isPlainObjectRoot(value) {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  // ---- hashParts() runtime boundary ----
+  //
+  // All internal call sites that need `hashParts()` (STANDARD vocabulary
+  // fingerprint §5.6.1, STANDARD entry_ref_id §5.6.2, conflict
+  // normalized_key_token §9.2) go through this wrapper rather than awaiting
+  // the dependency's `hashParts()` directly. `hashParts()` is an external
+  // dependency (id_hash_utils.js -> quantity_sidecar_binding_core.js) whose
+  // runtime failure modes (throwing synchronously, rejecting, or - in a
+  // hostile/misconfigured environment - resolving to something that is not a
+  // valid hash) must never propagate a native error, rejected value, or any
+  // fragment of it (message/stack/filesystem path/synthetic marker) out of
+  // this module. Every failure mode collapses to the same sanitized shape.
+  // This does NOT apply to hashPrivateDictionaryCanonical()'s direct SHA-256
+  // path (sha256DirectHex(), below) - that contract deliberately does not use
+  // hashParts() at all (§13.1) and is unaffected by this wrapper.
+  async function safeHashParts(namespace, parts) {
+    let result;
+    try {
+      result = await hashParts(namespace, parts);
+    } catch (err) {
+      throw makeDictionaryError('DICTIONARY_HASH_PARTS_UNAVAILABLE', '$');
+    }
+    if (typeof result !== 'string' || !HEX64_RE.test(result)) {
+      throw makeDictionaryError('DICTIONARY_HASH_PARTS_UNAVAILABLE', '$');
+    }
+    return result;
   }
 
   // ---- §13.1 direct SHA-256 over canonical UTF-8 bytes (hashParts() NOT used) ----
@@ -456,7 +547,7 @@
     try {
       return parseJsonNoDuplicates(text);
     } catch (err) {
-      if (err instanceof DictionaryError) throw err;
+      if (isSanitizedDictionaryError(err)) throw err;
       // Any unexpected native exception (RangeError, etc.) is never exposed as-is -
       // it is converted to the same sanitized shape parse-syntax errors use.
       throw makeDictionaryError('DICTIONARY_JSON_SYNTAX_INVALID', '$');
@@ -748,12 +839,17 @@
       throw makeDictionaryError('DICTIONARY_STANDARD_ALIASES_LIMIT_EXCEEDED', '$.aliases');
     }
     const allowedTagSet = new Set(tagVocabulary.allowed_tags);
+    // target -> { list: [{display,key}], keys: Set<normalizedAliasKey> } - the
+    // `keys` Set gives O(1) same-target duplicate detection instead of an
+    // O(n) scan per alias, so a large single-target alias group (bounded by
+    // LIMITS.MAX_TOTAL_ALIASES) cannot become quadratic.
     const aliasesByCanonical = new Map();
     for (const aliasKeyStr of aliasDisplayKeys) {
       if (aliasKeyStr.length === 0 || aliasKeyStr.length > LIMITS.MAX_TERM_LENGTH) {
         throw makeDictionaryError('DICTIONARY_STANDARD_ALIAS_KEY_INVALID', '$.aliases');
       }
-      if (normalize(aliasKeyStr).length === 0) {
+      const aliasNormalizedKey = normalize(aliasKeyStr);
+      if (aliasNormalizedKey.length === 0) {
         throw makeDictionaryError('DICTIONARY_STANDARD_ALIAS_KEY_INVALID', '$.aliases');
       }
       const target = tagVocabulary.aliases[aliasKeyStr];
@@ -763,8 +859,24 @@
       if (!allowedTagSet.has(target)) {
         throw makeDictionaryError('DICTIONARY_STANDARD_ALIAS_TARGET_UNRESOLVED', '$.aliases');
       }
-      if (!aliasesByCanonical.has(target)) aliasesByCanonical.set(target, []);
-      aliasesByCanonical.get(target).push({ display: aliasKeyStr, key: normalize(aliasKeyStr) });
+      // Per-canonical-entry normalized alias set (§5.6): an alias whose
+      // normalized key collides with its OWN target canonical's normalized
+      // key, or with another alias already recorded under the SAME target,
+      // is rejected here. A normalized alias key shared across DIFFERENT
+      // canonical targets is intentionally NOT a validation error - it is
+      // left for the existing lookup-conflict detection (§8) to flag when
+      // this layer view is later merged/detected against other layers.
+      const targetCanonicalKey = canonicalKeyByDisplay.get(target);
+      if (aliasNormalizedKey === targetCanonicalKey) {
+        throw makeDictionaryError('DICTIONARY_STANDARD_ALIAS_CANONICAL_DUPLICATE', '$.aliases');
+      }
+      if (!aliasesByCanonical.has(target)) aliasesByCanonical.set(target, { list: [], keys: new Set() });
+      const group = aliasesByCanonical.get(target);
+      if (group.keys.has(aliasNormalizedKey)) {
+        throw makeDictionaryError('DICTIONARY_STANDARD_ALIAS_DUPLICATE', '$.aliases');
+      }
+      group.keys.add(aliasNormalizedKey);
+      group.list.push({ display: aliasKeyStr, key: aliasNormalizedKey });
     }
 
     // §5.6.1: fingerprintは既存KnowledgeStoreと同一算法(hashParts("tag-vocabulary-v1", ...))
@@ -777,7 +889,7 @@
       allowed_tags: tagVocabulary.allowed_tags.slice(),
       aliases: Object.assign({}, tagVocabulary.aliases)
     };
-    const computedFingerprint = await hashParts('tag-vocabulary-v1', [canonicalJson(canonicalPayload)]);
+    const computedFingerprint = await safeHashParts('tag-vocabulary-v1', [canonicalJson(canonicalPayload)]);
 
     let dictionaryFingerprint = computedFingerprint;
     if (Object.prototype.hasOwnProperty.call(tagVocabulary, 'vocabulary_sha256') && tagVocabulary.vocabulary_sha256 !== undefined) {
@@ -796,9 +908,10 @@
     const entries = [];
     for (const tag of tagVocabulary.allowed_tags) {
       const canonicalKey = canonicalKeyByDisplay.get(tag);
-      const entryRefIdHash = await hashParts('private-dictionary-standard-entry-v1', [dictionaryFingerprint, canonicalKey]);
+      const entryRefIdHash = await safeHashParts('private-dictionary-standard-entry-v1', [dictionaryFingerprint, canonicalKey]);
       const entryRefId = 'std-' + entryRefIdHash.slice(0, 32);
-      const aliasList = (aliasesByCanonical.get(tag) || []).map(a => Object.freeze(Object.assign({}, a)));
+      const aliasGroup = aliasesByCanonical.get(tag);
+      const aliasList = (aliasGroup ? aliasGroup.list : []).map(a => Object.freeze(Object.assign({}, a)));
       entries.push(Object.freeze({
         entry_ref_id: entryRefId,
         canonical_display: tag,
@@ -906,6 +1019,15 @@
             errors.push(dictError('DICTIONARY_LAYER_ALIASES_LIMIT_EXCEEDED', `${ep}.aliases`));
           }
           totalAliases += entry.aliases.length;
+          // Same-entry normalized alias set (§8.3/§8.4 semantics enforced at
+          // the layer-view boundary): an alias.key equal to the entry's own
+          // canonical_key, or a normalized alias.key repeated within this
+          // SAME entry, is rejected here. Duplicates/collisions ACROSS
+          // different entries (same layer or different layers) are
+          // intentionally left to the existing dedup/conflict semantics
+          // (§8) in detectDictionaryLookupConflicts()/mergeDictionaryLayers()
+          // - this per-entry check never reaches across entry boundaries.
+          const seenAliasKeysForEntry = new Set();
           entry.aliases.forEach((alias, k) => {
             const ap = `${ep}.aliases[${k}]`;
             if (!isPlainObjectRoot(alias)) { errors.push(dictError('DICTIONARY_LAYER_ALIAS_INVALID', ap)); return; }
@@ -914,11 +1036,25 @@
             }
             if (typeof alias.display !== 'string' || alias.display.length === 0 || alias.display.length > LIMITS.MAX_TERM_LENGTH) {
               errors.push(dictError('DICTIONARY_LAYER_ALIAS_DISPLAY_INVALID', `${ap}.display`));
-            } else if (typeof alias.key !== 'string' || alias.key.length === 0) {
-              errors.push(dictError('DICTIONARY_LAYER_ALIAS_KEY_INVALID', `${ap}.key`));
-            } else if (alias.key !== normalize(alias.display)) {
-              errors.push(dictError('DICTIONARY_LAYER_ALIAS_KEY_MISMATCH', `${ap}.key`));
+              return;
             }
+            if (typeof alias.key !== 'string' || alias.key.length === 0) {
+              errors.push(dictError('DICTIONARY_LAYER_ALIAS_KEY_INVALID', `${ap}.key`));
+              return;
+            }
+            if (alias.key !== normalize(alias.display)) {
+              errors.push(dictError('DICTIONARY_LAYER_ALIAS_KEY_MISMATCH', `${ap}.key`));
+              return;
+            }
+            if (alias.key === entry.canonical_key) {
+              errors.push(dictError('DICTIONARY_LAYER_ALIAS_CANONICAL_DUPLICATE', ap));
+              return;
+            }
+            if (seenAliasKeysForEntry.has(alias.key)) {
+              errors.push(dictError('DICTIONARY_LAYER_ALIAS_DUPLICATE', ap));
+              return;
+            }
+            seenAliasKeysForEntry.add(alias.key);
           });
         }
 
@@ -999,8 +1135,8 @@
     const conflicts = [];
     for (const key of sortedConflictKeys) {
       const byCanonical = keyResolutions.get(key);
-      // §9.2: normalized_key_token = await hashParts("private-dictionary-lookup-key-v1", [key])
-      const token = await hashParts('private-dictionary-lookup-key-v1', [key]);
+      // §9.2: normalized_key_token = await safeHashParts("private-dictionary-lookup-key-v1", [key])
+      const token = await safeHashParts('private-dictionary-lookup-key-v1', [key]);
       const allRefs = [];
       for (const refs of byCanonical.values()) allRefs.push(...refs);
       const uniqueRefs = dedupeRefs(allRefs).sort((a, b) =>

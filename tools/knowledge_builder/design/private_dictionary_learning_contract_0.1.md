@@ -1,6 +1,9 @@
-# Private Dictionary Learning Contract 0.1（P2-A1 提案）
+# Private Dictionary Learning Contract 0.1（P2-A1）
 
-**状態**: 提案 / レビュー待ち（未実装・未固定）
+**状態**: P2-A1実装済み／PR #12独立監査対応中／integration未承認
+（core: `tools/knowledge_builder/core/private_dictionary_learning_core.js`、
+verification: `tools/knowledge_builder/verification/private_dictionary_learning_core_verification.js`
+がいずれも実装済み。tag／Release／製品承認／integrationはすべてHOLD。詳細は§20/§23参照）
 **方針**: P2-A1は「非公開辞書のデータ契約とpure関数境界」だけを固定する。抽出・matching統合・
 自動学習policyは一切含まない。
 **作成日**: 2026-08-04
@@ -51,6 +54,24 @@ fingerprintを使用、供給された`vocabulary_sha256`が存在する場合�
 「canonical JSON string」の1通りへ一意化。§10のvalidation条件番号の欠番
 （28→30）を連番（28→29）へ整理。Verification Planへ#60-#65を追加し、
 計65項目とした。
+**訂正5 (Step 6/6R/6R2/6R3/7/8/10)**: `tools/knowledge_builder/core/private_dictionary_learning_core.js`
+（本設計の12 public API全て）と`tools/knowledge_builder/verification/private_dictionary_learning_core_verification.js`
+（dedicated Node-only verification、§21の65項目を含む恒久検査群）を実装し、
+`claude/closed-domain-dictionary-learning-p2a1`ブランチへcommit・pushした
+（commit `712fd59b34a179ec8046954a36a13134b799d8e1`）。PR #12
+（`P2-A1: add private dictionary contract and local security boundary`、
+base `claude/child-handover-qcycsj`）を作成し、独立監査(Codex)によるレビューを
+受けている。Step 10は独立監査の指摘事項を修正するremediation stepであり、次を
+本節以降へ反映する: (1) thrown errorの外部契約をError instanceではなく
+plain frozen `{code, path}` objectへ限定（§11）、(2) `hashParts()`の
+runtime障害（throw/reject/非string返却/不正形式のhash文字列）を内部wrapper
+（`safeHashParts()`）でsanitizeし`DICTIONARY_HASH_PARTS_UNAVAILABLE`/`$`へ
+統一、(3) STANDARD alias（§5.6）とinternal layer alias（§5.5/§8）双方について
+alias-canonical重複・same-scope alias重複のfail-closed検査を追加、(4) §8.6/§14.4の
+provenance境界を明確化（merge result自体はentry-level provenanceを運ばない。
+§8.6/§14.4参照）、(5) STANDARDの`allowed_tags: []`を明示的に有効な入力として
+許可（§5.6参照）。**tag／Release／製品承認／integration（PR #12のmerge）は
+いずれもHOLDのままである**（独立監査の完了・製品承認を待つ）。
 
 ---
 
@@ -407,6 +428,33 @@ fieldはprivate dictionaryのentry由来か、STANDARDのcanonical tag由来か�
 別物であり、normalized keyを表示値と混在させたまま外部へ出す形式ではない。§13の
 canonical export本体には現れない、あくまで処理中の中間表現）。
 
+#### 5.5.1 Internal layer view validator（`validateDictionaryLayerViews()`、内部・非export）
+
+`detectDictionaryLookupConflicts(layerViews)`と`mergeDictionaryLayers(layerViews)`は
+いずれも、処理開始前に入力`layerViews`（§5.5形式の配列）自身をfail-closedで検査する
+（不正な形のlayer viewが、conflict record／`normalized_key_token`／
+`effective_vocabulary`／`source_fingerprints`のいずれの構築にも一切到達しない
+ことを保証する。public APIとしては別途増やさず、両関数の内部validationとして
+実装してよい）。
+
+このvalidatorが検査するentry単位のalias条件（Step 10監査remediation、STANDARD/
+private dictionary由来を問わず共通）:
+
+- **`alias.key`が、同一entryの`canonical_key`と一致する**（自己参照的なalias）。
+  `DICTIONARY_LAYER_ALIAS_CANONICAL_DUPLICATE`で拒否する。
+- **同一entry内で、normalized `alias.key`が重複する**。
+  `DICTIONARY_LAYER_ALIAS_DUPLICATE`で拒否する。
+
+**異なるentry間（同一layer内の別entry、または別layerのentry）でのnormalized key
+重複は、このvalidatorのfail-closed対象ではない**——それは§8の既存dedup／conflict
+意味論（同じnormalized keyが同じcanonical keyへ解決されれば決定的dedup、異なる
+canonical keyへ解決されれば`DICTIONARY_LOOKUP_CONFLICT`）へ委ねる。このvalidatorが
+検査するのは、あくまで**単一entry内の自己矛盾**（自己参照alias、entry内alias
+重複）に限る。
+
+エラーの`path`には、display値・normalized key・`entry_ref_id`などの動的な値を
+一切含めない（§11の規則どおり、配列indexと固定allowlisted親pathのみを使う）。
+
 ### 5.6 `createStandardDictionaryLayerView(tagVocabulary)` — STANDARD変換契約
 
 既存`tag_vocabulary`を§5.5の内部layer viewへ変換する。**この関数は`async`とする**
@@ -464,6 +512,15 @@ fail-closedで拒否する条件（`createStandardDictionaryLayerView()`内部�
 - alias targetが非空stringでない
 - alias targetが`allowed_tags`のいずれのcanonical displayへも解決できない
   （aliasの対応先が存在しないcanonical tagを指している）
+- **normalized alias keyが、対応先canonical targetのnormalized canonical key
+  （`canonical_key`）と一致する**（自己参照的なalias。`DICTIONARY_STANDARD_ALIAS_CANONICAL_DUPLICATE`
+  で拒否する。Step 10監査remediation）
+- **同一target canonical内で、normalized alias keyが重複する**（同じcanonical
+  targetへ向く2つ以上のaliasが、`normalize()`後に同じkeyになる場合。
+  `DICTIONARY_STANDARD_ALIAS_DUPLICATE`で拒否する。Step 10監査remediation。
+  **異なるcanonical target間で同じnormalized alias keyが使われる場合はこの
+  条件の対象外**——validation errorにはせず、§8のlookup conflict検出（後続の
+  `detectDictionaryLookupConflicts()`/`mergeDictionaryLayers()`）へ委ねる）
 - `vocabulary_sha256`が**存在する場合**、64文字lowercase hex（`^[0-9a-f]{64}$`）
   でない、または§5.6.1の再計算fingerprintと不一致（`vocabulary_sha256`が
   **存在しない場合**はこの条件の対象外。§5.6.1参照）
@@ -471,6 +528,14 @@ fail-closedで拒否する条件（`createStandardDictionaryLayerView()`内部�
 - getter／setterなど非data property
 - sparse array
 - §12のinput limitを超過
+
+**`allowed_tags`が空配列である場合の契約（Step 10監査remediation、明示的に固定）**:
+`allowed_tags: []`かつ`aliases: {}`（両方とも空）は、**validな STANDARD layerとして
+受理する**（拒否しない）。空のSTANDARD vocabularyは、DOMAIN/PROJECT/SESSION layerのみで
+`effective_vocabulary`を構成したい場合の正当な入力であり、fail-closedの対象では
+ない。一方、`aliases`が**非空**で、いずれかのaliasのtargetが`allowed_tags`（空を
+含む）で解決できない場合は、既存どおりfail-closedで拒否する
+（`DICTIONARY_STANDARD_ALIAS_TARGET_UNRESOLVED`）。
 
 **unknown top-level fieldの扱い**: 上記allowlist（`schema`/`vocabulary_id`/
 `vocabulary_version`/`allowed_tags`/`aliases`/`vocabulary_sha256`）以外の
@@ -908,9 +973,31 @@ keyが、結果として**同じ**normalized canonical keyへ解決される場�
   **ordinal順**で決定する
 - `aliases`は**全layerから安全に統合**する（§8.4の重複除外規則に従い、同じ
   normalized keyのaliasは1つにまとめる）
-- **元entryとprovenance（`source_kind`・所属layerの`scope`）は保持する**
-  （統合結果のcanonical groupが、どのlayerのどのentryに由来するかを追跡できる形を
-  維持し、統合によって出自情報を握りつぶさない）
+
+**provenance境界（Step 10監査remediation。§14.4と統一する契約）**: P2-A1は
+merge result schemaを拡張しない。「元entryとprovenanceを保持する」とは、
+次を意味する。
+
+- 入力`layerViews`内の各entryの`entry_ref_id`／`source_kind`／所属layerの
+  `scope`は、統合処理によって**非破壊的に保持される**——`mergeDictionaryLayers()`
+  は入力`layerViews`を変更しない（§14.4の既存要件どおり）ため、これらの値は
+  入力側に無傷のまま残り続ける。
+- **entry単位のprovenanceを追跡する責務は呼出側にある**: entry-level
+  provenanceが必要な間、呼出側は入力`layerViews`自体を保持しておく必要がある。
+- `mergeDictionaryLayers()`の戻り値（§14.4）の`source_fingerprints`が示すのは
+  **layer単位のprovenanceのみ**（どのscopeのどの`dictionary_fingerprint`が
+  merge対象になったか）であり、entry単位の内訳は示さない。
+- `effective_vocabulary`単体は、**entry-level audit artifactではない**
+  ——単に「どのcanonical displayが有効か」「どのaliasがどのcanonical displayを
+  指すか」を示す統合結果であり、どのlayer／entryに由来するかの追跡情報は含まない。
+- **P2-A1のmerge resultは、canonical groupごとのentry参照（entry refs）を
+  返さない**。これは§9で定義したconflict recordの`entry_refs`（conflictした
+  keyのみが持つ）とは別物であり、混同しない——conflictしていない通常の統合結果
+  （`effective_vocabulary`）にはentry参照は一切現れない。
+- entry-level provenanceのexport／audit用schema（「このcanonical display/alias
+  はどのlayerのどのentryに由来するか」を機械可読に示す形式）は、**P2-A2以降の
+  別契約**として設計する。P2-A1の固定戻り値schema（§14.4）以外のfieldを
+  暗黙に要求・想定しない。
 
 ### 8.7 `source.kind`とstatusの整合（§5.8参照）
 
@@ -1141,6 +1228,92 @@ errorは次の形式に**限定**する。
 - `JSON.stringify(input)`
 - thrown valueの無加工表示（`String(err)`や`err.message`をそのまま含む等）
 
+### 外部契約: plain frozen object、Error instanceではない（Step 10監査remediation）
+
+thrownされるerrorは**`Error`（またはそのsubclass）のinstanceではない**。
+`Object.freeze()`されたplain objectであり、次の性質を持つ:
+
+- own-enumerable fieldは**`code`と`path`の2つだけ**（`Object.keys(err)`／
+  `Reflect.ownKeys(err)`はいずれも`["code", "path"]`のみを返す）。
+- `message`／`stack`／`name`フィールドを持たない（`err.message === undefined`、
+  `err.stack === undefined`）。symbol brandや非enumerableなmarker fieldも
+  一切持たない。
+- `JSON.stringify(err)`は`{"code": "...", "path": "..."}`のみを含む。
+- `String(err)`（テンプレートリテラルでの暗黙coercion含む）は、raw input・
+  filesystem path・module resolution情報のいずれも含まない
+  （`Object.prototype.toString`のデフォルト表現になる）。
+
+内部でsanitized errorを識別する必要がある場合（例:
+`parsePrivateDictionaryJson()`が、意図的にthrowした構文エラーと、想定外の
+native例外——`RangeError`、descriptor検査中に例外を投げるhostile Proxy、あるいは
+sanitized errorを偽装した任意object——を区別する場合）は、`instanceof`による
+class判定やmodule-level state（`WeakSet`、symbol brand、hidden markerを含む）を
+一切使わず、**捕捉した値のshapeを厳密なexact contractに対して検査する**。
+「shapeが似ているだけの任意object」を安全側に倒して再throwしてよい、という
+解釈は成立しない——次の条件の**すべて**を満たさない限り、sanitized errorとして
+再throwしてはならない（Step 10R1、監査remediation。既存のゆるい判定
+——own keysが`code`/`path`の2つ、両方とも文字列値のdata property、という条件
+だけ——では、unfrozen object・custom prototype object・non-enumerable
+`code`/`path`・writableな`code`/`path`・configurableな`code`/`path`・
+accessor property・extra symbol propertyのいずれによっても偽装できてしまう
+ため、これらすべてを個別に拒否する厳密化を行った）:
+
+1. `value !== null`
+2. `typeof value === "object"`
+3. `Object.getPrototypeOf(value) === Object.prototype`（custom prototype・
+   `null` prototype・`Array.prototype`・`Error.prototype`等はすべて拒否）
+4. `Object.isFrozen(value) === true`
+5. `Reflect.ownKeys(value)`が**厳密に`["code", "path"]`の2件**（順序も含む。
+   3件以上——extra string/symbol propertyを含む——は拒否）
+6. `code`／`path`が own **data** property（accessor propertyではない）
+7. `code`／`path`のvalueが`string`
+8. `code`／`path`のproperty descriptorが次と完全一致:
+   `enumerable === true`、`writable === false`、`configurable === false`
+9. （8と同義だが明示）accessor property（`get`/`set`のみを持つdescriptor）は
+   常に拒否する
+10. 上記のshape検査自体は必ずtry/catchで包み、検査対象がhostile Proxyで
+    `getPrototypeOf`/`ownKeys`/`getOwnPropertyDescriptor`等のtrapが例外を
+    投げた場合でも、native errorを漏らさず「sanitizedでない」として扱う
+    （=より安全側、想定外の値として通常のsanitize変換に回す）
+11. この識別のために、module-level stateやWeakSet、symbol brand、hidden
+    markerを一切追加しない（識別は毎回、値そのものの構造から純粋に計算する）
+
+`Object.freeze({code, path})`のproperty insertion順序は`code`→`path`で固定する
+（条件5の順序判定と整合させる）。
+
+上記の**exact contractに一致しないcaught valueは、いかなる場合も再throwせず**、
+固定形式のsanitized error（例: `parsePrivateDictionaryJson()`の場合は
+`{code: "DICTIONARY_JSON_SYNTAX_INVALID", path: "$"}`）へ変換する。
+
+### 再throw可能な値そのもののallowlist（Step 10R2、監査remediation）
+
+上記のexact structural contract（frozen・`Object.prototype`・own keyが
+厳密に`code`/`path`の2つ・descriptorが完全一致）だけでは**不十分**である。
+structural contractは形（shape）だけを検査し、`code`/`path`の**値**については
+何も制約しない。したがって、structural contractを一字一句満たしながら
+任意の`code`/`path`文字列（呼出側や別経路から紛れ込んだ値を含む）を運ぶ
+偽装objectが、依然として「sanitized errorとして再throwされてしまう」
+という抜け穴が残る。
+
+`parsePrivateDictionaryJson()`のcatchが再throw可能と判定してよいのは、
+**structural contractに加えて、次の値条件もすべて満たす場合だけ**とする。
+
+- `path === "$"`（固定。他の値は一切許可しない）
+- `code`が次の3種類の**いずれか**（parser自身が正式に生成しうる値だけ）:
+  - `DICTIONARY_JSON_SYNTAX_INVALID`
+  - `DICTIONARY_JSON_DUPLICATE_KEY`
+  - `DICTIONARY_MAX_NESTING_DEPTH_EXCEEDED`
+
+structural contractを完全に満たしていても、`code`が上記3種類以外、または
+`path`が`"$"`以外であれば、**その値は再throwせず**、固定形式の
+sanitized error（`{code: "DICTIONARY_JSON_SYNTAX_INVALID", path: "$"}`）へ
+変換する。dynamic/private valueが`code`/`path`を経由して外部へ通過することを
+構造的に防ぐ。
+
+このallowlist判定は、直接比較（`===`）またはfrozen arrayに対する参照だけで
+実装し、module-level mutable `Set`／`WeakSet`／symbol brand／hidden marker
+は一切用いない（既存のsanitized error識別方針§11冒頭と同じ制約に従う）。
+
 ### path規則
 
 - 配列indexと**allowlisted field名**のみ使用可能。
@@ -1165,6 +1338,39 @@ errorは次の形式に**限定**する。
 `code`の名前空間は、conflict record用（`DICTIONARY_LOOKUP_CONFLICT`）と
 validation/parse error用（`DICTIONARY_ALIAS_DUPLICATE`、
 `DICTIONARY_JSON_SYNTAX_INVALID`等）で分ける。
+
+### `hashParts()` runtime boundary（Step 10監査remediation）
+
+`hashParts()`（既存`id_hash_utils.js`経由の外部依存関数）を直接`await`する
+call siteはP2-A1のcoreに3箇所ある: STANDARD vocabulary fingerprint（§5.6.1）、
+STANDARD entry_ref_id導出（§5.6.2）、conflictの`normalized_key_token`生成
+（§9.2）。この3箇所はいずれも、`hashParts()`を直接呼ばず、**内部共通wrapper**
+（実装では`safeHashParts(namespace, parts)`）を経由する。
+
+wrapperは次のいずれの障害も、同一の形式へ変換する。
+
+```json
+{
+  "code": "DICTIONARY_HASH_PARTS_UNAVAILABLE",
+  "path": "$"
+}
+```
+
+対象とする障害:
+
+- `hashParts()`が同期的にthrowする
+- `hashParts()`が返すPromiseがreject（rejected valueがstring／`Error`／
+  synthetic secretを含むobjectのいずれであっても）
+- `hashParts()`が解決した値がstringでない
+- `hashParts()`が解決した値が、64文字lowercase hex（`^[0-9a-f]{64}$`）
+  以外の形式である（大文字hex・短い／長いhex文字列を含む）
+
+いずれの場合も、**rejected valueやnative error（`message`/`stack`を含む）、
+filesystem path、synthetic markerをそのまま再利用しない**。
+
+**private dictionaryのcanonical fingerprint（§13.1、`hashPrivateDictionaryCanonical()`が
+`hashParts()`を使わず直接SHA-256を算出する契約）は、このwrapperの対象外であり、
+変更しない**。
 
 ---
 
@@ -1298,7 +1504,9 @@ serializePrivateDictionaryCanonical(input):
 
 ## 14. Import/Export Pure Boundary
 
-P2-A1で**後続実装予定**（このStepでは実装しない）のpure API責務を次のように定義する。
+P2-A1で固定した次のpure API責務は、**すべて
+`tools/knowledge_builder/core/private_dictionary_learning_core.js`として実装済み**
+である（Step 6/6R以降。§20/§23参照）。
 
 | 関数名 | async | 責務 |
 |---|---|---|
@@ -1409,9 +1617,15 @@ async function normalizePrivateDictionary(input)
     返すだけで、`Blob`/download等のbrowser APIには一切触れない）。
 - **filesystem、Blob、download、FileReaderを扱わない**。
 
-### 14.3 このStepでは実装しない
+### 14.3 実装状態
 
-上記の**関数名とその責務を設計として固定する**に留め、実装は行わない。
+上記の関数名とその責務は設計として固定されており、かつ
+`tools/knowledge_builder/core/private_dictionary_learning_core.js`として
+**実装済み**である（Step 6/6R/6R2/6R3で作成・強化し、Step 7でcommit・pushした
+`claude/closed-domain-dictionary-learning-p2a1`ブランチ上に存在する。
+`tools/knowledge_builder/verification/private_dictionary_learning_core_verification.js`
+のdedicated Node-only verificationも同様に実装済み）。PR #12は独立監査対応中で
+あり、integration（merge）・tag・Release・製品承認はいずれもHOLDである。
 
 ### 14.4 `mergeDictionaryLayers(layerViews)`の戻り値schema
 
@@ -1459,6 +1673,11 @@ async function mergeDictionaryLayers(layerViews)
 - **戻り値も決定的な順序**を持つ（同じ入力からは常に同じ出力配列順序）。
 - **STANDARD inputを変更しない**（`createStandardDictionaryLayerView()`の出力を
   そのまま読むだけで、書き換えない）。
+- **戻り値のtop-level fieldは、上記4つ（`effective_vocabulary`／`conflicts`／
+  `excluded_lookup_key_tokens`／`source_fingerprints`）に厳密に限定する**
+  （Step 10監査remediation）。P2-A1はこのschemaを拡張しない——entry-level
+  provenance（どのlayerのどのentryに由来するか）を運ぶfieldは含まない
+  （§8.6のprovenance境界を参照）。
 
 ### 14.5 `createSanitizedLearningSummary(dictionary)`のfingerprint再計算契約
 
@@ -1702,24 +1921,31 @@ sanitized constructorだけを使用する必要がある。**
 
 ## 20. Planned File Set
 
-**new（後続実装時。このStepでは作成しない）**:
+P2-A1の実装ファイルは次の3件であり、**いずれも実装済み**（Step 6/6R以降で作成、
+Step 7で`claude/closed-domain-dictionary-learning-p2a1`ブランチへcommit・push、
+PR #12として提出。独立監査対応中、integration未承認）:
 
 - `tools/knowledge_builder/core/private_dictionary_learning_core.js`
+  （実装済み。本設計の12 public APIすべてを提供するpure core）
 - `tools/knowledge_builder/verification/private_dictionary_learning_core_verification.js`
-
-**current Step（このStepで修正する唯一のファイル）**:
-
+  （実装済み。dedicated Node-only verification。§21の65項目を含む恒久検査群）
 - `tools/knowledge_builder/design/private_dictionary_learning_contract_0.1.md`
+  （本ファイル。実装状態に合わせ随時更新する）
 
 既存runtime file（adapters／`knowledge_store.js`／`relation_candidate_engine.js`／
-HTML／`quantity_sidecar_binding_core.js`／`id_hash_utils.js`）は**P2-A1では変更しない
-予定**とする。
+HTML／`quantity_sidecar_binding_core.js`／`id_hash_utils.js`）は、P2-A1（本Stepの
+監査remediationを含む）では**変更していない**（§23参照）。
 
 ---
 
 ## 21. Verification Plan
 
-後続（P2-A1実装Step）で必要となるtest項目を、設計段階で列挙する。
+P2-A1のdedicated verification
+（`tools/knowledge_builder/verification/private_dictionary_learning_core_verification.js`）
+が実装するtest項目の最小集合を次に列挙する（**実装済み**。Step 6/6R/6R2/6R3/10で
+このリストを超える恒久検査——parse depth・structural safety・layer view
+fail-closed・merge決定性・error contract・hashParts runtime boundary等——を
+追加している。以下はその基盤となった原始リストである）。
 
 1. valid dictionary PASS
 2. malformed schema reject
@@ -1858,16 +2084,32 @@ session state管理が実装された後に検証する。
 
 ## 23. Explicitly Not Implemented
 
-### A. Step 4（design-only）で未実装
+### A. Step 4（design-only、2026-08-04時点の履歴）で未実装だったもの
 
-このStep（および先行するStep 4/4R）で作成したのは設計書1ファイルのみであり、次は
-一切含まない。
+**この節は歴史的記録である**——Step 4（および先行するStep 4R）の時点で作成した
+のは設計書1ファイルのみであり、その時点では次を一切含んでいなかった。
 
 - core code
 - verification code
 - fixtures
 - commit
 - push
+
+**現在の実装状態はA2を参照**——A節はあくまでStep 4時点のスナップショットであり、
+現在（Step 7/8/10時点）はA2の状態が正しい。
+
+### A2. 現在の実装状態（Step 7/8/10時点。§20/§14.3と重複するが明記する）
+
+- `tools/knowledge_builder/core/private_dictionary_learning_core.js`:
+  **実装済み**（本設計の12 public APIすべて）。
+- `tools/knowledge_builder/verification/private_dictionary_learning_core_verification.js`:
+  **実装済み**（dedicated Node-only verification、§21の65項目を含む）。
+- `claude/closed-domain-dictionary-learning-p2a1`ブランチへ**commit・push済み**
+  （commit `712fd59b34a179ec8046954a36a13134b799d8e1`）。
+- PR #12（`P2-A1: add private dictionary contract and local security boundary`、
+  base `claude/child-handover-qcycsj`）**作成済み・独立監査(Codex)対応中**。
+- **次はすべてHOLD**（独立監査の完了・製品承認を待つ）: PR #12のmerge
+  （integration）、tag作成、Release作成、製品承認。
 
 ### B. P2-A1全体（後続の実装Stepを含む）で未実装
 
