@@ -121,6 +121,71 @@
     } catch (e) { badXlsxRejected = e && e.uiCode; }
     record('broken_xlsx_rejected', badXlsxRejected);
 
+    // --- encrypted PDF, through the real pipeline ------------------------------------------
+    // A session with a recorded decision is established first, so "unchanged" is meaningful.
+    const baseSession = await Ingest.run([{ kind: 'pdf', file: pdf }]);
+    let baseState = ReviewState.setCandidateDecision(
+      baseSession.reviewState, baseSession.evaluation.candidates[0].candidate_id, 'ACCEPT');
+    const evalBefore = baseSession.evaluation, idxBefore = baseSession.evidenceIndex, stateBefore = baseState;
+
+    const encFile = await fetchFile('/fixtures/encrypted_sample.pdf', 'encrypted_sample.pdf', 'application/pdf');
+    let encInfo = {};
+    try {
+      await Ingest.run([{ kind: 'pdf', file: encFile }]);
+      encInfo = { uiCode: null };
+    } catch (e) {
+      const serialized = (() => { try { return JSON.stringify(e); } catch (_) { return ''; } })();
+      const displayed = globalThis.P2A3ErrorMessages.describe(e, 'INTERNAL');
+      encInfo = {
+        uiCode: e && e.uiCode,
+        isError: e instanceof Error, hasMessage: !!(e && e.message), hasStack: !!(e && e.stack),
+        keys: e && typeof e === 'object' ? Object.keys(e).join(',') : typeof e,
+        serializedHasNoFileName: serialized.indexOf('encrypted_sample') === -1,
+        serializedHasNoPassword: serialized.indexOf('p2a3-synthetic-fixture') === -1,
+        messageHasNoPath: displayed.message.indexOf('/') === -1 && displayed.message.indexOf('\\') === -1,
+      };
+    }
+    encInfo.sessionUnchanged = baseSession.evaluation === evalBefore
+      && baseSession.evidenceIndex === idxBefore && baseState === stateBefore;
+    encInfo.decisionKept = baseState.candidate_decisions[evalBefore.candidates[0].candidate_id].decision;
+    encInfo.noPartialCandidates = baseSession.evaluation.summary.candidate_count === evalBefore.summary.candidate_count;
+    record('encrypted', encInfo);
+
+    // --- adapter safety limits ---------------------------------------------------------------
+    // Built in memory rather than fetched: these probes only need page count, not content.
+    const buildPagedPdf = pages => {
+      // minimal single-object-per-page PDF; pdf.js only needs a valid page tree for the count check
+      const objs = [];
+      const kids = [];
+      for (let i = 0; i < pages; i++) kids.push(`${4 + i} 0 R`);
+      objs.push('1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj');
+      objs.push(`2 0 obj<</Type/Pages/Count ${pages}/Kids[${kids.join(' ')}]>>endobj`);
+      objs.push('3 0 obj<</Length 44>>stream\nBT /F1 12 Tf 72 780 Td (probe page) Tj ET\nendstream endobj');
+      for (let i = 0; i < pages; i++) {
+        objs.push(`${4 + i} 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Contents 3 0 R/Resources<</Font<</F1<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>>>>>>>endobj`);
+      }
+      let pdf = '%PDF-1.4\n';
+      const offsets = [0];
+      for (const o of objs) { offsets.push(pdf.length); pdf += o + '\n'; }
+      const xref = pdf.length;
+      pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+      for (let i = 1; i <= objs.length; i++) pdf += String(offsets[i]).padStart(10, '0') + ' 00000 n \n';
+      pdf += `trailer<</Size ${objs.length + 1}/Root 1 0 R>>\nstartxref\n${xref}\n%%EOF`;
+      return new File([new Blob([pdf], { type: 'application/pdf' })], 'probe.pdf', { type: 'application/pdf' });
+    };
+    const MAX_PAGES = globalThis.KnowledgePdfDirectAdapter.MAX_PAGES || 2000;
+    let atLimitOk = false;
+    try { await Ingest.run([{ kind: 'pdf', file: buildPagedPdf(MAX_PAGES) }]); atLimitOk = true; }
+    catch (e) { atLimitOk = (e && e.uiCode) !== 'PDF_LIMIT_EXCEEDED'; }
+    record('adapter_at_limit_ok', atLimitOk);
+
+    let overCode = null;
+    try { await Ingest.run([{ kind: 'pdf', file: buildPagedPdf(MAX_PAGES + 1) }]); }
+    catch (e) { overCode = e && e.uiCode; }
+    record('adapter_over_limit', overCode);
+    record('adapter_over_limit_session_unchanged',
+      baseSession.evaluation === evalBefore && baseState === stateBefore);
+
     out.ok = true;
   } catch (e) {
     out.error = (e && e.uiCode) ? e.uiCode : String((e && e.message) || e).slice(0, 200);

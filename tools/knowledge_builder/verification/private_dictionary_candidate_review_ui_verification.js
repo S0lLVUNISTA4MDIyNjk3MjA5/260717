@@ -33,7 +33,7 @@ function assert(cond, message) {
 }
 function skip(message) { skips++; console.log(`SKIP: ${message}`); }
 
-const UI_SOURCES = ['server.js', 'index.html', 'app.js', 'bootstrap.js', 'limits.js', 'dom.js',
+const UI_SOURCES = ['server.js', 'index.html', 'app.js', 'bootstrap.js', 'limits.js', 'dom.js', 'pagination.js',
   'error_messages.js', 'input_selection.js', 'browser_ingest.js', 'evidence_index.js',
   'review_state.js', 'table_view.js', 'alias_view.js', 'conflict_view.js', 'evidence_panel.js',
   'dashboard.js', 'styles.css'];
@@ -90,6 +90,13 @@ function staticChecks() {
     'core/private_dictionary_rule_extraction_core.js'];
   assert(expectedPrefix.every((name, i) => order[i] === name), 'browser script load order matches the contract');
   assert(order[order.length - 1] === 'app.js', 'app.js loads last');
+
+  // Every script index.html asks for must be in the server's allowlist. A script that is loaded
+  // but not served 404s silently and leaves its global undefined at use time.
+  const served = serverBody;
+  const unlisted = order.filter(src => !src.startsWith('vendor/') && !src.startsWith('core/'))
+    .filter(src => served.indexOf(`'${src}'`) === -1 && served.indexOf(`'/${src}'`) === -1);
+  assert(unlisted.length === 0, `every UI script index.html loads is in the server allowlist (missing: ${unlisted.join(', ') || 'none'})`);
 
   // Not-yet-implemented buttons must be disabled, never merely decorative.
   const futureButtons = (html.match(/<button[^>]*後続Checkpoint[^<]*<\/button>/g) || []);
@@ -152,6 +159,55 @@ function pureChecks() {
 }
 
 // ================================================================================================
+// 2b. Pagination (pure, 1-origin contract)
+// ================================================================================================
+function paginationChecks() {
+  const P = require(path.join(UI, 'pagination.js'));
+  const items = Array.from({ length: 451 }, (_, i) => i);
+
+  for (const size of [50, 100, 200]) {
+    const expectedPages = Math.ceil(451 / size);
+    const first = P.paginate(451, size, 1);
+    assert(first.currentPage === 1 && first.startOffset === 0 && first.count === size,
+      `pagination(${size}): page 1 starts at offset 0 with a full page`);
+    assert(first.totalPages === expectedPages, `pagination(${size}): totalPages is ${expectedPages}`);
+    assert(!first.hasPrev && first.hasNext, `pagination(${size}): page 1 has next but no prev`);
+
+    const second = P.paginate(451, size, 2);
+    assert(second.startOffset === size, `pagination(${size}): page 2 starts one page in`);
+
+    const last = P.paginate(451, size, expectedPages);
+    assert(last.currentPage === expectedPages && last.endOffset === 451,
+      `pagination(${size}): the last page ends exactly at the total`);
+    assert(last.count === 451 - (expectedPages - 1) * size, `pagination(${size}): the last page holds the remainder`);
+    assert(last.hasPrev && !last.hasNext, `pagination(${size}): the last page has prev but no next`);
+
+    // Out-of-range requests clamp instead of producing an empty page.
+    assert(P.paginate(451, size, 0).currentPage === 1, `pagination(${size}): page 0 clamps to 1`);
+    assert(P.paginate(451, size, -5).currentPage === 1, `pagination(${size}): a negative page clamps to 1`);
+    assert(P.paginate(451, size, 9999).currentPage === expectedPages, `pagination(${size}): an over-range page clamps to the last`);
+    assert(P.paginate(451, size, NaN).currentPage === 1, `pagination(${size}): a non-numeric page clamps to 1`);
+
+    // Every item appears on exactly one page, and no page exceeds pageSize.
+    const seen = new Map();
+    let oversize = 0;
+    for (let pageNumber = 1; pageNumber <= expectedPages; pageNumber++) {
+      const info = P.paginate(451, size, pageNumber);
+      const slice = P.slice(items, info);
+      if (slice.length > size) oversize++;
+      for (const v of slice) seen.set(v, (seen.get(v) || 0) + 1);
+    }
+    assert(oversize === 0, `pagination(${size}): no page ever exceeds pageSize`);
+    assert(seen.size === 451, `pagination(${size}): every item appears somewhere`);
+    assert([...seen.values()].every(n => n === 1), `pagination(${size}): every item appears exactly once`);
+  }
+
+  const empty = P.paginate(0, 50, 1);
+  assert(empty.totalPages === 1 && empty.count === 0 && !empty.hasPrev && !empty.hasNext,
+    'pagination: an empty list still reports one valid page');
+}
+
+// ================================================================================================
 // 3. Browser checks
 // ================================================================================================
 function resolvePlaywright() {
@@ -204,8 +260,9 @@ function startHarnessServer() {
     '/core/private_dictionary_rule_extraction_core.js': [path.join(CORE, 'private_dictionary_rule_extraction_core.js'), JS],
     '/samples/train_hvac_requirement_spec_sample.pdf': [path.join(SAMPLES, 'train_hvac_requirement_spec_sample.pdf'), 'application/pdf'],
     '/samples/train_hvac_design_review_sample.xlsx': [path.join(SAMPLES, 'train_hvac_design_review_sample.xlsx'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+    '/fixtures/encrypted_sample.pdf': [path.join(HERE, 'fixtures', 'p2a3', 'encrypted_sample.pdf'), 'application/pdf'],
   });
-  for (const name of ['bootstrap.js', 'error_messages.js', 'limits.js', 'dom.js', 'review_state.js',
+  for (const name of ['bootstrap.js', 'error_messages.js', 'limits.js', 'dom.js', 'pagination.js', 'review_state.js',
     'evidence_index.js', 'input_selection.js', 'browser_ingest.js']) {
     routes['/' + name] = [path.join(UI, name), JS];
   }
@@ -285,6 +342,25 @@ async function browserChecks() {
     assert(c.broken_xlsx_rejected === 'EXCEL_READ_FAILED' || c.broken_xlsx_rejected === 'EXCEL_NO_USABLE_SHEET',
       'browser: a malformed XLSX fails closed with a content-free code');
 
+    // Encrypted PDF: a real encrypted fixture through the real pipeline, not a unit test of the
+    // classifier. This is what PDF.js actually throws for an encrypted document.
+    const enc = c.encrypted || {};
+    assert(enc.uiCode === 'PDF_ENCRYPTED', 'browser: an encrypted PDF is classified as PDF_ENCRYPTED');
+    assert(enc.isError === false && enc.hasMessage === false && enc.hasStack === false,
+      'browser: the encrypted-PDF failure is not a native Error and carries no message or stack');
+    assert(enc.keys === 'uiCode,count', 'browser: the encrypted-PDF failure carries only {uiCode,count}');
+    assert(enc.serializedHasNoFileName === true, 'browser: the encrypted-PDF failure never carries the file name');
+    assert(enc.serializedHasNoPassword === true, 'browser: the encrypted-PDF failure never carries the password');
+    assert(enc.messageHasNoPath === true, 'browser: the displayed encrypted-PDF message contains no path');
+    assert(enc.sessionUnchanged === true, 'browser: an encrypted PDF leaves the extraction result, evidence index and review state untouched');
+    assert(enc.decisionKept === 'ACCEPT', 'browser: a review decision made before the encrypted-PDF run survives it');
+    assert(enc.noPartialCandidates === true, 'browser: an encrypted PDF produces no partial candidate display');
+
+    // Adapter safety limits, reached through the ingest pipeline.
+    assert(c.adapter_at_limit_ok === true, 'browser: a PDF exactly at the adapter page limit still succeeds');
+    assert(c.adapter_over_limit === 'PDF_LIMIT_EXCEEDED', 'browser: a PDF over the adapter page limit fails with the dedicated limit code');
+    assert(c.adapter_over_limit_session_unchanged === true, 'browser: exceeding the adapter limit leaves the current session untouched');
+
     // The byte-identity gate.
     assert(result.canonical_json === baseline.candidate_evaluation, 'browser candidate_evaluation.json is byte-identical to the Node CLI output');
     assert(result.review_md === baseline.candidate_review, 'browser candidate_review.md is byte-identical to the Node CLI output');
@@ -302,10 +378,105 @@ async function browserChecks() {
   console.log(`(browser half used playwright from ${pw.from})`);
 }
 
+
+// ================================================================================================
+// 4. Production page checks (real server.js + real page, synthetic 451/451/451 session)
+// ================================================================================================
+async function productionPageChecks() {
+  const pw = resolvePlaywright();
+  if (!pw) { skip('production page checks (playwright not installed)'); return; }
+  const executablePath = fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined;
+  const { spawn } = require('child_process');
+  const server = spawn(process.execPath, [path.join(UI, 'server.js')],
+    { env: Object.assign({}, process.env, { P2A3_NO_BROWSER: '1' }), stdio: ['ignore', 'pipe', 'pipe'] });
+  const port = await new Promise((resolve, reject) => {
+    let buf = '';
+    server.stdout.on('data', d => { buf += d; const m = buf.match(/127\.0\.0\.1:(\d+)/); if (m) resolve(m[1]); });
+    setTimeout(() => reject(new Error('server did not start')), 20000);
+  });
+  let browser;
+  try {
+    browser = await pw.module.chromium.launch(executablePath ? { executablePath } : {});
+    const page = await browser.newPage();
+    const pageErrors = [];
+    page.on('pageerror', e => pageErrors.push(String(e)));
+    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load' });
+    await page.waitForFunction(() => globalThis.__P2A3_READY__ === true, { timeout: 30000 });
+    // Injected through the debugger, not a <script> tag: the page's own CSP (script-src 'self')
+    // blocks an inline tag, which is exactly the behaviour we want to keep.
+    await page.evaluate(fs.readFileSync(path.join(HERE, 'p2a3_production_page_checks.js'), 'utf8'));
+
+    const paging = await page.evaluate(() => globalThis.__P2A3_PAGE_CHECKS__());
+    for (const size of [50, 100, 200]) {
+      const r = paging.candidatePaging[size];
+      assert(r.walkedPages === r.expectedPages, `candidate pagination(${size}): next reaches every page (${r.walkedPages}/${r.expectedPages})`);
+      assert(r.maxRendered <= Number(size), `candidate pagination(${size}): one DOM render never exceeds pageSize`);
+      assert(r.uniqueSeen === 451 && r.everySeenOnce, `candidate pagination(${size}): all 451 rows appear exactly once across pages`);
+      assert(r.prevDisabledOnFirst, `candidate pagination(${size}): first/prev disabled on page 1`);
+      assert(r.nextDisabledOnLast, `candidate pagination(${size}): next/last disabled on the final page`);
+      assert(r.backToFirst, `candidate pagination(${size}): the first-page control returns to page 1`);
+      assert(r.jumpedToLast, `candidate pagination(${size}): the last-page control lands on the final page with the remainder`);
+      assert(r.lastRowDecided, `candidate pagination(${size}): a row on the final page can be judged`);
+    }
+    assert(paging.pageReset.beforeFilter > 1, 'candidate pagination: the reset test really started on a deep page');
+    assert(paging.pageReset.afterFilter === 1, 'candidate pagination: filter change resets to page 1');
+    assert(paging.pageReset.afterSort === 1, 'candidate pagination: sort change resets to page 1');
+    assert(paging.pageReset.afterPageSize === 1, 'candidate pagination: page-size change resets to page 1');
+    assert(paging.pageReset.afterSearch === 1, 'candidate pagination: search resets to page 1');
+    assert(paging.clampOverRange === paging.clampExpected,
+      `candidate pagination: an over-range page clamps to the last page (${paging.clampOverRange}/${paging.clampExpected})`);
+    assert(paging.clampUnderRange === 1, 'candidate pagination: an under-range page clamps to page 1');
+    assert(paging.clampAfterShrink.current <= paging.clampAfterShrink.deepPage && paging.clampAfterShrink.rows > 0,
+      'candidate pagination: a filter that shrinks the result set clamps to a page that still has rows');
+
+    assert(paging.selection.selectedAfterPage1 === 50, 'selection: select-all covers the current page only');
+    assert(paging.selection.selectAllStateOnPage2 === false, 'selection: select-all is unchecked on a page with no selection');
+    assert(paging.selection.selectedAfterPage2 === 100, 'selection: selections on other pages are kept');
+    assert(/このページ 50 件選択 \/ 全ページ合計 100 件選択/.test(paging.selection.countText),
+      'selection: page and total selection counts are shown separately');
+
+    const a = paging.aliasPaging;
+    assert(a.pages === a.expectedPages, 'alias pagination: next reaches every alias page');
+    assert(a.maxRendered <= 100, 'alias pagination: one DOM render never exceeds the alias page size');
+    assert(a.unique === 451 && a.everyOnce, 'alias pagination: all 451 aliases appear exactly once across pages');
+    assert(a.lastCount === 451 - 400, 'alias pagination: the final alias page holds the remainder');
+    assert(a.lastRowDecided, 'alias pagination: an alias on the final page can be judged');
+    assert(a.independentOfCandidatePageSize, 'alias pagination: alias page size is independent of the candidate table');
+
+    const k = paging.conflictPaging;
+    assert(k.pages === k.expectedPages, 'conflict pagination: next reaches every conflict page');
+    assert(k.maxRendered <= 200, 'conflict pagination: one DOM render never exceeds the conflict page size');
+    assert(k.unique === 451 && k.everyOnce, 'conflict pagination: all 451 conflicts appear exactly once across pages');
+    assert(k.lastCount === 451 - 400, 'conflict pagination: the final conflict page holds the remainder');
+    assert(k.lastCardResolved, 'conflict pagination: a conflict on the final page can be resolved');
+    assert(k.independentOfCandidatePageSize, 'conflict pagination: conflict page size is independent of the candidate table');
+
+    const snap = await page.evaluate(() => globalThis.__P2A3_SNAPSHOT_CHECKS__());
+    assert(snap.sameNameSameSize.signatureIdentical, 'snapshot: a same-name same-size swap leaves the signature identical');
+    assert(snap.sameNameSameSize.revisionChanged, 'snapshot: a same-name same-size swap still bumps the selection revision');
+    assert(snap.sameNameSameSize.snapshotFrozen, 'snapshot: the run snapshot is frozen');
+    assert(snap.staleNoticeShownForSameNameSwap, 'snapshot: the input-changed notice appears after a same-name same-size swap');
+
+    const g = snap.runGuards;
+    assert(g.unchanged, 'run guard: drop / sample / clear / remove events during a run change nothing');
+    assert(g.itemsStillPresent, 'run guard: the selection is intact after the rejected events');
+    assert(g.pdfInputDisabled && g.excelInputDisabled, 'run guard: file inputs are disabled while running');
+    assert(g.sampleButtonDisabled && g.clearButtonDisabled, 'run guard: sample and clear buttons are disabled while running');
+    assert(g.removeButtonDisabled === true, 'run guard: per-file remove buttons are disabled while running');
+
+    assert(pageErrors.length === 0, 'production page: no uncaught page error during the paging and guard checks');
+  } finally {
+    if (browser) await browser.close();
+    server.kill();
+  }
+}
+
 (async () => {
   staticChecks();
   pureChecks();
+  paginationChecks();
   await browserChecks();
+  await productionPageChecks();
   console.log(`\n${passes} PASS / ${failures} FAIL / ${skips} SKIP`);
   process.exit(failures === 0 ? 0 : 1);
 })().catch(e => {
