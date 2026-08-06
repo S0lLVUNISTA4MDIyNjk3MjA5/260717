@@ -138,6 +138,25 @@ Checkpoint 1 にて Chromium 実測済み。固定 base SHA の Node 実行結�
 └─ advanced export: JSON / Markdown             (通常操作から分離)
 ```
 
+### S4.1 run snapshot（入力の原子性）
+
+run の途中で入力選択が変わっても、**解析対象が入れ替わってはならない**。
+
+- 解析開始時に **`runSelection` / `runSelectionRevision` / `runInputSignature` を snapshot する**。
+  snapshot は `Object.freeze` 済みで、以後の選択操作に影響されない。
+- ingest は live な選択ではなく **snapshot の `runSelection` を消費する**。
+- 成功した run が session に記録する入力同一性は、snapshot 側の値である
+  （run 完了時点の live な選択ではない）。
+- **`revision` は選択に対する任意の変更（追加 / 削除 / 全消去）で単調増加する。**
+  `name` と `size` が同一の別内容ファイルへ差し替えられた場合、metadata 由来の
+  `runInputSignature` は変化しないが、`revision` は変化する。両方を保持することで
+  この差し替えを検出できる。
+- **run 中は選択の変更操作を禁止する。** 禁止は
+  **DOM（`disabled` 属性）と handler 側 guard の両方**で行う。DOM だけの抑止では、
+  実行中に到達した handler が state を書き換え得るため不足である。
+- 実行中フラグの変化は再描画に反映されなければならない
+  （app state と DOM が乖離してはならない）。
+
 ---
 
 ## S5. データ3層
@@ -357,6 +376,26 @@ sort：keyword / exposure count / document count / conflict 優先 / rule / deci
 
 pagination：50 / 100 / 200 件単位、または同等の virtualized rendering。
 **全候補を無制限に DOM へ追加しない。**
+
+### S8.1 pagination の必須要件
+
+「先頭 N 件だけを描画して残りを到達不能にする」実装は **pagination ではない**。以下を必須とする。
+
+- **candidate / alias / conflict の 3 tab すべて**に、実際にページを移動できる操作
+  （先頭 / 前 / 次 / 末尾、および現在位置と総ページ数の表示）を持たせる。
+  N 件目以降が UI 上で到達不能であってはならない。
+- **alias tab と conflict tab は、candidate tab とは独立した page / pageSize state を持つ。**
+  片方のページ移動が他方のページ位置を動かしてはならない。
+- page 番号は 1-origin とし、要求ページが範囲外のときは **clamp する**（例外を投げない）。
+  filter によって件数が減った場合、最後の有効ページに着地する。
+- filter / sort / keyword 検索 / pageSize 変更のいずれかが起きたら、
+  **candidate のページ位置を 1 に戻す**。
+- **select-all は現在ページの範囲に限定する**（`ページ内 n 件を選択 / 全体 m 件中` のように
+  ページ内選択数と全体件数の両方を表示する）。
+- 一括操作の確認表示には、**実際に操作対象となる件数**を出す。
+  画面外の件数を含めた誤った数を表示してはならない。
+- 検証は 451 candidate / 451 alias / 451 conflict の synthetic session を用い、
+  pageSize 50 / 100 / 200 の各条件で恒久 check として実行する。
 
 ---
 
@@ -753,15 +792,20 @@ browser-memory 方式では、上限は「ファイルとして扱えるか」�
 「browser のメモリ内で adapter → projection → 抽出 → 表示まで完走できるか」で決まる。
 未実測の値を対応保証として記載してはならない。
 
-| 項目 | 状態 | 提案値 | 根拠 |
-|---|---|---|---|
-| `MAX_FILE_BYTES`（1 ファイル上限） | **測定済 / 提案** | 1 MB (1,048,576) | 直下の 0.63 MB が 3/3 成功。不安定点 3.68 MB の約 1/3.7 |
-| `MAX_TOTAL_SELECTED_BYTES`（選択合計上限） | **測定済 / 提案** | 2 MB (2,097,152) | 不安定点の約 1/1.8。標準サンプル 31 KB の約 65 倍 |
-| `MAX_FILE_COUNT`（ファイル数上限） | **測定済 / 提案** | 20 | 20 件（distinct）が 3/3 成功・応答維持 |
+| 項目 | 状態 | 提案値 | 上限直前の実測（上限比） | 根拠 |
+|---|---|---|---|---|
+| `MAX_FILE_BYTES`（1 ファイル上限） | **測定済 / 提案** | 1 MB (1,048,576) | 単一 PDF 0.91 MB（**90.9%**）が **3/3 成功・応答維持** | 不安定点 3.68 MB の約 1/3.7 |
+| `MAX_TOTAL_SELECTED_BYTES`（選択合計上限） | **測定済 / 提案** | 2 MB (2,097,152) | distinct PDF 3 件 計 1.84 MB（**91.9%**）が **3/3 成功・応答維持** | 不安定点の約 1/1.8。標準サンプル 31 KB の約 65 倍 |
+| `MAX_FILE_COUNT`（ファイル数上限） | **測定済 / 提案** | 20 | distinct PDF 20 件（**100%**）が **3/3 成功・応答維持** | 件数はメモリより時間に効くため時間側の余裕で担保 |
 
 実測は `p2a3_browser_memory_measurement_report.md` に記録し、値は `limits.js` に実装した。
 **Chromium 実測のみ**であり、正式な配布上限としての承認は Checkpoint 2 レビューで行う。
 承認まで、この上限で正式配布は行わない。
+
+**上限値の裏づけ規則**：各上限は、**その値の 90% 以上の入力で 3 回連続成功**していなければ
+提案してはならない。成功判定に使う測定は、目的の limit に到達している必要がある——重複
+`source_document_id` 検出など**別の guard が先に発火して停止した run を、その limit 試験の成功
+として数えてはならない**。この条件を満たせない場合は、値を引き下げて再測定する。
 
 > 旧記載の「1 ファイルサイズ 512 MB」は実測に基づかない値だったため撤回した。
 > 512 MB を対応保証された上限として扱わない。
@@ -804,8 +848,15 @@ UI はそのエラー code を表示するだけで、**独自に緩和しない
 | 5 | 複数 XLSX |
 | 6 | 最大ファイル数近傍 |
 | 7 | 合計 byte 数近傍 |
-| 8 | adapter 上限到達 |
+| 8a | adapter 上限ちょうど（PDF `MAX_PAGES` = 2,000 ページ） |
+| 8b | adapter 上限超過（2,001 ページ）→ `PDF_LIMIT_EXCEEDED` |
 | 9 | P2-A2 projection 上限到達 |
+| 10 | 暗号化 PDF → `PDF_ENCRYPTED`（**本番 browser pipeline で測定すること**。Node の分類 unit test は代替にならない） |
+
+ケース 8a / 8b は、`MAX_FILE_BYTES` の pre-read guard が先に発火するサイズになるため、
+**本番 `browser_ingest.run()` を browser 上で直接呼ぶ**経路で測定してよい。adapter・projection・
+抽出は本番と同一実装でなければならない。同一ファイルを複数指定して重複検出を先に発火させた run は、
+adapter 上限の測定として認めない。
 
 各ケースで記録する測定項目：
 
@@ -816,13 +867,25 @@ UI はそのエラー code を表示するだけで、**独自に緩和しない
 unit 数                        projection の units.length
 browser が応答を維持したか      UI 操作が可能な状態を保ったか
 利用可能なメモリ指標            performance.memory 等、取得可能なもの（取得不可なら「取得不可」と記録）
-成功 / 安全な失敗              完走したか、fail-closed で停止したか（クラッシュは不合格）
+結果区分                       下記 6 区分のいずれか 1 つ
 処理後の Review State          既存 Review State が破壊されていないこと
 ```
 
+**結果区分（この 6 種以外を使わない）**
+
+| 区分 | 意味 |
+|---|---|
+| 成功 | 完走し、session が更新され、完走後も UI が応答した |
+| 分類済み安全失敗 | 意図した `{uiCode, count}` で停止した。既存 session / Evidence Index / Review State は不変 |
+| 入力事前拒否 | pre-read 検査が metadata だけで拒否した（`arrayBuffer()` 未呼び出し） |
+| 不安定 | クラッシュはしないが実用時間内に確定せず、後続操作がタイムアウトした |
+| browser crash | タブ／レンダラが異常終了した（**不合格**） |
+| 別guard先行（未測定） | 目的の limit の手前で別の guard が発火した。**その limit は未測定**であり、成功にも安全失敗にも数えない |
+
 **合否の考え方**：完走できることは必須ではない。**安全に失敗すること**（クラッシュせず、
 Review State を壊さず、content-free なエラーを出して停止すること）が必須である。
-確定する上限は、安全に完走できた最大規模に余裕を掛けた値とする。
+確定する上限は、安全に完走できた最大規模に余裕を掛けた値とし、S18.1 の裏づけ規則
+（提案値の 90% 以上で 3 回連続成功）を満たさなければならない。
 
 ---
 

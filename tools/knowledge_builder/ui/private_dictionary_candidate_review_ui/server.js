@@ -51,7 +51,7 @@ const ROUTES = Object.assign(Object.create(null), {
   '/samples/train_hvac_design_review_sample.xlsx': [path.join(SAMPLES, 'train_hvac_design_review_sample.xlsx'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
 });
 
-for (const name of ['bootstrap.js', 'error_messages.js', 'limits.js', 'dom.js', 'review_state.js',
+for (const name of ['bootstrap.js', 'error_messages.js', 'limits.js', 'dom.js', 'pagination.js', 'review_state.js',
   'evidence_index.js', 'input_selection.js', 'browser_ingest.js', 'dashboard.js', 'table_view.js',
   'alias_view.js', 'conflict_view.js', 'evidence_panel.js', 'app.js']) {
   ROUTES['/' + name] = [path.join(UI, name), JS];

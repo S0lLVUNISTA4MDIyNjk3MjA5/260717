@@ -47,9 +47,14 @@
     return out;
   }
 
+  /* Maps the PDF adapter's own error codes onto the UI's content-free codes. The adapter's
+   * safety limits get their own code so an over-large document is not reported as an unreadable
+   * one - the user can act on "split it up", not on "is it a text PDF?". */
   function classifyPdfFailure(e) {
     const code = e && typeof e.code === 'string' ? e.code : '';
     if (code === 'pdf_encrypted_or_password_required') return 'PDF_ENCRYPTED';
+    if (code === 'page_count_limit_exceeded' || code === 'statement_count_limit_exceeded'
+      || code === 'text_item_limit_exceeded' || code === 'extracted_char_limit_exceeded') return 'PDF_LIMIT_EXCEEDED';
     return 'PDF_READ_FAILED';
   }
 

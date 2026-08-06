@@ -14,6 +14,7 @@
   const ReviewState = globalThis.P2A3ReviewState;
   const Table = globalThis.P2A3TableView;
   const EvidenceIndex = globalThis.P2A3EvidenceIndex;
+  const Pagination = globalThis.P2A3Pagination;
 
   const RESOLUTION_LABELS = [
     ['UNRESOLVED', '未解決'], ['SELECT_CANONICAL', 'canonicalを選択'], ['REJECT_ALL', 'すべて却下'],
@@ -21,10 +22,14 @@
   ];
 
   function render(ctx) {
-    const { evaluation, index, state, handlers } = ctx;
+    const { evaluation, index, state, handlers, view } = ctx;
     const byCandidateId = new Map(evaluation.candidates.map(c => [c.candidate_id, c]));
+    // Conflicts are paged too: every conflict stays reachable, but a document with hundreds of
+    // them never puts them all into the DOM at once.
+    const info = Pagination.paginate(evaluation.conflicts.length, view.conflictPageSize, view.conflictPage);
+    view.conflictPage = info.currentPage;
 
-    const cards = evaluation.conflicts.map(k => {
+    const cards = Pagination.slice(evaluation.conflicts, info).map(k => {
       const entry = state.conflict_resolutions[k.conflict_id] || { resolution: 'UNRESOLVED', selected_candidate_id: null, reason_code: null, note: '' };
       const card = Dom.el('div', 'conflict-card');
       card.dataset.conflictId = k.conflict_id;
@@ -89,7 +94,9 @@
     });
 
     document.getElementById('conflict-list').replaceChildren(...cards);
-    document.getElementById('conflict-empty').hidden = cards.length > 0;
+    document.getElementById('conflict-empty').hidden = evaluation.conflicts.length > 0;
+    Pagination.renderControls(document.getElementById('conflict-pager'), info,
+      p => handlers.onConflictPage(p), 'Conflict専用のページ設定');
   }
 
   return { render, RESOLUTION_LABELS };

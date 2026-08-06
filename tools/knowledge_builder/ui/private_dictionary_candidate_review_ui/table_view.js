@@ -12,6 +12,7 @@
 
   const Dom = globalThis.P2A3Dom;
   const ReviewState = globalThis.P2A3ReviewState;
+  const Pagination = globalThis.P2A3Pagination;
 
   const RULE_LABELS = {
     TERM_STRUCTURAL_KEY: '構造KEY', TERM_STRUCTURAL_HEADING: '見出し',
@@ -93,12 +94,16 @@
       },
     };
     const sorted = filtered.slice().sort(comparators[view.sort] || byTerm);
-    return { page: sorted.slice(0, view.pageSize), filteredTotal: sorted.length };
+    // Real page navigation: paginate() clamps the requested page, so a decision that shrinks the
+    // filtered set lands on the last valid page instead of an empty view.
+    const info = Pagination.paginate(sorted.length, view.pageSize, view.candidatePage);
+    return { page: Pagination.slice(sorted, info), filteredTotal: sorted.length, pageInfo: info, sorted };
   }
 
   function render(ctx) {
     const { evaluation, index, state, view, selected, handlers } = ctx;
-    const { page, filteredTotal } = selectRows(evaluation, index, state, view);
+    const { page, filteredTotal, pageInfo } = selectRows(evaluation, index, state, view);
+    view.candidatePage = pageInfo.currentPage;      // write the clamped page back
     const rows = [];
 
     for (const c of page) {
@@ -169,10 +174,17 @@
 
     document.getElementById('rows').replaceChildren(...rows);
     document.getElementById('empty').hidden = rows.length > 0;
-    document.getElementById('sel-count').textContent = `${selected.size}件選択中`;
+
+    // Selection is reported per page and in total, because "select all on screen" only ever
+    // touches the current page while a bulk action applies to every selected id.
+    const onPage = page.filter(c => selected.has(c.candidate_id)).length;
+    document.getElementById('sel-count').textContent =
+      `このページ ${onPage} 件選択 / 全ページ合計 ${selected.size} 件選択`;
     document.getElementById('pager-info').textContent =
-      `表示 ${rows.length} 件 / 該当 ${filteredTotal} 件 / 全 ${evaluation.candidates.length} 件`
-      + `（1ページあたり最大 ${view.pageSize} 件をDOMへ描画）`;
+      `該当 ${filteredTotal} 件 / 全 ${evaluation.candidates.length} 件`
+      + `（1ページあたり最大 ${pageInfo.pageSize} 件をDOMへ描画）`;
+    Pagination.renderControls(document.getElementById('candidate-pager'), pageInfo,
+      p => handlers.onCandidatePage(p));
     const all = document.getElementById('select-all');
     if (all) all.checked = rows.length > 0 && page.every(c => selected.has(c.candidate_id));
     return page;

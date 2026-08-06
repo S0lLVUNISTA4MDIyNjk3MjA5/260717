@@ -14,14 +14,18 @@
   const ReviewState = globalThis.P2A3ReviewState;
   const Table = globalThis.P2A3TableView;
   const EvidenceIndex = globalThis.P2A3EvidenceIndex;
+  const Pagination = globalThis.P2A3Pagination;
 
   function render(ctx) {
     const { evaluation, index, state, handlers, view } = ctx;
     const byCandidateId = new Map(evaluation.candidates.map(c => [c.candidate_id, c]));
     // Aliases are paginated for the same reason candidates are: an unbounded alias list on a
     // large document puts thousands of rows into the DOM and freezes the tab.
-    const pageSize = (view && view.pageSize) || 50;
-    const shown = evaluation.alias_candidates.slice(0, pageSize);
+    // Alias paging is independent of the candidate tab: its own page and its own page size, so
+    // every alias is reachable regardless of how the candidate table is set up.
+    const info = Pagination.paginate(evaluation.alias_candidates.length, view.aliasPageSize, view.aliasPage);
+    view.aliasPage = info.currentPage;
+    const shown = Pagination.slice(evaluation.alias_candidates, info);
     const rows = shown.map(a => {
       const entry = state.alias_decisions[a.alias_candidate_id] || { decision: 'UNREVIEWED', reason_code: null, note: '' };
       const canonical = byCandidateId.get(a.canonical_candidate_id);
@@ -69,11 +73,8 @@
     });
     document.getElementById('alias-rows').replaceChildren(...rows);
     document.getElementById('alias-empty').hidden = rows.length > 0;
-    const pager = document.getElementById('alias-pager');
-    if (pager) {
-      pager.textContent = `表示 ${rows.length} 件 / 全 ${evaluation.alias_candidates.length} 件`
-        + `（1ページあたり最大 ${pageSize} 件をDOMへ描画）`;
-    }
+    Pagination.renderControls(document.getElementById('alias-pager'), info,
+      p => handlers.onAliasPage(p), 'Alias専用のページ設定');
   }
 
   return { render };

@@ -17,14 +17,18 @@
 
   const MB = 1024 * 1024;
 
+  /* Each value is backed by a measurement AT >=90% OF THE VALUE ITSELF, repeated 3 times, on
+   * distinct inputs - a run that stopped early because some other guard fired first (duplicate
+   * source detection, for instance) does not count as a successful limit test. */
   const LIMITS = Object.freeze({
-    // Largest single input file. Chromium stayed responsive and completed 3/3 runs on a dense
-    // 0.63 MB / 700-page PDF (17,501 units), and became unstable on a 3.68 MB workbook, so this
-    // sits ~3.7x below the observed instability point.
+    // Largest single input file. A dense 0.91 MB PDF (90.9% of this limit, 16,901 units,
+    // 32,500 candidates) completed 3/3 runs and stayed responsive. Chromium became unstable on a
+    // 3.68 MB workbook, so this sits ~3.7x below the observed instability point.
     MAX_FILE_BYTES: 1 * MB,
-    // Largest total across every selected file. Kept separate from MAX_FILE_BYTES because
-    // browser memory tracks the sum, not the largest file, and ~1.8x below the same instability
-    // point. The standard sample (31 KB) is two orders of magnitude below this.
+    // Largest total across every selected file. Kept separate from MAX_FILE_BYTES because browser
+    // memory tracks the sum, not the largest file. Three DISTINCT PDFs totalling 1.84 MB (91.9%
+    // of this limit, 34,323 units) completed 3/3 runs and stayed responsive; ~1.8x below the same
+    // instability point. The standard sample (31 KB) is two orders of magnitude below this.
     MAX_TOTAL_SELECTED_BYTES: 2 * MB,
     // Largest number of files in one run. 20 distinct PDFs completed 3/3 runs, responsive.
     MAX_FILE_COUNT: 20,

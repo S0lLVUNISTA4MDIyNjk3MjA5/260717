@@ -144,7 +144,7 @@
             </select>
           </div>
           <div class="field">
-            <label for="f-page">表示件数</label>
+            <label for="f-page">候補 表示件数</label>
             <select id="f-page"><option>50</option><option>100</option><option>200</option></select>
           </div>
         </div>
@@ -180,7 +180,10 @@
           </table>
           <p id="empty" class="empty" hidden>該当する候補がありません。</p>
         </div>
-        <div class="pager"><span id="pager-info"></span></div>
+        <div class="pager">
+          <span id="pager-info"></span>
+          <nav id="candidate-pager" class="page-nav" aria-label="候補ページ送り"></nav>
+        </div>
       </section>
 
       <!-- Alias タブ -->
@@ -197,7 +200,13 @@
           </table>
           <p id="alias-empty" class="empty" hidden>alias 候補はありません。</p>
         </div>
-        <div class="pager"><span id="alias-pager"></span></div>
+        <div class="pager">
+          <div class="field inline">
+            <label for="f-alias-page">Alias 表示件数</label>
+            <select id="f-alias-page"><option>50</option><option>100</option><option>200</option></select>
+          </div>
+          <nav id="alias-pager" class="page-nav" aria-label="Aliasページ送り"></nav>
+        </div>
       </section>
 
       <!-- Conflict タブ -->
@@ -205,6 +214,13 @@
         <p class="panel-note">同じ alias が複数の canonical を指しています。<strong>自動解決は行いません。</strong>件数に関わらず全件確認してください。</p>
         <div id="conflict-list" class="conflict-list"></div>
         <p id="conflict-empty" class="empty" hidden>alias conflict はありません。</p>
+        <div class="pager">
+          <div class="field inline">
+            <label for="f-conflict-page">Conflict 表示件数</label>
+            <select id="f-conflict-page"><option>50</option><option>100</option><option>200</option></select>
+          </div>
+          <nav id="conflict-pager" class="page-nav" aria-label="Conflictページ送り"></nav>
+        </div>
       </section>
     </section>
   </div>
@@ -261,6 +277,7 @@
 <script src="error_messages.js"></script>
 <script src="limits.js"></script>
 <script src="dom.js"></script>
+<script src="pagination.js"></script>
 <script src="review_state.js"></script>
 <script src="evidence_index.js"></script>
 <script src="input_selection.js"></script>

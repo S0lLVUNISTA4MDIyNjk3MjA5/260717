@@ -21,6 +21,7 @@
     TOO_MANY_FILES: '選択できるファイル数の上限を超えています。読み込みは行っていません。',
     PDF_READ_FAILED: 'PDFを解析できませんでした。テキストを含むPDFか確認してください。',
     PDF_ENCRYPTED: 'PDFが暗号化されているか、パスワードが必要です。',
+    PDF_LIMIT_EXCEEDED: 'PDFの規模が解析の安全上限を超えています。ページ数の少ない資料に分割してください。',
     EXCEL_READ_FAILED: 'Excelを解析できませんでした。ファイル形式を確認してください。',
     EXCEL_NO_USABLE_SHEET: '表示可能かつ空でないシートがないExcelが含まれています。',
     DUPLICATE_SOURCE_DOCUMENT: '同一内容の入力ファイルが重複しています。重複を除いてから再実行してください。',

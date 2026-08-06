@@ -34,7 +34,14 @@
     dirty: false,
     tab: 'candidates',
     selectedRows: new Set(),
-    view: { query: '', decision: 'ALL', source: 'ALL', rule: 'ALL', flag: 'ALL', sort: 'keyword', pageSize: 50 },
+    // Pages are 1-origin (see pagination.js). Alias and conflict keep their own page and page
+    // size so neither is bound to how the candidate table happens to be configured.
+    view: {
+      query: '', decision: 'ALL', source: 'ALL', rule: 'ALL', flag: 'ALL', sort: 'keyword',
+      pageSize: 50, candidatePage: 1,
+      aliasPage: 1, aliasPageSize: 50,
+      conflictPage: 1, conflictPageSize: 50,
+    },
     pendingConfirm: null,
   };
 
@@ -74,7 +81,9 @@
       row.append(Dom.el('span', 'size', Limits.formatBytes(item.size)));
       const remove = Dom.el('button', 'btn sm ghost', '削除');
       remove.type = 'button';
+      remove.disabled = app.running;
       remove.addEventListener('click', () => {
+        if (selectionLocked()) return;
         InputSelection.removeAt(app.selection, item.ordinal);
         renderSelection();
       });
@@ -90,17 +99,37 @@
       : `${count} 件 / 合計 ${Limits.formatBytes(check.totalBytes)}`;
     $('run-button').disabled = app.running || count === 0;
     $('clear-button').disabled = app.running || count === 0;
+    $('sample-button').disabled = app.running;
+    $('pdf-input').disabled = app.running;
+    $('excel-input').disabled = app.running;
+    $('pdf-picker').classList.toggle('is-locked', app.running);
+    $('excel-picker').classList.toggle('is-locked', app.running);
     updateInputChangedNotice();
   }
 
+  /* The displayed result belongs to the run snapshot. It is stale as soon as the selection has
+   * moved on, and revision catches that even when the metadata string is identical - a file
+   * swapped for different content with the same name and size bumps the revision but not the
+   * signature. */
   function updateInputChangedNotice() {
     const notice = $('input-changed');
     if (!app.session) { notice.hidden = true; return; }
-    const changed = InputSelection.signature(app.selection) !== app.session.inputSignature;
+    const changed = app.selection.revision !== app.session.inputRevision
+      || InputSelection.signature(app.selection) !== app.session.inputSignature;
     notice.hidden = !changed;
   }
 
+  /* Selection is frozen for the duration of a run. The controls are disabled in the DOM, and
+   * this guard rejects the change again at the handler, so a programmatic event cannot slip a
+   * mutation past a disabled attribute. */
+  function selectionLocked() {
+    if (!app.running) return false;
+    toast('解析中は入力を変更できません。');
+    return true;
+  }
+
   function addFiles(fileList) {
+    if (selectionLocked()) return;
     const result = InputSelection.addFiles(app.selection, fileList);
     if (result.rejectedUnsupported > 0) {
       setStatus(Errors.messageFor('UNSUPPORTED_EXTENSION') + `（${result.rejectedUnsupported} 件）`, 'error');
@@ -123,6 +152,10 @@
       return;
     }
 
+    // Snapshot the inputs before anything async happens. The run consumes the snapshot, so a
+    // selection change mid-flight can never swap what is actually being analysed.
+    const snapshot = InputSelection.snapshot(app.selection);
+
     app.running = true;
     renderSelection();
     setStatus('ブラウザ内で解析しています。画面を閉じずにお待ちください…', 'running');
@@ -132,7 +165,7 @@
     const startedAt = (globalThis.performance || Date).now();
     let pending = null;
     try {
-      pending = await Ingest.run(InputSelection.toIngestSelection(app.selection));
+      pending = await Ingest.run(snapshot.runSelection.map(i => ({ kind: i.kind, file: i.file })));
     } catch (thrown) {
       // Atomic failure: the pending work is dropped and nothing visible changes.
       pending = null;
@@ -150,7 +183,10 @@
       evidenceIndex: pending.evidenceIndex,
       reviewState: pending.reviewState,
       inputs: pending.inputs,
-      inputSignature: InputSelection.signature(app.selection),
+      // Both come from the snapshot, not from the live selection: the session must describe what
+      // was actually analysed, even if the selection moved on while the run was in flight.
+      inputSignature: snapshot.runInputSignature,
+      inputRevision: snapshot.runSelectionRevision,
       projectionUnitTotal: pending.projectionUnitTotal,
     };
     app.selectedRows = new Set();
@@ -188,6 +224,9 @@
         markDirty();
       },
       onDetail(id) { EvidencePanel.open(ctx(), id); },
+      onCandidatePage(page) { app.view.candidatePage = page; renderAll(); },
+      onAliasPage(page) { app.view.aliasPage = page; renderAll(); },
+      onConflictPage(page) { app.view.conflictPage = page; renderAll(); },
       onAliasDecision(id, decision) {
         app.session.reviewState = ReviewState.setAliasDecision(app.session.reviewState, id, decision);
         markDirty(); renderAll();
@@ -233,6 +272,10 @@
   }
 
   function renderAll() {
+    // Refresh the input controls too. Their disabled state and the stale-input notice are derived
+    // from app.running and the session revision, so re-deriving them here keeps the DOM in step
+    // with the app state no matter which path triggered the render.
+    renderSelection();
     if (!app.session) return;
     const context = ctx();
     const summary = ReviewState.summarize(app.session.reviewState, app.session.evaluation);
@@ -259,6 +302,7 @@
 
   // ---- sample loading ---------------------------------------------------------------------------
   async function loadStandardSample() {
+    if (selectionLocked()) return;
     try {
       const files = [];
       for (const spec of SAMPLE_FILES) {
@@ -310,6 +354,10 @@
   function wire() {
     $('pdf-input').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
     $('excel-input').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+    // Drag and drop is refused at the source as well, so nothing is even read while running.
+    for (const type of ['dragover', 'drop']) {
+      document.addEventListener(type, e => { if (app.running) { e.preventDefault(); e.stopPropagation(); } }, true);
+    }
 
     for (const picker of [$('pdf-picker'), $('excel-picker'), $('drop-zone')]) {
       for (const type of ['dragenter', 'dragover']) {
@@ -318,10 +366,11 @@
       for (const type of ['dragleave', 'drop']) {
         picker.addEventListener(type, e => { e.preventDefault(); picker.classList.remove('dragging'); });
       }
-      picker.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+      picker.addEventListener('drop', e => { if (selectionLocked()) return; addFiles(e.dataTransfer.files); });
     }
 
     $('clear-button').addEventListener('click', () => {
+      if (selectionLocked()) return;
       InputSelection.clear(app.selection);
       setStatus('');
       renderSelection();
@@ -329,14 +378,21 @@
     $('run-button').addEventListener('click', runAnalysis);
     $('sample-button').addEventListener('click', loadStandardSample);
 
-    $('q').addEventListener('input', e => { app.view.query = e.target.value; renderAll(); });
-    $('f-decision').addEventListener('change', e => { app.view.decision = e.target.value; renderAll(); });
-    $('f-source').addEventListener('change', e => { app.view.source = e.target.value; renderAll(); });
-    $('f-rule').addEventListener('change', e => { app.view.rule = e.target.value; renderAll(); });
-    $('f-flag').addEventListener('change', e => { app.view.flag = e.target.value; renderAll(); });
-    $('f-sort').addEventListener('change', e => { app.view.sort = e.target.value; renderAll(); });
-    $('f-page').addEventListener('change', e => { app.view.pageSize = Number(e.target.value); renderAll(); });
+    // Any change to what is being listed, or to how much fits on a page, returns to page 1.
+    // Staying on page 7 of a result set that just shrank to two pages is never what was meant.
+    const resetCandidatePage = () => { app.view.candidatePage = 1; };
+    $('q').addEventListener('input', e => { app.view.query = e.target.value; resetCandidatePage(); renderAll(); });
+    $('f-decision').addEventListener('change', e => { app.view.decision = e.target.value; resetCandidatePage(); renderAll(); });
+    $('f-source').addEventListener('change', e => { app.view.source = e.target.value; resetCandidatePage(); renderAll(); });
+    $('f-rule').addEventListener('change', e => { app.view.rule = e.target.value; resetCandidatePage(); renderAll(); });
+    $('f-flag').addEventListener('change', e => { app.view.flag = e.target.value; resetCandidatePage(); renderAll(); });
+    $('f-sort').addEventListener('change', e => { app.view.sort = e.target.value; resetCandidatePage(); renderAll(); });
+    $('f-page').addEventListener('change', e => { app.view.pageSize = Number(e.target.value); resetCandidatePage(); renderAll(); });
+    $('f-alias-page').addEventListener('change', e => { app.view.aliasPageSize = Number(e.target.value); app.view.aliasPage = 1; renderAll(); });
+    $('f-conflict-page').addEventListener('change', e => { app.view.conflictPageSize = Number(e.target.value); app.view.conflictPage = 1; renderAll(); });
 
+    // "select all shown" deliberately covers the current page only. Selections made on other
+    // pages are kept, and both counts are shown so a bulk action is never a surprise.
     $('select-all').addEventListener('change', e => {
       if (!app.session) return;
       const { page } = TableView.selectRows(app.session.evaluation, app.session.evidenceIndex, app.session.reviewState, app.view);
@@ -351,7 +407,8 @@
         const decision = button.dataset.bulk;
         if (app.selectedRows.size === 0) { toast('先に対象行を選択してください。'); return; }
         if (decision === 'ACCEPT') {
-          askConfirm(`選択中の ${app.selectedRows.size} 件をまとめて ACCEPT にします。辞書への自動登録は行われませんが、判定は上書きされます。よろしいですか？`,
+          askConfirm(`全ページ合計で選択中の ${app.selectedRows.size} 件をまとめて ACCEPT にします`
+            + `（表示中のページだけではありません）。辞書への自動登録は行われませんが、判定は上書きされます。よろしいですか？`,
             () => applyBulk('ACCEPT'));
         } else {
           applyBulk(decision);
