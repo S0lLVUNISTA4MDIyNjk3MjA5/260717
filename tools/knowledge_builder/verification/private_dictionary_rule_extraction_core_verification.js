@@ -136,6 +136,25 @@ async function buildExcelAdapterResult(opts) {
 
 function cell(header, raw, display) { return { header, raw, display: display === undefined ? String(raw) : display }; }
 
+// E1-R2 F-02: builds a PDF adapter result containing `conflictCount` independent alias
+// conflicts. Each conflict is a pair of paragraphs defining the SAME alias ("CA<i>") for two
+// DIFFERENT canonicals ("Controller A<i>" / "Controller B<i>"). Paragraphs are chunked into
+// sections so no single parent exceeds LIMITS.MAX_CHILDREN_PER_PARENT (2000).
+async function buildConflictFixture(fileName, conflictCount) {
+  const PARAS_PER_SECTION = 400;
+  const sections = [];
+  let p = 0;
+  for (let i = 0; i < conflictCount; i++) {
+    for (const side of ['A', 'B']) {
+      const secIndex = Math.floor(p / PARAS_PER_SECTION);
+      if (!sections[secIndex]) sections[secIndex] = { index: secIndex, page: 1, sectionId: `sec-${secIndex}`, title: `Definitions ${secIndex}`, paragraphs: [] };
+      sections[secIndex].paragraphs.push({ index: p, blockId: `blk-${p}`, text: `Controller ${side}${i} (hereinafter "CA${i}")` });
+      p++;
+    }
+  }
+  return buildPdfAdapterResult({ fileName, sections });
+}
+
 // ================================================================================================
 async function run() {
 
@@ -360,6 +379,153 @@ assert(evaluationA.alias_candidates.some(c => c.rule_ids.indexOf('ALIAS_EXPLICIT
   const ev = await Core.extractLocalDictionaryCandidates([proj]);
   const c = ev.candidates.find(c => c.canonical_term === '共通部品');
   assert(!!c && c.rule_ids.indexOf('TERM_REPEATED_VALUE') !== -1, 'Fix 2 regression: genuine 2-distinct-parent repeated VALUE still qualifies as a candidate');
+}
+
+// ---- E1-R2 F-01: English defined-as with a bounded multi-word canonical ---------------------------
+
+{
+  // Before F-01 the English pattern forbade any space in the canonical, so it could not match
+  // 'Sample Controller (hereinafter "SC")' at all and produced no alias whatsoever.
+  const pdfEn = await buildPdfAdapterResult({
+    fileName: 'synth_en_alias.pdf', sections: [{ index: 0, page: 1, sectionId: 'sec-0', title: 'Definitions', paragraphs: [
+      { index: 0, blockId: 'blk-0-0', text: 'Sample Controller (hereinafter "SC") is a fictitious placeholder component.' }
+    ] }]
+  });
+  const proj = await Core.buildExtractionInputProjectionFromPdfAdapterResult(pdfEn);
+  const ev = await Core.extractLocalDictionaryCandidates([proj]);
+  const aliases = ev.alias_candidates.filter(a => a.alias_term === 'SC');
+  assert(aliases.length === 1, 'F-01: exactly one alias candidate is produced for "SC"');
+  assert(aliases[0].rule_ids.length === 1 && aliases[0].rule_ids[0] === 'ALIAS_EXPLICIT_DEFINED_AS', 'F-01: the "SC" alias comes only from ALIAS_EXPLICIT_DEFINED_AS');
+  const canonical = ev.candidates.find(c => c.candidate_id === aliases[0].canonical_candidate_id);
+  assert(!!canonical && canonical.canonical_term === 'Sample Controller', 'F-01: canonical is the full multi-word phrase "Sample Controller"');
+  assert(ev.conflicts.length === 0, 'F-01: a single English defined-as alias produces no conflict');
+  assert(!ev.alias_candidates.some(a => /hereinafter/i.test(a.alias_term)), 'F-01: generic PARENTHETICAL never registers a "hereinafter ..." alias (no duplicate)');
+  assert(!ev.candidates.some(c => /hereinafter/i.test(c.canonical_term)), 'F-01: no candidate term contains the defined-as marker text');
+}
+
+{
+  // Same sentence written with Unicode curly quotes must behave identically.
+  const pdfEnCurly = await buildPdfAdapterResult({
+    fileName: 'synth_en_curly.pdf', sections: [{ index: 0, page: 1, sectionId: 'sec-0', title: 'Definitions', paragraphs: [
+      { index: 0, blockId: 'blk-0-0', text: 'Sample Controller (hereinafter “SC”) is a fictitious placeholder component.' }
+    ] }]
+  });
+  const proj = await Core.buildExtractionInputProjectionFromPdfAdapterResult(pdfEnCurly);
+  const ev = await Core.extractLocalDictionaryCandidates([proj]);
+  const aliases = ev.alias_candidates.filter(a => a.alias_term === 'SC');
+  assert(aliases.length === 1, 'F-01: Unicode-quoted English defined-as yields exactly one "SC" alias candidate');
+  const canonical = ev.candidates.find(c => c.candidate_id === aliases[0].canonical_candidate_id);
+  assert(!!canonical && canonical.canonical_term === 'Sample Controller', 'F-01: Unicode-quoted form resolves to the same multi-word canonical');
+  assert(!ev.alias_candidates.some(a => /hereinafter/i.test(a.alias_term)), 'F-01: Unicode-quoted form produces no PARENTHETICAL duplicate either');
+}
+
+{
+  // Strong sentence separators bound the canonical: the phrase must never reach back across the
+  // preceding full stop and swallow the whole previous sentence.
+  const pdfEnSentence = await buildPdfAdapterResult({
+    fileName: 'synth_en_sentence.pdf', sections: [{ index: 0, page: 1, sectionId: 'sec-0', title: 'Definitions', paragraphs: [
+      { index: 0, blockId: 'blk-0-0', text: 'The unit was bench tested. Sample Controller (hereinafter "SC") follows.' }
+    ] }]
+  });
+  const proj = await Core.buildExtractionInputProjectionFromPdfAdapterResult(pdfEnSentence);
+  const ev = await Core.extractLocalDictionaryCandidates([proj]);
+  const a = ev.alias_candidates.find(x => x.alias_term === 'SC');
+  assert(!!a, 'F-01: the alias is still found when a sentence precedes the definition');
+  const canonical = ev.candidates.find(c => c.candidate_id === a.canonical_candidate_id);
+  assert(!!canonical && canonical.canonical_term === 'Sample Controller', 'F-01: canonical stops at the sentence boundary, never absorbing the preceding sentence');
+}
+
+{
+  // Self-canonical English alias must still be rejected, exactly as the Japanese rule does.
+  const pdfEnSelf = await buildPdfAdapterResult({
+    fileName: 'synth_en_self.pdf', sections: [{ index: 0, page: 1, sectionId: 'sec-0', title: 'Definitions', paragraphs: [
+      { index: 0, blockId: 'blk-0-0', text: 'SC (hereinafter "SC") is a redundant definition.' }
+    ] }]
+  });
+  const proj = await Core.buildExtractionInputProjectionFromPdfAdapterResult(pdfEnSelf);
+  const ev = await Core.extractLocalDictionaryCandidates([proj]);
+  assert(!ev.alias_candidates.some(x => x.alias_term === 'SC'), 'F-01: self-canonical English alias (canonical === alias) is still rejected');
+}
+
+{
+  // Permanent English conflict fixture from the E1-R2 instruction.
+  const pdfEnConflict = await buildPdfAdapterResult({
+    fileName: 'synth_en_conflict.pdf', sections: [{ index: 0, page: 1, sectionId: 'sec-0', title: 'Definitions', paragraphs: [
+      { index: 0, blockId: 'blk-0-0', text: 'Controller A (hereinafter "CA")' },
+      { index: 1, blockId: 'blk-0-1', text: 'Controller B (hereinafter "CA")' }
+    ] }]
+  });
+  const proj = await Core.buildExtractionInputProjectionFromPdfAdapterResult(pdfEnConflict);
+  const ev = await Core.extractLocalDictionaryCandidates([proj]);
+  assert(ev.conflicts.length === 1, 'F-01: exactly one English alias conflict (CA)');
+  assert(ev.conflicts[0].alias_display === 'CA', 'F-01: the English conflict is keyed on "CA"');
+  assert(ev.conflicts[0].conflicting_candidate_ids.length === 2, 'F-01: the CA conflict references exactly 2 candidate IDs');
+  const ca = ev.candidates.find(c => c.canonical_term === 'Controller A');
+  const cb = ev.candidates.find(c => c.canonical_term === 'Controller B');
+  assert(!!ca && !!cb, 'F-01: both multi-word English canonicals became candidates');
+  assert(ev.conflicts[0].conflicting_candidate_ids.indexOf(ca.candidate_id) !== -1 && ev.conflicts[0].conflicting_candidate_ids.indexOf(cb.candidate_id) !== -1, 'F-01: the conflict references both English canonical candidate IDs');
+  assert(ca.metrics.alias_conflict_count === 1 && cb.metrics.alias_conflict_count === 1, 'F-01: alias_conflict_count is exactly 1 on both English conflicting candidates');
+  assert(!ev.alias_candidates.some(a => a.alias_term === 'CA'), 'F-01: a conflicted English alias is never auto-resolved into an alias candidate');
+  assert(!ev.alias_candidates.some(a => /hereinafter/i.test(a.alias_term)) && !ev.conflicts.some(c => /hereinafter/i.test(c.alias_display)), 'F-01: \'hereinafter "CA"\' is never generated as an alias candidate or a separate conflict');
+}
+
+// ---- E1-R2 F-02: alias conflict resolution uses an O(1) Map, not a linear candidate scan ----------
+
+{
+  const coreSrcNoComments = fs.readFileSync(CORE_PATH, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  assert(!/candidates\s*\.\s*find\s*\(/.test(coreSrcNoComments), 'F-02: core performs no Array.prototype.find() over candidates (comments excluded)');
+  assert(/candidateById\s*\.\s*set\s*\(/.test(coreSrcNoComments), 'F-02: candidateById Map is built alongside the candidates array');
+  assert(/candidateById\s*\.\s*get\s*\(/.test(coreSrcNoComments), 'F-02: candidateById Map is what the conflict loop reads');
+}
+
+{
+  // Many independent conflicts must each land on their OWN pair of candidates - the regression
+  // guard that the Map lookup did not cross-wire counts when it replaced the linear scan.
+  const res = await buildConflictFixture('synth_multi_conflict.pdf', 25);
+  const proj = await Core.buildExtractionInputProjectionFromPdfAdapterResult(res);
+  const ev = await Core.extractLocalDictionaryCandidates([proj]);
+  assert(ev.conflicts.length === 25, 'F-02: 25 distinct alias conflicts produce exactly 25 conflict records');
+  const byId = new Map(ev.candidates.map(c => [c.candidate_id, c]));
+  const conflicted = new Set();
+  let allTwo = true;
+  for (const cf of ev.conflicts) {
+    if (cf.conflicting_candidate_ids.length !== 2) allTwo = false;
+    for (const id of cf.conflicting_candidate_ids) conflicted.add(id);
+  }
+  assert(allTwo, 'F-02: every one of the 25 conflicts references exactly 2 candidate IDs');
+  assert(ev.candidates.every(c => c.metrics.alias_conflict_count === (conflicted.has(c.candidate_id) ? 1 : 0)), 'F-02: alias_conflict_count is 1 on exactly the conflicting candidates and 0 on every other candidate');
+  let pairedCorrectly = true;
+  for (const cf of ev.conflicts) {
+    const terms = cf.conflicting_candidate_ids.map(id => byId.get(id) && byId.get(id).canonical_term).sort();
+    const n = String(cf.alias_display).replace(/^CA/, '');
+    if (terms.join('|') !== `Controller A${n}|Controller B${n}`) pairedCorrectly = false;
+  }
+  assert(pairedCorrectly, 'F-02: each conflict maps to its own canonical pair, never another conflict\'s candidates');
+}
+
+{
+  // Bulk conflict fixture. This asserts RESULT CORRECTNESS at a scale where the previous
+  // per-conflict linear candidate scan dominated runtime; absolute wall time is deliberately NOT
+  // a pass condition here (it is environment-dependent and is measured/reported separately).
+  const res = await buildConflictFixture('synth_bulk_conflict.pdf', 500);
+  const proj = await Core.buildExtractionInputProjectionFromPdfAdapterResult(res);
+  const ev1 = await Core.extractLocalDictionaryCandidates([proj]);
+  assert(ev1.summary.conflict_count === 500, 'F-02: 500-conflict fixture yields exactly 500 conflicts');
+  assert(ev1.conflicts.every(c => c.conflicting_candidate_ids.length === 2), 'F-02: all 500 conflicts reference exactly 2 candidates each');
+  assert(ev1.summary.alias_candidate_count === 0, 'F-02: every alias in the bulk fixture is conflicted, so none is auto-resolved into an alias candidate');
+  const conflicted = new Set();
+  for (const cf of ev1.conflicts) for (const id of cf.conflicting_candidate_ids) conflicted.add(id);
+  assert(conflicted.size === 1000, 'F-02: the 500 conflicts touch exactly 1000 distinct candidates');
+  assert(ev1.candidates.filter(c => c.metrics.alias_conflict_count === 1).length === 1000, 'F-02: exactly 1000 candidates carry alias_conflict_count === 1');
+
+  const ev2 = await Core.extractLocalDictionaryCandidates([proj]);
+  assert(Core.serializeCandidateEvaluationCanonical(ev1) === Core.serializeCandidateEvaluationCanonical(ev2), 'F-02: repeated extraction over the same projection is byte-identical (deterministic)');
+  const ids = ev1.candidates.map(c => c.candidate_id);
+  assert(ids.every((v, i) => i === 0 || ids[i - 1] <= v), 'F-02: candidate order remains canonical (ascending candidate_id)');
+  const cids = ev1.conflicts.map(c => c.conflict_id);
+  assert(cids.every((v, i) => i === 0 || cids[i - 1] <= v), 'F-02: conflict order remains canonical (ascending conflict_id)');
+  const aids = ev1.alias_candidates.map(a => a.alias_candidate_id);
+  assert(aids.every((v, i) => i === 0 || aids[i - 1] <= v), 'F-02: alias candidate order remains canonical (ascending alias_candidate_id)');
 }
 
 // ---- E1-R1 Fix 1: extractLocalDictionaryCandidates() input boundary --------------------------------

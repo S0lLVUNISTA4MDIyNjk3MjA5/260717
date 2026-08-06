@@ -766,13 +766,41 @@
   // the parenthesis (bounded, "immediate syntactic relation only" per the contract's rule).
   const PARENTHETICAL_ALIAS_RE = /([^\s、。,.!?！?()（）]{1,64})[\s　]*[（(]([^()（）]{1,32})[)）]/g;
   const DEFINED_AS_JA_RE = /([^\s()（）]{1,64})[（(]\s*以下\s*[「"“]([^」"”]{1,32})[」"”]\s*という\s*[)）]/g;
-  const DEFINED_AS_EN_RE = /([^\s(]{1,64})\(\s*hereinafter\s+["“]([^"”]{1,32})["”]\s*\)/gi;
+  // E1-R2 F-01: the English defined-as canonical is a BOUNDED multi-word phrase sitting
+  // immediately before the parenthesis (the previous single-token pattern could not match
+  // 'Sample Controller (hereinafter "SC")' at all, because it forbade any space). Words are
+  // joined by single ASCII spaces; a word may never contain "(", ")", a quote character, a
+  // newline, or a strong sentence separator (. , ; : ! ? and the fullwidth/Japanese
+  // equivalents), and the phrase must begin at a whitespace/separator boundary or at the start
+  // of the unit. Together those two constraints are what stop a match from reaching back across
+  // a sentence break and swallowing the whole preceding sentence, and they keep the phrase
+  // word-aligned instead of starting mid-word. At most 8 words; the assembled canonical is then
+  // clamped to MAX_ALIAS_CANONICAL_LENGTH by boundEnglishCanonicalPhrase(). This handles the
+  // explicit 'X (hereinafter "Y")' syntax only - no fuzzy matching, no translation, no semantic
+  // inference, and no general English parsing.
+  const EN_DEFINED_AS_WORD = '[^\\s()（）"“”.,;:!?。、！？；：\\n]{1,32}';
+  const DEFINED_AS_EN_RE = new RegExp(
+    '(?:^|[\\s.,;:!?。、！？；：])(' + EN_DEFINED_AS_WORD + '(?:[ ]' + EN_DEFINED_AS_WORD + '){0,7})' +
+    '[ ]{0,3}\\(\\s*hereinafter\\s+["“]([^"”]{1,32})["”]\\s*\\)',
+    'gi'
+  );
   // E1-R1 Fix 3: content shaped like an explicit defined-as parenthetical ("...以下「X」という"
   // or "...hereinafter "X"") is handled exclusively by ALIAS_EXPLICIT_DEFINED_AS; the generic
   // ALIAS_EXPLICIT_PARENTHETICAL rule must not also register its own (broader, noisier) match
   // for the same span.
   const DEFINED_AS_CONTENT_RE = /^\s*以下\s*[「"“][^」"”]{1,32}[」"”]\s*という\s*$/;
   const DEFINED_AS_CONTENT_EN_RE = /^\s*hereinafter\s+["“][^"”]{1,32}["”]\s*$/i;
+
+  // E1-R2 F-01: clamp an English defined-as canonical phrase to MAX_ALIAS_CANONICAL_LENGTH by
+  // dropping whole leading words, so an over-long phrase yields the bounded tail rather than
+  // being cut mid-word or discarded outright. Returns '' when even the final word cannot fit,
+  // which routes the match into the caller's existing rejection path.
+  function boundEnglishCanonicalPhrase(text) {
+    const words = String(text == null ? '' : text).trim().split(' ').filter(w => w.length > 0);
+    while (words.length > 1 && words.join(' ').length > MAX_ALIAS_CANONICAL_LENGTH) words.shift();
+    const bounded = words.join(' ');
+    return bounded.length <= MAX_ALIAS_CANONICAL_LENGTH ? bounded : '';
+  }
 
   // extractLocalDictionaryCandidates() input boundary (E1-R1 Fix 1): the array/single-value
   // container itself is shape-checked before any property access, and every element is run
@@ -924,7 +952,10 @@
           re.lastIndex = 0;
           let dm;
           while ((dm = re.exec(unit.normalized_text)) !== null) {
-            const canonicalText = (dm[1] || '').trim();
+            // The English pattern may capture a multi-word phrase (F-01), so it is clamped to
+            // MAX_ALIAS_CANONICAL_LENGTH on whole-word boundaries; the Japanese pattern's
+            // canonical is a single bounded token and only needs trimming.
+            const canonicalText = re === DEFINED_AS_EN_RE ? boundEnglishCanonicalPhrase(dm[1]) : (dm[1] || '').trim();
             const aliasText = (dm[2] || '').trim();
             if (!canonicalText || !aliasText || canonicalText.length > MAX_ALIAS_CANONICAL_LENGTH || aliasText.length > MAX_ALIAS_TERM_LENGTH) {
               rejectedCount++; continue;
@@ -979,12 +1010,19 @@
 
     const candidates = [];
     const candidateIdByComparisonKey = new Map();
+    // E1-R2 F-02: candidateById is built here, as each candidate object is created, so the alias
+    // conflict loop below can reach a candidate in O(1). It previously used
+    // candidates.find(x => x.candidate_id === cid), which made conflict handling O(conflicts x
+    // candidates) and dominated runtime on conflict-heavy inputs. The Map holds the same object
+    // references the candidates array holds, so the later canonical sort of `candidates` does
+    // not invalidate it and no ordering changes.
+    const candidateById = new Map();
     for (const key of termComparisonKeys) {
       const bucket = termMap.get(key);
       const candidateId = 'pdc-' + await safeId128(idHashUtils, CANDIDATE_ID_NAMESPACE, [key]);
       candidateIdByComparisonKey.set(key, candidateId);
       for (const ruleId of bucket.ruleIds) countsByRule[ruleId] = (countsByRule[ruleId] || 0) + 1;
-      candidates.push({
+      const candidate = {
         candidate_id: candidateId,
         canonical_term: bucket.canonical,
         scope: 'SESSION',
@@ -993,7 +1031,9 @@
         evidence_refs: bucket.evidence.slice(),
         metrics: { exposure_count: bucket.exposureKeys.size, document_support_count: bucket.documentIds.size, alias_conflict_count: 0 },
         unmeasured_metrics: ['match_opportunity_count', 'candidate_gain', 'ranking_gain', 'candidate_noise_increase']
-      });
+      };
+      candidates.push(candidate);
+      candidateById.set(candidateId, candidate);
     }
 
     const aliasCandidates = [];
@@ -1011,7 +1051,7 @@
           const cid = candidateIdByComparisonKey.get(canonicalKey);
           if (cid) {
             canonicalCandidateIds.push(cid);
-            const c = candidates.find(x => x.candidate_id === cid);
+            const c = candidateById.get(cid); // F-02: O(1), never a linear scan of candidates
             if (c) c.metrics.alias_conflict_count += 1;
           }
           for (const r of entry.ruleIds) ruleIds.add(r);
