@@ -254,13 +254,66 @@ UNREVIEWED  ACCEPT  REJECT  UNCERTAIN
 
 ## S6. private / shareable 境界
 
-| 区分 | 含めてよい | 含めてはいけない |
-|---|---|---|
-| **private** (`private_dictionary_candidate_review.xlsx`, advanced JSON/MD) | canonical term、alias term、evidence excerpt、file 名、sheet 名、reviewer note、全 ID | — |
-| **shareable** (`shareable_review_summary.xlsx`) | schema version、source fingerprints、各種件数、reason code 別件数、rule 別件数、review 進捗、tool build 情報 | canonical term、alias term、file 名、sheet 名、PDF 本文、evidence excerpt、reviewer note、private path、selected canonical の表示名 |
+### S6.1 区分
 
-shareable 側に `selected_candidate_id` を出す場合も、**表示名を伴わない ID のみ**とする。
-共有前に人間確認を促す UI を必須とする。
+| 区分 | 内容 |
+|---|---|
+| **private** (`private_dictionary_candidate_review.xlsx`, advanced JSON/MD) | canonical term、alias term、evidence excerpt、file 名、sheet 名、reviewer note、全 ID を含んでよい |
+| **shareable** (`shareable_review_summary.xlsx`) | **集計値のみ**。S6.2 の allowlist に列挙した項目だけを含む |
+
+### S6.2 shareable 許可項目（allowlist / 完全列挙）
+
+shareable 成果物へ含めてよいのは次だけである。ここに無いものは含めない。
+
+```text
+schema version
+source fingerprints
+candidate 総数
+alias 総数
+conflict 総数
+decision 別件数
+reason code 別件数
+rule 別件数
+review 進捗
+tool build 情報
+```
+
+### S6.3 shareable 禁止項目（denylist）
+
+**candidate 系 ID を含む一切の識別子と、あらゆる本文・名称を含めてはならない。**
+
+```text
+candidate_id
+alias_candidate_id
+conflict_id
+selected_candidate_id
+source_unit_id
+provenance_ref_id
+canonical term
+alias term
+file 名
+sheet 名
+PDF 本文
+evidence excerpt
+reviewer note
+private path
+```
+
+`source_fingerprints` は例外的に許可する。これは入力バイト列に対する不可逆ハッシュであり、
+候補や本文を復元できないためである（`source_document_id` と `document_fingerprint` のみ）。
+
+### S6.4 conflict の扱い
+
+conflict は **件数と解決状態の分布のみ**を共有する。
+どの alias がどの canonical と競合したか、どちらを選んだかは shareable へ出さない。
+`selected_candidate_id` は ID であっても共有不可である
+（Extraction Result を持つ相手には candidate ID から本文が逆引きできるため、
+「表示名を伴わなければ共有可」という緩和は成立しない）。
+
+### S6.5 共有前確認
+
+shareable 成果物の生成時は、内容のプレビューと人間の明示的な確認を必須とする。
+確認画面にも「用語本文・ID は含まれていない」ことを明示する。
 
 ---
 
@@ -380,21 +433,140 @@ alias と conflict の進捗は**別に表示**する。
 | `Source Documents` | source_document_id、document_fingerprint、source_kind、file 名 |
 | `Build Information` | review_schema_version、extraction_schema_version、tool build 情報、生成時刻 |
 
-### S13.2 再開時の検証
+### S13.2 再開時の検証（完全一致のみ許可 / all-or-nothing）
 
-読み込み時に以下を検証し、**一致しないデータを黙って結合しない**。
+P2-A3 0.1 では、**次のすべてが完全一致した場合にのみ** review 再開を許可する。
 
 ```text
-review schema version / extraction schema version / source fingerprints
-candidate ID / alias candidate ID / conflict ID / scope / status
+review_schema_version                    完全一致
+extraction_schema_version                完全一致
+source_fingerprints                      完全一致（集合として）
+candidate ID 集合                         完全一致
+alias candidate ID 集合                   完全一致
+conflict ID 集合                          完全一致
+全 candidate / alias の scope             すべて SESSION
+全 candidate / alias の status            すべて PROBATION
 ```
 
-不一致時は差分を提示して、利用者に「中止」または「明示的な部分適用」を選ばせる。
-自動 merge は行わない。
+**順序差のみ**は不一致として扱わない。比較は canonical sort（ID 昇順、fingerprint は
+`source_document_id` 昇順）を適用したうえで行う。
+
+#### S13.2.1 拒否条件
+
+次のいずれかに該当した場合、**Workbook 全体の import を拒否**する。1 件でも該当すれば全体を拒否し、
+一部だけを取り込むことはしない。
+
+```text
+欠落 ID                                   期待される ID が Workbook に無い
+余分な ID                                 Extraction Result に存在しない ID がある
+fingerprint 差異                          source_fingerprints が一致しない
+schema 差異                               review / extraction の schema version が一致しない
+scope 差異                                SESSION 以外が含まれる
+status 差異                               PROBATION 以外が含まれる
+duplicate ID                             同一 ID が複数行に現れる
+malformed cell                           必須セルが空・型不正・長さ超過
+unknown enum                             decision / reason_code / resolution が既定値以外
+invalid selected candidate               selected_candidate_id が candidate 集合に存在しない
+conflict に属さない candidate の選択        selected_candidate_id がその conflict の
+                                          conflicting_candidate_ids に含まれない
+```
+
+#### S13.2.2 拒否時の要件（atomic rejection）
+
+| 要件 | 内容 |
+|---|---|
+| Extraction Result | **変更しない**（元々 immutable） |
+| Review State | **変更しない**。読み込み前の状態をそのまま維持する |
+| 部分適用 | **行わない**。1 件の decision も適用しない |
+| error 表示 | private term、alias term、file 名、sheet 名、evidence excerpt、note、path を**表示しない** |
+| 表示してよいもの | content-free な不一致分類（S13.2.1 の分類名）と**件数**のみ |
+
+実装上は、検証を完全に通過してから Review State へ一括適用する
+（検証しながら適用する方式は、途中失敗時に部分適用が残るため禁止）。
+
+#### S13.2.3 表示例（content-free）
+
+```text
+このファイルは現在の抽出結果と一致しないため、読み込みませんでした。
+  不一致分類: 欠落 ID (3件) / 余分な ID (1件)
+  現在のレビュー内容は変更されていません。
+```
+
+**部分適用は P2-A3 0.1 の out-of-scope**（S23）。
 
 ### S13.3 shareable workbook
 
-`shareable_review_summary.xlsx`。S6 の shareable 列のみ。生成前に人間確認 dialog を出す。
+`shareable_review_summary.xlsx`。**集計のみ**を含む content-free 成果物。
+S6.2 の allowlist に無い項目は含めない。生成前に人間確認 dialog を出す。
+
+sheet と column を次に確定列挙する。**この表に無い column を追加してはならない。**
+
+#### sheet `Summary`
+
+| column | 内容 | 例 |
+|---|---|---|
+| `metric` | 集計項目名（固定文字列） | `candidate_total` |
+| `value` | 数値 | `24` |
+
+`metric` の取り得る値（固定集合）：
+
+```text
+candidate_total          candidate_reviewed       review_progress_percent
+alias_total              alias_reviewed           alias_progress_percent
+conflict_total           conflict_resolved        conflict_progress_percent
+```
+
+#### sheet `Decisions`
+
+| column | 内容 |
+|---|---|
+| `target_kind` | `CANDIDATE` / `ALIAS` |
+| `decision` | `UNREVIEWED` / `ACCEPT` / `REJECT` / `UNCERTAIN` |
+| `count` | 件数 |
+
+#### sheet `Reason Codes`
+
+| column | 内容 |
+|---|---|
+| `target_kind` | `CANDIDATE` / `ALIAS` / `CONFLICT` |
+| `reason_code` | S5.5 の固定 enum |
+| `count` | 件数 |
+
+#### sheet `Rules`
+
+| column | 内容 |
+|---|---|
+| `rule_id` | 6 rule の固定 ID |
+| `candidate_count` | その rule が寄与した candidate 件数 |
+| `alias_count` | その rule が寄与した alias 件数 |
+
+#### sheet `Conflict Resolutions`
+
+| column | 内容 |
+|---|---|
+| `resolution` | `UNRESOLVED` / `SELECT_CANONICAL` / `REJECT_ALL` / `CONTEXT_DEPENDENT` / `UNCERTAIN` |
+| `count` | 件数 |
+
+**`selected_candidate_id` およびどの canonical が選ばれたかは出力しない**（S6.4）。
+
+#### sheet `Source Documents`
+
+| column | 内容 |
+|---|---|
+| `source_document_id` | `sd-` + 32hex |
+| `document_fingerprint` | 64hex |
+| `source_kind` | `PDF` / `EXCEL` |
+
+**file 名は含めない。**
+
+#### sheet `Build Information`
+
+| column | 内容 |
+|---|---|
+| `key` | `review_schema_version` / `extraction_schema_version` / `tool_version` / `source_commit` / `generated_at` |
+| `value` | 対応する値 |
+
+`generated_at` 以外に環境依存値（path、ホスト名、ユーザー名）を含めない。
 
 ---
 
@@ -468,28 +640,115 @@ Content-Security-Policy:
 
 - `default-src 'none'` を baseline とし、必要な directive のみ開ける（旧UIの `'self'` baseline から変更）。
 - `worker-src` は PDF.js worker のため必須（旧UIには存在しなかった）。
-- server log に URL token 以外の private 情報を出さない。
-- 起動 token を URL クエリで渡す場合、`history.replaceState` で除去しても **browser 履歴に残り得る**
-  ことを README に明記する。
+- server log に private 情報を出さない。
 - 配布 directory 内への runtime fallback を**禁止**する。tmp 確保失敗は fail-closed。
+
+### S17.1 起動 token の扱い
+
+**まず「token が必要か」を設計上再評価する。** P2-A3 の server は static asset 配信のみで、
+private 入力も評価結果も受け取らない。認証対象の API が存在しないなら、token は
+「配信しているのが自分の起動した server か」の確認以上の意味を持たない。
+
+| 構成 | token の要否 | 判断 |
+|---|---|---|
+| static-only（認証対象 API なし） | **不要** | 第一選択。token 機構自体を持たない |
+| 何らかの local API を追加した場合 | 必要 | S17.2 の fragment 方式で渡す |
+
+Checkpoint 2 で local API を追加しない限り、**token を持たない構成を既定とする**。
+
+### S17.2 token を用いる場合の受け渡し方式
+
+token を導入する場合は、URL query ではなく **URL fragment** を用いる。
+
+```text
+http://127.0.0.1:<port>/#token=<value>
+```
+
+fragment は HTTP request 行に含まれず、server log にも proxy にも送信されない
+（query 方式はリクエストごとに送信され、server log に残る）。
+
+- app 起動後、token を JS のメモリ、または **token 専用の sessionStorage キー**へ移す。
+  candidate / review data を sessionStorage へ置くことは S16 のとおり引き続き禁止。
+- 移送後ただちに `history.replaceState` で URL から fragment を除去する。
+- それでも **browser 履歴に残り得る**ことを README に明記する。
 
 ---
 
 ## S18. Resource bounds
 
+### S18.1 入力サイズ上限（Checkpoint 2 の実測で確定）
+
+**`MAX_FILE_BYTES` と `MAX_TOTAL_SELECTED_BYTES` は Checkpoint 1 では確定しない。**
+browser-memory 方式では、上限は「ファイルとして扱えるか」ではなく
+「browser のメモリ内で adapter → projection → 抽出 → 表示まで完走できるか」で決まる。
+未実測の値を対応保証として記載してはならない。
+
+| 項目 | 状態 | 決定時期 |
+|---|---|---|
+| `MAX_FILE_BYTES`（1 ファイル上限） | **未確定** | Checkpoint 2 の測定後に固定 |
+| `MAX_TOTAL_SELECTED_BYTES`（選択合計上限） | **未確定** | Checkpoint 2 の測定後に固定（`MAX_FILE_BYTES` とは別に定める） |
+| `MAX_FILE_COUNT`（ファイル数上限） | **未確定** | 同上 |
+
+> 旧記載の「1 ファイルサイズ 512 MB」は実測に基づかない値だったため撤回した。
+> 512 MB を対応保証された上限として扱わない。
+
+#### S18.1.1 上限の適用規則（値が未確定でも先に確定する挙動）
+
+- ファイル数だけでなく、**選択されたファイルの合計 byte 数**も制限する。
+- サイズ検査は **`File.arrayBuffer()` を呼ぶ前**に `File.size` で行う。
+  読み込んでから判定してはならない（読み込んだ時点でメモリを消費するため）。
+- 上限を超えたファイルは **読み込まない**（`arrayBuffer()` を呼ばない）。
+- 上限超過時に、**既存の Review State を変更しない**。抽出済みの結果も破棄しない。
+- 超過は content-free に通知する（file 名を出さず、「選択したファイルが上限を超えています」
+  と件数のみ）。
+- **上限値を未測定のまま正式配布しない。** 測定と Checkpoint 2 レビューでの確定を経てから配布する。
+
+### S18.2 確定済みの UI 側 bounds
+
 | 項目 | 上限 | 超過時 |
 |---|---|---|
-| 1 ファイルサイズ | 512 MB | 選択時に拒否 |
-| 入力ファイル数 | 50 | 選択時に拒否 |
 | DOM 描画行数 | 200 行 / page | pagination or virtualized |
 | evidence excerpt 長 | 400 文字 | 中略表示 |
 | reviewer note 長 | 2000 文字 | 入力時に制限 |
 
-P2-A2 core 側の bounds（`MAX_UNITS` 200000、`MAX_NORMALIZED_TEXT_LENGTH` 4000、
-`MAX_CHILDREN_PER_PARENT` 2000 等）は core が fail-closed で扱う。UI はそのエラー code を
-表示するだけで、独自に緩和しない。
+### S18.3 P2-A2 core 側 bounds
 
-browser メモリ上限は未実測（Checkpoint 2 以降の測定対象）。
+`MAX_UNITS` 200000、`MAX_NORMALIZED_TEXT_LENGTH` 4000、`MAX_CHILDREN_PER_PARENT` 2000、
+`MAX_COLUMNS_PER_ROW` 1000、`MAX_INPUT_UTF8_BYTES` 8388608 等は core が fail-closed で扱う。
+UI はそのエラー code を表示するだけで、**独自に緩和しない**。
+
+### S18.4 Checkpoint 2 browser-memory 測定 matrix
+
+次の全ケースを測定し、結果に安全余裕を設けたうえで Checkpoint 2 レビューで最終上限を決定する。
+
+| # | ケース |
+|---|---|
+| 1 | PDF 単体 |
+| 2 | XLSX 単体 |
+| 3 | PDF ＋ XLSX 混在 |
+| 4 | 複数 PDF |
+| 5 | 複数 XLSX |
+| 6 | 最大ファイル数近傍 |
+| 7 | 合計 byte 数近傍 |
+| 8 | adapter 上限到達 |
+| 9 | P2-A2 projection 上限到達 |
+
+各ケースで記録する測定項目：
+
+```text
+入力 bytes                     合計および最大単一ファイル
+処理時間                       ingest / extraction / 初回描画を分けて計測
+候補数                         candidate / alias / conflict
+unit 数                        projection の units.length
+browser が応答を維持したか      UI 操作が可能な状態を保ったか
+利用可能なメモリ指標            performance.memory 等、取得可能なもの（取得不可なら「取得不可」と記録）
+成功 / 安全な失敗              完走したか、fail-closed で停止したか（クラッシュは不合格）
+処理後の Review State          既存 Review State が破壊されていないこと
+```
+
+**合否の考え方**：完走できることは必須ではない。**安全に失敗すること**（クラッシュせず、
+Review State を壊さず、content-free なエラーを出して停止すること）が必須である。
+確定する上限は、安全に完走できた最大規模に余裕を掛けた値とする。
 
 ---
 
@@ -547,8 +806,37 @@ runtime binary は Checkpoint 1 の source commit へ追加しない（packaging
 | static scan | mock / UI に external URL、remote font、external fetch、localStorage、IndexedDB、Service Worker、candidate の console 出力、`innerHTML` 経由の利用者入力が無いこと |
 | 操作 | filter / sort / decision / reason / note / evidence / conflict / dashboard が動作 |
 | viewport | 1280×720 で主要操作が見える。1920×1080 で横幅を活用。narrow でも操作不能にならない |
-| privacy | shareable 成果物に private marker が現れない |
+| privacy | S22.1 の private marker 検査 |
+| resume | S22.2 の完全一致 / atomic rejection 検査 |
+| resource bounds | S18.4 の測定 matrix を実施し、上限を確定してから配布 |
 | packaging | allowlist / denylist 検査 |
+
+### S22.1 private marker 検査（shareable 境界）
+
+candidate term、alias term、reviewer note、file 名のそれぞれに一意の private marker
+（例 `PRIVATE_MARKER_P2A3_<場所>`）を仕込んだ入力でレビューを実施し、次を検査する。
+
+- 生成された **shareable object の全プロパティ値**に、いずれの marker も出現しないこと
+- 生成された **shareable Workbook の全 sheet・全 cell**（数式・コメント・ドキュメントプロパティを含む）に、
+  いずれの marker も出現しないこと
+- 併せて、shareable の全 cell 値に `pdc-` / `pda-` / `pdx-` / `psu-` / `pref-` の
+  **ID prefix パターンが出現しないこと**（S6.3 の ID 禁止を機械的に担保する）
+- `source_fingerprints` の値（`sd-` + 32hex、および 64hex）は S6.3 の例外として許可する
+
+marker が 1 件でも出現した場合、その時点で **blocking failure** とする。
+
+### S22.2 resume 検査
+
+S13.2.1 の各拒否条件について、1 条件につき最低 1 件の異常 Workbook を用意し、次を検査する。
+
+- import が拒否されること（exit / 戻り値が失敗であること）
+- Extraction Result が変更されていないこと
+- Review State が読み込み前と **完全に同一**であること（1 件の decision も適用されていないこと）
+- error 表示に private term、alias term、file 名、sheet 名、excerpt、note、path が
+  **含まれないこと**
+- 表示されるのが分類名と件数のみであること
+
+併せて、正常系（完全一致する Workbook）で resume が成功し、全 decision が復元されることを検査する。
 
 ---
 
@@ -561,3 +849,10 @@ runtime binary は Checkpoint 1 の source commit へ追加しない（packaging
 - 外部 AI / network / telemetry の追加
 - 複数利用者の同時編集・サーバ側永続化
 - Knowledge DataSet への書き込み
+- **review Workbook の部分適用（partial import）**
+  不一致 Workbook から一部の decision だけを取り込む機能は P2-A3 0.1 では提供しない。
+  S13.2 のとおり完全一致のみを許可し、不一致は全体を拒否する。
+  部分適用を導入する場合は、どの decision がどの根拠で適用されたかを追跡可能にする設計が
+  別途必要であり、後続バージョンの検討事項とする。
+- **shareable 成果物への ID 出力**
+  集計以外の粒度（candidate 単位・alias 単位・conflict 単位の行）を共有する機能は提供しない。

@@ -691,8 +691,8 @@ function init() {
   });
 
   $('#btn-save').addEventListener('click', () => toast('モックです。Checkpoint 2 以降で private_dictionary_candidate_review.xlsx を生成します。'));
-  $('#btn-resume').addEventListener('click', () => toast('モックです。保存済み Excel を読み込み、fingerprint と ID を検証してから再開します。'));
-  $('#btn-share').addEventListener('click', () => toast('モックです。用語本文を含まない shareable_review_summary.xlsx を生成します（共有前に人間確認）。'));
+  $('#btn-resume').addEventListener('click', () => toast('モックです。schema・fingerprint・ID集合・scope・status が完全一致した場合のみ再開します。不一致は全体を読み込みません。'));
+  $('#btn-share').addEventListener('click', () => toast('モックです。集計のみの shareable_review_summary.xlsx を生成します（用語本文もIDも含みません。共有前に人間確認）。'));
 
   window.addEventListener('beforeunload', e => {
     if (!review.dirty) return;
