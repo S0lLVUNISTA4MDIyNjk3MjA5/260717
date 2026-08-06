@@ -426,12 +426,56 @@ alias と conflict の進捗は**別に表示**する。
 | sheet | 内容 |
 |---|---|
 | `Summary` | review 集計、進捗、reason code 別件数、rule 別件数 |
-| `Candidates` | candidate_id、canonical_term、rule_ids、exposure、document、conflict、decision、reason_code、note |
-| `Aliases` | alias_candidate_id、alias_term、canonical_candidate_id、canonical_term、rule_ids、decision、reason_code、note |
+| `Candidates` | S13.1.1 の確定列 |
+| `Aliases` | S13.1.2 の確定列 |
 | `Alias Conflicts` | conflict_id、alias_display、conflicting_candidate_ids、resolution、selected_candidate_id、reason_code、note |
 | `Evidence Index` | source_document_id、source_unit_id、provenance_ref_id、source_kind、file 名、role、page/sheet/row/column、excerpt |
 | `Source Documents` | source_document_id、document_fingerprint、source_kind、file 名 |
 | `Build Information` | review_schema_version、extraction_schema_version、tool build 情報、生成時刻 |
+
+#### S13.1.1 sheet `Candidates` 確定列
+
+```text
+candidate_id
+canonical_term
+scope
+status
+rule_ids
+exposure_count
+document_support_count
+alias_conflict_count
+decision
+reason_code
+note
+```
+
+保存値：`scope` は常に `SESSION`、`status` は常に `PROBATION`。
+
+#### S13.1.2 sheet `Aliases` 確定列
+
+```text
+alias_candidate_id
+alias_term
+canonical_candidate_id
+canonical_term
+scope
+status
+rule_ids
+decision
+reason_code
+note
+```
+
+保存値：`scope` は常に `SESSION`、`status` は常に `PROBATION`。
+
+#### S13.1.3 scope / status 列の位置づけ
+
+`scope` / `status` は Extraction Result 由来の値であり、**照合・検証専用**である。
+
+- Workbook から読み込んだ `scope` / `status` を **Extraction Result へ適用してはならない**。
+- Review State へも書き込まない（Review State は人間の判断のみを保持する / S5.3）。
+- import 時に「Workbook 側の値」「Extraction Result 側の値」「契約上の固定値」の
+  三者が一致することを確認するためだけに用いる（S13.2）。
 
 ### S13.2 再開時の検証（完全一致のみ許可 / all-or-nothing）
 
@@ -451,6 +495,21 @@ conflict ID 集合                          完全一致
 **順序差のみ**は不一致として扱わない。比較は canonical sort（ID 昇順、fingerprint は
 `source_document_id` 昇順）を適用したうえで行う。
 
+#### S13.2.0 scope / status の照合手順
+
+Workbook 内の**各 candidate 行・各 alias 行**について、次を順に確認する。
+
+1. `scope` 列が存在する（sheet の header に含まれる）
+2. `status` 列が存在する（sheet の header に含まれる）
+3. その行の `scope === "SESSION"`（文字列として厳密一致）
+4. その行の `status === "PROBATION"`（文字列として厳密一致）
+5. 同じ ID を持つ**現在の Extraction Result 側**の要素も `scope === "SESSION"` かつ
+   `status === "PROBATION"` である
+6. Workbook 側の値と Extraction Result 側の値が**一致する**
+
+1 行でも上記のいずれかを満たさない場合、**Workbook 全体を atomic rejection** する（S13.2.2）。
+`scope` / `status` は照合専用であり、Extraction Result へ適用しない（S13.1.3）。
+
 #### S13.2.1 拒否条件
 
 次のいずれかに該当した場合、**Workbook 全体の import を拒否**する。1 件でも該当すれば全体を拒否し、
@@ -461,8 +520,15 @@ conflict ID 集合                          完全一致
 余分な ID                                 Extraction Result に存在しない ID がある
 fingerprint 差異                          source_fingerprints が一致しない
 schema 差異                               review / extraction の schema version が一致しない
+scope 列欠落                              Candidates / Aliases sheet に scope 列が無い
+status 列欠落                             Candidates / Aliases sheet に status 列が無い
+scope 空値                                scope セルが空
+status 空値                               status セルが空
+scope 型不正                              scope が文字列でない
+status 型不正                             status が文字列でない
 scope 差異                                SESSION 以外が含まれる
 status 差異                               PROBATION 以外が含まれる
+scope / status の照合不一致                Workbook 側の値が Extraction Result 側の値と一致しない
 duplicate ID                             同一 ID が複数行に現れる
 malformed cell                           必須セルが空・型不正・長さ超過
 unknown enum                             decision / reason_code / resolution が既定値以外
@@ -555,9 +621,13 @@ conflict_total           conflict_resolved        conflict_progress_percent
 |---|---|
 | `source_document_id` | `sd-` + 32hex |
 | `document_fingerprint` | 64hex |
-| `source_kind` | `PDF` / `EXCEL` |
 
-**file 名は含めない。**
+**この 2 列のみ。**`source_kind` と file 名は含めない。
+
+P2-A2 の承認済み `source_fingerprints` 構造は `source_document_id` と `document_fingerprint` の
+2 項目だけである。P2-A3 の shareable 成果物もこの境界を拡張せず、そのまま踏襲する
+（`source_kind` は入力の種別という追加情報であり、承認済み構造に含まれない）。
+`source_kind` は private 側（S5.2 の Evidence Display Index、S13.1 の private workbook）でのみ扱う。
 
 #### sheet `Build Information`
 
@@ -837,6 +907,54 @@ S13.2.1 の各拒否条件について、1 条件につき最低 1 件の異常 
 - 表示されるのが分類名と件数のみであること
 
 併せて、正常系（完全一致する Workbook）で resume が成功し、全 decision が復元されることを検査する。
+
+#### S22.2.1 scope 異常 fixture
+
+| fixture | 改変内容 |
+|---|---|
+| scope-1 | candidate の `scope` を `PROJECT` へ改変 |
+| scope-2 | alias の `scope` を `DOMAIN` へ改変 |
+| scope-3 | `scope` 列を削除 |
+| scope-4 | `scope` を空にする |
+| scope-5 | `scope` を非文字列にする（数値・boolean 等） |
+
+#### S22.2.2 status 異常 fixture
+
+| fixture | 改変内容 |
+|---|---|
+| status-1 | candidate の `status` を `ACTIVE` へ改変 |
+| status-2 | alias の `status` を未知値へ改変 |
+| status-3 | `status` 列を削除 |
+| status-4 | `status` を空にする |
+| status-5 | `status` を非文字列にする |
+
+上記 10 fixture すべてについて、次を検査する。
+
+- **Workbook 全体が拒否される**こと（1 件も適用されないこと）
+- Review State が読み込み前と**不変**であること。判定は byte 比較
+  （canonical 直列化の一致）または deep-equality のいずれかで行う
+- Extraction Result が不変であること
+- error 表示が content-free であること
+
+#### S22.2.3 shareable column 検査
+
+shareable Workbook の `Source Documents` sheet について、次を検査する。
+
+- header が **`source_document_id`, `document_fingerprint` の 2 列だけ**であること
+- **header 数・header 名・header 順序を完全一致**で検査する（部分一致・順不同を許さない）
+- `source_kind` が header にも cell にも存在しないこと
+
+併せて shareable Workbook 全体に対し、次が**全 cell・全数式・全コメント・全 Workbook property**
+のいずれにも存在しないことを検査する。
+
+```text
+source_kind の値（"PDF" / "EXCEL"）
+file 名
+candidate 系 ID（pdc- / pda- / pdx- / psu- / pref- prefix）
+private marker（S22.1）
+```
+
+`source_fingerprints` 由来の `sd-` + 32hex と 64hex は S6.3 の例外として許可する。
 
 ---
 
