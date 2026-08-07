@@ -784,18 +784,34 @@ P2-A2 の承認済み `source_fingerprints` 構造は `source_document_id` と `
 
 ---
 
-## S14. Advanced export（Checkpoint 1 では実装不要、契約のみ）
+## S14. Advanced export（future / out-of-scope for P2-A3 0.1・Checkpoint 4 是正）
 
-通常操作から分離した折りたたみ領域「監査用詳細出力」に配置する。
+**P2-A3 0.1 では実装しない。** 通常運用は private Workbook 保存／resume と shareable Workbook
+生成で完結しており（S13）、advanced JSON／Markdown export を UI へ追加すると、private 内容を
+外部へ送出できる経路が増えるだけで、通常運用に必要な機能を何も追加しない。
 
-| 出力 | 区分 |
-|---|---|
-| `candidate_evaluation.json` | private |
-| `candidate_review.md` | private |
-| `shareable_summary.json` | shareable |
-| `review_session.json` | private |
+理由：
 
-private / shareable の区分を UI 上に明示する。
+- 通常運用は Excel 保存／resume で完結している（S13.2 の resume、S13.3 の shareable 出力）。
+- private JSON／Markdown 出力経路を UI に増やすと、誤共有（外部 AI・チャット・issue への
+  貼り付けなど）のリスクが増える。
+- P2-A2 CLI（`private_dictionary_candidate_evaluation_cli.js`）に、`candidate_evaluation.json`／
+  `candidate_review.md`／`shareable_summary.json` を生成する既存の監査成果物生成経路がある。
+  これは変更禁止 7 ファイルの一つであり、P2-A3 UI が重複させる必要はない。
+- P2-A3 UI の役割は人間レビューであり、監査用 export UI を重複して持つことは必須要件ではない。
+
+この節が P2-A3 0.1 より前に検討していた出力候補は、次のとおり整理する。
+
+| 出力 | 区分 | 状態 |
+|---|---|---|
+| `candidate_evaluation.json` | private | P2-A2 CLI が既に生成。P2-A3 UI からは export しない |
+| `candidate_review.md` | private | 同上 |
+| `shareable_summary.json` | shareable | 同上（P2-A3 UI 独自の shareable 出力は `shareable_review_summary.xlsx`、S13.3） |
+| `review_session.json` | private | **out of scope**。P2-A3 のどの Checkpoint でも実装しない |
+
+将来 P2-A3 0.2 以降で advanced export を追加する場合は、この節を改訂した上で
+独立した Checkpoint として設計・承認を経ること。P2-A3 0.1 の画面に、export 用の
+disabled button を「将来実装」として残してはならない（未実装ボタンは削除する）。
 
 ---
 
