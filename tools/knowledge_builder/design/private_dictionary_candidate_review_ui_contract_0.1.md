@@ -785,22 +785,22 @@ fragment は HTTP request 行に含まれず、server log にも proxy にも送
 
 ## S18. Resource bounds
 
-### S18.1 入力サイズ上限（Checkpoint 2 の実測で確定）
+### S18.1 入力サイズ上限（Checkpoint 2 の実測で確定 / Checkpoint 2 承認済）
 
-**`MAX_FILE_BYTES` と `MAX_TOTAL_SELECTED_BYTES` は Checkpoint 1 では確定しない。**
 browser-memory 方式では、上限は「ファイルとして扱えるか」ではなく
 「browser のメモリ内で adapter → projection → 抽出 → 表示まで完走できるか」で決まる。
 未実測の値を対応保証として記載してはならない。
 
-| 項目 | 状態 | 提案値 | 上限直前の実測（上限比） | 根拠 |
+| 項目 | 状態 | 承認値 | 上限直前の実測（上限比） | 根拠 |
 |---|---|---|---|---|
-| `MAX_FILE_BYTES`（1 ファイル上限） | **測定済 / 提案** | 1 MB (1,048,576) | 単一 PDF 0.91 MB（**90.9%**）が **3/3 成功・応答維持** | 不安定点 3.68 MB の約 1/3.7 |
-| `MAX_TOTAL_SELECTED_BYTES`（選択合計上限） | **測定済 / 提案** | 2 MB (2,097,152) | distinct PDF 3 件 計 1.84 MB（**91.9%**）が **3/3 成功・応答維持** | 不安定点の約 1/1.8。標準サンプル 31 KB の約 65 倍 |
-| `MAX_FILE_COUNT`（ファイル数上限） | **測定済 / 提案** | 20 | distinct PDF 20 件（**100%**）が **3/3 成功・応答維持** | 件数はメモリより時間に効くため時間側の余裕で担保 |
+| `MAX_FILE_BYTES`（1 ファイル上限） | **Checkpoint 2 承認済 / Chromium 基準** | 1 MB (1,048,576) | 単一 PDF 0.91 MB（**90.9%**）が **3/3 成功・応答維持** | 不安定点 3.68 MB の約 1/3.7 |
+| `MAX_TOTAL_SELECTED_BYTES`（選択合計上限） | **Checkpoint 2 承認済 / Chromium 基準** | 2 MB (2,097,152) | distinct PDF 3 件 計 1.84 MB（**91.9%**）が **3/3 成功・応答維持** | 不安定点の約 1/1.8。標準サンプル 31 KB の約 65 倍 |
+| `MAX_FILE_COUNT`（ファイル数上限） | **Checkpoint 2 承認済 / Chromium 基準** | 20 | distinct PDF 20 件（**100%**）が **3/3 成功・応答維持** | 件数はメモリより時間に効くため時間側の余裕で担保 |
 
 実測は `p2a3_browser_memory_measurement_report.md` に記録し、値は `limits.js` に実装した。
-**Chromium 実測のみ**であり、正式な配布上限としての承認は Checkpoint 2 レビューで行う。
-承認まで、この上限で正式配布は行わない。
+**Chromium 実測のみ**であり、Windows Edge／Chrome 実機、macOS Safari は未検証である。
+上記 3 値は Checkpoint 2 レビューで P2-A3 0.1 の Chromium 基準として承認された
+（`PASS / P2-A3 CHECKPOINT 2 CLOSED`）。
 
 **上限値の裏づけ規則**：各上限は、**その値の 90% 以上の入力で 3 回連続成功**していなければ
 提案してはならない。成功判定に使う測定は、目的の limit に到達している必要がある——重複
@@ -886,6 +886,45 @@ browser が応答を維持したか      UI 操作が可能な状態を保った
 Review State を壊さず、content-free なエラーを出して停止すること）が必須である。
 確定する上限は、安全に完走できた最大規模に余裕を掛けた値とし、S18.1 の裏づけ規則
 （提案値の 90% 以上で 3 回連続成功）を満たさなければならない。
+
+### S18.5 Review Workbook 上限（Checkpoint 3 の実測 / 提案）
+
+`MAX_FILE_BYTES` 等の source 入力上限を、private review Workbook（resume 用）へそのまま
+流用してはならない。Review Workbook は数万 candidate を含み得るため、source 入力より
+大きくなり得る。
+
+| 項目 | 状態 | 提案値 | 根拠 |
+|---|---|---|---|
+| `MAX_REVIEW_WORKBOOK_BYTES` | **測定済 / 提案** | 60 MB (62,914,560) | S18.6 参照 |
+
+実測は `p2a3_review_workbook_measurement_report.md` に記録し、値は `limits.js` の
+`REVIEW_WORKBOOK_LIMITS` に実装した。正式な配布上限としての承認は Checkpoint 3 レビューで行う。
+
+### S18.6 Review Workbook 測定サマリー
+
+Checkpoint 2 で承認された source 入力上限（1 MB / 2 MB / 20 件）から生成される最大規模の
+candidate/alias/conflict 集合を、実 PDF を再生成せず synthetic session として直接構築し、
+private/shareable Workbook の生成・resume を実測した（S18.4 と異なり、この測定はブラウザに
+インストール済みの Chromium で `private_review_export.js` / `private_review_import.js` を
+直接呼び出す形で行った。ingest pipeline は Checkpoint 2 から変更していない）。
+
+| ケース | candidate 数 | private Workbook | export | import (resume) | heap | 応答 | crash |
+|---|---|---|---|---|---|---|---|
+| 451/451/451 synthetic | 451 | 0.54 MB | 101.7 ms | 127.0 ms | 19→31 MB | ○ | なし |
+| Checkpoint 2 の 0.91MB 入力相当（32,500/8,000/2,000） | 32,500 | 17.45 MB | 4,067 ms | 2,825 ms | 40→190 MB | ○ | なし |
+| Checkpoint 2 の 1.84MB 入力相当（66,000/16,000/4,000） | 66,000 | **35.48 MB** | 9,707 ms | 5,601 ms | 134→231 MB | ○ | なし |
+
+**§61 の判定**：Checkpoint 2 で承認された source 入力上限から生成される最大規模の session
+（66,000 candidate 相当）で、private Workbook の生成・resume は完走し、応答を維持し、
+crash しなかった。**BLOCKED の条件（source は成功するが Workbook 側が不安定化する）には
+該当しない。**
+
+**`MAX_REVIEW_WORKBOOK_BYTES` の根拠**：測定範囲内では Workbook 側の不安定点は観測されなかった
+（66,000 candidate まで安定）。そのため、S18.1 のように「不安定点からの倍率」では表現できず、
+**観測された最大成功値（35.48 MB）に対する安全余裕**として 60 MB を提案する（約 1.7 倍）。
+これは撤回された「未実測 512 MB」とは異なり、実測された成功点からの明示的な安全余裕である。
+真の不安定点は本 Checkpoint では未特定であり、より高い規模での追加測定が必要であれば
+Checkpoint 3 レビューで指示されたい。
 
 ---
 

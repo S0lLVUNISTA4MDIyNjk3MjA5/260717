@@ -98,10 +98,18 @@ function staticChecks() {
     .filter(src => served.indexOf(`'${src}'`) === -1 && served.indexOf(`'/${src}'`) === -1);
   assert(unlisted.length === 0, `every UI script index.html loads is in the server allowlist (missing: ${unlisted.join(', ') || 'none'})`);
 
-  // Not-yet-implemented buttons must be disabled, never merely decorative.
-  const futureButtons = (html.match(/<button[^>]*後続Checkpoint[^<]*<\/button>/g) || []);
-  assert(futureButtons.length >= 3, 'future-checkpoint buttons are present and labelled');
-  assert(futureButtons.every(b => /disabled/.test(b)), 'every future-checkpoint button is disabled');
+  // Checkpoint 3: the private-export / resume / shareable-export buttons are real now, not
+  // placeholders. Each must exist and start disabled in the static markup - JS only enables them
+  // once a session exists (app.js renderWorkbookButtons()), so a page that never runs app.js must
+  // never offer them as clickable.
+  for (const id of ['export-private-button', 'resume-button', 'export-shareable-button']) {
+    const re = new RegExp(`<button id="${id}"[^>]*>`);
+    const m = html.match(re);
+    assert(!!m, `workbook button #${id} is present`);
+    assert(m && /disabled/.test(m[0]), `workbook button #${id} starts disabled in the static markup`);
+  }
+  assert(/<input id="resume-input" type="file"[^>]*accept="[^"]*\.xlsx[^"]*"/.test(html),
+    'resume file input is a dedicated .xlsx-only control, separate from the source pdf/excel inputs');
 }
 
 // ================================================================================================

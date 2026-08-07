@@ -90,6 +90,10 @@ function main() {
   const check = spawnSync(process.execPath, [path.join(HERE, 'generate_sample_expectations.js'), '--check'], { encoding: 'utf8' });
   assert(check.status === 0, 'sample_expectations.json matches a fresh measurement of the fixed core');
 
+  // ---- 4. expected review Workbook (Checkpoint 3) --------------------------------------------
+  const reviewCheck = spawnSync(process.execPath, [path.join(HERE, 'generate_train_hvac_expected_review.js'), '--check'], { encoding: 'utf8' });
+  assert(reviewCheck.status === 0, 'train_hvac_expected_review.xlsx matches a fresh generation from the production export');
+
   console.log(`\n${passes} PASS / ${failures} FAIL`);
   process.exit(failures === 0 ? 0 : 1);
 }
