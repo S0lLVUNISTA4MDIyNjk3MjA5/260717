@@ -464,13 +464,13 @@ alias と conflict の進捗は**別に表示**する。
 
 | sheet | 内容 |
 |---|---|
-| `Summary` | review 集計、進捗、reason code 別件数、rule 別件数 |
+| `Summary` | S13.1.5 で確定する固定 metric 集合（review 集計、進捗、reason code 別件数、rule 別件数） |
 | `Candidates` | S13.1.1 の確定列 |
 | `Aliases` | S13.1.2 の確定列 |
 | `Alias Conflicts` | conflict_id、alias_display、conflicting_candidate_ids、resolution、selected_candidate_id、reason_code、note |
-| `Evidence Index` | source_document_id、source_unit_id、provenance_ref_id、source_kind、file 名、role、page/sheet/row/column、excerpt |
+| `Evidence Index` | S13.1.6 で確定する 11 列（`page`／`sheet`／`row`／`column` は分離した独立列） |
 | `Source Documents` | source_document_id、document_fingerprint、source_kind、file 名 |
-| `Build Information` | review_schema_version、extraction_schema_version、tool build 情報、生成時刻 |
+| `Build Information` | S13.1.4 で確定する 3 key（`review_schema_version` / `extraction_schema_version` / `tool_build`） |
 
 #### S13.1.1 sheet `Candidates` 確定列
 
@@ -515,6 +515,111 @@ note
 - Review State へも書き込まない（Review State は人間の判断のみを保持する / S5.3）。
 - import 時に「Workbook 側の値」「Extraction Result 側の値」「契約上の固定値」の
   三者が一致することを確認するためだけに用いる（S13.2）。
+
+#### S13.1.4 sheet `Build Information` 確定 key（P2-A3 0.1 正式版・Checkpoint 3-R1 是正）
+
+private Workbook・shareable Workbook のいずれも、`Build Information` sheet の `key` 列は
+**次の 3 つに確定する。これ以外の key を含めない。**
+
+```text
+review_schema_version
+extraction_schema_version
+tool_build
+```
+
+| key | 内容 |
+|---|---|
+| `review_schema_version` | Review State の schema version（S5.3 の `REVIEW_SCHEMA_VERSION`） |
+| `extraction_schema_version` | Extraction Result の schema version（P2-A2 evaluation の `schema_version`） |
+| `tool_build` | 固定の環境非依存 identifier（例：`p2a3-candidate-review-ui/0.1`）。ビルドごと・実行環境ごとに変化しない |
+
+**旧記載（`生成時刻` / `generated_at` / `tool_version` / `source_commit`）は削除する。** 理由：
+
+- **`generated_at`（生成時刻）**：同一 state から複数回生成した Workbook が **byte-identical**
+  であることを P2-A3 0.1 は要件とする（S13.1 の byte determinism 要件、および Checkpoint 3
+  測定報告）。壁時計時刻を Workbook データへ記録すると、生成するたびに値が変わり、この要件と
+  両立しない。したがって `generated_at` は **P2-A3 0.1 では保存しない**。
+- **`source_commit`**：実行中の runtime source から、対応する commit SHA を自己参照的かつ正確に
+  特定する仕組みが Checkpoint 3 の時点では存在しない（誤った値を記録する方が実害が大きい）。
+  この情報を扱う場合は、最終 packaging 時点の MANIFEST／build provenance に属する**後続事項**
+  とし、P2-A3 0.1 の Workbook contract には含めない。
+- **`tool_version`**：`tool_build` に統合した。ビルドごとに変わる値ではなく、固定の
+  環境非依存 identifier 1 本で足りる。
+
+`generated_at` を含め、環境依存値（path、ホスト名、ユーザー名、OS username、timezone、
+temporary directory）は Build Information へ一切含めない。
+
+#### S13.1.5 sheet `Summary` 確定 metric 集合（Checkpoint 3-R1 是正）
+
+`Summary` sheet の行集合は次を **固定・完全列挙**とし、行数・順序も固定する。ここに無い
+metric を含めてはならず、ここにある metric が欠落してもならない。
+
+```text
+scalar metric（S12 dashboard の値と対応する固定集合。件数・進捗率）
+reason_code:<CANDIDATE|ALIAS|CONFLICT>:<S5.5 の 10 reason code>   の全組合せ
+rule_candidate_count:<P2-A2 の 6 rule_id（TERM_STRUCTURAL_KEY / TERM_STRUCTURAL_HEADING /
+  TERM_REPEATED_VALUE / TERM_EXPLICIT_QUOTED / ALIAS_EXPLICIT_PARENTHETICAL /
+  ALIAS_EXPLICIT_DEFINED_AS）>
+rule_alias_count:<同上>
+```
+
+`value` は非負の有限数とする。`*_progress_percent` で終わる metric は `0`〜`100` の範囲とする。
+
+**`Summary` は resume の正本ではない**（S13.2 の完全一致条件に含まれない）。ただし、tool 自身が
+生成した private Workbook の監査コピーであるため、破損した `Summary` を黙って受理してはならない。
+import 時は次の 2 段階で検証する。
+
+1. **構造検証**：行数の完全一致、metric の固定集合との完全一致（duplicate なし・欠落なし・
+   未知 metric なし）、value の型・範囲。
+2. **集計再計算による値検証**：Candidates／Aliases／Alias Conflicts から pending Review State を
+   構築した後、現在の Extraction Result と pending Review State から `Summary` の期待値を
+   再計算し、Workbook `Summary` の全値と比較する。1 件でも不一致があれば Workbook 全体を
+   atomic rejection する。
+
+いずれの段階の不整合も、Workbook の import を拒否する理由になる。
+
+#### S13.1.6 sheet `Evidence Index` 確定列と対象範囲（Checkpoint 3-R1 是正）
+
+確定列（11 列、`page`／`sheet`／`row`／`column` は分離した独立列とする）：
+
+```text
+source_document_id
+source_unit_id
+provenance_ref_id
+source_kind
+file_name
+role
+page
+sheet
+row
+column
+excerpt
+```
+
+**この sheet の行集合は「candidate／alias／conflict の evidence_refs から到達可能な
+source_unit_id」だけに限定する。** 現在の projection に存在する全 unit を無差別に列挙しない
+（S9 の evidence panel から実際に到達できる範囲と一致させ、UI に一度も表示されない構造的な
+unit まで書き出さない）。この対象範囲の限定は実装都合ではなく、**この Workbook contract の
+確定事項**である。
+
+**Evidence Index は resume の正本ではない**（S5.2 の Evidence Display Index が正本のまま）。
+import 時は監査／表示コピーとして次を検証し、1 件でも不一致があれば Workbook 全体を
+atomic rejection する。
+
+- **範囲の完全一致**：Workbook の `source_unit_id` 集合が、現在の evaluation から再計算した
+  「参照済み unit 集合」と完全に一致すること（欠落・余分・duplicate のいずれも拒否）。
+- **各行の参照整合性**：`source_unit_id` が現在の Evidence Display Index の `byUnitId` に、
+  `provenance_ref_id` が `byProvenanceRefId` に、それぞれ存在し、かつ両者が**同一の
+  entry** を指すこと（prefix が正しいだけでは受理しない）。
+- **`source_document_id` と `source_kind` の整合**：Workbook の値が、現在の Evidence Display
+  Index の該当 entry の値と一致すること。
+- **descriptive column の型検証**：`file_name`／`role`／`page`／`sheet`／`row`／`column`／
+  `excerpt` は identity として使用しないが、型は検証する（`page`／`row` は数値または空欄、
+  `sheet`／`column`／`file_name`／`excerpt` は文字列または空欄、`role` は非空文字列）。
+  現行仕様で `page`／`row` が常に空欄になる、あるいは `sheet`／`column` が Excel の
+  KEY/VALUE 交互構造以外で空欄になることは、そのまま許可する（S5.2）。
+
+Workbook の Evidence Index から、現在の Evidence Display Index を再構築・置換することは禁止する。
 
 ### S13.2 再開時の検証（完全一致のみ許可 / all-or-nothing）
 
@@ -672,10 +777,10 @@ P2-A2 の承認済み `source_fingerprints` 構造は `source_document_id` と `
 
 | column | 内容 |
 |---|---|
-| `key` | `review_schema_version` / `extraction_schema_version` / `tool_version` / `source_commit` / `generated_at` |
+| `key` | S13.1.4 で確定した 3 key（`review_schema_version` / `extraction_schema_version` / `tool_build`）と同一。private 側・shareable 側で key 集合を分けない |
 | `value` | 対応する値 |
 
-`generated_at` 以外に環境依存値（path、ホスト名、ユーザー名）を含めない。
+環境依存値（path、ホスト名、ユーザー名、生成時刻）は一切含めない。根拠は S13.1.4 を参照。
 
 ---
 
