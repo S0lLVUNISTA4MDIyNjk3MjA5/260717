@@ -21,6 +21,11 @@
   const ConflictView = globalThis.P2A3ConflictView;
   const EvidencePanel = globalThis.P2A3EvidencePanel;
   const Dashboard = globalThis.P2A3Dashboard;
+  const WorkbookContract = globalThis.P2A3WorkbookContract;
+  const PrivateReviewExport = globalThis.P2A3PrivateReviewExport;
+  const PrivateReviewImport = globalThis.P2A3PrivateReviewImport;
+  const ShareableSummaryExport = globalThis.P2A3ShareableSummaryExport;
+  const WorkbookDownload = globalThis.P2A3WorkbookDownload;
 
   const SAMPLE_FILES = [
     { url: 'samples/train_hvac_requirement_spec_sample.pdf', name: 'train_hvac_requirement_spec_sample.pdf', type: 'application/pdf' },
@@ -31,6 +36,8 @@
     selection: InputSelection.createSelection(),
     session: null,             // { evaluation, evidenceIndex, reviewState, inputSignature, inputs }
     running: false,
+    sampleLoading: false,
+    workbookBusy: false,
     dirty: false,
     tab: 'candidates',
     selectedRows: new Set(),
@@ -99,12 +106,115 @@
       : `${count} 件 / 合計 ${Limits.formatBytes(check.totalBytes)}`;
     $('run-button').disabled = app.running || count === 0;
     $('clear-button').disabled = app.running || count === 0;
-    $('sample-button').disabled = app.running;
+    $('sample-button').disabled = app.running || app.sampleLoading;
     $('pdf-input').disabled = app.running;
     $('excel-input').disabled = app.running;
     $('pdf-picker').classList.toggle('is-locked', app.running);
     $('excel-picker').classList.toggle('is-locked', app.running);
     updateInputChangedNotice();
+    renderWorkbookButtons();
+  }
+
+  // ---- workbook (private export / resume / shareable export) ----------------------------------
+  function renderWorkbookButtons() {
+    const hasSession = !!app.session;
+    const busy = app.running || app.workbookBusy;
+    $('export-private-button').disabled = !hasSession || busy;
+    $('resume-button').disabled = !hasSession || busy;
+    $('resume-input').disabled = !hasSession || busy;
+    $('export-shareable-button').disabled = !hasSession || busy;
+  }
+
+  /* Both export paths snapshot {evaluation, evidenceIndex, reviewState} by capturing the
+   * references synchronously, before anything async happens. review_state.js reducers never
+   * mutate an existing object - every decision replaces app.session.reviewState with a brand new
+   * top-level object - so a decision made after this point cannot alter what was captured here,
+   * even though the Workbook build below awaits nothing before XLSX.write() runs. */
+  async function exportPrivateReviewWorkbook() {
+    if (!app.session || app.running || app.workbookBusy) return;
+    const snapshot = { evaluation: app.session.evaluation, evidenceIndex: app.session.evidenceIndex, reviewState: app.session.reviewState };
+    app.workbookBusy = true;
+    renderWorkbookButtons();
+    try {
+      const bytes = PrivateReviewExport.buildPrivateReviewWorkbookBytes(snapshot);
+      WorkbookDownload.downloadBytes(bytes, WorkbookContract.PRIVATE_FILE_NAME);
+      // Dirty clears ONLY on a build that reached the point of starting the download - a failed
+      // build must leave the badge exactly as it was.
+      app.dirty = false;
+      $('dirty-badge').hidden = true;
+      setStatus('private レビュー Workbook を生成しました（LOCAL PRIVATE / 外部共有禁止）。', 'ok');
+    } catch (_) {
+      showError(null, 'INTERNAL');
+    } finally {
+      app.workbookBusy = false;
+      renderWorkbookButtons();
+    }
+  }
+
+  async function exportShareableSummaryWorkbook() {
+    if (!app.session || app.running || app.workbookBusy) return;
+    askConfirm('共有用サマリーの生成確認',
+      'このファイルは共有用集計です。キーワード、alias、file名、evidence、レビューコメントは含みません。共有前に内容を確認してください。',
+      async () => {
+        if (!app.session) return;
+        const evaluation = app.session.evaluation;
+        const reviewState = app.session.reviewState;
+        app.workbookBusy = true;
+        renderWorkbookButtons();
+        try {
+          const bytes = ShareableSummaryExport.buildShareableSummaryWorkbookBytes(evaluation, reviewState);
+          WorkbookDownload.downloadBytes(bytes, WorkbookContract.SHAREABLE_FILE_NAME);
+          setStatus('共有用サマリー Workbook を生成しました。内容を確認してから共有してください。', 'ok');
+        } catch (_) {
+          showError(null, 'INTERNAL');
+        } finally {
+          app.workbookBusy = false;
+          renderWorkbookButtons();
+        }
+      }, '生成する');
+  }
+
+  function startResumeFlow() {
+    if (!app.session || app.running || app.workbookBusy) return;
+    if (app.dirty) {
+      askConfirm('未保存のレビュー結果があります',
+        '現在の未保存レビュー結果は、読み込んだレビュー結果で置き換えられます。',
+        () => $('resume-input').click(), '読み込む');
+    } else {
+      $('resume-input').click();
+    }
+  }
+
+  async function handleResumeFile(file) {
+    if (!app.session || app.running || app.workbookBusy) return;
+    const check = Limits.checkReviewWorkbookFile(file);
+    if (!check.ok) { showError({ uiCode: check.code, count: null }, check.code); return; }
+
+    app.workbookBusy = true;
+    renderWorkbookButtons();
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const currentSession = { evaluation: app.session.evaluation, evidenceIndex: app.session.evidenceIndex, reviewState: app.session.reviewState };
+      const pending = PrivateReviewImport.validateAndBuildPendingReviewState(arrayBuffer, currentSession);
+      // Success: swap Review State only. Extraction Result, Evidence Display Index and source
+      // fingerprints are never touched - only the human-judgement layer is replaced.
+      app.session.reviewState = pending;
+      app.selectedRows = new Set();
+      app.pendingConfirm = null;
+      $('confirm').hidden = true;
+      EvidencePanel.close();
+      app.dirty = false;
+      $('dirty-badge').hidden = true;
+      renderAll();
+      setStatus('保存済みのレビュー結果を再開しました。', 'ok');
+    } catch (thrown) {
+      // Failure: nothing above this catch has touched app.session, selectedRows, dirty or the
+      // pending confirm - the atomic pipeline only ever returns a value or throws.
+      showError(thrown, 'REVIEW_WORKBOOK_INVALID');
+    } finally {
+      app.workbookBusy = false;
+      renderWorkbookButtons();
+    }
   }
 
   /* The displayed result belongs to the run snapshot. It is stale as soon as the selection has
@@ -128,8 +238,11 @@
     return true;
   }
 
+  /* Always returns a result, even when the run guard refuses the change - callers that report
+   * success (the sample loader in particular) must look at `added` rather than assume the call
+   * mutated anything, or a rejected add can still be announced as a success. */
   function addFiles(fileList) {
-    if (selectionLocked()) return;
+    if (selectionLocked()) return { added: 0, rejectedUnsupported: 0, locked: true };
     const result = InputSelection.addFiles(app.selection, fileList);
     if (result.rejectedUnsupported > 0) {
       setStatus(Errors.messageFor('UNSUPPORTED_EXTENSION') + `（${result.rejectedUnsupported} 件）`, 'error');
@@ -137,6 +250,7 @@
       setStatus('');
     }
     renderSelection();
+    return result;
   }
 
   // ---- run ------------------------------------------------------------------------------------
@@ -294,15 +408,25 @@
     toast(`${ids.length} 件を ${decision === 'UNREVIEWED' ? '未判定へ戻しました' : decision + ' にしました'}`);
   }
 
-  function askConfirm(text, onOk) {
+  function askConfirm(title, text, onOk, okLabel) {
+    $('confirm-title').textContent = title;
     $('confirm-text').textContent = text;
+    $('confirm-ok').textContent = okLabel || 'OK';
     app.pendingConfirm = onOk;
     $('confirm').hidden = false;
   }
 
   // ---- sample loading ---------------------------------------------------------------------------
+  /* sampleLoading guards against a double click starting a second fetch while the first is still
+   * in flight; selectionLocked() (checked both here and, again, inside addFiles()) guards against
+   * a run starting during that same fetch. Success is announced only when addFiles() actually
+   * added something - a rejection that happens while the fetch was in flight must not be
+   * overwritten by a stale "追加しました" message. */
   async function loadStandardSample() {
+    if (app.sampleLoading) return;
     if (selectionLocked()) return;
+    app.sampleLoading = true;
+    $('sample-button').disabled = true;
     try {
       const files = [];
       for (const spec of SAMPLE_FILES) {
@@ -313,10 +437,19 @@
       }
       // Sample files go through exactly the same validation path as a manual selection, and are
       // only added to the list: the user still presses 解析開始.
-      addFiles(files);
-      setStatus('標準サンプルを選択一覧へ追加しました。「解析開始」を押してください。', 'ok');
+      const result = addFiles(files);
+      if (result.locked || result.added === 0) {
+        // The run guard refused the add (a run started while the fetch was in flight) or nothing
+        // was actually added - never claim success for a no-op.
+        if (result.locked) toast('解析中のため、標準サンプルは追加されませんでした。');
+      } else {
+        setStatus('標準サンプルを選択一覧へ追加しました。「解析開始」を押してください。', 'ok');
+      }
     } catch (thrown) {
       showError(thrown, 'SAMPLE_LOAD_FAILED');
+    } finally {
+      app.sampleLoading = false;
+      renderSelection();
     }
   }
 
@@ -378,6 +511,15 @@
     $('run-button').addEventListener('click', runAnalysis);
     $('sample-button').addEventListener('click', loadStandardSample);
 
+    $('export-private-button').addEventListener('click', exportPrivateReviewWorkbook);
+    $('export-shareable-button').addEventListener('click', exportShareableSummaryWorkbook);
+    $('resume-button').addEventListener('click', startResumeFlow);
+    $('resume-input').addEventListener('change', e => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (file) handleResumeFile(file);
+    });
+
     // Any change to what is being listed, or to how much fits on a page, returns to page 1.
     // Staying on page 7 of a result set that just shrank to two pages is never what was meant.
     const resetCandidatePage = () => { app.view.candidatePage = 1; };
@@ -407,9 +549,10 @@
         const decision = button.dataset.bulk;
         if (app.selectedRows.size === 0) { toast('先に対象行を選択してください。'); return; }
         if (decision === 'ACCEPT') {
-          askConfirm(`全ページ合計で選択中の ${app.selectedRows.size} 件をまとめて ACCEPT にします`
+          askConfirm('一括 ACCEPT の確認',
+            `全ページ合計で選択中の ${app.selectedRows.size} 件をまとめて ACCEPT にします`
             + `（表示中のページだけではありません）。辞書への自動登録は行われませんが、判定は上書きされます。よろしいですか？`,
-            () => applyBulk('ACCEPT'));
+            () => applyBulk('ACCEPT'), 'ACCEPT にする');
         } else {
           applyBulk(decision);
         }
@@ -451,7 +594,10 @@
     $('limit-info').textContent =
       `1ファイル上限 ${Limits.formatBytes(Limits.LIMITS.MAX_FILE_BYTES)} ／ `
       + `合計上限 ${Limits.formatBytes(Limits.LIMITS.MAX_TOTAL_SELECTED_BYTES)} ／ `
-      + `最大 ${Limits.LIMITS.MAX_FILE_COUNT} 件（Checkpoint 2 測定に基づく提案値）`;
+      + `最大 ${Limits.LIMITS.MAX_FILE_COUNT} 件（Checkpoint 2 承認済 / Chromium基準）`;
+    $('review-workbook-limit-info').textContent =
+      `レビューWorkbook 再開の上限 ${Limits.formatBytes(Limits.REVIEW_WORKBOOK_LIMITS.MAX_REVIEW_WORKBOOK_BYTES)}`
+      + `（Checkpoint 3 測定に基づく提案値）`;
   }
 
   function init() {

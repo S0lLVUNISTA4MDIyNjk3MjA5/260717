@@ -19,9 +19,10 @@
     </div>
     <div class="topbar-right">
       <span id="dirty-badge" class="dirty-badge" hidden>未保存の変更があります</span>
-      <button class="btn ghost" type="button" disabled title="後続Checkpointで実装">Excelで保存（後続Checkpointで実装）</button>
-      <button class="btn ghost" type="button" disabled title="後続Checkpointで実装">レビューを再開（後続Checkpointで実装）</button>
-      <button class="btn ghost" type="button" disabled title="後続Checkpointで実装">共有用サマリー（後続Checkpointで実装）</button>
+      <button id="export-private-button" class="btn ghost" type="button" disabled title="レビュー結果を private Excel（LOCAL PRIVATE）として保存します">レビュー結果をExcel保存</button>
+      <button id="resume-button" class="btn ghost" type="button" disabled title="private Excel からレビュー状態のみを再開します">レビューを再開</button>
+      <button id="export-shareable-button" class="btn ghost" type="button" disabled title="集計のみを含む共有用 Excel を保存します">共有用サマリーをExcel保存</button>
+      <input id="resume-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none">
     </div>
   </header>
 
@@ -258,7 +259,7 @@
 
   <footer class="footer">
     <span>ローカル専用 / 外部送信なし / 生成候補はすべて SESSION・PROBATION（自動登録なし）</span>
-    <span>Excel保存・再開・共有用サマリーは後続Checkpointで実装</span>
+    <span id="review-workbook-limit-info"></span>
   </footer>
 </div>
 
@@ -287,6 +288,13 @@
 <script src="alias_view.js"></script>
 <script src="conflict_view.js"></script>
 <script src="evidence_panel.js"></script>
+<script src="workbook_contract.js"></script>
+<script src="workbook_cells.js"></script>
+<script src="workbook_validation.js"></script>
+<script src="private_review_export.js"></script>
+<script src="private_review_import.js"></script>
+<script src="shareable_summary_export.js"></script>
+<script src="workbook_download.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

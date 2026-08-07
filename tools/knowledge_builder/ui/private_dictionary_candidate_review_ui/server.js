@@ -53,7 +53,10 @@ const ROUTES = Object.assign(Object.create(null), {
 
 for (const name of ['bootstrap.js', 'error_messages.js', 'limits.js', 'dom.js', 'pagination.js', 'review_state.js',
   'evidence_index.js', 'input_selection.js', 'browser_ingest.js', 'dashboard.js', 'table_view.js',
-  'alias_view.js', 'conflict_view.js', 'evidence_panel.js', 'app.js']) {
+  'alias_view.js', 'conflict_view.js', 'evidence_panel.js',
+  'workbook_contract.js', 'workbook_cells.js', 'workbook_validation.js',
+  'private_review_export.js', 'private_review_import.js', 'shareable_summary_export.js', 'workbook_download.js',
+  'app.js']) {
   ROUTES['/' + name] = [path.join(UI, name), JS];
 }
 

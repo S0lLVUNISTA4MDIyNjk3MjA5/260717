@@ -34,6 +34,30 @@
     MAX_FILE_COUNT: 20,
   });
 
+  /* Review Workbook resume limit. This is a SEPARATE bound from MAX_FILE_BYTES above: a private
+   * review Workbook holds a full candidate/alias/conflict/evidence dump and can legitimately be
+   * larger than the 1 MB source-file limit that produced it (Checkpoint 3 measurement; see
+   * p2a3_review_workbook_measurement_report.md). Checked against File.size before
+   * File.arrayBuffer() is ever called, exactly like MAX_FILE_BYTES. */
+  const REVIEW_WORKBOOK_LIMITS = Object.freeze({
+    // Checkpoint 3 measurement (p2a3_review_workbook_measurement_report.md): a synthetic session
+    // at the scale the Checkpoint-2-approved 1.84 MB / 3-file input actually produces (66,000
+    // candidates) exported a 35.48 MB private Workbook, imported it back successfully, and stayed
+    // responsive with no crash - no instability point was found at this scale. Unlike
+    // MAX_FILE_BYTES (set below an observed instability point), this has no observed failure to
+    // sit below, so the margin is expressed the only honest way available: ~1.7x the largest
+    // successful measurement. A higher true ceiling may exist; this is a first proposal for
+    // Checkpoint 3 review, not a value derived from a measured failure boundary.
+    MAX_REVIEW_WORKBOOK_BYTES: 60 * 1024 * 1024,
+  });
+
+  function checkReviewWorkbookFile(file, limits) {
+    const L = limits || REVIEW_WORKBOOK_LIMITS;
+    const size = file && Number.isFinite(file.size) ? file.size : 0;
+    if (size > L.MAX_REVIEW_WORKBOOK_BYTES) return { ok: false, code: 'REVIEW_FILE_TOO_LARGE' };
+    return { ok: true, code: null };
+  }
+
   const ALLOWED_EXTENSIONS = Object.freeze(['.pdf', '.xlsx']);
 
   function extensionOf(name) {
@@ -91,5 +115,8 @@
     return `${(n / MB).toFixed(1)} MB`;
   }
 
-  return { LIMITS, ALLOWED_EXTENSIONS, extensionOf, kindForExtension, isSupportedName, checkSelection, formatBytes };
+  return {
+    LIMITS, ALLOWED_EXTENSIONS, extensionOf, kindForExtension, isSupportedName, checkSelection, formatBytes,
+    REVIEW_WORKBOOK_LIMITS, checkReviewWorkbookFile,
+  };
 });
