@@ -227,6 +227,12 @@ async function run() {
   await tamperFixtureChecks(session, privateBytesA);
 
   // ================================================================================================
+  // 4b. F-13: real ZIP-archive VBA / externalLink fixtures (not a unit test of the byte scanner -
+  // an actual malicious entry added to a real, otherwise-valid private Workbook's ZIP container)
+  // ================================================================================================
+  await archiveActiveContentChecks(session, privateBytesA);
+
+  // ================================================================================================
   // 5. Shareable: allowlist correctness, aggregate correctness, privacy marker scan
   // ================================================================================================
   await shareableChecks();
@@ -472,6 +478,140 @@ async function tamperFixtureChecks(session, validBytes) {
     setCell(ws, firstDataRowAddr(ws, 1), { t: 'n', v: 12345 });
   }, 'REVIEW_WORKBOOK_INVALID']);
 
+  // ---- F-11: Summary sheet (checkpoint 3-R1) -------------------------------------------------
+  function findRowByCellValue(ws, col, value) {
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let r = range.s.r + 1; r <= range.e.r; r++) {
+      const cell = ws[XLSX.utils.encode_cell({ r, c: col })];
+      if (cell && cell.v === value) return r;
+    }
+    return -1;
+  }
+  cases.push(['summary: row added (unknown metric)', wb => {
+    const ws = wb.Sheets['Summary'];
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    const newRow = range.e.r + 1;
+    setCell(ws, XLSX.utils.encode_cell({ r: newRow, c: 0 }), { t: 's', v: 'not_a_real_metric' });
+    setCell(ws, XLSX.utils.encode_cell({ r: newRow, c: 1 }), { t: 'n', v: 1 });
+    ws['!ref'] = XLSX.utils.encode_range({ s: range.s, e: { r: newRow, c: range.e.c } });
+  }, 'REVIEW_WORKBOOK_INVALID']);
+  cases.push(['summary: row removed', wb => {
+    const ws = wb.Sheets['Summary'];
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    ws['!ref'] = XLSX.utils.encode_range({ s: range.s, e: { r: range.e.r - 1, c: range.e.c } });
+  }, 'REVIEW_WORKBOOK_INVALID']);
+  cases.push(['summary: metric name rewritten', wb => {
+    const ws = wb.Sheets['Summary'];
+    const r = findRowByCellValue(ws, 0, 'candidate_total');
+    setCell(ws, XLSX.utils.encode_cell({ r, c: 0 }), { t: 's', v: 'candidate_totalX' });
+  }, 'REVIEW_WORKBOOK_INVALID']);
+  cases.push(['summary: duplicate metric', wb => {
+    const ws = wb.Sheets['Summary'];
+    const r1 = findRowByCellValue(ws, 0, 'candidate_total');
+    const r2 = findRowByCellValue(ws, 0, 'alias_total');
+    setCell(ws, XLSX.utils.encode_cell({ r: r2, c: 0 }), Object.assign({}, ws[XLSX.utils.encode_cell({ r: r1, c: 0 })]));
+  }, 'REVIEW_WORKBOOK_INVALID']);
+  cases.push(['summary: value rewritten (aggregate mismatch)', wb => {
+    const ws = wb.Sheets['Summary'];
+    const r = findRowByCellValue(ws, 0, 'candidate_total');
+    const current = ws[XLSX.utils.encode_cell({ r, c: 1 })];
+    setCell(ws, XLSX.utils.encode_cell({ r, c: 1 }), { t: 'n', v: (current ? current.v : 0) + 7 });
+  }, 'REVIEW_SUMMARY_MISMATCH']);
+  cases.push(['summary: value stringified', wb => {
+    const ws = wb.Sheets['Summary'];
+    const r = findRowByCellValue(ws, 0, 'candidate_total');
+    setCell(ws, XLSX.utils.encode_cell({ r, c: 1 }), { t: 's', v: '40' });
+  }, 'REVIEW_WORKBOOK_INVALID']);
+  cases.push(['summary: negative count', wb => {
+    const ws = wb.Sheets['Summary'];
+    const r = findRowByCellValue(ws, 0, 'candidate_total');
+    setCell(ws, XLSX.utils.encode_cell({ r, c: 1 }), { t: 'n', v: -1 });
+  }, 'REVIEW_WORKBOOK_INVALID']);
+  cases.push(['summary: progress percent > 100', wb => {
+    const ws = wb.Sheets['Summary'];
+    const r = findRowByCellValue(ws, 0, 'candidate_progress_percent');
+    setCell(ws, XLSX.utils.encode_cell({ r, c: 1 }), { t: 'n', v: 150 });
+  }, 'REVIEW_WORKBOOK_INVALID']);
+
+  // ---- F-12: Evidence Index (checkpoint 3-R1) -------------------------------------------------
+  cases.push(['evidence: referenced unit row removed', wb => {
+    const ws = wb.Sheets['Evidence Index'];
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    if (range.e.r < 1) return;
+    ws['!ref'] = XLSX.utils.encode_range({ s: range.s, e: { r: range.e.r - 1, c: range.e.c } });
+  }, 'REVIEW_WORKBOOK_INVALID']);
+  cases.push(['evidence: extra row for an unreferenced-but-real unit', wb => {
+    const ws = wb.Sheets['Evidence Index'];
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    const referenced = new Set(Cells.sheetToRowValues(ws).slice(1).map(r => r[1]));
+    let unreferencedEntry = null;
+    for (const entry of session.evidenceIndex.byUnitId.values()) {
+      if (!referenced.has(entry.source_unit_id)) { unreferencedEntry = entry; break; }
+    }
+    if (!unreferencedEntry) return; // no-op guard: every unit happens to be referenced in this fixture
+    const newRow = range.e.r + 1;
+    const vals = [unreferencedEntry.source_document_id, unreferencedEntry.source_unit_id, unreferencedEntry.provenance_ref_id,
+      unreferencedEntry.source_kind, unreferencedEntry.display_file_name, unreferencedEntry.structural_role,
+      unreferencedEntry.page, unreferencedEntry.sheet, unreferencedEntry.row, unreferencedEntry.column, EvidenceIndex.excerptFor(unreferencedEntry)];
+    for (let c = 0; c < vals.length; c++) {
+      const v = vals[c];
+      if (v == null) continue;
+      setCell(ws, XLSX.utils.encode_cell({ r: newRow, c }), typeof v === 'number' ? { t: 'n', v } : { t: 's', v: String(v) });
+    }
+    ws['!ref'] = XLSX.utils.encode_range({ s: range.s, e: { r: newRow, c: range.e.c } });
+  }, 'REVIEW_WORKBOOK_INVALID']);
+  cases.push(['evidence: source_unit_id replaced with a nonexistent one', wb => {
+    const ws = wb.Sheets['Evidence Index'];
+    setCell(ws, firstDataRowAddr(ws, 1), { t: 's', v: 'psu-' + 'e'.repeat(32) });
+  }, 'REVIEW_WORKBOOK_INVALID']);
+  cases.push(['evidence: provenance_ref_id replaced with a nonexistent one', wb => {
+    const ws = wb.Sheets['Evidence Index'];
+    setCell(ws, firstDataRowAddr(ws, 2), { t: 's', v: 'pref-' + 'e'.repeat(32) });
+  }, 'REVIEW_WORKBOOK_INVALID']);
+  cases.push(['evidence: provenance_ref_id swapped with a different unit\'s', wb => {
+    // A true SWAP (not a copy): both rows keep their own provenance_ref_id text, so no value is
+    // duplicated - only the (unit, ref) PAIRING becomes wrong for both rows. This isolates the
+    // pair-consistency check (byUnit !== byRef) from duplicate-ID detection, which a one-way copy
+    // would trigger instead.
+    const ws = wb.Sheets['Evidence Index'];
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    if (range.e.r < 2) return;
+    const row1Ref = ws[firstDataRowAddr(ws, 2)];
+    const row2Ref = ws[XLSX.utils.encode_cell({ r: 2, c: 2 })];
+    setCell(ws, firstDataRowAddr(ws, 2), Object.assign({}, row2Ref));
+    setCell(ws, XLSX.utils.encode_cell({ r: 2, c: 2 }), Object.assign({}, row1Ref));
+  }, 'REVIEW_WORKBOOK_INVALID']);
+  cases.push(['evidence: source_document_id replaced with a different real document', wb => {
+    const ws = wb.Sheets['Evidence Index'];
+    const docIds = new Set(session.evaluation.source_fingerprints.map(sf => sf.source_document_id));
+    const rows = Cells.sheetToRowValues(ws).slice(1);
+    const originalDocId = rows[0][0];
+    const other = Array.from(docIds).find(id => id !== originalDocId);
+    if (!other) return;
+    setCell(ws, firstDataRowAddr(ws, 0), { t: 's', v: other });
+  }, 'REVIEW_WORKBOOK_INVALID']);
+  cases.push(['evidence: source_kind replaced', wb => {
+    const ws = wb.Sheets['Evidence Index'];
+    const current = ws[firstDataRowAddr(ws, 3)];
+    const swapped = current && current.v === 'PDF' ? 'EXCEL' : 'PDF';
+    setCell(ws, firstDataRowAddr(ws, 3), { t: 's', v: swapped });
+  }, 'REVIEW_WORKBOOK_INVALID']);
+  cases.push(['evidence: duplicate provenance_ref_id', wb => {
+    const ws = wb.Sheets['Evidence Index'];
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    if (range.e.r < 2) return;
+    const row1Ref = ws[firstDataRowAddr(ws, 2)];
+    setCell(ws, XLSX.utils.encode_cell({ r: 2, c: 2 }), Object.assign({}, row1Ref));
+  }, 'REVIEW_DUPLICATE_ID']);
+  cases.push(['evidence: file_name changed to a number', wb => {
+    const ws = wb.Sheets['Evidence Index'];
+    setCell(ws, firstDataRowAddr(ws, 4), { t: 'n', v: 123 });
+  }, 'REVIEW_WORKBOOK_INVALID']);
+  cases.push(['evidence: excerpt changed to a number', wb => {
+    const ws = wb.Sheets['Evidence Index'];
+    setCell(ws, firstDataRowAddr(ws, 10), { t: 'n', v: 456 });
+  }, 'REVIEW_WORKBOOK_INVALID']);
+
   for (const [label, mutate, expectedCode] of cases) {
     const before = { evaluation: session.evaluation, evidenceIndex: session.evidenceIndex, reviewState: session.reviewState };
     const wb = loadWorkbook(validBytes);
@@ -491,6 +631,54 @@ async function tamperFixtureChecks(session, validBytes) {
     assert(session.reviewState === before.reviewState, `tamper[${label}]: Review State reference unchanged`);
   }
   console.log(`    tamper fixtures exercised: ${cases.length}`);
+}
+
+// ================================================================================================
+// F-13: real ZIP-archive VBA / externalLink fixtures. Python's stdlib zipfile (no new npm
+// dependency) appends a genuine entry into a COPY of a real, valid private Workbook's ZIP
+// container - not a synthetic byte string fed straight to the unit-level scanner. This proves the
+// rejection holds against an actual malformed archive, the way a hand-crafted malicious upload
+// would actually look.
+// ================================================================================================
+async function archiveActiveContentChecks(session, validBytes) {
+  const before = { evaluation: session.evaluation, evidenceIndex: session.evidenceIndex, reviewState: session.reviewState };
+  const fixtures = [
+    { label: 'archive: xl/vbaProject.bin entry added', entryName: 'xl/vbaProject.bin', content: 'not a real VBA project, just a marker for the scan\n' },
+    { label: 'archive: xl/externalLinks/externalLink1.xml entry added', entryName: 'xl/externalLinks/externalLink1.xml', content: '<externalLink/>\n' },
+  ];
+  for (const fx of fixtures) {
+    const srcPath = path.join(os.tmpdir(), `p2a3-archive-src-${process.pid}-${Math.random().toString(36).slice(2)}.xlsx`);
+    const outPath = path.join(os.tmpdir(), `p2a3-archive-out-${process.pid}-${Math.random().toString(36).slice(2)}.xlsx`);
+    fs.writeFileSync(srcPath, Buffer.from(validBytes));
+    try {
+      const pyScript = `
+import sys, shutil, zipfile
+src, out, entry_name, content = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+shutil.copyfile(src, out)
+with zipfile.ZipFile(out, 'a', zipfile.ZIP_DEFLATED) as z:
+    z.writestr(entry_name, content)
+`;
+      const py = spawnSync('python3', ['-c', pyScript, srcPath, outPath, fx.entryName, fx.content], { encoding: 'utf8' });
+      assert(py.status === 0, `${fx.label}: python3 zipfile appended the entry to a real archive`);
+      const tamperedBuf = fs.readFileSync(outPath);
+
+      let error = null, result = null;
+      try { result = Import.validateAndBuildPendingReviewState(tamperedBuf, session); } catch (e) { error = e; }
+      assert(error !== null && result === null, `${fx.label}: import is rejected`);
+      if (error) {
+        assert(error.uiCode === 'REVIEW_ACTIVE_CONTENT_FORBIDDEN', `${fx.label}: classified as REVIEW_ACTIVE_CONTENT_FORBIDDEN (got ${error.uiCode})`);
+        assert(!(error instanceof Error), `${fx.label}: rejection is never a native Error`);
+        assert(typeof error.uiCode === 'string' && !/[a-z]{2,}\.(bin|xml)|path|\\|\//.test(JSON.stringify(error)),
+          `${fx.label}: rejection carries no path or file content`);
+      }
+      assert(session.evaluation === before.evaluation, `${fx.label}: Extraction Result reference unchanged`);
+      assert(session.evidenceIndex === before.evidenceIndex, `${fx.label}: Evidence Index reference unchanged`);
+      assert(session.reviewState === before.reviewState, `${fx.label}: Review State reference unchanged`);
+    } finally {
+      fs.rmSync(srcPath, { force: true });
+      fs.rmSync(outPath, { force: true });
+    }
+  }
 }
 
 // ================================================================================================

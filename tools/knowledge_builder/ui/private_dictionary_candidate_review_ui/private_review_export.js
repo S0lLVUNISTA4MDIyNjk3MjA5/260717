@@ -195,16 +195,34 @@
     return { scalars, reasonCounts, ruleCandidateCounts, ruleAliasCounts };
   }
 
+  /* The single source of truth for which metric names appear in the private Summary sheet, and in
+   * what order (S19: "Summary contract固定順"). private_review_import.js (F-11) validates a
+   * resumed Workbook's Summary against this SAME list - not a hand-copied one - so export and
+   * import can never silently drift apart on what "the fixed set" means. */
+  function summaryMetricNames() {
+    const names = Contract.PRIVATE_SUMMARY_SCALAR_METRICS.slice();
+    for (const kind of Contract.REASON_CODE_TARGET_KINDS) {
+      for (const code of Contract.REASON_CODES) names.push(`reason_code:${kind}:${code}`);
+    }
+    for (const id of Contract.ALL_RULE_IDS) names.push(`rule_candidate_count:${id}`);
+    for (const id of Contract.ALL_RULE_IDS) names.push(`rule_alias_count:${id}`);
+    return names;
+  }
+
+  function summaryValueForMetric(metric, s) {
+    if (Object.prototype.hasOwnProperty.call(s.scalars, metric)) return s.scalars[metric];
+    let m = metric.match(/^reason_code:([A-Z]+):([A-Z_]+)$/);
+    if (m) return s.reasonCounts[m[1]][m[2]];
+    m = metric.match(/^rule_candidate_count:(.+)$/);
+    if (m) return s.ruleCandidateCounts[m[1]];
+    m = metric.match(/^rule_alias_count:(.+)$/);
+    if (m) return s.ruleAliasCounts[m[1]];
+    return undefined;
+  }
+
   function buildSummaryRows(evaluation, reviewState) {
     const s = computeSummary(evaluation, reviewState);
-    const rows = [];
-    for (const metric of Contract.PRIVATE_SUMMARY_SCALAR_METRICS) rows.push([metric, s.scalars[metric]]);
-    for (const kind of Contract.REASON_CODE_TARGET_KINDS) {
-      for (const code of Contract.REASON_CODES) rows.push([`reason_code:${kind}:${code}`, s.reasonCounts[kind][code]]);
-    }
-    for (const id of Contract.ALL_RULE_IDS) rows.push([`rule_candidate_count:${id}`, s.ruleCandidateCounts[id]]);
-    for (const id of Contract.ALL_RULE_IDS) rows.push([`rule_alias_count:${id}`, s.ruleAliasCounts[id]]);
-    return rows;
+    return summaryMetricNames().map(metric => [metric, summaryValueForMetric(metric, s)]);
   }
 
   function buildPrivateReviewWorkbook(snapshot) {
@@ -238,7 +256,7 @@
   return {
     buildCandidatesRows, buildAliasesRows, buildAliasConflictsRows,
     buildEvidenceIndexRows, buildSourceDocumentsRows, buildBuildInformationRows,
-    computeSummary, buildSummaryRows,
+    computeSummary, summaryMetricNames, summaryValueForMetric, buildSummaryRows,
     buildPrivateReviewWorkbook, buildPrivateReviewWorkbookBytes,
   };
 });

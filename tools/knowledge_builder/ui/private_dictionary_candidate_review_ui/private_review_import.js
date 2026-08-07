@@ -128,13 +128,15 @@
       const noteV = cellString(note);
       let ruleIds = null;
       try { ruleIds = Cells.decodeIdArray(cellString(rule_ids_cell) || ''); } catch (_) { ruleIds = null; }
+      // reason_code/note are legitimately blank (null cell), but a PRESENT cell of the wrong type
+      // (e.g. a number) must not be silently treated as blank - isStringOrBlankCell on the raw
+      // cell tells those two cases apart; cellString() alone cannot.
       const ok = isNonEmptyString(id) && id.indexOf(ID_PREFIX.candidate) === 0 && isNonEmptyString(term)
         && isNonEmptyString(scopeV) && isNonEmptyString(statusV) && ruleIds !== null
         && isFiniteNonNegNumber(exposureN) && isFiniteNonNegNumber(docSupportN) && isFiniteNonNegNumber(aliasConflictN)
-        && isNonEmptyString(decisionV) && (reasonV === null || isNonEmptyString(reasonV))
-        && (noteV === null || (typeof noteV === 'string' && noteV.length <= Contract.MAX_NOTE_LENGTH));
+        && isNonEmptyString(decisionV) && isStringOrBlankCell(reason_code) && isStringOrBlankCell(note)
+        && (noteV === null || noteV.length <= Contract.MAX_NOTE_LENGTH);
       if (!ok) { malformed++; continue; }
-      if (noteV != null && noteV.length > Contract.MAX_NOTE_LENGTH) { malformed++; continue; }
       out.push({ candidate_id: id, scope: scopeV, status: statusV, decision: decisionV, reason_code: reasonV, note: noteV || '' });
     }
     return { rows: out, malformed };
@@ -158,8 +160,8 @@
         && isNonEmptyString(canonicalId) && canonicalId.indexOf(ID_PREFIX.candidate) === 0
         && isNonEmptyString(cellString(alias_term)) && isNonEmptyString(cellString(canonical_term))
         && isNonEmptyString(scopeV) && isNonEmptyString(statusV) && ruleIds !== null
-        && isNonEmptyString(decisionV) && (reasonV === null || isNonEmptyString(reasonV))
-        && (noteV === null || (typeof noteV === 'string' && noteV.length <= Contract.MAX_NOTE_LENGTH));
+        && isNonEmptyString(decisionV) && isStringOrBlankCell(reason_code) && isStringOrBlankCell(note)
+        && (noteV === null || noteV.length <= Contract.MAX_NOTE_LENGTH);
       if (!ok) { malformed++; continue; }
       out.push({ alias_candidate_id: id, canonical_candidate_id: canonicalId, scope: scopeV, status: statusV, decision: decisionV, reason_code: reasonV, note: noteV || '' });
     }
@@ -180,8 +182,9 @@
       try { conflictingIds = Cells.decodeIdArray(cellString(conflicting_ids_cell) || ''); } catch (_) { conflictingIds = null; }
       const ok = isNonEmptyString(id) && id.indexOf(ID_PREFIX.conflict) === 0
         && isNonEmptyString(cellString(alias_display)) && conflictingIds !== null
-        && isNonEmptyString(resolutionV) && (reasonV === null || isNonEmptyString(reasonV))
-        && (noteV === null || (typeof noteV === 'string' && noteV.length <= Contract.MAX_NOTE_LENGTH));
+        && isNonEmptyString(resolutionV) && isStringOrBlankCell(selected_candidate_id)
+        && isStringOrBlankCell(reason_code) && isStringOrBlankCell(note)
+        && (noteV === null || noteV.length <= Contract.MAX_NOTE_LENGTH);
       if (!ok) { malformed++; continue; }
       out.push({ conflict_id: id, resolution: resolutionV, selected_candidate_id: selectedV, reason_code: reasonV, note: noteV || '' });
     }
@@ -205,21 +208,41 @@
     return { rows: out, malformed };
   }
 
+  /* F-12: captures every column, not just the two identity fields the earlier implementation
+   * kept. source_document_id and source_kind are compared against the CURRENT Evidence Display
+   * Index entry for the same unit (never trusted as-is); the descriptive columns (file_name,
+   * role, page, sheet, row, column, excerpt) are type-checked only - never used as identity and
+   * never fed back into anything (checkpoint §38/§39). page/row/sheet/column are legitimately
+   * null for most rows under the current S5.2 rules (page/row are always null; sheet/column are
+   * null outside an alternating-KEY/VALUE Excel row) - null is accepted for all four. */
+  // NOTE: these check the RAW CELL, not a cellString()/cellNumber()-coerced value. Coercing first
+  // would make a wrongly-typed cell (e.g. a number where a string belongs) indistinguishable from
+  // a legitimately blank one - cellString() maps both to null - which would let a type-mismatched
+  // descriptive column through as if it were simply absent. A blank cell (no cell / v undefined /
+  // v null) is accepted; a present cell of the wrong type is not.
+  function isBlankCell(cell) { return !cell || cell.v === undefined || cell.v === null; }
+  function isStringOrBlankCell(cell) { return isBlankCell(cell) || typeof cell.v === 'string'; }
+  function isNumberOrBlankCell(cell) { return isBlankCell(cell) || (typeof cell.v === 'number' && Number.isFinite(cell.v)); }
+
   function parseEvidenceIndexRows(rows) {
     const out = [];
     let malformed = 0;
     for (const row of rows) {
-      const [source_document_id, source_unit_id, provenance_ref_id, source_kind] = row;
+      const [source_document_id, source_unit_id, provenance_ref_id, source_kind, file_name, role, page, sheet, rowCell, column, excerpt] = row;
       const docId = cellString(source_document_id);
       const unitId = cellString(source_unit_id);
       const refId = cellString(provenance_ref_id);
       const kind = cellString(source_kind);
+      const roleV = cellString(role);
       const ok = isNonEmptyString(docId) && docId.indexOf(ID_PREFIX.sourceDocument) === 0
         && isNonEmptyString(unitId) && unitId.indexOf(ID_PREFIX.unit) === 0
         && isNonEmptyString(refId) && refId.indexOf(ID_PREFIX.provenanceRef) === 0
-        && SOURCE_KINDS.indexOf(kind) !== -1;
+        && SOURCE_KINDS.indexOf(kind) !== -1
+        && isNonEmptyString(roleV)
+        && isStringOrBlankCell(file_name) && isNumberOrBlankCell(page) && isStringOrBlankCell(sheet)
+        && isNumberOrBlankCell(rowCell) && isStringOrBlankCell(column) && isStringOrBlankCell(excerpt);
       if (!ok) { malformed++; continue; }
-      out.push({ source_unit_id: unitId, provenance_ref_id: refId });
+      out.push({ source_document_id: docId, source_unit_id: unitId, provenance_ref_id: refId, source_kind: kind });
     }
     return { rows: out, malformed };
   }
@@ -231,6 +254,35 @@
     if (keys[0] !== 'review_schema_version' || keys[1] !== 'extraction_schema_version' || keys[2] !== 'tool_build') return null;
     if (!isNonEmptyString(values[0]) || !isNonEmptyString(values[1]) || !isNonEmptyString(values[2])) return null;
     return { review_schema_version: values[0], extraction_schema_version: values[1] };
+  }
+
+  /* F-11: Summary is not the source of truth for resume (its values are never written into the
+   * pending Review State), but a corrupted audit copy from the tool's own export must still be
+   * rejected, not silently accepted. Structural checks (row count, fixed metric set, no
+   * duplicate/unknown/missing metric, value type/range) run here; the VALUE comparison against an
+   * independently recomputed expectation happens later in the pipeline, once a pending Review
+   * State exists to recompute from. */
+  function parseSummaryRows(rows) {
+    const expectedNames = Export.summaryMetricNames();
+    const expectedSet = new Set(expectedNames);
+    const map = {};
+    const seen = new Set();
+    let malformed = 0, duplicate = 0, unknown = 0;
+    for (const row of rows) {
+      const [metricCell, valueCell] = row;
+      const metric = cellString(metricCell);
+      const value = cellNumber(valueCell);
+      if (!isNonEmptyString(metric) || value === null || !Number.isFinite(value)) { malformed++; continue; }
+      if (!expectedSet.has(metric)) { unknown++; continue; }
+      if (seen.has(metric)) { duplicate++; continue; }
+      if (value < 0) { malformed++; continue; }
+      if (metric.endsWith('progress_percent') && value > 100) { malformed++; continue; }
+      seen.add(metric);
+      map[metric] = value;
+    }
+    const missing = expectedNames.filter(n => !seen.has(n)).length;
+    const rowCountMismatch = rows.length !== expectedNames.length ? 1 : 0;
+    return { map, malformed, duplicate, unknown, missing, rowCountMismatch, expectedNames };
   }
 
   // ---- duplicate ID detection --------------------------------------------------------------
@@ -268,10 +320,16 @@
     const sourceDocuments = parseSourceDocumentRows(sheets['Source Documents']);
     const evidenceRows = parseEvidenceIndexRows(sheets['Evidence Index']);
     const buildInfo = parseBuildInformationRows(sheets['Build Information']);
+    const summary = parseSummaryRows(sheets['Summary']);
 
-    const malformedTotal = candidates.malformed + aliases.malformed + conflicts.malformed + sourceDocuments.malformed + evidenceRows.malformed;
+    const malformedTotal = candidates.malformed + aliases.malformed + conflicts.malformed + sourceDocuments.malformed + evidenceRows.malformed
+      + summary.malformed;
     if (malformedTotal > 0) throw fail('REVIEW_WORKBOOK_INVALID', malformedTotal);
     if (!buildInfo) throw fail('REVIEW_WORKBOOK_INVALID', 1);
+
+    // ---- F-11: Summary structure (row count, fixed metric set, no duplicate/unknown/missing) --
+    const summaryStructuralInvalid = summary.rowCountMismatch + summary.duplicate + summary.unknown + summary.missing;
+    if (summaryStructuralInvalid > 0) throw fail('REVIEW_WORKBOOK_INVALID', summaryStructuralInvalid);
 
     // ---- schema version (S13.2, exact match) ---------------------------------------------------
     if (buildInfo.review_schema_version !== reviewState.review_schema_version
@@ -323,12 +381,30 @@
     const workbookFingerprints = sourceDocuments.rows.map(r => `${r.source_document_id}:${r.document_fingerprint}`);
     if (!sortedEqual(currentFingerprints, workbookFingerprints)) throw fail('REVIEW_SOURCE_MISMATCH', 1);
 
-    // ---- Evidence Index reference existence (S39) ----------------------------------------------
-    let unresolvedEvidence = 0;
-    for (const row of evidenceRows.rows) {
-      if (!evidenceIndex.byUnitId.has(row.source_unit_id)) unresolvedEvidence++;
+    // ---- F-12: Evidence Index - exact expected unit set, then per-row reference validity ------
+    // Expected set: exactly the units reachable from a candidate/alias/conflict evidence_ref in
+    // the CURRENT evaluation (same rule the export side uses) - missing, extra or duplicated
+    // units are all rejected, not just "does this unit exist somewhere".
+    const expectedUnitIds = referencedUnitIds(evaluation);
+    const workbookUnitIds = evidenceRows.rows.map(r => r.source_unit_id);
+    if (!sortedEqual(Array.from(expectedUnitIds), workbookUnitIds)) {
+      const wbSet = new Set(workbookUnitIds);
+      const missing = Array.from(expectedUnitIds).filter(id => !wbSet.has(id)).length;
+      const extra = workbookUnitIds.filter(id => !expectedUnitIds.has(id)).length;
+      throw fail('REVIEW_WORKBOOK_INVALID', missing + extra);
     }
-    if (unresolvedEvidence > 0) throw fail('REVIEW_WORKBOOK_INVALID', unresolvedEvidence);
+    // Per-row reference validity: both indices must resolve the row's IDs, to the SAME entry, and
+    // the row's own source_document_id/source_kind must match what that entry actually says -
+    // never trusted as the workbook wrote them.
+    let evidenceInvalid = 0;
+    for (const row of evidenceRows.rows) {
+      const byUnit = evidenceIndex.byUnitId.get(row.source_unit_id);
+      const byRef = evidenceIndex.byProvenanceRefId.get(row.provenance_ref_id);
+      const pairOk = byUnit && byRef && byUnit === byRef;
+      const contentOk = pairOk && byUnit.source_document_id === row.source_document_id && byUnit.source_kind === row.source_kind;
+      if (!contentOk) evidenceInvalid++;
+    }
+    if (evidenceInvalid > 0) throw fail('REVIEW_WORKBOOK_INVALID', evidenceInvalid);
 
     // ---- scope/status (S13.2.0: workbook value AND current Extraction Result value) -----------
     let scopeStatusMismatch = 0;
@@ -411,6 +487,21 @@
     if (!sortedEqual(Object.keys(pending.candidate_decisions), currentCandidateIds)) throw fail('REVIEW_WORKBOOK_INVALID', 1);
     if (!sortedEqual(Object.keys(pending.alias_decisions), currentAliasIds)) throw fail('REVIEW_WORKBOOK_INVALID', 1);
     if (!sortedEqual(Object.keys(pending.conflict_resolutions), currentConflictIds)) throw fail('REVIEW_WORKBOOK_INVALID', 1);
+
+    // ---- F-11: Summary AGGREGATE comparison. `pending` is shaped exactly like a reviewState
+    // (candidate_decisions/alias_decisions/conflict_resolutions), so Export.computeSummary() -
+    // the SAME function the export side used to produce the Workbook's Summary values in the
+    // first place - can recompute the expected numbers from {current evaluation, pending state}
+    // and they must match every value the Workbook actually contains. A Summary sheet that
+    // "looks" structurally fine but reports the wrong counts (e.g. copied from a different
+    // session, or hand-edited) is rejected here, atomically, before pending is ever used. -------
+    const expectedSummary = Export.computeSummary(evaluation, pending);
+    let summaryValueMismatch = 0;
+    for (const metric of summary.expectedNames) {
+      const expected = Export.summaryValueForMetric(metric, expectedSummary);
+      if (summary.map[metric] !== expected) summaryValueMismatch++;
+    }
+    if (summaryValueMismatch > 0) throw fail('REVIEW_SUMMARY_MISMATCH', summaryValueMismatch);
 
     return pending;
   }

@@ -45,6 +45,7 @@
     REVIEW_DUPLICATE_ID: 'レビューWorkbookにID重複が含まれているため、読み込みを中止しました。現在のレビュー内容は変更されていません。',
     REVIEW_ACTIVE_CONTENT_FORBIDDEN: 'レビューWorkbookに数式・コメント・ハイパーリンク等が含まれているため、読み込みを中止しました。現在のレビュー内容は変更されていません。',
     REVIEW_NOTE_TOO_LONG: 'レビューWorkbookのメモが上限文字数を超えているため、読み込みを中止しました。現在のレビュー内容は変更されていません。',
+    REVIEW_SUMMARY_MISMATCH: 'レビューWorkbookの集計値が現在の解析結果と一致しないため、読み込みを中止しました。現在のレビュー内容は変更されていません。',
     INTERNAL: '処理に失敗しました。',
   };
 
