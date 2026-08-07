@@ -992,18 +992,24 @@ Review State を壊さず、content-free なエラーを出して停止するこ
 確定する上限は、安全に完走できた最大規模に余裕を掛けた値とし、S18.1 の裏づけ規則
 （提案値の 90% 以上で 3 回連続成功）を満たさなければならない。
 
-### S18.5 Review Workbook 上限（Checkpoint 3 の実測 / 提案）
+### S18.5 Review Workbook 上限（Checkpoint 3 承認済 / Chromium 基準）
 
 `MAX_FILE_BYTES` 等の source 入力上限を、private review Workbook（resume 用）へそのまま
 流用してはならない。Review Workbook は数万 candidate を含み得るため、source 入力より
 大きくなり得る。
 
-| 項目 | 状態 | 提案値 | 根拠 |
+| 項目 | 状態 | 承認値 | 根拠 |
 |---|---|---|---|
-| `MAX_REVIEW_WORKBOOK_BYTES` | **測定済 / 提案** | 60 MB (62,914,560) | S18.6 参照 |
+| `MAX_REVIEW_WORKBOOK_BYTES` | **Checkpoint 3 approved / Chromium baseline** | 60 MB (62,914,560) | S18.6 参照 |
 
 実測は `p2a3_review_workbook_measurement_report.md` に記録し、値は `limits.js` の
-`REVIEW_WORKBOOK_LIMITS` に実装した。正式な配布上限としての承認は Checkpoint 3 レビューで行う。
+`REVIEW_WORKBOOK_LIMITS` に実装した。Checkpoint 3 レビューで正式承認済み。
+
+**この承認の意味を限定する**：60 MB の Workbook を性能保証した、という意味ではない。
+実測された最大正常 Workbook は 35.48 MB（66,000 candidate 規模）であり、60 MB はそこから
+安全余裕を取った **pre-read 拒否上限**である。真の不安定点は S18.6 のとおり未特定のまま。
+**Windows Edge／Chrome 実機、macOS Safari は未検証**であり、最終配布判断の前に実機検証が
+必要（この制約は実際に検証するまで残す）。
 
 ### S18.6 Review Workbook 測定サマリー
 

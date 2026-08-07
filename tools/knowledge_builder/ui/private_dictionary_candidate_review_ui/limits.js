@@ -2,9 +2,10 @@
 /* P2-A3 candidate review UI - input limits and the pure pre-read size check.
  *
  * The values below come from the Checkpoint 2 browser-memory measurement recorded in
- * tools/knowledge_builder/design/p2a3_browser_memory_measurement_report.md. They are PROPOSED
- * limits: Checkpoint 2 review decides whether they become the shipping limits. Nothing here may
- * be raised without a fresh measurement.
+ * tools/knowledge_builder/design/p2a3_browser_memory_measurement_report.md. Status: Checkpoint 2
+ * approved / Chromium baseline. Windows Edge/Chrome and macOS Safari remain unverified - the
+ * status label covers only what was actually measured. Nothing here may be raised without a
+ * fresh measurement.
  *
  * checkSelection() is a pure function over file METADATA only ({name, size}). It never touches
  * File.arrayBuffer(), so an over-limit selection is rejected before a single byte is read.
@@ -40,14 +41,16 @@
    * p2a3_review_workbook_measurement_report.md). Checked against File.size before
    * File.arrayBuffer() is ever called, exactly like MAX_FILE_BYTES. */
   const REVIEW_WORKBOOK_LIMITS = Object.freeze({
-    // Checkpoint 3 measurement (p2a3_review_workbook_measurement_report.md): a synthetic session
-    // at the scale the Checkpoint-2-approved 1.84 MB / 3-file input actually produces (66,000
-    // candidates) exported a 35.48 MB private Workbook, imported it back successfully, and stayed
-    // responsive with no crash - no instability point was found at this scale. Unlike
-    // MAX_FILE_BYTES (set below an observed instability point), this has no observed failure to
-    // sit below, so the margin is expressed the only honest way available: ~1.7x the largest
-    // successful measurement. A higher true ceiling may exist; this is a first proposal for
-    // Checkpoint 3 review, not a value derived from a measured failure boundary.
+    // Status: Checkpoint 3 approved / Chromium baseline. Windows Edge/Chrome and macOS Safari
+    // remain unverified. Checkpoint 3 measurement (p2a3_review_workbook_measurement_report.md): a
+    // synthetic session at the scale the Checkpoint-2-approved 1.84 MB / 3-file input actually
+    // produces (66,000 candidates) exported a 35.48 MB private Workbook, imported it back
+    // successfully, and stayed responsive with no crash - no instability point was found at this
+    // scale. Unlike MAX_FILE_BYTES (set below an observed instability point), this has no
+    // observed failure to sit below, so the margin is expressed the only honest way available:
+    // ~1.7x the largest successful measurement. A higher true ceiling may exist; this is not a
+    // value derived from a measured failure boundary, and it is a pre-read rejection ceiling, not
+    // a performance guarantee.
     MAX_REVIEW_WORKBOOK_BYTES: 60 * 1024 * 1024,
   });
 

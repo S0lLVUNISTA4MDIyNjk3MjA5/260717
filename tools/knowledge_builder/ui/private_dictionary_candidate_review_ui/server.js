@@ -20,9 +20,23 @@ const { spawn } = require('child_process');
 const HOST = '127.0.0.1';
 const UI = __dirname;
 const KB = path.join(UI, '..', '..');
-const VENDOR = path.join(KB, 'ui', 'vendor');
-const CORE = path.join(KB, 'core');
-const SAMPLES = path.join(KB, 'samples', 'p2a3', 'standard');
+
+/* This file runs from two different directory layouts:
+ *   - source tree (this repo):  tools/knowledge_builder/ui/private_dictionary_candidate_review_ui/
+ *   - packaged distribution:    <package root>/app/            (flat: core/, vendor/ live right
+ *                                                                 here; samples/ is a sibling of app/)
+ * The Checkpoint 4 package deliberately does not mirror the source tree's nesting (a packaged
+ * distribution is not "the repo minus some files"), so this picks whichever layout is actually on
+ * disk rather than assuming one. The check is a static, one-time directory existence probe against
+ * fixed relative paths at startup - not derived from any request. */
+function firstExisting(candidates) {
+  for (const c of candidates) { try { if (fs.existsSync(c)) return c; } catch (_) { /* keep looking */ } }
+  return candidates[candidates.length - 1];
+}
+const VENDOR = firstExisting([path.join(UI, 'vendor'), path.join(KB, 'ui', 'vendor')]);
+const CORE = firstExisting([path.join(UI, 'core'), path.join(KB, 'core')]);
+const SAMPLES = firstExisting([path.join(UI, '..', 'samples'), path.join(KB, 'samples', 'p2a3', 'standard')]);
+const QUANTITY_SIDECAR = firstExisting([path.join(CORE, 'quantity_sidecar_binding_core.js'), path.join(KB, '..', 'quantity_sidecar_binding_core.js')]);
 
 const JS = 'text/javascript; charset=utf-8';
 
@@ -41,7 +55,7 @@ const ROUTES = Object.assign(Object.create(null), {
   '/vendor/pdfjs/fonts-data.js': [path.join(VENDOR, 'pdfjs', 'fonts-data.js'), JS],
   '/vendor/pdfjs/alpha-local-factories.js': [path.join(VENDOR, 'pdfjs', 'alpha-local-factories.js'), JS],
 
-  '/core/quantity_sidecar_binding_core.js': [path.join(KB, '..', 'quantity_sidecar_binding_core.js'), JS],
+  '/core/quantity_sidecar_binding_core.js': [QUANTITY_SIDECAR, JS],
   '/core/id_hash_utils.js': [path.join(CORE, 'id_hash_utils.js'), JS],
   '/core/pdf_direct_adapter.js': [path.join(CORE, 'pdf_direct_adapter.js'), JS],
   '/core/excel_direct_adapter.js': [path.join(CORE, 'excel_direct_adapter.js'), JS],

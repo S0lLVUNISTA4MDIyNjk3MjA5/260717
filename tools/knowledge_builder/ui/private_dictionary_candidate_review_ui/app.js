@@ -597,15 +597,22 @@
       + `最大 ${Limits.LIMITS.MAX_FILE_COUNT} 件（Checkpoint 2 承認済 / Chromium基準）`;
     $('review-workbook-limit-info').textContent =
       `レビューWorkbook 再開の上限 ${Limits.formatBytes(Limits.REVIEW_WORKBOOK_LIMITS.MAX_REVIEW_WORKBOOK_BYTES)}`
-      + `（Checkpoint 3 測定に基づく提案値）`;
+      + `（Checkpoint 3 承認済み / Chromium 基準）`;
   }
 
   function init() {
     if (!checkEnvironment()) return;
     wire();
     renderSelection();
-    // Exposed for the browser verification harness. Read-only inspection of live state; the
-    // harness never mutates it, and no candidate content is written to the console.
+    // Diagnostic hook for this repository's own automated verification (Playwright), not an
+    // end-user-facing feature. It exposes the live app object by reference, so nested state
+    // (app.session.reviewState etc.) IS technically writable from the browser console - this is
+    // a judgement call, not an oversight: a local single-user desktop tool has no privilege
+    // boundary for its own browser console to cross (whoever can open devtools already has full
+    // access to everything the page can do), and several existing verification scripts rely on
+    // this surface for both reading and, in a couple of targeted cases, driving state directly
+    // instead of every single interaction going through a full DOM click. No candidate content is
+    // ever written to the console by production code.
     globalThis.__P2A3_APP__ = app;
     globalThis.__P2A3_READY__ = true;
   }
