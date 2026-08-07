@@ -199,6 +199,11 @@ function checkReadme(packageRoot) {
     if (!fs.existsSync(p)) continue;
     const text = fs.readFileSync(p, 'utf8');
     assert(text.length > 3000, `${name} has substantial content (${text.length} bytes)`);
+    // R2: PDF input constraints must be explicit - text layer required, no built-in OCR, and
+    // encrypted/password-protected PDFs are not processed.
+    assert(/OCR機能はありません/.test(text), `${name} states this tool has no built-in OCR`);
+    assert(/暗号化.*(パスワード保護|PDFは処理できません)|パスワード保護.*PDF/.test(text), `${name} states encrypted/password-protected PDFs are not processed`);
+    assert(/テキスト層を持つものを使用/.test(text), `${name} states PDF input must have a text layer`);
   }
   const html = fs.readFileSync(path.join(packageRoot, 'README_JA.html'), 'utf8');
   assert(!/<script\s+src=/.test(html), 'README_JA.html has no external <script src=');
