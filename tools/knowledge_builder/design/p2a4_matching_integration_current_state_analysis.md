@@ -10,6 +10,18 @@ P2-A4 Checkpoint 1 — Matching Tool Current-State Analysis
 であり、推測は含まない（確認方法が実装コード読解でなくschema/testからの推定に留まる箇所のみ
 「Confidence: Medium」と明記する）。
 
+**R2改訂**: Checkpoint 1-R2にて、既存tag matching pipelineの正確な実装（§15.1）を追加確認した。
+特に、P2-A4指示書・contract文書が当初想定していた `matchInitialTags()` という関数は、
+**P2-A4の対象であるmatching tool（`tools/json_ab_trace_matching_tool_v12.1.15.html`）には
+存在しない**ことを確認した（同ファイルをgrepしてゼロ件）。`matchInitialTags()`という名前の関数は
+実際には存在するが、それは`tools/knowledge_builder/core/excel_direct_adapter.js`（L396）/
+`pdf_direct_adapter.js`（L532）という**別ツール**（Excel/PDFからKnowledge Node/Relation graphを
+構築するknowledge_builder入力adapter。matching toolとは無関係な別系統）の同名関数であり、
+セル/段落の初期tag付与（完全一致・alias一致のみ）に使われる。P2-A4のmatching integration対象
+（TraceRecord同士のPLM-vs-要求仕様 comparison）とは別の関数であることを明確にする（§15.1で詳細）。
+実際の統合候補点は`_tagInfo`/`buildTagIndex()`/`evaluateTagMatch()`/`matchPlmParts()`の
+既存chainであり、設計上の結論はcontract文書S13を参照。
+
 ---
 
 ## 0. スコープの誤解を避けるための前提
@@ -255,6 +267,63 @@ Confidence: High.
 いずれもPROJECT/DOMAIN/ACTIVEの概念を持たない。それは§9記載のknowledge_builder側にのみ存在する。
 
 Confidence: High.
+
+### 15.1 tag matching pipelineの正確な実装（R2で追加確認）
+
+P2-A4指示書・contract文書R1版は `matchInitialTags()` という関数の実装確認を次Checkpointの
+条件としていたが、**この関数はP2-A4の対象であるmatching tool
+（`tools/json_ab_trace_matching_tool_v12.1.15.html`）には存在しない**（同ファイルを
+`matchInitialTags`/`InitialTag`で全文grepしてゼロ件）。
+
+**訂正（推測ではなく実装確認による）**: `matchInitialTags()`という名前の関数自体は
+コードベース上に**実在する**が、それは`tools/knowledge_builder/core/excel_direct_adapter.js`
+（L396）と`pdf_direct_adapter.js`（L532）という、matching toolとは**別のtool系統**
+（Excel/PDFからKnowledge Node/Relation graphを構築するknowledge_builder入力adapter、
+`knowledge_builder_tool_v0.2.0-alpha.html`が消費する）に属する同名関数である。実装を確認した
+ところ、セル/段落の表示値に対し完全一致・alias一致のみでNodeの初期tagを決定する処理
+（`private_dictionary_learning_contract_0.1.md` §該当箇所にも「後続でeffective_vocabularyを
+matchInitialTags()へ渡すことを想定」という記述がある）であり、**P2-A4が対象とする
+TraceRecord同士のPLM-vs-要求仕様comparison（matching tool側）とは無関係**。
+指示書が想定していた関数名は、この別系統の同名関数と混同されたものと考えられる。実際の
+matching tool側tag pipelineは以下の関数chainであることを直接コード読解で確認した
+（`tools/json_ab_trace_matching_tool_v12.1.15.html`）。
+
+- **`explicitTagsFromRow()`/`explicitRawTagsFromRow()`/`synonymBaseTagsForText()`/
+  `dictionaryTagSourceSummary()`/`tagOverrideForRow()`/`composeFinalTags()`**（L4260-4335）:
+  1行分のTraceRecordから複数のtag source（明示tag／synonym辞書由来tag／コード由来tag／
+  手動追加／手動削除）を個別に抽出し、最終tag集合へ合成するヘルパー群。
+  `synonymBaseTagsForText()` が**唯一**、辞書由来tagを生成する経路であり、その入力は
+  `matchLogic.synonymMap`/`synonymAuto`/`businessDictionary`（§15記載のad hoc辞書）のみ。
+  P2-A1の`effective_vocabulary`を消費する経路は現状**存在しない**。
+- **`buildRowTagInfo()`/`annotateTraceTags()`**（L4400-4459）: 上記ヘルパー群を呼び出し、
+  matching開始前に各rowへ `_tags`（最終tag配列）と `_tagInfo`（`{explicit, dict, code,
+  manualAdd, manualRemove}` という5つのsource別集合）を事前付与する。`annotateTraceTags()` が
+  TraceRecordSet全体に対しこれを一括実行する、matching前の前処理ステップ。
+- **`buildTagIndex()`/`evaluateTagMatch()`**（L5396-5505）: `buildTagIndex()` は
+  tagの文書頻度（document frequency）を集計しhigh-frequency tagを枝刈りするindexを構築する。
+  `evaluateTagMatch()` は2 rowの `_tagInfo` から実効tag集合（`tagSourceSetForRow()`/
+  `tagIsDictOnlyHighFrequency()`/`effectiveNonCodeTagSet()`/`activeCodeTagSet()` を介して
+  決定）を取り出し、Dice係数（重複度）ベースのtag一致scoreを計算する。
+- **`bestMatchForPlm()`/`bestDeterministicMatchForPlm()`**（L5267-5395）: 候補生成・
+  スコアキャッシュ（`calcMatch`/`invalidateMatchCache`）を担う。
+- **`matchPlmParts()`**（L5665-5737）: comparison生成の**唯一のエントリポイント**
+  （§19表#1と同一箇所）。`tagSettings.useForMatching` が有効な場合のみtag-scoreを評価し、
+  既存の通常テキストscore（conventional score）とtag-scoreを**max選択**（どちらか大きい方を
+  採用。同値の場合はconventional scoreを優先）で統合する。**加算・重み付け合成ではない。**
+
+**P2-A4への含意（確定）**: `effective_vocabulary` をtag matching経路へ接続する場合、
+接続点は「comparison生成前」という単一の統合点（§19表#1）の**内部**にあり、具体的には
+`_tagInfo` の既存5 source（`.explicit`/`.dict`/`.code`/`.manualAdd`/`.manualRemove`）に
+**新しいsibling source**を追加し、`buildTagIndex()`/`evaluateTagMatch()` が読む実効tag集合の
+決定ロジック（`tagSourceSetForRow()`等）へその新sourceを組み込む、という拡張が構造的に可能で
+あることを確認した。既存の`_tagInfo.dict`（ad hoc辞書由来）とは出自を混同しないよう、
+別sourceとして追加することが前提となる。この拡張は**matching tool側のみの変更**で完結し、
+`private_dictionary_learning_core.js`（P2-A1 core）側の変更を要求しない
+（P2-A1は既に`effective_vocabulary`という消費可能な形でSource of Truthを提供済みであるため）。
+設計上の結論はcontract文書S13を参照。実装（matching tool側コード変更）はP2-A4本Checkpointの
+対象外（後続実装Checkpoint）。
+
+Confidence: High（実コード直接確認、`matchInitialTags`非存在はgrepで確認）。
 
 ---
 

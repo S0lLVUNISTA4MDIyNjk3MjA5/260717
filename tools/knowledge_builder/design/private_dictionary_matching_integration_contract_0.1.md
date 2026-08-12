@@ -14,6 +14,22 @@ P2-A4「Private Dictionary Application / Matching Integration」の設計契約�
 （S12.A/S12.B）、Snapshot selection/pinningの矛盾解消（S14）を反映。変更点は各節に(R1-n)として
 明記する。
 
+**R2改訂**: Checkpoint 1-R2にて、以下を反映。変更点は各節に(R2-n)として明記する。
+
+- S13: `matchInitialTags()`（matching tool内には存在せず、実際は無関係な別tool系統
+  `excel_direct_adapter.js`/`pdf_direct_adapter.js`の同名関数であることが判明）への言及、
+  および「`matchLogic`へ新しい独立カテゴリを追加する」という未確定推奨を撤回し、実コード確認済みの
+  `_tagInfo`/`buildTagIndex()`/`evaluateTagMatch()`/`matchPlmParts()` chainへの拡張として
+  再定義（R2-1）。
+- S4.1（新設）: Resolution provenanceのSource of Truthを、既存P2-A1出力（layerViews/
+  `mergeDictionaryLayers()`）から構築する方式（Option B）として確定（R2-2）。
+- S5.1/S5.2: `wrapper_sha256` を `wrapper_integrity_sha256` へ改称し、`dictionary_payload_sha256`
+  との責務分離を明確化。全fieldのhash対象/対象外を表形式で確定（R2-3）。
+- S5.1/S5.4（新設）: `snapshot_status` をimmutable wrapperから分離し、別の
+  Snapshot Activation Recordへ移動（R2-4）。
+- S6.4/S6.3: S6.4をS6.1の3-input契約と一致させ、`SELECT_CANONICAL`の意味を訂正（R2-5）。
+- S9: `alias_rule_id` の扱いをS4.1の結論に合わせて訂正（R2-2）。
+
 ---
 
 ## S0. 目的とKPI（要約。詳細は acceptance plan 側）
@@ -143,7 +159,7 @@ Dictionary maintenance queue へ収集（Checkpoint 1ではcontractのみ、queu
   "resolution_type": "APPROVED_ALIAS",
   "dictionary_entry_id": "pde-<hex32>",
   "dictionary_snapshot_id": "dsnap-<hex32>",
-  "dictionary_wrapper_sha256": "<hex64>",
+  "wrapper_integrity_sha256": "<hex64>",
   "scope": "PROJECT",
   "status": "ACTIVE"
 }
@@ -173,6 +189,46 @@ Dictionary maintenance queue へ収集（Checkpoint 1ではcontractのみ、queu
 （事実上のAUTO ACCEPTや無自覚なmatching再計算）を招く。実装Checkpointでは、この2つの利用を
 コード上も別関数として分離することを推奨する（unresolved design questionではなく、確定方針）。
 
+### S4.1 Resolution Annotation Provenance Source of Truth（R2-2で新設）
+
+S4の「Resolution Annotation の最小構成案」は `dictionary_entry_id`/`scope`/`status` 等の
+provenance fieldを含むが、**これらは`effective_vocabulary`単体からは復元できない**。
+`effective_vocabulary`（`mergeDictionaryLayers()`の出力）は
+`{allowed_tags:[canonical表示名の配列], aliases:{alias表示名→canonical表示名}}` という
+**flatなマッピング**であり（current-state-analysis §18.1）、entry識別子・scope・statusは
+含まれない。Resolverがprovenance付きのResolution Annotationを生成するには、
+`effective_vocabulary`とは別に、これらの識別情報を保持する仕組みが必要である。
+
+**検討した2案**:
+
+| 案 | 内容 | 評価 |
+|---|---|---|
+| A: P2-A1 coreへ新規APIを追加 | 後続Checkpointで`private_dictionary_learning_core.js`へ、`effective_vocabulary`と同時にprovenance lookup indexを生成する追加pure関数を実装する | P2-A1 coreへの変更を伴う。P2-A1は「promotion/quarantine/rollback policyは実装しない」と自ら宣言したread-only Source of Truthであり（current-state-analysis §18）、新規API追加は最小限にとどめるべきという方針（R1-3の「P2-A1契約は変更しない」原則）と緊張関係にある |
+| B: 既存のlayerView/merge出力からP2-A4側で構築（採用） | Resolverが`createPrivateDictionaryLayerView()`の戻り値（`{entry_ref_id, canonical_display, canonical_key, aliases:[{display,key}], status, source_kind}`の配列、current-state-analysis §18.1）と`mergeDictionaryLayers()`の戻り値を**両方**保持しておき、`effective_vocabulary`の各entryに対応する`entry_ref_id`/`status`/`scope`（layerViewの`scope`）/`dictionary_fingerprint`をP2-A4側のResolverコード内でつき合わせて provenance lookup index（`canonical_key`/`alias key` → `{entry_ref_id, scope, status, dictionary_fingerprint}`）を構築する | **P2-A1 core側の変更が一切不要**。`createPrivateDictionaryLayerView()`の戻り値は既に`entry_ref_id`等を含んでおり、`mergeDictionaryLayers()`はこのlayerViewを入力に取るため、Resolverは元々両方の出力を呼び出し時点で手元に持っている。P2-A1のmerge/conflict/priority semanticsを一切再実装せず、その出力を「そのまま保持して引き回す」だけで足りる |
+
+**R2-2の結論: Option Bを採用する。** 理由: (1) P2-A1 core APIへの変更を要求しない
+（P2-A1の既存契約変更コストがゼロ）。(2) P2-A1のmerge/conflict/priority判定ロジックを
+P2-A4側で再実装・再現する必要がない（`createPrivateDictionaryLayerView()`と
+`mergeDictionaryLayers()`をそのまま順に呼び出し、両方の戻り値を保持するだけで
+provenance lookup indexが構築できる）。(3) Source of Truthは常にP2-A1側の関数呼び出し結果のみで
+あり、P2-A4側は「値を作る」のではなく「既に返ってきた値をindex化して引き回す」役割に限定される。
+
+**`alias_rule_id`の処遇（訂正）**: S4/S9のResolution Annotation/Provenance必須項目案に
+`alias_rule_id`（「P2-A3の`rule_ids`契約と対応させる」）が挙がっていたが、
+`private_dictionary_learning_core.js`の`ALLOWLISTED_FIELD_NAMES`（R1で確認済み）を確認した結果、
+**`rule_id`/`rule_ids`に相当するfieldは存在しない**。つまりP2-A1の正式schema（
+`private-dictionary-overlay/1.0`）を経由した時点で、どのP2-A3抽出ruleに由来するcandidateだったか
+という情報は失われる（P2-A1はrule起源を保持しない設計になっている）。
+
+このため、**`alias_rule_id`をResolution Annotationの必須fieldから外す**（推測値を生成しない
+という原則、R1-2/R2directive「never generate a guessed value」に従う）。rule起源の追跡が
+将来的に必要になった場合は、Resolution Annotationとは別に、Promotion Validatorが
+Promotion実行時点で生成する**独立したcontent-addressed「Promotion Provenance Artifact」**
+（`candidate_id`/`alias_id` → 由来ruleの記録）を新設し、Snapshot wrapperの
+`promotion_record_identity`（S5.1）経由で参照可能にする、という設計を候補として残す
+（具体的なartifact schemaは後続Checkpointで設計。unresolved design question、S23参照）。
+**現時点で`alias_rule_id`に推測値・ダミー値を割り当てることはしない。**
+
 ---
 
 ## S5. Dictionary Snapshot Contract案（R1-4: P2-A1 canonical schemaのwrapperとして再定義）
@@ -188,18 +244,17 @@ Dictionary Snapshotは**辞書本文を新たに定義しない**。既存の `p
 payload（1つ以上のscope layerの `serializeValidatedPrivateDictionary()` 出力そのもの）を
 **そのまま包む wrapper artifact** として定義し直す。
 
-**S5.1 Snapshot Wrapper Schema**（Checkpoint 1で定義する項目。実装はしない）:
+**S5.1 Snapshot Wrapper Schema**（Checkpoint 1で定義する項目。実装はしない。R2-3/R2-4で改訂）:
 
 | field | 内容 | 備考 |
 |---|---|---|
 | `wrapper_schema_version` | 例 `private-dictionary-snapshot-wrapper/0.1` | wrapper自体のschema。辞書本文のschemaとは別軸 |
 | `snapshot_id` | 例 `dsnap-<hex32>` | 内容に依存しない発番（重複禁止の識別子） |
 | `dictionary_payload` | **`private-dictionary-overlay/1.0` の辞書本体そのもの**（1 scope layer分、`validatePrivateDictionary()` で検証可能な構造） | 第二の正本を作らない。P2-A1の既存構造をそのまま埋め込む |
-| `dictionary_payload_sha256` | `hashPrivateDictionaryCanonical(dictionary_payload)` の出力 | **P2-A1の既存関数をそのまま呼び出す**（下記S5.2） |
-| `wrapper_sha256` | wrapper全体のcanonical serializationのSHA-256 | S5.2のhash projection参照 |
+| `dictionary_payload_sha256` | `hashPrivateDictionaryCanonical(dictionary_payload)` の出力 | **辞書内容の同一性のみ**を表す。P2-A1の既存関数をそのまま呼び出す（下記S5.2）。**この値の責務は「同じ辞書内容なら同じhash」のみであり、wrapper全体の改ざん検知を兼任しない（R2-3）** |
+| `wrapper_integrity_sha256` | wrapper artifact全体（自己参照field除く）のcanonical serializationのSHA-256 | **（R2-3で`wrapper_sha256`から改称）** wrapperの**改ざん検知**専用。`dictionary_payload_sha256`とは責務が異なる別hash。S5.2のhash projection参照 |
 | `snapshot_version` | 単調増加の版番号（wrapper発行ごと） | rollback対象の識別に使う(S12) |
 | `scope` | `dictionary_payload.scope` と一致必須（`PROJECT`、初期実装はS7参照） | 二重管理を避けるため、wrapperのscope fieldはpayload内scopeのミラーとしてのみ存在し、検証時に不一致ならreject |
-| `snapshot_status` | Snapshot自体のstatus（`ACTIVE`/`SUPERSEDED` 等、S8参照） | **entry単位の`status`（P2-A1既存）とは別軸**。entry単位statusは`dictionary_payload`内にP2-A1契約のまま存在する |
 | `provenance` | 生成元の追跡情報 | 下記S9参照 |
 | `source_review_artifact_identity` | 元になったP2-A3 Review Workbookの識別（file名ではなくSHA-256等） | 実体は含めない（S17でprivacy検討） |
 | `promotion_record_identity` | S6のPromotion Validatorが生成した記録への参照 | |
@@ -208,26 +263,40 @@ payload（1つ以上のscope layerの `serializeValidatedPrivateDictionary()` �
 | `supersedes` | 直前のsnapshot_idへの参照 | rollback chainの構成(S16) |
 | `rollback_target` | 明示的にrollbackされた場合の遡及先 | |
 
-**S5.2 Hash Projection（完全固定）**:
+**（R2-4で削除）`snapshot_status`はwrapperから除去した。** 理由・移動先はS5.4参照。
 
-`wrapper_sha256` の対象・非対象を明確に分離する。
+**S5.2 Hash Projection（完全固定、R2-3で全field網羅の表へ改訂）**:
 
-- **hash対象外**: `wrapper_sha256` 自身（自己参照不可）、生成時刻に相当するあらゆるtimestamp
-  field（wrapperにtimestamp fieldそのものを持たせない方針とする）。
-- **`snapshot_id` の扱い**: hash対象**外**。発番方式（乱数/連番等）に依存する識別子であり、
-  同一内容のwrapperを再生成した場合でもsnapshot_idは異なりうる（発行のたびに新規発番される
-  ため）。内容の同一性は`dictionary_payload_sha256`で判定する。
-- **`snapshot_version` の扱い**: hash対象**外**。versionは「この内容が何回目の発行か」という
-  外部的な連番であり、内容そのものではない。
-- **`provenance` の扱い**: hash対象**外**。`source_commit`等の生成環境情報は再現性の記録目的で
-  あり、辞書内容の同一性判定には使わない。
-- **`supersedes`/`rollback_target` の扱い**: hash対象**外**。version chain上のリンク情報であり、
-  chainの前後関係が変わってもwrapperの中身（辞書内容）が同じならhashは変わらない設計とする。
-- **hash対象**: `wrapper_schema_version`、`dictionary_payload`（＝`private-dictionary-overlay/1.0`
-  の内容全体。実質的には`dictionary_payload_sha256`と同じ内容を指すため冗長を避け、
-  `wrapper_sha256`の対象は`dictionary_payload_sha256`（stringとして）を含める形とし、
-  `dictionary_payload`自体を二重にhashしない）、`scope`、`snapshot_status`、
-  `source_review_artifact_identity`、`promotion_record_identity`、`conflict_state`。
+2つのhashは責務が異なる。
+
+- **`dictionary_payload_sha256`**: 「同じ辞書内容（`dictionary_payload`）なら常に同じhash」を
+  保証する。`hashPrivateDictionaryCanonical(dictionary_payload)`をそのまま呼び出すのみで、
+  wrapperの他fieldには一切依存しない。
+- **`wrapper_integrity_sha256`**: wrapper artifact全体（自分自身を除く、実質的に不変な
+  immutable fieldすべて）の改ざん検知を担う。1 byteでもimmutable fieldが変化すれば
+  この値も変化しなければならない。
+
+以下、S5.1の全fieldについてhash対象（`wrapper_integrity_sha256`計算への算入）可否とその理由を
+明示する。
+
+| field | hash対象 | 理由 |
+|---|---|---|
+| `wrapper_schema_version` | 対象 | wrapper構造自体の版。変化すれば別構造として区別すべき改ざん相当の変化 |
+| `snapshot_id` | **対象外** | 発番方式（乱数/連番等）に依存する識別子。同一内容のwrapperを再生成した場合でも新規発番されうるため、内容同一性の判定には使わない（`dictionary_payload_sha256`が担う） |
+| `dictionary_payload` | 対象（`dictionary_payload_sha256`という文字列として算入） | payload全体を二重にhashするのを避けるため、`dictionary_payload`そのものではなく、既に計算済みの`dictionary_payload_sha256`の値（string）をhash入力へ含める。これにより`dictionary_payload`の改変は必ず`wrapper_integrity_sha256`へ波及する |
+| `dictionary_payload_sha256` | 対象（上記と同一の算入経路） | 同上 |
+| `wrapper_integrity_sha256` | **対象外（自己参照不可）** | 自身のhash値をhash対象に含めることはできない |
+| `snapshot_version` | **対象外** | 「この内容が何回目の発行か」という外部連番であり、内容そのものではない。versionが進んでも辞書内容とwrapperの他属性が同一なら改ざんとはみなさない設計とする |
+| `scope` | 対象 | `dictionary_payload.scope`のミラー。scopeの改ざんはPROJECT/DOMAIN境界という重大な意味変化のため、検知対象に含める |
+| `provenance` | 対象 | 生成元追跡情報そのものが改ざん検知の主対象（誰がいつ生成したかの偽装を防ぐ） |
+| `source_review_artifact_identity` | 対象 | 由来artifactのすり替え検知のため |
+| `promotion_record_identity` | 対象 | 同上 |
+| `source_commit` | 対象 | 誤った/偽装されたcommitへのすり替え防止のため、改ざん検知対象に含める（生成環境情報だが、値そのものの真正性は保証したいため`provenance`とは別に明示算入する） |
+| `conflict_state` | 対象 | S12.Aの「内部不整合Snapshotは生成しない」保証に関わる要約。改ざんされるとその保証が無意味化するため対象に含める |
+| `supersedes` | **対象外** | version chain上のリンク情報。chainの前後関係が変わってもwrapperの中身（辞書内容）が同一ならhashは変わらない設計とする |
+| `rollback_target` | **対象外** | 同上 |
+| `snapshot_status`（R2-4で削除） | 該当なし | wrapper本体から除去されたため、そもそも`wrapper_integrity_sha256`の算入対象になり得ない。運用上の活性化状態はS5.4のSnapshot Activation Record側で別管理し、そちらはimmutable wrapperのhash対象ではない（可変値のため） |
+
 - **key ordering**: `private_dictionary_learning_core.js` の `canonicalJson()`
   （`tools/quantity_sidecar_binding_core.js` L122-128と共通実装のパターン）と同じ規則 —
   objectのkeyを`Object.keys(value).sort()`でordinal順に再帰ソートしてから`JSON.stringify()`。
@@ -240,8 +309,9 @@ payload（1つ以上のscope layerの `serializeValidatedPrivateDictionary()` �
 
 **P2-A1関数の直接再利用（推奨、実装Checkpointでの指針）**: `dictionary_payload_sha256`は
 **新規実装せず** `hashPrivateDictionaryCanonical(dictionary_payload)` をそのまま呼び出す。
-`wrapper_sha256`についても、wrapper用のcanonical構造体を組んだ上で同じ`canonicalJson()` +
-SHA-256の手順を再利用し、独自のhashアルゴリズムを新設しない。
+`wrapper_integrity_sha256`についても、wrapper用のcanonical構造体（上表の「対象」fieldのみを
+含む）を組んだ上で同じ`canonicalJson()` + SHA-256の手順を再利用し、独自のhashアルゴリズムを
+新設しない。
 
 **S5.3 SnapshotとConflictの関係（R1-5、詳細はS12参照）**: wrapperの`conflict_state`は
 「Promotion Validatorが**このSnapshotの生成をブロックした**内部不整合」（S12 A類）の要約のみを
@@ -249,6 +319,44 @@ SHA-256の手順を再利用し、独自のhashアルゴリズムを新設しな
 は、そもそもSnapshot単体（1 scope layer分の`private-dictionary-overlay/1.0`）には存在しない概念
 であり、merge時点（matching tool起動時、複数Snapshotを束ねる段階）で毎回計算される。
 `conflict_state`フィールドとB類conflictを混同しない。
+
+### S5.4 Snapshot Activation Record（R2-4で新設: immutable wrapperと可変運用状態の分離）
+
+R1版のS5.1は`snapshot_status`（`ACTIVE`/`SUPERSEDED`等）をwrapper内fieldとして定義していたが、
+これは「Dictionary Snapshotはversioned immutable content artifactである」という設計原則（S16）
+と**矛盾する**。immutableと宣言したwrapperの中に「現在の運用状態」という時間とともに変化する
+値を同居させると、(a) 同じ`snapshot_id`のwrapperが発行後に書き換わってよいのか曖昧になる、
+(b) `wrapper_integrity_sha256`が可変fieldを含んでしまうと、運用状態が変わるたびにhashが変わり、
+「wrapperのcontent-addressabilityは辞書内容に対して安定である」という前提（S15）が崩れる、
+という2つの問題を招く。
+
+**解消方針**: Snapshot wrapper本体は**完全にimmutableな内容artifact**とする
+（`snapshot_status`を持たない）。「現在どのSnapshotが有効か」という運用状態は、wrapperとは
+**別の、変更可能な小さいレコード**として管理する。
+
+```json
+{
+  "activation_record_schema_version": "private-dictionary-snapshot-activation/0.1",
+  "dictionary_snapshot_id": "dsnap-<hex32>",
+  "wrapper_integrity_sha256": "<hex64>",
+  "activation_status": "ACTIVE",
+  "updated_by": "<human operator識別子>"
+}
+```
+
+- `activation_status`候補値: `ACTIVE` / `SUPERSEDED` / `ROLLED_BACK`。
+- このレコードは**書き換え可能**（Activation自体は運用上のbookkeepingであり、immutable
+  contentではない）。書き換えの都度、新しいSnapshotが生成されるわけではない。
+- **matching sessionのSnapshot Loaderは、このActivation Recordを検索して「現在ACTIVEな
+  snapshotを探す」ことはしない。** それはS14が禁止する「暗黙のlatest探索」の再導入になる。
+  Snapshot Loaderは常にS14のproject configurationが指す**厳密なsnapshot identity**のみを読む。
+  Activation Recordは、辞書メンテナンス側UI（P2-A3拡張、将来slice）が「このsnapshotは既に
+  supersededである」等を人間へ表示するための**監査・表示専用**の情報であり、matching session
+  の挙動には一切影響しない。
+- P2-A1既存のentry単位status（`PROBATION`/`ACTIVE`/`OBSERVING`/`QUARANTINED`/`RETIRED`、S8）
+  とは**完全に別軸**である。entry単位statusは`dictionary_payload`内（P2-A1契約のまま、
+  wrapperの中のimmutable content）に存在し続ける。Activation Recordが管理するのは
+  「Snapshotという単位そのものの選択状態」であり、Snapshot内の個々のentryの状態ではない。
 
 ---
 
@@ -303,7 +411,7 @@ aliasは自動ACCEPTされない」をPromotion層でも維持する）。
    （canonicalが存在しないaliasは意味を持たないため）。
 3. 当該aliasに関連するunresolved conflictが存在しないこと（S6.3参照）。
 
-### S6.3 Conflict resolution enumごとのpromotion eligibility
+### S6.3 Conflict resolution enumごとのpromotion eligibility（R2-5で`SELECT_CANONICAL`行を訂正）
 
 P2-A3の`conflict_resolutions`は次のenumを持つ（既存contract準拠）。各値ごとのpromotion可否を
 明示する。
@@ -311,14 +419,25 @@ P2-A3の`conflict_resolutions`は次のenumを持つ（既存contract準拠）�
 | `resolution` | promotion対象か | 理由 |
 |---|---|---|
 | `UNRESOLVED` | **対象外** | 未解決。当該conflictに関わる全candidateをpromotion対象から除外する |
-| `SELECT_CANONICAL` | 選択された`selected_candidate_id`のcandidateのみ**条件付きで対象**（当該candidate自身のACCEPT状態・S6.2の要件を別途満たす必要がある） | 選択されなかった他のconflicting candidateは対象外のまま |
+| `SELECT_CANONICAL` | 選択された`selected_candidate_id`は**条件付きで対象**（S6.2の要件を別途満たす必要がある）。**選択されなかった他のconflicting candidateは、この解決だけを理由に対象外にはしない**（各candidate自身の`candidate_decisions`の状態に従い、S6.2の要件を独立に満たせばpromotion対象となりうる） | R2-5で訂正: `private_dictionary_candidate_review_ui_contract_0.1.md`（L205-260）が定義する`conflict_resolutions`schemaを確認した結果、`SELECT_CANONICAL`は「選択されたcandidateへalias対応関係を割り当てる」ことのみを意味し、非選択candidateの`candidate_decisions`そのものを書き換える・無効化するという契約は存在しない。conflict resolution UIの実装（`onConflictSelect()`相当のhandler）も、選択操作でaliasのcanonical割り当てを更新するのみで、非選択candidateのACCEPT/REJECT状態には触れない。これを根拠なく「対象外」とみなすことは、P2-A3契約にない除外をPromotion層が勝手に発明することになるため訂正した |
 | `REJECT_ALL` | **対象外**（関与する全candidateを除外） | 人間が明示的に「いずれも採用しない」と判断した結果 |
 | `CONTEXT_DEPENDENT` | **対象外** | 文脈依存と判断されており、辞書全体で一意に正式化できる状態ではない |
 | `UNCERTAIN` | **対象外** | 判断保留 |
 
-### S6.4 Promotion Validatorの最小責務（設計のみ）
+**補足（R2-5）**: `SELECT_CANONICAL`の下で非選択candidateが独立にpromotion対象となりうる場合でも、
+そのcandidateが選択されたcanonicalと**同一のlookup key/canonical_keyを主張する**なら、
+Promotion Validatorのcanonical衝突検出（S6.4手順3）により別途弾かれる可能性がある。つまり
+「conflict resolution自体は非選択candidateを除外しない」ことと「canonical衝突検証で結果的に
+弾かれることがある」ことは別の話であり、両者を混同しない。
 
-1. 入力: P2-A3 private Review Workbookの候補群（ACCEPT decisionのみ抽出）。
+### S6.4 Promotion Validatorの最小責務（設計のみ、R2-5でS6.1と不整合だった記述を修正）
+
+1. 入力: **S6.1の3つの独立した入力集合**（`candidate_decisions`/`alias_decisions`/
+   `conflict_resolutions`）。（R2-5で訂正: 旧版は「ACCEPT decisionのみ抽出」という
+   S6.1と矛盾する簡略化された記述だったが、S6.1が定めた3-input契約と完全に一致させた。
+   「ACCEPTのみ抽出すればよい」という含意は撤回する — alias eligibility（S6.2）と
+   conflict resolution（S6.3）の判定には、`alias_decisions`と`conflict_resolutions`の
+   実際の内容が不可欠であり、`candidate_decisions`のACCEPTのみでは判定できない）。
 2. scope衝突検出: 同一canonical termが異なるscopeで矛盾する定義を持たないか。
 3. canonical衝突検出: 既存Snapshot中のcanonical/aliasと矛盾しないか
    （例: 既にalias Aとして承認済みの語を、別candidateがcanonical Bとして提案していないか）。
@@ -384,14 +503,17 @@ canonicalへ解決されたのか」を追跡できること。
 **必須項目（S4のResolution Annotationと重複するが、provenance専用の観点でここに列挙）**:
 
 - `resolution_type`
-- `dictionary_entry_id`
+- `dictionary_entry_id`（S4.1のOption Bで構築するprovenance lookup indexの`entry_ref_id`）
 - `dictionary_snapshot_id`
-- `dictionary_wrapper_sha256`
+- `wrapper_integrity_sha256`（S5.2、旧`dictionary_wrapper_sha256`表記から改称。R2-3）
 - `original_term`（原文そのまま。破壊しない = NG-9）
 - `canonical_term`
-- `alias_rule_id`（P2-A3の `rule_ids` 契約と対応させる）
 - `scope`
 - `status`
+
+**（R2-2で削除）`alias_rule_id`は必須項目から外した。** P2-A1の正式schema
+（`ALLOWLISTED_FIELD_NAMES`）にrule起源を保持するfieldが存在しないため、推測値を割り当てず
+必須項目としない（詳細な経緯・代替案はS4.1参照）。
 
 **Privacyとのバランス**: これらのfieldはtermの文字列そのものを含むため、P2-A2/P2-A3の
 private/shareable境界（S12）を継承する必要がある。matching result内部（loopback-only、
@@ -514,45 +636,90 @@ S12.Bは個々のlookup keyの除外に留まり、Resolver自体は有効なま
 
 ---
 
-## S13. Dictionary Matchの意味づけ（既存matching scoreへの入力方法）
+## S13. Dictionary Matchの意味づけ（既存matching scoreへの入力方法）（R2-1で全面改訂）
 
 Dictionary resolutionは「comparisonの証拠の1つ」であり、**Dictionary exact/alias一致だけを
-理由にcomparisonを無条件で一致扱いにしてはならない**（NG-10）。
+理由にcomparisonを無条件で一致扱いにしてはならない**（NG-10）。この原則は変更しない。
 
-既存 `matchLogic`（current-state-analysis §5）が既に手法別スコア（完全一致/コード一致/synonym/
-自動synonym/fuzzy/vector/partial）を持っている。Dictionary resolutionは、この既存スコア体系に
-**新しい入力信号を1つ追加する**形で統合することを推奨する。
+**R2-1: R1版の記述を撤回する。** R1版は「`matchLogic`内に新しい独立カテゴリ（例: `dictionary`）を
+追加する」ことを推奨し、その判断根拠として`matchInitialTags()`という関数の実装確認を次Checkpoint
+の条件としていた。Checkpoint 1-R2で`tools/json_ab_trace_matching_tool_v12.1.15.html`を直接
+grep・読解した結果、**`matchInitialTags()`はこのmatching tool内には存在しない**
+（同ファイルを`matchInitialTags`/`InitialTag`で全文検索してゼロ件）。
 
-**R1-3: `private_dictionary_learning_core.js` の `effective_vocabulary`（`mergeDictionaryLayers()`
-の出力）をこの入力信号のSource of Truthとする。**
-`matchLogic.synonymMap`（利用者が手元で編集するad hocな辞書、current-state-analysis §15）と
-`effective_vocabulary`（P2-A3で人間が正式承認し、Promotion Validatorを経た正式辞書）は**出自が
-異なる別概念**であり、正式辞書を`matchLogic.synonymMap`へ直接書き込む/マージする設計は
-**採用しない**（既存の利用者編集可能なsynonymMapへ正式辞書を混入させると、(a) 利用者が
-無自覚に正式辞書entryを上書き・削除できてしまう、(b) 正式辞書とad hoc辞書の出自が区別できなく
-なりprovenanceが壊れる、という2つの問題を招くため）。
+**訂正内容の正確な記述**: `matchInitialTags()`という同名関数自体はコードベース上に実在するが、
+それは`tools/knowledge_builder/core/excel_direct_adapter.js`（L396）/`pdf_direct_adapter.js`
+（L532）という、matching toolとは無関係な**別tool系統**（Excel/PDFからKnowledge Node/Relation
+graphを構築する入力adapter）に属する同名関数であり、セル/段落からNodeの初期tagを決定する処理
+である（current-state-analysis §15.1で確認事実として記録済み）。P2-A4が対象とするのは
+TraceRecord同士のPLM-vs-要求仕様comparisonを行うmatching toolであり、この別系統の
+`matchInitialTags()`とは無関係。存在しない関数を前提に設計を進めることは「推測で
+architectureを書く」ことになるため、ここで訂正する。
 
-新しい入力信号（案）:
+**確定した実際のtag matching pipeline**（current-state-analysis §15.1で実コード確認済み）:
 
-- `deterministic normalization`: Resolverが`effective_vocabulary.aliases`を用いて確定させた
-  `canonical_term` を、既存の`normalizeForMatch()`の前処理段階でオプション適用可能にする
-  （既存正規化ロジックは変更しない。追加inputとして扱う）。
-- `canonical identity` / `alias identity`: `matchLogic`内に**新しいカテゴリ**
-  （例: `dictionary`）として追加し、既存の`synonym`/`synonymAuto`カテゴリとは独立に扱う。
-  スコアリングでの重み付けは後続Checkpointで具体設計する。
-- `provenance`: matchの根拠として `根拠` 列相当（既存の証跡表示機構）へ追加表示する。
+```text
+buildRowTagInfo() / annotateTraceTags()   <- matching開始前、各TraceRecord rowへ
+        |                                    _tags / _tagInfo を事前付与する前処理
+        v
+_tagInfo = { explicit, dict, code, manualAdd, manualRemove }   <- row単位、source別のtag集合
+        |     (.dict は synonymBaseTagsForText() 経由でのみ生成 = matchLogic.synonymMapが唯一の
+        |      入力。P2-A1 effective_vocabulary を読む経路は現状ゼロ)
+        v
+buildTagIndex()                            <- 全rowのtag文書頻度indexを構築（高頻度tagの枝刈り）
+        |
+        v
+evaluateTagMatch()                         <- 2 row間のtag集合をDice係数で比較しtag-scoreを算出
+        |
+        v
+matchPlmParts()                            <- comparison生成の唯一のentry point。
+                                               tagSettings.useForMatchingが有効な場合のみ
+                                               tag-scoreを評価し、既存conventional score（通常
+                                               テキスト照合score）とtag-scoreを**max選択**で統合
+                                               （加算・重み付け合成ではない。同値時はconventional
+                                               scoreを優先）。
+```
 
-**既存の opt-in tag機構（`evaluateTagMatch()`/`buildTagIndex()`、`matchInitialTags()`との整合）**:
-現状のtag機構は`shared/tag_vocabulary.json`（flat、scope/statusなし）を用いる別系統であり、
-P2-A3/P2-A1の`effective_vocabulary`とは出自が異なる。P2-A4の初期実装で
-`effective_vocabulary`をtag機構側へ統合するか、`matchLogic`側の新カテゴリとして独立させるかは
-**Checkpoint 1では決定しない**（unresolved design question、S23参照）。安易にtag機構の
-`allowed_tags`へ`effective_vocabulary.allowed_tags`をマージする設計は、P2-A1契約から逸脱する
-可能性があるため、次Checkpointで`matchInitialTags()`の実装を直接確認したうえで判断する。
+**R2-1の結論: `effective_vocabulary → tag resolution → existing tag evidence → existing
+matching` は、既存のP2-A1契約を変更せずに接続できる。** 具体的な拡張点は
+`matchLogic`への新カテゴリ追加ではなく、既存 `_tagInfo` の5 source（`.explicit`/`.dict`/`.code`/
+`.manualAdd`/`.manualRemove`）に**新しいsibling source**（例: `.approvedDict`）を追加することで
+ある。
 
-**具体的なスコア係数・statusごとの重み付けはCheckpoint 1では決定しない**
-（unresolved design question）。ここで固定するのは「Dictionary一致は既存スコア体系への
-入力信号の一つであり、matching結果を直接決定する特別ルールにはしない」という原則のみ。
+- 既存の `_tagInfo.dict`（ad hoc `matchLogic.synonymMap` 由来）と、新設する
+  `_tagInfo.approvedDict`（`effective_vocabulary` 由来、P2-A3で人間が正式承認しPromotion
+  Validatorを経た正式辞書）を**別sourceとして区別する**。理由はR1-3で述べた通り: 正式辞書を
+  ad hoc辞書（`synonymMap`）へ直接マージすると、(a) 利用者が無自覚に正式辞書entryを
+  上書き・削除できてしまう、(b) 正式辞書とad hoc辞書の出自が区別できなくなりprovenanceが
+  壊れる。`_tagInfo`が元々source別にtagを保持する設計であるため、この区別は既存構造の
+  自然な延長として表現できる（新しいtop-level機構を作る必要がない）。
+- `buildTagIndex()`/`evaluateTagMatch()`が読む実効tag集合の決定ロジック
+  （`tagSourceSetForRow()`/`tagIsDictOnlyHighFrequency()`/`effectiveNonCodeTagSet()`）へ、
+  新設する`.approvedDict` sourceを組み込む。これにより、正式辞書由来のtag一致は既存の
+  tag-score（Dice係数）へ反映され、`matchPlmParts()`の既存max選択ロジックを**そのまま**
+  通過する。新しいスコア合成ロジックを追加する必要はない。
+- `dictionary_entry_id`/`scope`/`status`等のprovenance情報は、tag集合そのものには含まれない
+  （tagはtext表示名の集合でしかないため）。tag-scoreへの寄与とprovenance追跡は別軸であり、
+  provenance側はResolution Sidecar（S4）/ Resolution Annotation Provenance（S4.1）が担う。
+  tag-score計算経路とprovenance記録経路は独立して動作してよい。
+
+**この結論は「P2-A1契約改訂が必要」ではなく「matching-tool側の拡張が可能」であることを意味する。**
+`private_dictionary_learning_core.js`（P2-A1 core）は`effective_vocabulary`という既に消費可能な
+形でSource of Truthを提供済みであり、**この結論のためにP2-A1 core側の変更は一切不要**。
+必要なのはmatching tool側（`tools/json_ab_trace_matching_tool_v12.1.15.html`）に
+`_tagInfo.approvedDict`という新sourceを追加する実装のみであり、これは**後続の実装
+Checkpointで行う**（Checkpoint 1-R2は設計のみで、この変更を含め一切のコード変更を行わない）。
+
+**旧`deterministic normalization`案の扱い**: R1版で挙げた「Resolverが確定させた`canonical_term`を
+`normalizeForMatch()`の前処理段階でオプション適用する」案は、tag経路とは別の追加入力候補として
+引き続き検討対象とするが、具体的な適用要否・実装方法は後続Checkpointで判断する
+（unresolved design question、S23参照）。
+
+**具体的なスコア係数・statusごとの重み付け（`.approvedDict` sourceがtag-scoreへどの程度
+寄与するか）はCheckpoint 1-R2でも決定しない**（unresolved design question）。ここで固定するのは
+「Dictionary一致は既存tag-score経由の入力信号の一つであり、matching結果を直接決定する特別ルールに
+はしない」という原則と、「拡張点は`_tagInfo`の新sibling sourceであり、P2-A1契約改訂を要しない」
+という接続方式の2点のみ。
 
 ---
 
@@ -573,7 +740,7 @@ project configuration                <- 案件ごとの設定ファイル（matc
         |                               ここに「使うべきsnapshotの厳密な指定」を事前に書いておく。
         v
 exact snapshot identity + SHA        <- 例: { "dictionary_snapshot_id": "dsnap-<hex32>",
-        |                                     "dictionary_wrapper_sha256": "<hex64>" }
+        |                                     "wrapper_integrity_sha256": "<hex64>" }
         v
 Snapshot Loader                      <- project configurationが指す正確な1つのsnapshotのみを
         |                               読み込む。指定と異なる内容が見つかった場合は
@@ -595,8 +762,9 @@ matching session開始（自動、人間操作なし）
 matching resultへ最低限残す情報:
 
 - `dictionary_snapshot_id`
-- `dictionary_wrapper_sha256`（S5.1の`wrapper_sha256`。旧`dictionary_snapshot_sha256`から
-  命名をS5のwrapper契約と整合させた）
+- `wrapper_integrity_sha256`（S5.1の同名field。旧`dictionary_snapshot_sha256`→
+  `dictionary_wrapper_sha256`（R1）→`wrapper_integrity_sha256`（R2-3）と、S5のwrapper契約の
+  改訂に合わせて命名を追従させてきた）
 - `snapshot_version`
 
 既存のreview session（`trace_comparison_review_session_core.js`）が持つ
@@ -613,8 +781,8 @@ staleにはならず、**次回session開始時からのみ**新しいpin先が�
 を使えば、同じdictionary resolutionおよびcomparison inputを再現できる設計とする。
 
 - 辞書の「最新版」を暗黙に参照する設計は禁止（NG-6と表裏一体、S14のpinning方式で担保）。
-- Snapshotが`wrapper_sha256`/`dictionary_payload_sha256`によりcontent-addressableであること
-  （S5.2）が、再現性の基盤となる。
+- Snapshotが`wrapper_integrity_sha256`/`dictionary_payload_sha256`によりcontent-addressable
+  であること（S5.2）が、再現性の基盤となる。
 - 既存matching tool側の `requirement_dataset_signature` / `actual_dataset_signature`
   （`QA-SHA256:<hex64>`、current-state-analysis §13）と同様に、Dictionary Snapshotのsignatureも
   matching resultのprovenanceへ含める。
@@ -755,9 +923,25 @@ matching実行（既存logic、変更なし）
 
 ## S23. Unresolved Design Questions（次Checkpointへの持ち越し事項）
 
+**R2で解決した項目（旧番号を維持し、解決済みとして記録する）**:
+
+- 旧#7（R1で追加）: `effective_vocabulary` を既存tag機構（`evaluateTagMatch()`/`buildTagIndex()`）
+  へどう接続するかは、R2-1で**解決した**。接続点は`matchLogic`への独立カテゴリ新設ではなく、
+  `_tagInfo`への新sibling source（`.approvedDict`）追加である（S13）。なお前提としていた
+  `matchInitialTags()`はmatching tool内には存在せず、無関係な別tool系統
+  （`excel_direct_adapter.js`/`pdf_direct_adapter.js`）の同名関数であったことを確認した
+  （current-state-analysis §15.1）。
+- 旧#8（R1で追加）: Snapshot wrapperのhash計算における`dictionary_payload`の扱いは、R2-3で
+  **解決した**。`dictionary_payload_sha256`（内容同一性専用）と`wrapper_integrity_sha256`
+  （wrapper全体の改ざん検知専用）を分離し、全fieldのhash対象/対象外を表で確定した（S5.2）。
+
+**残存・新規の未解決事項**:
+
 1. Promotion Validatorがscope/canonical衝突を検出した際、「該当candidateのみ除外」か
    「Promotion全体を停止」かの粒度（S6.4）。
-2. Dictionary一致信号を既存 `matchLogic` スコア体系へどの重みで統合するか（S13）。
+2.（R2-1で範囲を再確定）`_tagInfo.approvedDict`（正式辞書由来のtag source）が既存tag-score
+   （Dice係数）へどの重みで寄与するか、具体的な係数設計は未確定（S13）。接続方式そのものは
+   R2-1で確定済みだが、係数は引き続き次Checkpointで設計する。
 3. Excel exportにおけるdictionary情報の具体的な列設計・sheet配置（S18）。
 4. Unknown term収集queueの永続化形式・辞書メンテナンス画面との具体的な接続方法（S11）。
 5. Conflict candidateをP2-A3のAlias Conflict機構へどう還流させるか、双方向のデータフロー
@@ -765,12 +949,16 @@ matching実行（既存logic、変更なし）
 6. matching tool側テキスト照合の comparison ID（現状formalな契約なし、
    current-state-analysis §4）と、Resolution Annotationの紐付けキーをどう設計するか
    — 数量subsystemの `comparison_id` 契約とは別に検討が必要。
-7.（R1で追加）`effective_vocabulary` を既存 opt-in tag機構（`evaluateTagMatch()` /
-   `buildTagIndex()` / `matchInitialTags()`）へどう接続するか。`matchLogic`側に独立カテゴリを
-   新設する案とtag機構統合案のどちらが既存契約との整合性が高いか、次Checkpointで
-   `matchInitialTags()`の実装を直接確認したうえで判断する（S13）。
-8.（R1で追加）Snapshot wrapperの`wrapper_sha256`計算における、`dictionary_payload`の扱いの
-   具体的なcanonical構造体定義（`dictionary_payload_sha256`という文字列をhash対象に含める案を
-   S5.2で提示したが、実装Checkpointでの正式なフィールド列挙・型定義はまだ確定していない）。
-9.（R1で追加）project configuration（S14のpinning元）の具体的な格納場所・形式
+7. project configuration（S14のpinning元）の具体的な格納場所・形式
    （案件ごとのファイル、matching tool起動時の読み込み経路等）は未設計。
+8.（R2-2で追加）`alias_rule_id`相当のrule起源追跡が実際に必要になった場合の
+   「Promotion Provenance Artifact」の具体的なschema（content-addressing方式、
+   `promotion_record_identity`との参照関係の具体形）は未設計（S4.1）。そもそもこの追跡が
+   実装Checkpointで本当に必要かどうか自体、未確定。
+9.（R2-1で追加）旧`deterministic normalization`案（Resolverが確定させた`canonical_term`を
+   `normalizeForMatch()`前処理段階へオプション適用する）の採否・具体的な適用方法（S13）。
+   `_tagInfo.approvedDict`経路とは独立した追加入力候補として残るが、Checkpoint 1-R2では
+   決定しない。
+10.（R2-4で追加）Snapshot Activation Record（S5.4）の具体的な永続化場所・schema・
+    project configuration（S14）との関係の詳細設計（同一artifactに統合するか、別artifactとして
+    分離を維持するか）は未設計。

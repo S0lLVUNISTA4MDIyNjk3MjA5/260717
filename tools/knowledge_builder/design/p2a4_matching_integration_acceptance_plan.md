@@ -11,6 +11,9 @@ conflict-only / invalid snapshot）へ分離し（S1.1）、`total comparisons =
 適用範囲をunknown-only/conflict-only fixtureに限定、approved alias fixtureはfalse-positive/
 false-negative評価で扱うよう修正（S1.2）。
 
+**R2改訂**: Checkpoint 1-R2にて、contract文書R2改訂（S13/S4.1/S5.2/S5.4/S6.3-S6.4）に対応する
+7件の検証項目をS11として新設した（R2-6）。
+
 ---
 
 ## S1. 検証の基本方針
@@ -178,7 +181,25 @@ fixtureとは混在させない）。
 
 ---
 
-## S11. 本Checkpointでの結論
+## S11. Contract R2改訂に対応する検証項目（R2-6で新設）
+
+Checkpoint 1-R2で行ったcontract文書の改訂（S13/S4.1/S5.2/S5.4/S6.3-S6.4）に対応する、
+7件の具体的な検証項目を追加する。いずれも実装Checkpointでverification scriptへ落とし込む
+**計画**であり、本Checkpointでは実測しない。
+
+| # | 検証項目 | 対応するcontract節 | 検証方法（案） |
+|---|---|---|---|
+| 1 | 正式辞書（`effective_vocabulary`由来の情報）が`matchLogic.synonymMap`へ一切混入しないこと | S13（R2-1） | Resolver実行前後で`matchLogic.synonymMap`のkey集合を比較し、差分がないことを確認する。また`_tagInfo.approvedDict`のsource実装が`synonymMap`へ書き込むcode pathを持たないことを静的確認する |
+| 2 | P2-A1 `effective_vocabulary`とResolverの解決結果が一致すること | S4.1（R2-2） | 同一のlayerViews入力に対し、(a) `mergeDictionaryLayers()`を直接呼んだ結果の`effective_vocabulary`と、(b) Resolverが`_tagInfo.approvedDict`等へ反映した解決結果を突き合わせ、canonical/alias対応関係が完全一致することを確認する |
+| 3 | Resolution provenanceが決定的に再現可能であること | S4.1（R2-2） | 同一のDictionary Snapshot + TraceRecordSetで2回実行し、provenance lookup index（`entry_ref_id`/`scope`/`status`/`dictionary_fingerprint`の対応表）が完全一致することを確認する（S6 Deterministic Replay testsと同種の手法） |
+| 4 | wrapper metadataの1byte改変で`wrapper_integrity_sha256`が変化すること | S5.2（R2-3） | S5.2の表で「hash対象」に分類したfield（例: `scope`）を1byte改変し、`wrapper_integrity_sha256`が変化することを確認する。逆に「hash対象外」に分類したfield（例: `snapshot_version`、`supersedes`）を改変した場合は`wrapper_integrity_sha256`が**変化しない**ことも合わせて確認し、include/exclude表の正しさを両方向から検証する |
+| 5 | 同一のdictionary payloadから同一の`dictionary_payload_sha256`が得られること | S5.2（R2-3） | 同じ`dictionary_payload`を異なるwrapper metadata（異なる`snapshot_id`/`snapshot_version`等）で2つのwrapperへ包み、`dictionary_payload_sha256`が2つとも一致し、かつ`wrapper_integrity_sha256`は異なることを確認する（2つのhashの責務分離を実証する） |
+| 6 | project configurationのsnapshot pin先切り替えが進行中sessionへ影響しないこと | S14/S5.4（R2-4） | snapshot Aへpinされた状態でmatching sessionを開始し、途中でproject configurationのpin先をsnapshot Bへ切り替える。進行中sessionの`dictionary_snapshot_id`/`wrapper_integrity_sha256`がsnapshot Aのまま変化しないこと、かつ次回session開始時にのみsnapshot Bが適用されることを確認する |
+| 7 | `SELECT_CANONICAL`が非選択candidateを誤って除外・無効化しないこと | S6.3（R2-5） | conflict-only fixture（S1.1）に2件以上のconflicting candidateを含め、`SELECT_CANONICAL`で1件を選択した後、非選択candidateが独立した`candidate_decisions`の状態（ACCEPT等）に従ってpromotion対象と判定されうることを確認する（`SELECT_CANONICAL`という解決自体を理由に強制的に対象外化されていないことを検証する） |
+
+---
+
+## S12. 本Checkpointでの結論
 
 Checkpoint 1では上記すべてが**計画のみ**であり、実測・実装は行っていない。後続Checkpointで
 Dictionary Resolver・Promotion Validator・Snapshot生成が実装された時点で、本書のtest caseを
