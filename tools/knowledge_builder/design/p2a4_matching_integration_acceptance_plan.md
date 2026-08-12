@@ -6,6 +6,11 @@ Checkpoint 1では実装を伴わないため、本書自体もplanのみであ�
 KPI・test caseの具体的な数値目標や合否基準は、実装Checkpointの内容が固定された時点で
 再確認・必要に応じて改訂する。
 
+**R1改訂**: Checkpoint 1-R1にて、単一の複合fixtureを4種類（approved alias / unknown-only /
+conflict-only / invalid snapshot）へ分離し（S1.1）、`total comparisons == baseline`要求の
+適用範囲をunknown-only/conflict-only fixtureに限定、approved alias fixtureはfalse-positive/
+false-negative評価で扱うよう修正（S1.2）。
+
 ---
 
 ## S1. 検証の基本方針
@@ -20,9 +25,35 @@ KPI・test caseの具体的な数値目標や合否基準は、実装Checkpoint�
   P2-A3標準sample train_hvac系列から作成する新規demo dataset。両方を検討し、後続Checkpointで
   確定する）。
 - 同一のmatching configuration。
-- Dictionaryありの場合のみ、事前に承認済みのDictionary Snapshot（S7参照相当、少なくとも1件の
-  approved alias・1件のunresolved conflict・1件のunknown termを含む、意図的に作られたfixture）
-  を使用する。
+- Dictionaryありの場合、S1.1のfixture分離方針に従う（R1-7: 単一の複合fixtureで全ケースを
+  同時に混在させない）。
+
+### S1.1 Acceptance fixtureの分離（R1-7）
+
+Checkpoint 1初版は「approved alias 1件・unresolved conflict 1件・unknown term 1件を含む
+単一の複合fixture」を想定していたが、これは(a) baseline比較の基準（total comparisons一致）を
+alias fixtureにまで一律適用してしまう、(b) 各ケースの効果が互いに干渉し評価しづらい、という
+問題があるため、**最低4種類の独立したfixtureへ分離する**。
+
+| fixture | 内容 | 目的 |
+|---|---|---|
+| approved alias fixture | `effective_vocabulary`に承認済みaliasを含み、対応するTraceRecordペアが存在する | dictionary併用によるmatching改善効果の評価 |
+| unknown-only fixture | 辞書に存在しない語のみを含み、conflict・aliasは含まない | unknown termがmatchingを妨げないことの検証 |
+| conflict-only fixture | S12.Bのlookup conflictを意図的に発生させる語のみを含む | conflictの局所化（全体無効化しないこと）の検証 |
+| invalid snapshot fixture | hash不一致・schema不正等、壊れたwrapperを意図的に用意する | S10の「案B: 辞書無効化+続行」の検証 |
+
+### S1.2 baseline一致要求の適用範囲（R1-7）
+
+**`total comparisons == baseline`（dictionaryなし実行と同数）を要求するのは、unknown-only
+fixtureとconflict-only fixtureに限定する。** これらのfixtureでは辞書はbaseline matching
+ロジックへfallbackするだけなので、comparison件数はdictionaryの有無に関わらず一致するはずであり、
+一致しなければ「辞書がbaseline matchingへ意図せず影響している」というregressionを意味する。
+
+**approved alias fixtureにはこの要求を適用しない。** 辞書によってmatching結果が実際に改善される
+ことこそがP2-A4の目的であるため、comparison数や各comparisonの順位（rank/score）が
+dictionaryなしの場合と変わることを**許容する**。approved alias fixtureの評価は、件数一致では
+なく、事前に用意した**正解セット（どのTraceRecordペアが本来対応すべきか、人手で確定した
+ground truth）に対するfalse-positive/false-negative comparison count**（S2の#11, #12）で行う。
 
 ---
 
@@ -70,10 +101,15 @@ KPI・test caseの具体的な数値目標や合否基準は、実装Checkpoint�
 
 ## S4. Unknown / Conflict caseの検証
 
-- unknown termを含むfixtureで、matchingが**停止しない**ことを確認する（unresolved
-  dictionary conflictも同様）。
-- unknown term/conflictがあっても `total comparisons` が dictionary無効時と同数であることを
-  確認する（＝辞書layerの有無がbaseline matching結果件数に影響を与えない）。
+S1.1で分離した`unknown-only fixture`と`conflict-only fixture`を個別に用いる（approved alias
+fixtureとは混在させない）。
+
+- unknown-only fixtureで、matchingが**停止しない**ことを確認する。
+- conflict-only fixtureで、S12.Bの局所化semantics（conflicted lookup keyのみ除外、
+  他のnon-conflict entryは利用可能、任意canonicalを選ばない）が実際に機能することを確認する。
+- 両fixtureとも、`total comparisons` が dictionary無効時と同数であることを確認する
+  （S1.2の適用範囲どおり、これら2 fixtureにのみ本要求を課す。＝辞書layerの有無がbaseline
+  matching結果件数に影響を与えない）。
 - Conflict candidateがP2-A3のAlias Conflict機構へ正しく還流されること（設計はcontract §23の
   unresolved question 5を参照。具体的な確認方法は後続Checkpointで確定）。
 

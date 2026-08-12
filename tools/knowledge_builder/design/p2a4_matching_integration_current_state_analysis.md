@@ -326,15 +326,64 @@ lifecycle）に記載する。
 
 Confidence: High（実コード直接確認）。
 
+### 18.1 P2-A1 の公開APIの正確な形（R1で追加確認、`private_dictionary_learning_core.js` 直接読解）
+
+`private_dictionary_matching_integration_contract_0.1.md` をこれらの既存関数のSource of Truth
+として設計するため、R1にて実装を再確認した。すべて `private_dictionary_learning_core.js` の
+`module.exports`（L1318-1324付近）に含まれ、外部から呼び出し可能。
+
+- **`schema_version` 固定値**: `'private-dictionary-overlay/1.0'`（L574で検証。他の値は
+  `DICTIONARY_SCHEMA_VERSION_INVALID` で拒否）。単一辞書（1レイヤー分）のcanonical payload
+  schemaはこの1つのみで、P2-A4が第二の辞書本文schemaを作る必要はない。
+- **`serializePrivateDictionaryCanonical(input)`**（L733、§13/§14.2）: 入力を`validatePrivateDictionary()`
+  で検証後、`{schema_version, dictionary_id, version, scope, entries}` の形へ正規化して
+  `canonicalJson()` へ渡す。`entries` は `entry_id` のordinal順にsortされ、各entryは
+  `{entry_id, canonical_term, aliases(正規化key→ordinal順にsort), status, source:{kind,
+  content_included}, utility:{7つの整数field}}` のみを含む（L691-729）。**timestampに相当する
+  fieldはこの構造に一切含まれない。**
+- **`hashPrivateDictionaryCanonical(input)`**（L741、§13.1）: 上記のcanonical文字列を
+  `TextEncoder().encode()` でUTF-8 bytesにし、SHA-256 hexを返す（`sha256DirectHex`）。
+- **`canonicalJson(value)`**（`tools/quantity_sidecar_binding_core.js` L128、id_hash_utils系の
+  共有実装と同型）: `Object.keys(value).sort()` によるkeyのordinal順ソートを再帰的に適用し、
+  `JSON.stringify()` する。配列はソートせず、呼び出し側（`serializeValidatedPrivateDictionary()`）
+  が事前に`entries`/`aliases`をordinal順へsortしてから渡す。
+- **`createPrivateDictionaryLayerView(dictionary)`**（L766）: 1レイヤー分の辞書を検証・fingerprint化
+  （`hashPrivateDictionaryCanonical()` を内部で呼ぶ）し、
+  `{scope, dictionary_fingerprint, entries:[{entry_ref_id, canonical_display, canonical_key,
+  aliases:[{display,key}], status, source_kind}]}` を返す。
+- **`detectDictionaryLookupConflicts(layerViews)`**（L1120、§9.2）: 複数layerViewを横断して、
+  同じnormalized lookup keyが複数の異なるcanonical keyへ解決される場合を`conflictedKeys`として
+  検出する（L1097-1103のコメントで、canonical同士の自己解決は`byCanonical.size===1`のため
+  conflict扱いされないことを明示）。conflict 1件ごとに `{code:'DICTIONARY_LOOKUP_CONFLICT',
+  normalized_key_token, entry_refs[]}` を生成（`normalized_key_token` はkey文字列そのものではなく
+  `safeHashParts('private-dictionary-lookup-key-v1',[key])` によるhash — 元の語を露出しない）。
+  `MAX_CONFLICT_RECORDS` を超えるconflict集合はhash生成前に即rejectされる（L1131、fail-closed）。
+- **`mergeDictionaryLayers(layerViews)`**（L1164、§14.4）: 内部で`detectDictionaryLookupConflicts()`
+  を呼び、**conflictedKeys（canonical keyとしてもalias keyとしても）を持つentry/aliasは
+  effective_vocabularyの構築から丸ごとskipされる**（L1178-1179, L1184-1185の
+  `if (conflictedKeys.has(...)) continue;`）。非conflictのentryは通常通り採用される
+  — 「1件のconflictがDictionary全体を無効化する」ことはなく、**局所的に該当lookup keyのみ
+  除外**される設計であることを実装で直接確認した。戻り値:
+  `{effective_vocabulary:{allowed_tags:[canonical表示名の配列], aliases:{alias表示名→canonical
+  表示名}}, conflicts:[...], excluded_lookup_key_tokens:[...], source_fingerprints:[...]}`。
+  `SCOPE_PRIORITY`（`SESSION > PROJECT > DOMAIN > STANDARD`）が同一canonical_keyの複数候補間の
+  優先順位（どのscopeのcanonical表示名を採用するか）に使われる（L1176, L1187, L1199）。
+
+**P2-A4への含意（確定）**: `effective_vocabulary`（`allowed_tags`/`aliases`のflatな解決済み
+mapping）こそがDictionary resolutionのSource of Truthであり、P2-A4は独自の辞書本文schemaや
+独自のconflict解決ロジックを作らず、`createPrivateDictionaryLayerView()` →
+`mergeDictionaryLayers()` の出力をそのまま消費する設計とする。詳細な統合方針は
+contract文書 R1修正後のS4/S5/S12を参照。
+
 ---
 
 ## 19. まとめ: P2-A4統合候補点
 
 | # | 統合候補点 | 現状の実装 | 備考 |
 |---|---|---|---|
-| 1 | matching開始前のTraceRecord正規化 | `prepareInputData()` | Dictionary Resolverの挿入候補点の一つ |
-| 2 | comparison生成後・review開始前 | `buildTraceMatrixRows()` の出力〜review session開始まで | resolution sidecarを添えるのに最も既存境界を壊さない箇所 |
-| 3 | review UIのACCEPT/REJECT | `b4bHandleAction()` | dictionary由来のcomparison判断への影響はここではなくresolution段階で吸収すべき |
+| 1 | matching開始前のTraceRecord正規化・matching input生成 | `prepareInputData()` 〜 `matchPlmParts()`/`buildTraceMatrixRows()` 呼び出し直前 | **matchingの結果に実際に影響しうる唯一の統合点**。Dictionary Resolverはここでのみ動作し、`matchLogic`（既存スコア体系）への追加入力信号を作る（R1修正: 旧版は「comparison生成後」も統合点として並記していたが撤回。詳細はcontract側S4/S13参照） |
+| 2 | comparison生成後・review開始前 | `buildTraceMatrixRows()` の出力〜review session開始まで | **display/provenance binding専用**。この段階でのsidecar付与はUI表示・Excel export向けのprovenance注記であり、matching結果そのものには一切影響しない（matching inputではない） |
+| 3 | review UIのACCEPT/REJECT | `b4bHandleAction()` | dictionary由来のcomparison判断への影響はここではなくresolution段階（#1）で吸収すべき |
 | 4 | Excel export | `trace_comparison_review_export_core.js` | dictionary使用有無の出力先候補（§31） |
 | 5 | knowledge_builder側status/scope語彙 | `private_dictionary_learning_core.js` | P2-A4が再利用すべき既存契約 |
 
