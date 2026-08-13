@@ -339,6 +339,91 @@ Promotion実行時点で生成する**独立したcontent-addressed「Promotion 
 （具体的なartifact schemaは後続Checkpointで設計。unresolved design question、S23参照）。
 **現時点で`alias_rule_id`に推測値・ダミー値を割り当てることはしない。**
 
+### S4.2 Dictionary Resolver Pure Core（Checkpoint 6で正式固定）
+
+S4/S4.1の設計を、`tools/knowledge_builder/core/private_dictionary_resolver_core.js`として
+実装・確定した。Checkpoint 3の`PrivateDictionarySnapshotCore.loadDictionarySnapshotWrapper()`と
+P2-A1の`createPrivateDictionaryLayerView()`/`mergeDictionaryLayersWithProvenance()`のみを
+使うpure orchestration層であり、winner選択・conflict判定・ハッシュ計算のいずれも独自実装しない。
+
+**Resolver Input 0.1**（`private-dictionary-resolution-input/0.1`）: トップレベルは
+`{schema_version, snapshot_wrapper, terms}`の3 fieldのみ、追加field禁止。`snapshot_wrapper`は
+Checkpoint 3の`private-dictionary-snapshot-wrapper/0.1`そのものであり、Resolverは格納payloadを
+一切信用せず必ず`loadDictionarySnapshotWrapper()`を通す。`terms`はTraceRecord非依存の文字列配列
+（Resolverはfield名・tokenization一切を知らない。TraceRecord→terms変換は別Checkpointの責務）。
+`terms.length`上限50000（`RESOLVER_TERMS_LIMIT_EXCEEDED`）、各term長1-256文字。入力順序を
+出力annotation順序としてそのまま維持し、duplicate termも1件ずつ独立にresolveする（dedupe/reorder
+しない）。
+
+**Batch Output 0.1**（`private-dictionary-resolution-batch/0.1`）: `{schema_version,
+snapshot_binding, annotations}`。`snapshot_binding`は`{snapshot_id, snapshot_version,
+wrapper_integrity_sha256, dictionary_payload_sha256, dictionary_id, dictionary_version, scope}`
+であり、すべて`validatedSnapshot`からの値コピーのみ（再hash禁止）。`annotations[i]`は
+`terms[i]`への解決結果であり、`annotations.length === terms.length`必須。
+
+**exact whole-term規則**: 入力term全体を`KnowledgeIdHashUtils.normalize()`した1つのkeyのみで
+lookupする。substring・prefix/suffix・delimiter split（comma/slash/whitespace tokenization含む）・
+fuzzy・edit distance・stemming・AI推定・semantic similarity・synonymMap・regex検索は一切行わない
+（Checkpoint 6は厳密exact-match resolverとして固定する）。
+
+**normalize Source of Truth**: `KnowledgeIdHashUtils.normalize()`のみを使用し、P2-A2の
+`foldComparisonKey()`やRule Extraction独自normalizer、独自lower-case/trim処理を一切使わない。
+
+**canonical/alias precedence**: normalizedKeyに対し、(1) `provenance_index.canonical`に存在すれば
+`EXACT_CANONICAL`、(2) canonicalになく`provenance_index.alias`に存在すれば`APPROVED_ALIAS`、
+(3) いずれにも存在しないがP2-A1 Layer View上のACTIVE lookup keyだった場合は`DICTIONARY_CONFLICT`、
+(4) それ以外は`UNKNOWN_TERM`。canonicalを必ずaliasより先に評価する。
+
+**P2-A1 provenance Source of Truth**: `provenance_index.canonical[key].selected_entry_ref_id`/
+`provenance_index.alias[key].selected_entry_ref_id`のみをwinner／alias-source識別子として使用し、
+Resolver自身が`entries`配列のfirst/last・表示名sort等からwinnerを選ぶことは一切しない。同一
+normalized canonical keyを複数ACTIVE entryが持つ場合でも、layer entries配列の走査順序に
+resolution結果が依存しないことをNode検証（G/H項目）で確認済み。
+
+**alias source entry vs canonical display winner**: APPROVED_ALIASの`dictionary_entry_id`は
+「そのaliasを提供したentry（alias source）」であり、`resolved_canonical`は
+`provenance_index.canonical[alias provenanceのcanonical_key]`が指す**canonical表示winner entry**の
+`canonical_display`である。alias source entry自身の`canonical_display`を`resolved_canonical`へ
+誤用しない（両者が異なるentryになるケースをNode検証I項目で確認済み）。
+
+**UNKNOWN_TERM**: 辞書に存在しないtermはResolver全体のerrorではなく、正常な解決結果の1種として
+返す（`resolved_canonical`/`dictionary_entry_id`/`scope`/`status`はすべて`null`）。matchingを
+止めるかどうかは呼び出し側（次Checkpoint）の責務。
+
+**DICTIONARY_CONFLICT**: P2-A1がconflictとして`effective_vocabulary`／`provenance_index`から
+除外したlookup keyについても、Resolver全体のerrorにはしない。該当termのみ
+`resolution_type: DICTIONARY_CONFLICT`（全fieldnull）とし、conflictの判定はP2-A1が生成した
+layer viewのACTIVE entryが持つlookup keyの単純membership集合（`activeLookupKeys`）と
+provenance_indexの不在の組み合わせのみで行う。P2-A1のconflict grouping/winner選択algorithmを
+Resolver側で再実装することはしない。
+
+**conflict local continuation**: 同一batch内に conflict term と正常解決可能な term が混在しても、
+1件のconflictがbatch全体を無効化しない。conflict term以外は通常どおり解決される。
+
+**snapshot binding**: `annotations[i].dictionary_snapshot_id`/`wrapper_integrity_sha256`は
+常に`validatedSnapshot.snapshot_id`/`wrapper_integrity_sha256`（Resolver自身の再hash禁止）。
+
+**atomicity**: Checkpoint 3/4/5と同一原則。関数開始時の同期phaseで`root`/`schema_version`/
+`snapshot_wrapper` reference/`terms`配列をdescriptor-based安全readでcaptureし、Snapshot Loader
+呼び出しをResolver自身の最初の`await`より前に開始する。caller inputをawait後に再readしない。
+
+**fail-closed**: 依存先（Snapshot Loader/`createPrivateDictionaryLayerView`/
+`mergeDictionaryLayersWithProvenance`/`normalize`）のsync throw・Promise reject・malformed
+return・hostile Proxy returnは、いずれもnative Error/message/stack/causeを外部へ一切漏らさず、
+固定の`{code, path}`（`RESOLVER_SNAPSHOT_LOAD_FAILED`/`RESOLVER_LAYER_VIEW_FAILED`/
+`RESOLVER_MERGE_FAILED`/`RESOLVER_NORMALIZATION_FAILED`/`RESOLVER_CONTEXT_BINDING_MISMATCH`等）
+へsanitizeする。caught valueの内容（`.code`/`.path`含む）を信用して再throwすることはしない
+（Checkpoint 5-R2で確定したComposition core同水準のfail-closed境界を、Resolverでも独立実装した）。
+
+**PROJECT-only**: Checkpoint 6では`validatedSnapshot.scope === 'PROJECT'`のみを受理する。
+SESSION/DOMAIN/STANDARD scopeのSnapshotは`RESOLVER_SCOPE_UNSUPPORTED`で拒否し、今回は実装しない
+（multi-layer runtime統合は別Checkpointの対象、S23参照）。
+
+**今回実装しないもの（Checkpoint 6のスコープ外、明示）**: TraceRecord→terms抽出（field/row
+tokenization）、`_tagInfo.approvedDict`生成・matching tool統合、UI/Excel/graph、unknown term
+queueの永続化、Snapshot Activation Record・project configuration・latest snapshot選択・rollback、
+STANDARD/DOMAIN/SESSION layerの実行時統合、P2-A3 Review State→Promotion Input adapter。
+
 ---
 
 ## S5. Dictionary Snapshot Contract案（R1-4: P2-A1 canonical schemaのwrapperとして再定義）
@@ -1403,6 +1488,15 @@ Checkpointで行う**（Checkpoint 1-R2は設計のみで、この変更を含�
 
 ### S13.1 `_tagInfo.approvedDict` 生成・合成規則（R3-3で新設）
 
+**Checkpoint 6との責務分離（明記）**: Dictionary Resolver（S4.2、
+`private_dictionary_resolver_core.js`）と、本S13.1が定義する`_tagInfo.approvedDict`の
+tokenization/合成規則は**別責務**である。Resolverは「1つのresolution単位として既に切り出された
+文字列（term）→ canonical/alias解決」のみを行う純粋coreであり、TraceRecordのfield値から
+どうtermを切り出すか（本S13.1のtokenization規則）や、matching tool側の`_tagInfo`への実際の
+組み込み・スコア合成は一切知らない。Checkpoint 6では、本S13.1が定義するmatching tool統合
+（`_tagInfo.approvedDict`の実装・`composeFinalTags()`等への配線）はまだ実装しない
+（S23参照。Resolver pure coreの実装のみがCheckpoint 6のスコープ）。
+
 `_tagInfo.approvedDict`という新sourceを追加すること自体はS13で確定した。R3-3では、その
 生成規則・既存パイプラインへの合成規則を、以下の実コード（`tools/json_ab_trace_matching_tool_v12.1.15.html`）
 を直接確認したうえで10項目固定する: `buildRowTagInfo()`(L4400)、`composeFinalTags()`(L4336)、
@@ -1839,3 +1933,25 @@ matching実行（既存logic、変更なし）
 13.（Checkpoint 4で追加）Promotion Input 0.1をP2-A3 Review State/Workbookから実際に生成する
     UI adapterの具体的な実装方法・接続点（S6.5.1）は未設計。今回は「UI非依存の入力契約」の
     固定のみが対象で、adapter自体は次Checkpoint以降の対象。
+
+**Checkpoint 6で解決した項目**:
+
+- 旧#12（Checkpoint 3で追加）: Dictionary Resolver（Snapshotから実際にterm解決を行う層）は、
+  Checkpoint 6（`private_dictionary_resolver_core.js`）で**解決した**。Snapshot Loader→
+  P2-A1 Private Layer View→`mergeDictionaryLayersWithProvenance()`→exact whole-term解決→
+  Resolution Annotation batchという接続をpure coreとして固定した（S4.2）。ただし以下は
+  引き続き未解決のまま残る（新規項目として下記14-19に追加）。
+
+**残存・新規の未解決事項（Checkpoint 6時点、続き）**:
+
+14. P2-A3 Review State→Promotion Input adapter（旧#13と同一、未解決のまま）。
+15. Snapshot Activation Record・project configuration・latest snapshot選択（旧#8/#6と同一、
+    未解決のまま）。
+16. `snapshot_version`のchain monotonicity検証・rollback chain全体の存在確認/循環検査
+    （旧#11と同一、未解決のまま）。
+17. STANDARD/DOMAIN/SESSION多layerの実行時統合（Resolverは今回PROJECT scopeのみを受理し、
+    multi-layer構成でのSCOPE_PRIORITY実行時マージは対象外のまま、S4.2）。
+18. `_tagInfo.approvedDict`のmatching tool統合（S13.1の生成規則自体はR3-3/R4-3で確定済みだが、
+    実際の配線・スコア係数はCheckpoint 6でも未実装のまま、旧#1と同一）。
+19. Excel export列設計・unknown term queueの永続化・HUMAN-01/02/03（旧#2/#3、current-state-analysis
+    HUMAN項目と同一、未解決のまま）。

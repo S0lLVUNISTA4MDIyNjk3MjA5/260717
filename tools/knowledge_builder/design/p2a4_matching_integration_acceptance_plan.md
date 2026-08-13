@@ -368,3 +368,53 @@ case一覧（A-KK、実測・実装対象）。
 Checkpoint 5では上記A-KKをすべて実測・実装する。R/S/Tはvm sandboxによるdependency stand-in、
 A-N/CC/DD/EEは必ず実Checkpoint 3/4 coreを利用し、stand-in testだけでsuccessを証明しない
 （§34相当の原則）。
+
+## S15. Dictionary Resolver検証項目（Checkpoint 6で新設）
+
+| 項目 | 内容 |
+|---|---|
+| A | EXACT_CANONICAL: ACTIVE canonical termを解決し、`resolution_type`/`resolved_canonical`/entry/scope/status/snapshot provenanceが一致することを確認する |
+| B | APPROVED_ALIAS: ACTIVE entryのapproved aliasを解決し、resolved canonicalが正しいことを確認する |
+| C | UNKNOWN_TERM: 辞書に存在しないtermがerrorにならず`UNKNOWN_TERM`として返ることを確認する |
+| D | DICTIONARY_CONFLICT: 同一normalized alias lookup keyが異なるcanonicalへ向くvalid PROJECT dictionaryで、ResolverがDICTIONARY_CONFLICT（`resolved_canonical=null`）を返すことを確認する |
+| E | Conflict local continuation: 同一batch内でconflict termと正常termを混在させ、1件のconflictがbatch全体をfailさせないことを確認する |
+| F | Non-ACTIVE exclusion: PROBATION/OBSERVING/QUARANTINED/RETIRED entryのtermが通常resolutionに参加せず`UNKNOWN_TERM`になることを確認する |
+| G | Duplicate canonical winner: 同一normalized canonical keyを複数ACTIVE entryで定義し、P2-A1 `mergeDictionaryLayersWithProvenance()`のselected_entry_ref_idを独立oracle取得のうえResolverの`dictionary_entry_id`が完全一致することを確認する |
+| H | Duplicate canonical order invariance: Gのlayer source entries順を逆転してもP2-A1 winner・Resolver結果が同一であることを確認する |
+| I | Alias source != canonical display winner: alias提供entryと canonical display winner entryが異なるfixtureで、`dictionary_entry_id`がalias source、`resolved_canonical`がcanonical winnerのdisplayであることを確認する |
+| J | Formal normalization: `KnowledgeIdHashUtils.normalize()`で同一keyになる表記差のtermが同一resolutionへ到達することを確認する |
+| K | No substring: canonical termを含むがwhole-termとして一致しないinputが`UNKNOWN_TERM`になることを確認する |
+| L | No delimiter split: comma等で連結したwhole termが辞書内の個別termへ分割されないことを確認する |
+| M | Duplicate terms/order preservation: `[A,B,A]`が`[A-result,B-result,A-result]`の順序・件数で返ることを確認する |
+| N | Snapshot tamper: payload/hashを改ざんしたwrapperがLoaderでrejectされ、外部errorが`RESOLVER_SNAPSHOT_LOAD_FAILED`のみであることを確認する |
+| O | Layer fingerprint binding: malformed P2-A1 stand-inで`layerView.dictionary_fingerprint`を不一致にし、`RESOLVER_CONTEXT_BINDING_MISMATCH`かつmergeが呼ばれないことを確認する |
+| P | Malformed merge provenance: provenance_index欠落等が`RESOLVER_CONTEXT_BINDING_MISMATCH`（native TypeErrorでない）になることを確認する |
+| Q | P2-A1 selected ref must exist: provenanceのselected_entry_ref_idがlayerView entriesに存在しないstand-inでfail-closedになることを確認する |
+| R | Provenance fingerprint: selected_dictionary_fingerprintがlayerView.dictionary_fingerprintと不一致でfail-closedになることを確認する |
+| S | Provenance status/scope: selected_status!==ACTIVEまたはselected_scope!==PROJECTでfail-closedになることを確認する |
+| T | Atomic caller mutation: `resolveDictionaryTerms(input)`呼び出し直後await前にterms/snapshot_wrapperを変更しても、結果がcall開始時点captureのみを反映することを確認する |
+| U | Hostile root Proxy: getPrototypeOf/ownKeys/getOwnPropertyDescriptor trapがthrowしてもsanitized errorのみであることを確認する |
+| V | Hostile terms array: sparse/accessor element/custom property/symbol key/custom prototype/descriptor trapがすべてfail-closedでnative leakage 0であることを確認する |
+| W | normalize failure: `KnowledgeIdHashUtils.normalize`のsync throw/invalid non-string returnが`RESOLVER_NORMALIZATION_FAILED`へsanitizeされることを確認する |
+| X | Snapshot dependency failure: sync throw/reject/malformed returnをvm stand-inで検証し、native leakageが0であることを確認する |
+| Y | LearningCore dependency failure: `createPrivateDictionaryLayerView`/`mergeDictionaryLayersWithProvenance`各々のsync throw/reject/malformed returnがnative leakage 0でsanitizeされることを確認する |
+| Z | Dependency resolution hostile Node/browser: required function property get trap・browser global getterが`RESOLVER_DEPENDENCY_RESOLUTION_FAILED`のみになることを確認する（Checkpoint 5-R2同水準） |
+| AA | Deep freeze: return root/snapshot_binding/annotations配列/各annotationがすべてfrozenであることを確認する |
+| AB | Caller alias isolation: call完了後にcaller terms/wrapperを変更してもresultが不変であることを確認する |
+| AC | No normalized key leakage: 出力に内部専用のnormalized key値が漏れておらず、annotation fieldが exact allowlistであることを確認する |
+| AD | Prototype-sensitive lookup key: normalize結果が`__proto__`等になるfixtureでもown-data-property lookupのみが使われ、prototype pollution/誤resolveが起きないことを確認する |
+| AE | No winner reimplementation static guard: production sourceにSCOPE_PRIORITY/ordinalCompare/candidates.sort/byCanonical等のP2-A1アルゴリズムコピーが存在しないことを静的に確認する |
+| AF | No conflict token rehash: `private-dictionary-lookup-key-v1`/`hashParts`/`SHA256`をResolver productionで使用していないことを確認する |
+| AG | No P2-A2 normalizer: `foldComparisonKey`等rule extraction normalizerへの依存がないことを確認する |
+| AH | No matching dependency: matching tool/synonymMap/approvedDict/matchPlmParts/evaluateTagMatchへのproduction dependencyがないことを確認する |
+| AI | No TraceRecord mutation: TraceRecord/row/`_tags`/`_tagInfo`をproduction coreが一切扱わないことを確認する |
+| AJ | Real Snapshot Loader use: 通常A-M系テストが実Checkpoint 3 Loaderを使用していることを独立計算値との一致で確認する |
+| AK | Real P2-A1 Layer View use: 通常A-M系テストが実`createPrivateDictionaryLayerView`を使用していることを確認する |
+| AL | Real P2-A1 merge provenance use: 通常A-M系テストが実`mergeDictionaryLayersWithProvenance`を使用していることを確認する |
+| AM | No independent dictionary hash: `createHash`/`crypto.subtle.digest`/`TextEncoder`によるSHA実装がないことを確認する |
+| AN | No I/O/UI: fs/fetch/XHR/storage/console/UI importがなく、実行中にconsole/fetchが一切呼ばれないことを確認する |
+| AO | Existing regression suites: P2-A1 710/Snapshot 191/Promotion 151/Composition 170のPASS/FAIL件数が既存値のまま維持されることを確認する |
+
+Checkpoint 6では上記A-AOをすべて実測・実装する。O/P/Q/R/S/W/X/Y/Zはvm sandboxによるdependency
+stand-in、A-M/AJ/AK/ALは必ず実Checkpoint 3/P2-A1 coreを利用し、stand-in testだけでsuccessを
+証明しない（Checkpoint 5-R2 §34相当の原則）。
