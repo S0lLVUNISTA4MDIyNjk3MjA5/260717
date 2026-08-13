@@ -55,24 +55,33 @@
   // to the same sanitized {code, path} shape - never a native Error.message,
   // filesystem path, or module-resolution detail. ----
 
+  // R2-5 (§S6.6 Checkpoint 5-R2): the Node require() call, the browser
+  // globalThis[...] lookup, the dependency-object type check, AND the
+  // required-function property lookup (`dep[fn]`, which can trigger a
+  // hostile `get` trap on a Proxy dependency) are all inside this ONE
+  // fail-closed try/catch boundary. Whatever fails, and however it fails
+  // (a thrown native Error, a Proxy trap throw, any other thrown value),
+  // the caught value is never inspected or re-thrown - only a freshly
+  // minted, statically-fixed COMPOSITION_DEPENDENCY_RESOLUTION_FAILED
+  // {code, path} error ever leaves this function.
   function resolveDependency(nodeRelativePath, browserGlobalName, requiredFns) {
-    let dep;
-    if (typeof module === 'object' && module.exports && typeof require === 'function') {
-      try {
+    try {
+      let dep;
+      if (typeof module === 'object' && module.exports && typeof require === 'function') {
         dep = require(nodeRelativePath);
-      } catch (err) {
-        throw makeCompositionError('COMPOSITION_DEPENDENCY_RESOLUTION_FAILED', '$');
+      } else {
+        dep = globalThis[browserGlobalName];
       }
-    } else if (globalThis[browserGlobalName]) {
-      dep = globalThis[browserGlobalName];
-    }
-    if (!dep || typeof dep !== 'object') {
+      if (!dep || typeof dep !== 'object') {
+        throw new Error('composition dependency not found');
+      }
+      for (const fn of requiredFns) {
+        if (typeof dep[fn] !== 'function') throw new Error('composition dependency function missing');
+      }
+      return dep;
+    } catch (err) {
       throw makeCompositionError('COMPOSITION_DEPENDENCY_RESOLUTION_FAILED', '$');
     }
-    for (const fn of requiredFns) {
-      if (typeof dep[fn] !== 'function') throw makeCompositionError('COMPOSITION_DEPENDENCY_RESOLUTION_FAILED', '$');
-    }
-    return dep;
   }
 
   const PromotionCore = resolveDependency('./private_dictionary_promotion_core.js', 'PrivateDictionaryPromotionCore',
@@ -276,21 +285,25 @@
     if (a !== b) throw makeCompositionError(code, path);
   }
 
-  // ---- R1-2/R1-3 (§S6.6 Checkpoint 5-R1): a binding gate (and, for the
-  // Promotion gate, the immediately-following Builder input construction -
-  // §4) must never let a native TypeError/Error/Proxy-trap-throw escape,
-  // however malformed or hostile the upstream dependency result is. `fn` is
-  // run inside this boundary; if it throws an already-sanitized
-  // {code, path} error carrying the SAME `code` this boundary owns, that
-  // error (with its more specific `path`) is preserved as-is; any other
-  // throw (native TypeError from a null/undefined dereference, a Proxy trap
-  // throwing an arbitrary Error, etc.) is replaced with a fresh sanitized
-  // error at `fallbackPath` - never the original message/stack/cause. ----
+  // ---- R1-2/R1-3/R2-1 (§S6.6 Checkpoint 5-R1/5-R2): a binding gate (and,
+  // for the Promotion gate, the immediately-following Builder input
+  // construction - §4) must never let a native TypeError/Error/Proxy-trap-
+  // throw - or a FORGED error-shaped object designed to be mistaken for one
+  // of this module's own sanitized errors - escape, however malformed or
+  // hostile the upstream dependency result is. `fn` runs inside this
+  // boundary; on ANY throw, the caught value itself is never inspected in
+  // any way (no `.code`/`.path` read, no re-throw of the raw caught
+  // reference) - a fresh, statically-fixed `{code, path}` error is always
+  // minted instead. This deliberately sacrifices the more specific
+  // per-check `path` a legitimate binding-mismatch would have carried
+  // in favor of a strictly fail-closed boundary: a hostile dependency
+  // result that throws a forged `{code: <this boundary's code>, path: ...,
+  // ...}`-shaped object (to have it laundered straight through) is
+  // rejected exactly the same as any other hostile throw. ----
   function runFailClosedBoundary(fn, code, fallbackPath) {
     try {
       return fn();
     } catch (err) {
-      if (err && typeof err === 'object' && err.code === code && typeof err.path === 'string') throw err;
       throw makeCompositionError(code, fallbackPath);
     }
   }

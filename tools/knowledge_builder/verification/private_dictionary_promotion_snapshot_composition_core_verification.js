@@ -1014,6 +1014,135 @@ async function main() {
     assert(!!result.validated_snapshot, 'R1-I end-to-end promotion still succeeds after confirming synchronous call-start ordering');
   }
 
+  // ==========================================================================
+  // R2-2. Forged same-code error laundering (Checkpoint 5-R2)
+  // ==========================================================================
+  {
+    const secretMarker = 'SECRET_R2_2_FORGED_SAME_CODE';
+    let builderCalled = false;
+    const forgedError = Object.freeze({
+      code: 'COMPOSITION_PROMOTION_BINDING_MISMATCH',
+      path: '$.forged',
+      secret: secretMarker
+    });
+    const basePromotionResult = {
+      dictionary_payload_sha256: 'e'.repeat(64),
+      promotion_record: { output_dictionary_payload_sha256: 'e'.repeat(64) }
+    };
+    const hostilePromotionResult = new Proxy(basePromotionResult, {
+      get(target, prop, receiver) {
+        if (prop === 'dictionary_payload_sha256') throw forgedError;
+        return Reflect.get(target, prop, receiver);
+      }
+    });
+    const hostilePromotionCore = { promoteReviewedCandidatesToProjectDictionary: async () => hostilePromotionResult };
+    const hostileSnapshotCore = {
+      buildDictionarySnapshotWrapper: async () => { builderCalled = true; throw new Error('should never be reached'); },
+      loadDictionarySnapshotWrapper: async () => { throw new Error('should never be reached'); }
+    };
+    const sandbox = loadCompositionCoreInSandbox(sandboxRequireStub(hostilePromotionCore, hostileSnapshotCore));
+    const input = makeCompositionInput(makeSimplePromotionInput({}), {});
+    const realmInput = toSandboxValue(sandbox, input);
+    let caught = null;
+    try { await sandbox.module.exports.promoteReviewedCandidatesAndBuildSnapshot(realmInput); } catch (err) { caught = err; }
+    assert(!!caught && caught.code === 'COMPOSITION_PROMOTION_BINDING_MISMATCH', 'R2-2 forged same-code thrown object still results in COMPOSITION_PROMOTION_BINDING_MISMATCH');
+    assert(!!caught && caught.path === '$.promotion_result', "R2-2 forged path ('$.forged') is discarded - the boundary's own static fallback path ('$.promotion_result') is used instead");
+    assert(!builderCalled, 'R2-2 Snapshot Builder is never called when the Promotion binding gate is hit with a laundering attack');
+    assertSanitizedErrorCrossRealm(caught, 'R2-2 forged same-code error: thrown error is the sanitized {code,path} shape');
+    assert(!!caught && Object.isFrozen(caught), 'R2-2 forged same-code error: returned error is frozen');
+    assert(!!caught && Object.keys(caught).sort().join(',') === 'code,path', 'R2-2 forged same-code error: returned error has exactly {code,path}, no smuggled "secret" field');
+    assert(!JSON.stringify(caught).includes(secretMarker), 'R2-2 forged same-code error: no secretMarker leakage');
+    assert(caught !== forgedError, 'R2-2 forged same-code error: the raw thrown object is never re-thrown as-is (different reference)');
+  }
+
+  // ==========================================================================
+  // R2-3. Hostile thrown Proxy error object
+  // ==========================================================================
+  {
+    const secretMarker = 'SECRET_R2_3_HOSTILE_ERROR_PROXY';
+    let secondaryTrapFired = false;
+    let builderCalled = false;
+    const hostileErrorProxy = new Proxy({}, {
+      get(target, prop) {
+        if (prop === 'code' || prop === 'path') { secondaryTrapFired = true; throw new Error(secretMarker); }
+        return undefined;
+      }
+    });
+    const basePromotionResult = {};
+    const hostilePromotionResult = new Proxy(basePromotionResult, {
+      get(target, prop, receiver) {
+        if (prop === 'dictionary_payload_sha256') throw hostileErrorProxy;
+        return Reflect.get(target, prop, receiver);
+      }
+    });
+    const hostilePromotionCore = { promoteReviewedCandidatesToProjectDictionary: async () => hostilePromotionResult };
+    const hostileSnapshotCore = {
+      buildDictionarySnapshotWrapper: async () => { builderCalled = true; throw new Error('should never be reached'); },
+      loadDictionarySnapshotWrapper: async () => { throw new Error('should never be reached'); }
+    };
+    const sandbox = loadCompositionCoreInSandbox(sandboxRequireStub(hostilePromotionCore, hostileSnapshotCore));
+    const input = makeCompositionInput(makeSimplePromotionInput({}), {});
+    const realmInput = toSandboxValue(sandbox, input);
+    let caught = null;
+    try { await sandbox.module.exports.promoteReviewedCandidatesAndBuildSnapshot(realmInput); } catch (err) { caught = err; }
+    assert(!secondaryTrapFired, "R2-3 the caught hostile error Proxy's own code/path get trap is never triggered (runFailClosedBoundary never reads the caught value)");
+    assert(!!caught && caught.code === 'COMPOSITION_PROMOTION_BINDING_MISMATCH', 'R2-3 hostile thrown error Proxy still results in a clean COMPOSITION_PROMOTION_BINDING_MISMATCH');
+    assert(!builderCalled, 'R2-3 Snapshot Builder is never called when the Promotion binding gate is attacked with a hostile thrown error Proxy');
+    assertSanitizedErrorCrossRealm(caught, 'R2-3 hostile thrown error Proxy: thrown error is the sanitized {code,path} shape');
+    assert(!JSON.stringify(caught).includes(secretMarker), 'R2-3 hostile thrown error Proxy: no native Error/secret leakage');
+  }
+
+  // ==========================================================================
+  // R2-6. Node dependency-resolution hostile test (required-function
+  // property lookup via a Proxy get trap that throws)
+  // ==========================================================================
+  {
+    const secretMarker = 'SECRET_R2_6_NODE_HOSTILE_REQUIRE';
+    const hostilePromotionCoreProxy = new Proxy({}, {
+      get(target, prop) {
+        if (prop === 'promoteReviewedCandidatesToProjectDictionary') throw new Error(secretMarker);
+        return undefined;
+      }
+    });
+    const customRequire = function(mod) {
+      if (mod.indexOf('private_dictionary_promotion_core') !== -1) return hostilePromotionCoreProxy;
+      if (mod.indexOf('private_dictionary_snapshot_core') !== -1) return realCrossRealmSnapshotCore();
+      throw new Error('unexpected require() in sandbox: ' + mod);
+    };
+    let caught = null;
+    try {
+      loadCompositionCoreInSandbox(customRequire);
+    } catch (err) { caught = err; }
+    assert(!!caught && caught.code === 'COMPOSITION_DEPENDENCY_RESOLUTION_FAILED', 'R2-6 hostile Proxy dependency (get trap throws during required-function property lookup) is sanitized to COMPOSITION_DEPENDENCY_RESOLUTION_FAILED at module load time');
+    assertSanitizedErrorCrossRealm(caught, 'R2-6 hostile Node dependency Proxy: thrown error is the sanitized {code,path} shape');
+    assert(!JSON.stringify(caught).includes(secretMarker), 'R2-6 hostile Node dependency Proxy: no native Error/secret leakage');
+  }
+
+  // ==========================================================================
+  // R2-7. Browser dependency-resolution hostile test (globalThis[...]
+  // property access via a hostile getter that throws)
+  // ==========================================================================
+  {
+    const secretMarker = 'SECRET_R2_7_BROWSER_HOSTILE_GLOBAL';
+    const browserSandbox = {};
+    browserSandbox.globalThis = browserSandbox;
+    // Deliberately no module/require defined at all, forcing resolveDependency
+    // down its `else { dep = globalThis[browserGlobalName]; }` branch.
+    Object.defineProperty(browserSandbox, 'PrivateDictionaryPromotionCore', {
+      configurable: true,
+      enumerable: true,
+      get() { throw new Error(secretMarker); }
+    });
+    vm.createContext(browserSandbox);
+    let caught = null;
+    try {
+      vm.runInContext(fs.readFileSync(COMPOSITION_CORE_PATH, 'utf8'), browserSandbox, { filename: 'private_dictionary_promotion_snapshot_composition_core.js (R2-7 browser sandbox)' });
+    } catch (err) { caught = err; }
+    assert(!!caught && caught.code === 'COMPOSITION_DEPENDENCY_RESOLUTION_FAILED', 'R2-7 hostile globalThis[...] getter on the browser dependency-resolution path is sanitized to COMPOSITION_DEPENDENCY_RESOLUTION_FAILED at module load time');
+    assertSanitizedErrorCrossRealm(caught, 'R2-7 hostile browser dependency getter: thrown error is the sanitized {code,path} shape');
+    assert(!JSON.stringify(caught).includes(secretMarker), 'R2-7 hostile browser dependency getter: no native Error/secret leakage');
+  }
+
   console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }
