@@ -59,6 +59,16 @@ P2-A4「Private Dictionary Application / Matching Integration」の設計契約�
   （scalar=value全体、array=要素ごと、object=対象外、delimiter split/substring/fuzzy/AI推定
   すべて禁止）。S23旧#13を解決済みへ移動（R4-3）。
 
+**Checkpoint 2**（設計文書の変更なし）: `mergeDictionaryLayersWithProvenance()`を
+`private_dictionary_learning_core.js`へadditive pure APIとして実装し、S4.1（R3-1）で
+決定したOption Aを完了した（commit `95df19f9d0a6764baff051934bb59b806fd924c6`）。
+既存`mergeDictionaryLayers()`の戻り値はbit-for-bit不変。S23旧#11をこのCheckpointで
+解決済みへ移動する（下記）。
+
+**Checkpoint 3A改訂**: S5.5（新設）でSnapshot Wrapper 0.1の正確なfield contract
+（型・format・PROJECT-only制約・builder入力/loader返り値のfield集合の違い・今回のscope外事項）
+を正式固定した。実装は`private_dictionary_snapshot_core.js`（Checkpoint 3B）で行う。
+
 ---
 
 ## S0. 目的とKPI（要約。詳細は acceptance plan 側）
@@ -437,6 +447,52 @@ artifact全体の完全性、という異なる問いに答えるため）。
 は、そもそもSnapshot単体（1 scope layer分の`private-dictionary-overlay/1.0`）には存在しない概念
 であり、merge時点（matching tool起動時、複数Snapshotを束ねる段階）で毎回計算される。
 `conflict_state`フィールドとB類conflictを混同しない。
+
+### S5.5 Snapshot Wrapper 0.1 Field Contract（Checkpoint 3Aで正式固定）
+
+S5.1で定義したwrapper fieldの**正確な型・format**をここで固定する。実装（Checkpoint 3B、
+`tools/knowledge_builder/core/private_dictionary_snapshot_core.js`）はこの表を正本とする。
+
+**top-level fields**: 以下14個のみ。additional property禁止。`snapshot_status`は含めない
+（S5.4参照）。
+
+| field | 型・format | 備考 |
+|---|---|---|
+| `wrapper_schema_version` | 完全一致文字列 `"private-dictionary-snapshot-wrapper/0.1"` | |
+| `snapshot_id` | `^dsnap-[0-9a-f]{32}$` | **caller-supplied。Snapshot core内部では自動発番しない**（`Math.random()`/`crypto.randomUUID()`/`Date.now()`等からの暗黙生成禁止）。発番方法自体は後続Checkpointの対象 |
+| `dictionary_payload` | valid `private-dictionary-overlay/1.0` object | P2-A1 `validatePrivateDictionary()`で検証する。第二schemaを作らない |
+| `dictionary_payload_sha256` | `^[0-9a-f]{64}$` | `hashPrivateDictionaryCanonical(dictionary_payload)`の出力そのもの |
+| `wrapper_integrity_sha256` | `^[0-9a-f]{64}$` | S5.2のhash projection参照 |
+| `snapshot_version` | `Number.isSafeInteger(value) && value >= 1` | 今回のcoreは単一artifactの型検証のみ行い、**「単調増加履歴」そのものは検証しない**（後続Checkpointの対象） |
+| `scope` | 完全一致文字列 `"PROJECT"` | **P2-A4初期sliceでは`PROJECT`のみ許可**（S7の`PROJECT-first`方針と整合）。`DOMAIN`/`SESSION` snapshotは今回生成・受理禁止。さらに`wrapper.scope === dictionary_payload.scope`必須（不一致はreject） |
+| `provenance` | `{ generated_at, generator }`（他field禁止） | `generated_at`: `YYYY-MM-DDTHH:mm:ss.sssZ`形式のcanonical UTC timestamp文字列、**caller supplied**（Snapshot core内部で現在時刻を生成しない）。`generator`: `{ tool, version }`（他field禁止）、両方non-empty string |
+| `source_review_artifact_identity` | `{ sha256 }`（他field禁止） | `sha256`は64 lowercase hex。**file nameやprivate termをidentityに使わない** |
+| `promotion_record_identity` | `{ sha256 }`（他field禁止） | `sha256`は64 lowercase hex。Checkpoint 4のPromotion Validator未実装のため、Checkpoint 3時点ではsynthetic value（呼び出し側が用意した仮値）を許容する |
+| `source_commit` | `^[0-9a-f]{40}$` | 生成時のrepository commit SHA |
+| `conflict_state` | `{ unresolved_count }`（他field禁止） | `unresolved_count`は non-negative safe integer。**private candidate名・alias名・conflict本文は一切含めない**（S17） |
+| `supersedes` | `null` または有効な`snapshot_id` format | `supersedes !== snapshot_id`必須（自己参照禁止）。**chain全体の存在確認・循環検査は今回対象外**（後続Checkpoint） |
+| `rollback_target` | `null` または有効な`snapshot_id` format | `rollback_target !== snapshot_id`必須（自己参照禁止）。circular/existence検査は同上、今回対象外 |
+
+**builder入力（`buildDictionarySnapshotWrapper()`）の項目**: 上記14 fieldのうち
+`wrapper_schema_version`/`scope`/`dictionary_payload_sha256`/`wrapper_integrity_sha256`の
+4つを**除いた10 field**（`dictionary_payload`/`snapshot_id`/`snapshot_version`/`provenance`/
+`source_review_artifact_identity`/`promotion_record_identity`/`source_commit`/
+`conflict_state`/`supersedes`/`rollback_target`）をcallerから受け取る。`wrapper_schema_version`
+は固定文字列としてbuilder自身が設定し、`scope`は検証済み`dictionary_payload.scope`から導出し、
+両hashはbuilder自身が計算する（**caller supplied hashは受け取らない**）。
+
+**loaderの返り値（`loadDictionarySnapshotWrapper()`）**: `wrapper_schema_version`を除いた
+**13 field**の deep-frozen "validated snapshot handle"。S10.1 step10（Checkpoint 3の境界）は
+「validated snapshotを返せる状態になる」ところまでであり、Dictionary Resolver自体は
+Checkpoint 3の対象外（S13/S13.1参照、Resolverの実装は後続Checkpoint）。
+
+**Checkpoint 3の明示的スコープ外事項**（S17参照、S21のNon-goalsへも波及）:
+
+- raw JSON textの受け取り・parse（loaderはobjectを受ける。file I/Oも対象外）
+- `snapshot_version`のchain monotonicity検証（版番号が本当に単調増加しているかの検証）
+- `supersedes`/`rollback_target`が指すsnapshot chain全体の存在確認・循環検査
+- Promotion Validator・Snapshot Activation Record・project configuration・Dictionary Resolver
+  の実装（いずれも未実装のまま）
 
 ### S5.4 Snapshot Activation Record（R2-4で新設: immutable wrapperと可変運用状態の分離）
 
@@ -1255,6 +1311,17 @@ matching実行（既存logic、変更なし）
   manualRemove適用・maxTagsPerRow・high-frequency pruning・display解決・stats識別）を
   実コード確認済みの既存関数を根拠にR3-3で確定した（S13.1）。
 
+**Checkpoint 2で解決した項目**:
+
+- 旧#11（R3-1で追加）: `mergeDictionaryLayersWithProvenance()`をP2-A1 coreへ実装するタイミング、
+  および既存`mergeDictionaryLayers()`を薄いwrapperとして再実装するか独立実装のまま維持するかは、
+  P2-A4 Checkpoint 2（commit `95df19f9d0a6764baff051934bb59b806fd924c6`）で**解決した**。
+  既存の`canonicalGroups`/`aliasMap`計算を`computeDictionaryLayerMerge()`という単一の内部helperへ
+  抽出し、`mergeDictionaryLayers()`はこのhelperを呼び出す薄いwrapper（元の4 fieldのみ返す）へ
+  再実装し、`mergeDictionaryLayersWithProvenance()`も同じhelperを呼んで`provenance_index`を
+  追加で返す。既存`mergeDictionaryLayers()`の戻り値がbit-for-bit不変であることは
+  Node検証（P2-A4 Checkpoint2-A、canonical文字列比較）で確認済み。
+
 **R4で解決した項目**:
 
 - 旧#13（R3-3で追加）: `_tagInfo.approvedDict`のtokenization（field値内部の分割要否）は、
@@ -1298,9 +1365,15 @@ matching実行（既存logic、変更なし）
 10.（R2-4で追加）Snapshot Activation Record（S5.4）の具体的な永続化場所・schema・
     project configuration（S14）との関係の詳細設計（同一artifactに統合するか、別artifactとして
     分離を維持するか）は未設計。
-11.（R3-1で追加）`mergeDictionaryLayersWithProvenance()`をP2-A1 coreへ実装するタイミング
-    （どの後続Checkpointで実装するか）、および既存`mergeDictionaryLayers()`をこの新APIの
-    薄いwrapperとして再実装するか、両者を独立実装のまま維持するかは未確定。いずれの場合も
-    既存`mergeDictionaryLayers()`の戻り値がbit-for-bit不変であることが必須要件（S4.1）。
-12.（R3-1で追加）`shadowed_entry_refs`（非採用candidateの補助的な公開）を実装するか否か、
+11.（R3-1で追加）`shadowed_entry_refs`（非採用candidateの補助的な公開）を実装するか否か、
     実装する場合の具体的なschemaは未設計（S4.1、必須契約ではなくoptional拡張として位置づけ）。
+12.（Checkpoint 3で追加）`snapshot_id`の発番方式は未設計（S5.5で「caller-supplied、Snapshot
+    core内部で自動発番しない」ことのみ確定。`dsnap-<hex32>`という発番元をどこで・どう決定するか
+    は後続Checkpointの対象）。
+13.（Checkpoint 3で追加）`snapshot_version`のchain monotonicity検証（版番号が実際に単調増加して
+    いるかの検証）、および`supersedes`/`rollback_target`が指すsnapshot chain全体の存在確認・
+    循環検査は、Checkpoint 3のSnapshot core（単一artifactの型検証のみ）では対象外のまま
+    （S5.5）。いつ・どの層（Snapshot core自体か、それとも呼び出し側か）で検証するかは未設計。
+14.（Checkpoint 3で追加）Dictionary Resolver（Snapshotから実際にterm解決を行う層）は
+    Checkpoint 3で未実装のまま。loaderは「validated snapshot handle」を返すところまでが境界
+    （S5.5、S10.1 step10）であり、S4のResolver設計との接続方法は後続Checkpointで具体化する。
