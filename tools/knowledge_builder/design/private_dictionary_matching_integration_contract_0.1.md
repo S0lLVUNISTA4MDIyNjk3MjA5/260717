@@ -22,13 +22,33 @@ P2-A4「Private Dictionary Application / Matching Integration」の設計契約�
   `_tagInfo`/`buildTagIndex()`/`evaluateTagMatch()`/`matchPlmParts()` chainへの拡張として
   再定義（R2-1）。
 - S4.1（新設）: Resolution provenanceのSource of Truthを、既存P2-A1出力（layerViews/
-  `mergeDictionaryLayers()`）から構築する方式（Option B）として確定（R2-2）。
+  `mergeDictionaryLayers()`）から構築する方式（Option B）として確定（R2-2）。**R3-1で撤回・
+  Option Aへ変更（下記R3改訂参照）。**
 - S5.1/S5.2: `wrapper_sha256` を `wrapper_integrity_sha256` へ改称し、`dictionary_payload_sha256`
   との責務分離を明確化。全fieldのhash対象/対象外を表形式で確定（R2-3）。
 - S5.1/S5.4（新設）: `snapshot_status` をimmutable wrapperから分離し、別の
   Snapshot Activation Recordへ移動（R2-4）。
 - S6.4/S6.3: S6.4をS6.1の3-input契約と一致させ、`SELECT_CANONICAL`の意味を訂正（R2-5）。
 - S9: `alias_rule_id` の扱いをS4.1の結論に合わせて訂正（R2-2）。
+
+**R3改訂**: Checkpoint 1-R3にて、以下を反映。変更点は各節に(R3-n)として明記する。
+
+- S4.1: R2版のOption B（P2-A4側でlayerView/mergeの出力を突き合わせてprovenance indexを
+  再構築する方式）を撤回。`mergeDictionaryLayers()`（L1164-1231）の内部実装を再確認した結果、
+  `entry_ref_id`はcanonical/aliasのpriority選択過程で破棄され、外部からの復元は
+  P2-A1のscope priority/tie-break semanticsの再実装を要することが判明したため。代わりに
+  Option A（P2-A1 coreへ`mergeDictionaryLayersWithProvenance()`という追加pure APIを後続
+  実装Checkpointで追加し、既存`mergeDictionaryLayers()`と同じ内部計算からprovenance_indexを
+  副産物として持ち帰る）を採用。duplicate同一canonicalマッピングのprovenanceは単一
+  `selected_entry_ref_id`とし、`effective_vocabulary`の単一選択結果と1:1に対応させる（R3-1）。
+- S5.1/S5.2: `wrapper_integrity_sha256`の対象を、`snapshot_id`/`snapshot_version`/
+  `supersedes`/`rollback_target`を含む**自己参照field以外の全immutable field**へ拡張
+  （従来はcontent-addressability目的でこれらを対象外としていたが、その責務は
+  `dictionary_payload_sha256`が既に単独で担うため、`wrapper_integrity_sha256`は純粋な
+  改ざん検知に特化させ、対象外fieldを残さない設計へ改めた）（R3-2）。
+- S4/S13: `_tagInfo.approvedDict`の生成・合成規則を実コード（`buildRowTagInfo()`/
+  `composeFinalTags()`/`buildTagDisplayMap()`/`buildTagIndex()`/`evaluateTagMatch()`等）に
+  基づき10項目で確定（R3-3）。
 
 ---
 
@@ -189,7 +209,7 @@ Dictionary maintenance queue へ収集（Checkpoint 1ではcontractのみ、queu
 （事実上のAUTO ACCEPTや無自覚なmatching再計算）を招く。実装Checkpointでは、この2つの利用を
 コード上も別関数として分離することを推奨する（unresolved design questionではなく、確定方針）。
 
-### S4.1 Resolution Annotation Provenance Source of Truth（R2-2で新設）
+### S4.1 Resolution Annotation Provenance Source of Truth（R2-2で新設、R3-1で全面改訂）
 
 S4の「Resolution Annotation の最小構成案」は `dictionary_entry_id`/`scope`/`status` 等の
 provenance fieldを含むが、**これらは`effective_vocabulary`単体からは復元できない**。
@@ -199,19 +219,90 @@ provenance fieldを含むが、**これらは`effective_vocabulary`単体から�
 含まれない。Resolverがprovenance付きのResolution Annotationを生成するには、
 `effective_vocabulary`とは別に、これらの識別情報を保持する仕組みが必要である。
 
-**検討した2案**:
+**R3-1: R2版のOption B（P2-A4側でlayerView/merge出力を突き合わせてprovenance indexを
+再構築する）を撤回する。** `private_dictionary_learning_core.js`（L1164-1231）の
+`mergeDictionaryLayers()`実装を再度直接読解した結果、次の事実を確認した:
 
-| 案 | 内容 | 評価 |
-|---|---|---|
-| A: P2-A1 coreへ新規APIを追加 | 後続Checkpointで`private_dictionary_learning_core.js`へ、`effective_vocabulary`と同時にprovenance lookup indexを生成する追加pure関数を実装する | P2-A1 coreへの変更を伴う。P2-A1は「promotion/quarantine/rollback policyは実装しない」と自ら宣言したread-only Source of Truthであり（current-state-analysis §18）、新規API追加は最小限にとどめるべきという方針（R1-3の「P2-A1契約は変更しない」原則）と緊張関係にある |
-| B: 既存のlayerView/merge出力からP2-A4側で構築（採用） | Resolverが`createPrivateDictionaryLayerView()`の戻り値（`{entry_ref_id, canonical_display, canonical_key, aliases:[{display,key}], status, source_kind}`の配列、current-state-analysis §18.1）と`mergeDictionaryLayers()`の戻り値を**両方**保持しておき、`effective_vocabulary`の各entryに対応する`entry_ref_id`/`status`/`scope`（layerViewの`scope`）/`dictionary_fingerprint`をP2-A4側のResolverコード内でつき合わせて provenance lookup index（`canonical_key`/`alias key` → `{entry_ref_id, scope, status, dictionary_fingerprint}`）を構築する | **P2-A1 core側の変更が一切不要**。`createPrivateDictionaryLayerView()`の戻り値は既に`entry_ref_id`等を含んでおり、`mergeDictionaryLayers()`はこのlayerViewを入力に取るため、Resolverは元々両方の出力を呼び出し時点で手元に持っている。P2-A1のmerge/conflict/priority semanticsを一切再実装せず、その出力を「そのまま保持して引き回す」だけで足りる |
+- canonical選択: `canonicalGroups`は`canonical_key`ごとに全layerの候補（`status==='ACTIVE'`かつ
+  非conflictのみ）を`candidates`配列へ集約した後、`priority`（`SCOPE_PRIORITY`のindex、小さいほど
+  優先）→ 同点なら`ordinalCompare(display)`で**sortし、`candidates[0]`のみを採用する**
+  （L1194-1201）。**採用元の`entry_ref_id`はこの時点で`candidates`配列から破棄され、
+  `effective_vocabulary.allowed_tags`には表示名しか残らない。**
+- alias選択: `group.aliasMap`は同一`alias.key`について「priorityがより小さい、または同点なら
+  displayのordinal順がより小さい」候補で**逐次上書き**する（L1186-1189, `if (!existing ||
+  priority < existing.priority || ...)`）。この時点でも`{priority, display}`のみが保持され、
+  `entry_ref_id`は保持されない。
 
-**R2-2の結論: Option Bを採用する。** 理由: (1) P2-A1 core APIへの変更を要求しない
-（P2-A1の既存契約変更コストがゼロ）。(2) P2-A1のmerge/conflict/priority判定ロジックを
-P2-A4側で再実装・再現する必要がない（`createPrivateDictionaryLayerView()`と
-`mergeDictionaryLayers()`をそのまま順に呼び出し、両方の戻り値を保持するだけで
-provenance lookup indexが構築できる）。(3) Source of Truthは常にP2-A1側の関数呼び出し結果のみで
-あり、P2-A4側は「値を作る」のではなく「既に返ってきた値をindex化して引き回す」役割に限定される。
+つまり、**`effective_vocabulary`のどのcanonical/alias表示名がどのlayer（＝どの`entry_ref_id`）
+に由来するかを決定するロジックは、`mergeDictionaryLayers()`内部の`candidates`/`aliasMap`の
+sort・上書き処理そのもの**であり、外部からlayerViewと`effective_vocabulary`を単純に
+突き合わせるだけでは、複数layerが同一canonical_key/alias keyを主張するケース（同一canonicalを
+SESSION/PROJECT両方が定義している等）で**どちらが採用されたかを一意に復元できない**
+（表示名が同じ場合はなおさら区別不能）。R2版のOption Bは、この事実を確認しないまま
+「layerViewとeffective_vocabularyを机上で対応付けられる」と誤って前提していた。正確な
+`entry_ref_id`復元のためには、P2-A4側で`SCOPE_PRIORITY`の優先順位比較と`ordinalCompare`
+tie-breakを**再実装**する必要があり、これはR1-3で確定した「P2-A1のmerge/conflict/priority
+semanticsをP2-A4側で再実装しない」という原則に反する。よってOption Bは撤回する。
+
+**採用方針: Option A（P2-A1 coreへadditive pure APIを後続実装Checkpointで追加する）。**
+
+```text
+private_dictionary_learning_core.js の新規export（概念、実装はしない）:
+
+mergeDictionaryLayersWithProvenance(layerViews)
+  -> {
+       effective_vocabulary,          // 既存 mergeDictionaryLayers() と完全に同じ値・同じ計算
+       conflicts,                     // 同上
+       excluded_lookup_key_tokens,    // 同上
+       source_fingerprints,           // 同上
+       provenance_index: {            // 新規。同一のcanonicalGroups/aliasMap計算過程から
+         canonical: {                 // 副産物として生成する（計算をやり直さない）
+           "<canonical_key>": {
+             selected_entry_ref_id, selected_scope, selected_status,
+             selected_dictionary_fingerprint, resolution_kind: "canonical"
+           }, ...
+         },
+         alias: {
+           "<alias_key>": {
+             selected_entry_ref_id, selected_scope, selected_status,
+             selected_dictionary_fingerprint, canonical_key, resolution_kind: "alias"
+           }, ...
+         }
+       }
+     }
+```
+
+- **既存`mergeDictionaryLayers()`の公開契約・戻り値は一切変更しない。** 新APIは既存関数を
+  置き換えるのではなく、**同じ内部計算（`canonicalGroups`の構築・sort・`aliasMap`の逐次上書き）を
+  1回だけ実行し、その計算過程で自然に確定する「どのentryが勝者だったか」という情報を
+  追加で持ち帰る**設計とする。既存`mergeDictionaryLayers()`は内部で新APIを呼び、
+  `provenance_index`を捨てて元の戻り値のみを返す薄いwrapperとして再実装してもよい
+  （後続Checkpointの実装判断。既存の`effective_vocabulary`/`conflicts`等の値がbit-for-bit
+  変化しないことが必須要件）。
+- P2-A4側（Resolver）は`mergeDictionaryLayersWithProvenance()`を呼ぶだけであり、
+  **priority比較・tie-break・conflict除外のロジックを一切再実装しない**。R1-3/R2-2で確定した
+  「P2-A1をSource of Truthとする」原則をR3でむしろ強化する結果となる。
+
+**duplicate同一canonicalマッピングのprovenance契約（単一selected ref vs. contributing refs配列）**:
+
+既存`mergeDictionaryLayers()`自身の意味論が、そもそも**常に単一勝者を選択する**設計である
+（`candidates[0]`のみ採用、`aliasMap`は逐次上書きで最終的に1件のみ残る）。
+`effective_vocabulary`自体も、あるcanonical_key/alias keyに対して**複数の表示名を同時に
+公開することはない**（1 key = 1 display）。したがって、provenance側だけが「寄与した全entry」を
+複数値として公開すると、`effective_vocabulary`（単一選択の結果）とprovenance
+（複数候補の集合）の間で対応関係が崩れ、「このcanonical表示名の出自はこのentryである」という
+1:1の主張ができなくなる。
+
+**R3-1の結論: 必須契約は単一`selected_entry_ref_id`とする**（`effective_vocabulary`の
+選択結果と1:1に対応させる）。これにより、同一canonical_keyを複数layerが主張する場合でも、
+provenance_indexは常に「実際に採用された1件」のみを指し、曖昧さを生まない。
+
+任意（optional）の拡張として、`canonicalGroups`/`aliasMap`は勝者選択の前に全候補
+（`candidates`配列全体）を既に計算済みであるため、非採用の候補（shadowed candidates）を
+`shadowed_entry_refs`のような**補助的・非必須のfield**として同時に公開すること自体は
+将来のCheckpointで検討してよい（辞書メンテナンスUIでの「他layerにも同名candidateがあった」
+という監査表示に使える可能性がある）。ただし、これはResolution Annotation/Provenanceの
+**必須field(S9)には含めない**。必須契約は単一selected refのみで完結させる。
 
 **`alias_rule_id`の処遇（訂正）**: S4/S9のResolution Annotation/Provenance必須項目案に
 `alias_rule_id`（「P2-A3の`rule_ids`契約と対応させる」）が挙がっていたが、
@@ -265,16 +356,25 @@ payload（1つ以上のscope layerの `serializeValidatedPrivateDictionary()` �
 
 **（R2-4で削除）`snapshot_status`はwrapperから除去した。** 理由・移動先はS5.4参照。
 
-**S5.2 Hash Projection（完全固定、R2-3で全field網羅の表へ改訂）**:
+**S5.2 Hash Projection（完全固定、R2-3で全field網羅の表へ改訂、R3-2で対象範囲を拡張）**:
 
 2つのhashは責務が異なる。
 
 - **`dictionary_payload_sha256`**: 「同じ辞書内容（`dictionary_payload`）なら常に同じhash」を
   保証する。`hashPrivateDictionaryCanonical(dictionary_payload)`をそのまま呼び出すのみで、
-  wrapperの他fieldには一切依存しない。
-- **`wrapper_integrity_sha256`**: wrapper artifact全体（自分自身を除く、実質的に不変な
-  immutable fieldすべて）の改ざん検知を担う。1 byteでもimmutable fieldが変化すれば
-  この値も変化しなければならない。
+  wrapperの他fieldには一切依存しない。**content-addressability（同一内容なら同一hash）の責務は
+  この値が単独で担う。**
+- **`wrapper_integrity_sha256`**: wrapper artifact全体（自分自身を除く、immutable fieldの
+  すべて）の改ざん検知を担う。1 byteでもimmutable fieldが変化すればこの値も変化しなければ
+  ならない。**R3-2で方針を明確化: content-addressabilityの責務は`dictionary_payload_sha256`が
+  既に単独で担っているため、`wrapper_integrity_sha256`はそれと責務を分担する必要がなく、
+  純粋な改ざん検知に特化させてよい。したがって、自己参照field（`wrapper_integrity_sha256`
+  自身）を除く、immutableなwrapper fieldを一つも対象外にしない。** R2-3版では
+  `snapshot_id`/`snapshot_version`/`supersedes`/`rollback_target`を「発番・連番・リンク情報で
+  内容そのものではない」という理由で対象外としていたが、これは「hashは内容の同一性判定にのみ
+  使う」という前提に立った場合の理由付けであり、`wrapper_integrity_sha256`の真の責務
+  （wrapper全体の改ざん検知）とは無関係だった。**これらのfieldが改ざん・すり替えされても
+  検知できないのは改ざん検知hashとして不完全であるため、R3-2でこの4 fieldも対象へ含める。**
 
 以下、S5.1の全fieldについてhash対象（`wrapper_integrity_sha256`計算への算入）可否とその理由を
 明示する。
@@ -282,20 +382,29 @@ payload（1つ以上のscope layerの `serializeValidatedPrivateDictionary()` �
 | field | hash対象 | 理由 |
 |---|---|---|
 | `wrapper_schema_version` | 対象 | wrapper構造自体の版。変化すれば別構造として区別すべき改ざん相当の変化 |
-| `snapshot_id` | **対象外** | 発番方式（乱数/連番等）に依存する識別子。同一内容のwrapperを再生成した場合でも新規発番されうるため、内容同一性の判定には使わない（`dictionary_payload_sha256`が担う） |
+| `snapshot_id`（R3-2で対象化） | 対象 | 発番方式に依存する識別子だが、`wrapper_integrity_sha256`の責務は改ざん検知であり内容同一性判定ではない（それは`dictionary_payload_sha256`の責務）。`snapshot_id`が別の値へすり替えられた場合も検知できるべきであるため対象に含める |
 | `dictionary_payload` | 対象（`dictionary_payload_sha256`という文字列として算入） | payload全体を二重にhashするのを避けるため、`dictionary_payload`そのものではなく、既に計算済みの`dictionary_payload_sha256`の値（string）をhash入力へ含める。これにより`dictionary_payload`の改変は必ず`wrapper_integrity_sha256`へ波及する |
 | `dictionary_payload_sha256` | 対象（上記と同一の算入経路） | 同上 |
-| `wrapper_integrity_sha256` | **対象外（自己参照不可）** | 自身のhash値をhash対象に含めることはできない |
-| `snapshot_version` | **対象外** | 「この内容が何回目の発行か」という外部連番であり、内容そのものではない。versionが進んでも辞書内容とwrapperの他属性が同一なら改ざんとはみなさない設計とする |
+| `wrapper_integrity_sha256` | **対象外（自己参照不可）** | 自身のhash値をhash対象に含めることはできない。全immutable field中で対象外となるのはこのfieldのみ |
+| `snapshot_version`（R3-2で対象化） | 対象 | 外部連番であっても、`snapshot_version`が改ざんされれば版数の偽装（例: 古いversionを新しいと詐称）を検知できなくなるため対象に含める |
 | `scope` | 対象 | `dictionary_payload.scope`のミラー。scopeの改ざんはPROJECT/DOMAIN境界という重大な意味変化のため、検知対象に含める |
 | `provenance` | 対象 | 生成元追跡情報そのものが改ざん検知の主対象（誰がいつ生成したかの偽装を防ぐ） |
 | `source_review_artifact_identity` | 対象 | 由来artifactのすり替え検知のため |
 | `promotion_record_identity` | 対象 | 同上 |
 | `source_commit` | 対象 | 誤った/偽装されたcommitへのすり替え防止のため、改ざん検知対象に含める（生成環境情報だが、値そのものの真正性は保証したいため`provenance`とは別に明示算入する） |
 | `conflict_state` | 対象 | S12.Aの「内部不整合Snapshotは生成しない」保証に関わる要約。改ざんされるとその保証が無意味化するため対象に含める |
-| `supersedes` | **対象外** | version chain上のリンク情報。chainの前後関係が変わってもwrapperの中身（辞書内容）が同一ならhashは変わらない設計とする |
-| `rollback_target` | **対象外** | 同上 |
+| `supersedes`（R3-2で対象化） | 対象 | version chain上のリンク情報だが、改ざんされればrollback chainの完全性（S16）が偽装されうるため対象に含める |
+| `rollback_target`（R3-2で対象化） | 対象 | 同上。明示的rollback先の偽装を検知できる必要がある |
 | `snapshot_status`（R2-4で削除） | 該当なし | wrapper本体から除去されたため、そもそも`wrapper_integrity_sha256`の算入対象になり得ない。運用上の活性化状態はS5.4のSnapshot Activation Record側で別管理し、そちらはimmutable wrapperのhash対象ではない（可変値のため） |
+
+**R3-2で確定した性質**: 上表の通り、**自己参照field（`wrapper_integrity_sha256`自身）を除く
+immutable wrapper fieldは1つも対象外に残らない。** これにより「1 byteでもimmutable field
+（`wrapper_integrity_sha256`以外のいずれか）が変化すれば、`wrapper_integrity_sha256`も
+必ず変化する」という性質が、例外なく成立する。同時に、`snapshot_id`/`snapshot_version`等が
+異なるだけの2つのwrapper（`dictionary_payload`は同一）は、`dictionary_payload_sha256`は
+一致するが`wrapper_integrity_sha256`は不一致になる — これは責務分離の意図した挙動であり、
+矛盾ではない（`dictionary_payload_sha256`＝内容同一性、`wrapper_integrity_sha256`＝
+artifact全体の完全性、という異なる問いに答えるため）。
 
 - **key ordering**: `private_dictionary_learning_core.js` の `canonicalJson()`
   （`tools/quantity_sidecar_binding_core.js` L122-128と共通実装のパターン）と同じ規則 —
@@ -503,7 +612,8 @@ canonicalへ解決されたのか」を追跡できること。
 **必須項目（S4のResolution Annotationと重複するが、provenance専用の観点でここに列挙）**:
 
 - `resolution_type`
-- `dictionary_entry_id`（S4.1のOption Bで構築するprovenance lookup indexの`entry_ref_id`）
+- `dictionary_entry_id`（S4.1（R3-1）のOption A: `mergeDictionaryLayersWithProvenance()`
+  `provenance_index`の`selected_entry_ref_id`）
 - `dictionary_snapshot_id`
 - `wrapper_integrity_sha256`（S5.2、旧`dictionary_wrapper_sha256`表記から改称。R2-3）
 - `original_term`（原文そのまま。破壊しない = NG-9）
@@ -721,6 +831,104 @@ Checkpointで行う**（Checkpoint 1-R2は設計のみで、この変更を含�
 はしない」という原則と、「拡張点は`_tagInfo`の新sibling sourceであり、P2-A1契約改訂を要しない」
 という接続方式の2点のみ。
 
+### S13.1 `_tagInfo.approvedDict` 生成・合成規則（R3-3で新設）
+
+`_tagInfo.approvedDict`という新sourceを追加すること自体はS13で確定した。R3-3では、その
+生成規則・既存パイプラインへの合成規則を、以下の実コード（`tools/json_ab_trace_matching_tool_v12.1.15.html`）
+を直接確認したうえで10項目固定する: `buildRowTagInfo()`(L4400)、`composeFinalTags()`(L4336)、
+`buildTagDisplayMap()`(L4355)、`computeHighFrequencyDictionaryTags()`(L4461)、
+`tagSourceSetForRow()`(L5396)、`tagIsDictOnlyHighFrequency()`(L5400)、
+`effectiveNonCodeTagSet()`(L5406)、`buildTagIndex()`(L5423)、`evaluateTagMatch()`(L5460)、
+`candidateEntriesForSys()`(L5561)、`tagSourcesFor()`(L5940)、`synonymBaseTagsForText()`(L4304)。
+
+**1. `effective_vocabulary`からapprovedDict tagを生成する正確な一致規則**:
+既存`.dict`の生成元`synonymBaseTagsForText()`は、`tagSourceText()`が返す**複数fieldを
+連結した1つの長いtext**に対し、`compiledSynonymIndex()`/`synonymGroupsForText()`で
+正規化済みtermの**部分文字列出現**（`n.startsWith(t.term, i)`を全開始位置iで走査、L4144-4160）
+を検出する方式である。これは`matchLogic.synonymMap`に固有の索引（`compiledSynonymIndex()`）
+に依存しており、`effective_vocabulary`に対してこの索引をそのまま再利用することはできない
+（索引がsynonymMap専用に構築されているため）。
+
+R3-3では、`.dict`と同じ「連結text中の部分文字列出現」方式を`effective_vocabulary`へそのまま
+横展開せず、**より保守的な規則**を採用する: `tagSourceFields()`が返す各fieldの値を
+**連結する前に、field単位で個別に**正規化し、その正規化済み値が`effective_vocabulary`の
+canonical display（`allowed_tags`）またはalias display（`aliases`のkey）と**完全一致**する
+場合にのみtagを生成する（部分文字列としての出現では生成しない）。
+
+**2. canonical exact / approved aliasの正規化規則**:
+`.dict`と同じ正規化primitive（`normalizeForMatch()`、`normalizeTagValue()`）を再利用する。
+新しい正規化ロジックは追加しない。canonical exact一致は「field正規化値 ==
+`normalizeForMatch(canonical display)`」、approved alias一致は「field正規化値 ==
+`normalizeForMatch(alias display)`」で判定し、後者はhitした場合`effective_vocabulary.aliases`の
+対応するcanonical displayをtag値として採用する（`effective_vocabulary.aliases`が
+`{alias表示名→canonical表示名}`という向きであることに整合、current-state-analysis §18.1）。
+
+**3. substring / fuzzy / AI推定の要否**: **原則禁止する。** 上記1の通り、`.dict`が採用する
+「連結text中の部分文字列出現」方式は、正式に承認された辞書由来のtagとしては再現率
+（recall）を過剰に広げ、意図しない文脈への誤付与（false positive）を招くリスクがある。
+approvedDictはP2-A3レビュー→Promotion Validatorを経た正式知識であるため、ad hoc辞書より
+**高い精度（precision）を優先**する設計とし、field値の完全一致のみを許可する。
+fuzzy一致（編集距離等）・AI推定は初期実装では一切行わない（将来的にscore係数（S13の
+unresolved design question）と合わせて再検討してよいが、Checkpoint 1-R3では決定しない）。
+
+**4. `composeFinalTags()`でのsource priority**: 既存の`ordered`配列構築順序
+（`manualAdd, explicit, dict, code`、L4338-4343）へ、`approvedDict`を**`explicit`と`dict`の間**
+に挿入する（`manualAdd, explicit, approvedDict, dict, code`）。理由: `explicit`は人間が明示的に
+付与したtag（最高信頼）、`approvedDict`はP2-A3レビューを経た正式知識（次に高い信頼）、
+`dict`は利用者が手元で自由編集できるad hoc辞書（未レビュー）であるため、
+`maxTagsPerRow`による切り詰め（L4344-4351の`if (out.length >= maxTags) break;`）が発生した際、
+正式辞書由来のtagがad hoc辞書由来のtagより優先的に残るようにする。
+
+**5. `manualRemove`の適用可否**: **適用する（既存挙動をそのまま継承）。**
+`composeFinalTags()`の除外処理（`removed = new Set(uniqueNormalizedTags(info?.manualRemove
+|| []))`、L4337）は`ordered`配列全体に対してsource非依存に適用されるため、`approvedDict`を
+`ordered`へ追加するだけで自動的にmanualRemoveの対象になる。特別扱い・除外規則の追加は不要
+であり、「人間が最終的に常に上書きできる」という既存の原則をapprovedDictにも一貫させる。
+
+**6. `maxTagsPerRow`との関係**: **専用の予約枠は設けない。** approvedDictも他sourceと同じ
+`ordered`配列・同じ`maxTagsPerRow`上限（既定16、設定範囲1-100、L4175-4193）を共有する。
+専用枠を設けると新しい設定項目が必要になり複雑化するため、4で定めたsource priorityによる
+保護のみで足りるとする。
+
+**7. high-frequency pruningのapprovedDictへの適用**: **`.dict`と対称に適用する。**
+`tagIsDictOnlyHighFrequency()`（L5400-5404）は現状「`sources.has('dict')` かつ
+`explicit`/`manual`/`code`のいずれでもない」場合のみ高頻度枝刈りの対象とする。
+`approvedDict`も「利用者が個別に選んだわけではない、辞書由来の一括付与」という性質は
+`dict`と同じであり、高頻度出現時にDice scoreの識別力を落とす点も変わらない。よって
+判定を「`sources.has('dict') || sources.has('approvedDict')` かつ `explicit`/`manual`/`code`の
+いずれでもない」へ拡張する（`dict`と`approvedDict`のいずれか一方のみに由来する高頻度tagも、
+両方に由来する高頻度tagも、同様に枝刈り対象とする）。`explicit`/`manual`/`code`から同時に
+由来する場合は、既存同様に枝刈りしない。
+
+**8. `buildTagIndex()` documentFrequencyへのapprovedDict算入**: 7と対応し、
+`documentFrequency`の集計元（現状`row?._tagInfo?.dict`のみ、L5432-5435）を
+`row._tagInfo.dict`と`row._tagInfo.approvedDict`の**和集合**（1行内の重複は`Set`で除去）へ
+拡張する。`highFrequencyRatio`等の閾値設定・計算式（L5436-5437）はそのまま流用し、
+approvedDict専用の別閾値は新設しない。
+
+**9. `_tagDisplayMap`でのcanonical表示**: `buildTagDisplayMap()`（L4355-4372）は現状、
+`.dict`由来tagの表示名を`Object.keys(matchLogic.synonymMap || {})`を再走査して解決している
+（L4363-4366）。`effective_vocabulary`は`matchLogic.synonymMap`に一切書き込まないため
+（NG-10 / S13本文の原則）、`approvedDict`由来tagの表示名は**別の解決ステップ**として、
+`effective_vocabulary.allowed_tags`（canonical表示名）と`effective_vocabulary.aliases`の
+key（alias表示名）を走査し、`info.approvedDict`に含まれるtagについてのみ
+`map[key] = display`を設定する（既存の「keyが未設定の場合のみ設定、先勝ち」ルール
+（L4360）をそのまま踏襲）。
+
+**10. stats/evidenceでのad hoc dictとapprovedDictの識別**: `tagSourcesFor()`（L5940-5947）へ
+`if ((info.approvedDict || []).includes(tag)) sources.push('approvedDict');`を追加するだけで、
+`annotationTagHtml()`（表示class・title tooltip、L5949-5955）や`tagSourceSetForRow()`
+（`tagIsDictOnlyHighFrequency()`等が内部で使う判定、L5396-5398）は**変更なしで自動的に
+approvedDictを識別可能になる**（既存機構がsource文字列の集合として汎用的に設計されているため）。
+一方、`currentTagCoverageStats()`/`tagMatchSummaryHtml()`（L5498-5523）は現状`.dict`のみを
+件数集計しており、`.approvedDict`を独立した内訳として表示するには**別途集計ロジックの追加**
+（後続実装Checkpointの対象）が必要である。この10項目はいずれも**設計方針の固定のみ**であり、
+実装（matching tool側コード変更）はCheckpoint 1-R3の対象外。
+
+**正式辞書を`matchLogic.synonymMap`へ書き込まない、既存tag score計算式
+（`getScore('tag') * dice`、L5486）を変更しない、という2点は、上記10項目のいずれによっても
+変更されない。**
+
 ---
 
 ## S14. Immutable Snapshot / Session Pinning（R1-6: 自動読込と暗黙latest禁止の矛盾を解消）
@@ -781,8 +989,14 @@ staleにはならず、**次回session開始時からのみ**新しいpin先が�
 を使えば、同じdictionary resolutionおよびcomparison inputを再現できる設計とする。
 
 - 辞書の「最新版」を暗黙に参照する設計は禁止（NG-6と表裏一体、S14のpinning方式で担保）。
-- Snapshotが`wrapper_integrity_sha256`/`dictionary_payload_sha256`によりcontent-addressable
-  であること（S5.2）が、再現性の基盤となる。
+- **（R3-2で訂正）** content-addressability（同一辞書内容なら同一hash）は`dictionary_payload_sha256`
+  が単独で担う。`wrapper_integrity_sha256`はR3-2で全immutable fieldを対象化したため、
+  `snapshot_id`等の発番ごとに変化する値を含み、**同一辞書内容のSnapshotを再発行しても
+  `wrapper_integrity_sha256`自体は一致しない**（改ざん検知が責務であり、内容同一性の判定は
+  `dictionary_payload_sha256`の役割）。再現性の基盤となるのは、S14のpinningが
+  `dictionary_snapshot_id` + `wrapper_integrity_sha256`という**厳密な1つのwrapper artifact**を
+  指すこと自体であり、Loaderが指定と異なる内容を検出した場合はS10のinvalid Snapshot扱いと
+  なることで担保される（S5.2）。
 - 既存matching tool側の `requirement_dataset_signature` / `actual_dataset_signature`
   （`QA-SHA256:<hex64>`、current-state-analysis §13）と同様に、Dictionary Snapshotのsignatureも
   matching resultのprovenanceへ含める。
@@ -934,6 +1148,21 @@ matching実行（既存logic、変更なし）
 - 旧#8（R1で追加）: Snapshot wrapperのhash計算における`dictionary_payload`の扱いは、R2-3で
   **解決した**。`dictionary_payload_sha256`（内容同一性専用）と`wrapper_integrity_sha256`
   （wrapper全体の改ざん検知専用）を分離し、全fieldのhash対象/対象外を表で確定した（S5.2）。
+  **R3-2でさらに、`wrapper_integrity_sha256`の対象範囲を`snapshot_id`/`snapshot_version`/
+  `supersedes`/`rollback_target`を含む全immutable fieldへ拡張し、対象外fieldを自己参照field
+  以外ゼロにした。**
+
+**R3で解決した項目**:
+
+- Resolution provenanceのSource of Truth（R2で「Option B」として一旦解決したが、
+  `mergeDictionaryLayers()`の内部実装（priority選択・tie-break後に`entry_ref_id`が破棄される
+  こと）を再確認した結果、Option Bでは正確な復元にP2-A1のmerge semantics再実装が必要になる
+  ことが判明したため、R3-1で**Option Aへ変更**して再解決した。P2-A1 coreへ
+  `mergeDictionaryLayersWithProvenance()`という追加pure APIを後続Checkpointで実装する方針とし、
+  duplicate同一canonicalマッピングのprovenanceは単一`selected_entry_ref_id`とする（S4.1）。
+- `_tagInfo.approvedDict`の生成・合成規則10項目（一致規則・正規化・source priority・
+  manualRemove適用・maxTagsPerRow・high-frequency pruning・display解決・stats識別）を
+  実コード確認済みの既存関数を根拠にR3-3で確定した（S13.1）。
 
 **残存・新規の未解決事項**:
 
@@ -962,3 +1191,13 @@ matching実行（既存logic、変更なし）
 10.（R2-4で追加）Snapshot Activation Record（S5.4）の具体的な永続化場所・schema・
     project configuration（S14）との関係の詳細設計（同一artifactに統合するか、別artifactとして
     分離を維持するか）は未設計。
+11.（R3-1で追加）`mergeDictionaryLayersWithProvenance()`をP2-A1 coreへ実装するタイミング
+    （どの後続Checkpointで実装するか）、および既存`mergeDictionaryLayers()`をこの新APIの
+    薄いwrapperとして再実装するか、両者を独立実装のまま維持するかは未確定。いずれの場合も
+    既存`mergeDictionaryLayers()`の戻り値がbit-for-bit不変であることが必須要件（S4.1）。
+12.（R3-1で追加）`shadowed_entry_refs`（非採用candidateの補助的な公開）を実装するか否か、
+    実装する場合の具体的なschemaは未設計（S4.1、必須契約ではなくoptional拡張として位置づけ）。
+13.（R3-3で追加）`_tagInfo.approvedDict`の一致規則（field値の完全一致、S13.1項目1）における、
+    単一field値内でのtokenization（区切り文字での分割要否）の具体的な仕様は未設計。
+    「連結text全体への部分文字列走査は行わない」という方針（S13.1項目3）のみ確定しており、
+    field値そのものの内部分割方式は後続実装Checkpointで設計する。

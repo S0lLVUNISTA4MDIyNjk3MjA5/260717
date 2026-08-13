@@ -14,6 +14,10 @@ false-negative評価で扱うよう修正（S1.2）。
 **R2改訂**: Checkpoint 1-R2にて、contract文書R2改訂（S13/S4.1/S5.2/S5.4/S6.3-S6.4）に対応する
 7件の検証項目をS11として新設した（R2-6）。
 
+**R3改訂**: Checkpoint 1-R3にて、contract文書R3改訂（S4.1のOption A変更、S5.2の
+`wrapper_integrity_sha256`対象範囲拡張、S13.1新設）に対応してS11の項目#2-4を修正し、
+approvedDict tag挙動・duplicate mapping provenanceに関する項目#8-13を新設した（R3-4）。
+
 ---
 
 ## S1. 検証の基本方針
@@ -181,21 +185,30 @@ fixtureとは混在させない）。
 
 ---
 
-## S11. Contract R2改訂に対応する検証項目（R2-6で新設）
+## S11. Contract R2/R3改訂に対応する検証項目（R2-6で新設、R3-4で追記・修正）
 
-Checkpoint 1-R2で行ったcontract文書の改訂（S13/S4.1/S5.2/S5.4/S6.3-S6.4）に対応する、
-7件の具体的な検証項目を追加する。いずれも実装Checkpointでverification scriptへ落とし込む
-**計画**であり、本Checkpointでは実測しない。
+Checkpoint 1-R2/R3で行ったcontract文書の改訂（S13/S13.1/S4.1/S5.2/S5.4/S6.3-S6.4）に対応する
+検証項目を追加する。いずれも実装Checkpointでverification scriptへ落とし込む**計画**であり、
+本Checkpointでは実測しない。
+
+**R3-4での修正点**: #2/#3をS4.1のR3-1改訂（Option A採用）に合わせて修正、#4を
+S5.2のR3-2改訂（`wrapper_integrity_sha256`対象範囲の拡張）に合わせて修正。#8以降をR3-4で新設。
 
 | # | 検証項目 | 対応するcontract節 | 検証方法（案） |
 |---|---|---|---|
 | 1 | 正式辞書（`effective_vocabulary`由来の情報）が`matchLogic.synonymMap`へ一切混入しないこと | S13（R2-1） | Resolver実行前後で`matchLogic.synonymMap`のkey集合を比較し、差分がないことを確認する。また`_tagInfo.approvedDict`のsource実装が`synonymMap`へ書き込むcode pathを持たないことを静的確認する |
-| 2 | P2-A1 `effective_vocabulary`とResolverの解決結果が一致すること | S4.1（R2-2） | 同一のlayerViews入力に対し、(a) `mergeDictionaryLayers()`を直接呼んだ結果の`effective_vocabulary`と、(b) Resolverが`_tagInfo.approvedDict`等へ反映した解決結果を突き合わせ、canonical/alias対応関係が完全一致することを確認する |
-| 3 | Resolution provenanceが決定的に再現可能であること | S4.1（R2-2） | 同一のDictionary Snapshot + TraceRecordSetで2回実行し、provenance lookup index（`entry_ref_id`/`scope`/`status`/`dictionary_fingerprint`の対応表）が完全一致することを確認する（S6 Deterministic Replay testsと同種の手法） |
-| 4 | wrapper metadataの1byte改変で`wrapper_integrity_sha256`が変化すること | S5.2（R2-3） | S5.2の表で「hash対象」に分類したfield（例: `scope`）を1byte改変し、`wrapper_integrity_sha256`が変化することを確認する。逆に「hash対象外」に分類したfield（例: `snapshot_version`、`supersedes`）を改変した場合は`wrapper_integrity_sha256`が**変化しない**ことも合わせて確認し、include/exclude表の正しさを両方向から検証する |
-| 5 | 同一のdictionary payloadから同一の`dictionary_payload_sha256`が得られること | S5.2（R2-3） | 同じ`dictionary_payload`を異なるwrapper metadata（異なる`snapshot_id`/`snapshot_version`等）で2つのwrapperへ包み、`dictionary_payload_sha256`が2つとも一致し、かつ`wrapper_integrity_sha256`は異なることを確認する（2つのhashの責務分離を実証する） |
+| 2（R3-4で修正） | P2-A1 `mergeDictionaryLayersWithProvenance()`が返す`effective_vocabulary`が、既存`mergeDictionaryLayers()`の戻り値とbyte/deterministicに一致すること | S4.1（R3-1） | 同一のlayerViews入力に対し、(a) 既存`mergeDictionaryLayers()`を直接呼んだ結果の`effective_vocabulary`と、(b) 新設`mergeDictionaryLayersWithProvenance()`が返す`effective_vocabulary`を、`canonicalJson()`でcanonical化した文字列同士で完全一致比較する。1文字でも異なれば新APIが既存契約を壊したとみなしFAILとする |
+| 3（R3-4で修正） | Resolution provenance（`provenance_index`）が決定的に再現可能であること | S4.1（R3-1） | 同一のlayerViews入力で`mergeDictionaryLayersWithProvenance()`を2回呼び、`provenance_index.canonical`/`provenance_index.alias`の`selected_entry_ref_id`/`selected_scope`/`selected_status`/`selected_dictionary_fingerprint`が完全一致することを確認する（S6 Deterministic Replay testsと同種の手法） |
+| 4（R3-4で修正） | immutable wrapper fieldの1byte改変で`wrapper_integrity_sha256`が変化すること（対象外fieldがゼロであることの実証） | S5.2（R3-2） | S5.1の全immutable field（`wrapper_schema_version`/`snapshot_id`/`dictionary_payload_sha256`/`snapshot_version`/`scope`/`provenance`/`source_review_artifact_identity`/`promotion_record_identity`/`source_commit`/`conflict_state`/`supersedes`/`rollback_target`の12種、`wrapper_integrity_sha256`自身を除く）それぞれについて個別に1byte改変し、そのすべてで`wrapper_integrity_sha256`が変化することを確認する。1つでも変化しないfieldがあればFAILとする（R3-2で「対象外fieldをゼロにする」とした契約の直接検証） |
+| 5 | 同一のdictionary payloadから同一の`dictionary_payload_sha256`が得られること | S5.2（R2-3） | 同じ`dictionary_payload`を異なるwrapper metadata（異なる`snapshot_id`/`snapshot_version`等）で2つのwrapperへ包み、`dictionary_payload_sha256`が2つとも一致することを確認する。R3-2により`wrapper_integrity_sha256`は`snapshot_id`等の差により**必ず異なる**ことも合わせて確認し（R2-6版では「異なるmetadataでも同一になりうる」余地があったが、R3-2でこの余地は排除された）、2つのhashの責務分離を実証する |
 | 6 | project configurationのsnapshot pin先切り替えが進行中sessionへ影響しないこと | S14/S5.4（R2-4） | snapshot Aへpinされた状態でmatching sessionを開始し、途中でproject configurationのpin先をsnapshot Bへ切り替える。進行中sessionの`dictionary_snapshot_id`/`wrapper_integrity_sha256`がsnapshot Aのまま変化しないこと、かつ次回session開始時にのみsnapshot Bが適用されることを確認する |
 | 7 | `SELECT_CANONICAL`が非選択candidateを誤って除外・無効化しないこと | S6.3（R2-5） | conflict-only fixture（S1.1）に2件以上のconflicting candidateを含め、`SELECT_CANONICAL`で1件を選択した後、非選択candidateが独立した`candidate_decisions`の状態（ACCEPT等）に従ってpromotion対象と判定されうることを確認する（`SELECT_CANONICAL`という解決自体を理由に強制的に対象外化されていないことを検証する） |
+| 8（R3-4で新設） | duplicate同一canonicalマッピングでもprovenanceが曖昧にならないこと | S4.1（R3-1） | 同一canonical_keyを2つ以上のlayer（例: SESSIONとPROJECT両方）が主張するfixtureを用意し、`provenance_index.canonical["<key>"].selected_entry_ref_id`が、`SCOPE_PRIORITY`上位1件（同点ならordinal順で先頭）の`entry_ref_id`と一致し、かつ常に単一値（配列でない）であることを確認する |
+| 9（R3-4で新設） | approvedDict由来tagがhigh-frequency pruningの対象になること | S13.1項目7/8 | `_tagInfo.approvedDict`にのみ由来する高頻度tag（`highFrequencyRatio`閾値以上の行で出現）を含むfixtureを用意し、`buildTagIndex()`の`ignoredForPruning`に含まれ、`effectiveNonCodeTagSet()`から除外されることを確認する。同一tagが同時に`explicit`にも由来する場合は除外されない（既存`.dict`の挙動と対称であること）ことも確認する |
+| 10（R3-4で新設） | approvedDictのsource priorityが`composeFinalTags()`の切り詰めで機能すること | S13.1項目4 | `maxTagsPerRow`を小さく設定したfixtureで、`explicit`/`approvedDict`/`dict`/`code`が競合する場合に、`approvedDict`由来tagが`dict`由来tagより優先して残ることを確認する（S13.1で定めた`manualAdd, explicit, approvedDict, dict, code`の順序を直接検証する） |
+| 11（R3-4で新設） | approvedDict由来tagに対する`manualRemove`の適用 | S13.1項目5 | approvedDict由来のtagを`manualRemove`で指定した場合、`composeFinalTags()`の最終`_tags`から除外されることを確認する（他sourceと同じ除外挙動であることの直接検証） |
+| 12（R3-4で新設） | `maxTagsPerRow`境界でのapprovedDict扱い | S13.1項目6 | `maxTagsPerRow`ちょうどの件数・1件超過の境界値fixtureで、approvedDict専用の予約枠が存在しない（他sourceと同じ共有上限に従う）ことを確認する |
+| 13（R3-4で新設） | approvedDictとad hoc dictのprovenance分離（stats/evidence） | S13.1項目10 | 同一tagが`.dict`のみ／`.approvedDict`のみ／両方、の3パターンでfixtureを用意し、`tagSourceSetForRow()`の返す集合がそれぞれ正しく`dict`/`approvedDict`/両方を含むこと、`evaluateTagMatch()`のevidenceから当該sharedTagの由来source集合を辿れることを確認する |
 
 ---
 
