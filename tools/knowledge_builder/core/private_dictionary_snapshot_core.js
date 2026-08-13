@@ -456,23 +456,36 @@
     }
     if (!validation.valid) throw makeSnapshotError('SNAPSHOT_PAYLOAD_INVALID', '$.dictionary_payload');
 
-    // §7: scope is derived from the (now validated) payload, never accepted
-    // as separate builder input - by construction a wrapper this function
-    // produces can never carry a scope/dictionary_payload.scope mismatch.
-    if (dictionaryPayload.scope !== ALLOWED_SCOPE) {
+    // R2-1: `dictionaryPayload` is treated as an opaque input reference for
+    // PrivateDictionaryLearningCore only, from this point on - this module
+    // never reads any `dictionaryPayload.*` property itself (that would be a
+    // live-reference read racing against a hostile/stateful payload). P2-A1's
+    // own deep-frozen normalized copy is obtained FIRST; every field this
+    // module needs (including `scope`) is subsequently read exclusively from
+    // that frozen, no-longer-caller-owned copy.
+    let frozenPayload;
+    try {
+      frozenPayload = (await LearningCore.normalizePrivateDictionary(dictionaryPayload)).dictionary;
+    } catch (err) {
+      throw makeSnapshotError('SNAPSHOT_HASH_FAILED', '$');
+    }
+
+    // §7: scope is derived from the (now validated, now frozen) payload,
+    // never accepted as separate builder input - by construction a wrapper
+    // this function produces can never carry a scope/dictionary_payload.scope
+    // mismatch. Read from `frozenPayload`, never the live `dictionaryPayload`.
+    if (frozenPayload.scope !== ALLOWED_SCOPE) {
       throw makeSnapshotError('SNAPSHOT_SCOPE_INVALID', '$.dictionary_payload.scope');
     }
     const scope = ALLOWED_SCOPE;
 
-    // R1-1: obtain P2-A1's own deep-frozen copy FIRST, then hash THAT frozen
-    // copy - not the raw (still potentially caller-mutable) `dictionaryPayload`
-    // reference. From this point on the payload content itself is immutable,
-    // so nothing that happens after this `await` (including further awaits
-    // below) can change what gets hashed or embedded in the wrapper.
-    let frozenPayload;
+    // Hash the frozen copy - not the raw (still potentially caller-mutable)
+    // `dictionaryPayload` reference. From this point on the payload content
+    // itself is immutable, so nothing that happens after this `await`
+    // (including further awaits below) can change what gets hashed or
+    // embedded in the wrapper.
     let dictionaryPayloadSha256;
     try {
-      frozenPayload = (await LearningCore.normalizePrivateDictionary(dictionaryPayload)).dictionary;
       dictionaryPayloadSha256 = await LearningCore.hashPrivateDictionaryCanonical(frozenPayload);
     } catch (err) {
       throw makeSnapshotError('SNAPSHOT_HASH_FAILED', '$');
@@ -560,24 +573,27 @@
     }
     if (!validation.valid) throw makeSnapshotError('SNAPSHOT_PAYLOAD_INVALID', '$.dictionary_payload');
 
-    // §7 cross-field contract: only read AFTER P2-A1 has validated the
-    // payload (never before - §12).
-    if (dictionaryPayload.scope !== snapshot.scope) {
-      throw makeSnapshotError('SNAPSHOT_SCOPE_MISMATCH', '$.scope');
-    }
-
-    // R1-1: obtain P2-A1's deep-frozen normalized copy ONCE, here, and use
-    // that SAME frozen copy as the Source of Truth for BOTH the recomputed
-    // hash (STEP 3) AND the final returned dictionary_payload (STEP 10).
-    // dictionaryPayload itself is never read again after this point, so a
-    // mutation of the caller's live object between STEP 3 and STEP 10 (across
-    // the STEP 7 await boundary) cannot desynchronize the verified hash from
-    // the returned payload content.
+    // R2-1: obtain P2-A1's deep-frozen normalized copy ONCE, here, and use
+    // that SAME frozen copy as the Source of Truth for the scope cross-check,
+    // the recomputed hash (STEP 3), AND the final returned dictionary_payload
+    // (STEP 10). `dictionaryPayload` itself is treated as an opaque input
+    // reference for PrivateDictionaryLearningCore only, from this point on -
+    // this module never reads any `dictionaryPayload.*` property itself, so a
+    // mutation of the caller's live object after this point (across the
+    // STEP 7 await boundary) cannot desynchronize the verified hash from the
+    // returned payload content.
     let frozenPayload;
     try {
       frozenPayload = (await LearningCore.normalizePrivateDictionary(dictionaryPayload)).dictionary;
     } catch (err) {
       throw makeSnapshotError('SNAPSHOT_HASH_FAILED', '$');
+    }
+
+    // §7 cross-field contract: only read AFTER P2-A1 has validated AND
+    // normalized the payload (never before - §12). Read from `frozenPayload`,
+    // never the live `dictionaryPayload`.
+    if (frozenPayload.scope !== snapshot.scope) {
+      throw makeSnapshotError('SNAPSHOT_SCOPE_MISMATCH', '$.scope');
     }
 
     // STEP 3: independent payload SHA recomputation (never trust the stored

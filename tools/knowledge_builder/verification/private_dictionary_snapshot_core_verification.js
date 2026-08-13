@@ -695,6 +695,128 @@ async function main() {
     await assertThrowsCode(() => Snapshot.buildDictionarySnapshotWrapper(nonLeapYearInput), 'SNAPSHOT_PROVENANCE_INVALID', 'R1-4 builder rejects Feb 29 in a non-leap year (2023) as SNAPSHOT_PROVENANCE_INVALID');
   }
 
+  // ---- R2-2. Hostile dictionary_payload Proxy (the payload object itself,
+  // not a wrapper metadata field): a valid private-dictionary-overlay/1.0
+  // target whose `get` trap throws a secret-marker-carrying native Error the
+  // instant `.scope` is read, while `getOwnPropertyDescriptor` and every
+  // other trap faithfully forward to the real target. Per R2-1,
+  // private_dictionary_snapshot_core.js itself never reads
+  // `dictionaryPayload.scope` (or any other `dictionaryPayload.*` property)
+  // directly any more - the only remaining consumer that could trigger this
+  // trap is PrivateDictionaryLearningCore itself (an unmodified P2-A1
+  // dependency, out of scope to change here). Whether P2-A1 ends up
+  // rejecting this Proxy fail-closed or crashing on the live `.scope` read
+  // inside its own implementation, this module's existing dependency-call
+  // try/catch boundaries (callDependency() at STEP 2, and the
+  // normalizePrivateDictionary()/hashPrivateDictionaryCanonical() try/catch
+  // blocks) must sanitize whatever happens to exactly {code, path} - the
+  // native Error, its .message/.stack, and secretMarker must never leak
+  // externally either way. ----
+  {
+    const secretMarker = 'SECRET_R2_2_PAYLOAD_SCOPE_PROXY_MARKER';
+
+    function makeHostileScopeGetterPayload(target) {
+      let scopeGetCount = 0;
+      return {
+        proxy: new Proxy(target, {
+          get(t, key, receiver) {
+            if (key === 'scope') {
+              scopeGetCount++;
+              throw new Error(secretMarker);
+            }
+            return Reflect.get(t, key, receiver);
+          }
+          // getOwnPropertyDescriptor, has, ownKeys, etc. are all left as the
+          // Proxy's default (faithfully-forwarding) behavior - only `get` is
+          // hostile, matching the R2-2 fixture spec exactly.
+        }),
+        getScopeGetCount: () => scopeGetCount
+      };
+    }
+
+    // Builder: the payload Proxy is supplied directly as
+    // input.dictionary_payload.
+    {
+      const validTarget = makeDictionaryPayload({});
+      const { proxy: hostilePayload } = makeHostileScopeGetterPayload(validTarget);
+      const input = makeBuilderInput({ dictionary_payload: hostilePayload });
+      let caught = null;
+      let wrapper = null;
+      try { wrapper = await Snapshot.buildDictionarySnapshotWrapper(input); } catch (err) { caught = err; }
+      // Either outcome (P2-A1 processes it, or P2-A1/this module rejects it)
+      // is acceptable per R2-2 - the ONLY hard requirement is no native
+      // Error/secretMarker leakage.
+      assert(!!wrapper || !!caught, 'R2-2 builder: hostile scope-getter payload Proxy produces either a successful wrapper or a thrown error (no silent hang/undefined)');
+      if (caught) {
+        assertSanitizedError(caught, 'R2-2 builder: any error thrown for the hostile scope-getter payload Proxy is sanitized {code,path}, never a native Error');
+        assert(!JSON.stringify(caught).includes(secretMarker), 'R2-2 builder: secretMarker never leaks into the thrown error');
+      }
+      if (wrapper) {
+        assert(!JSON.stringify(wrapper).includes(secretMarker), 'R2-2 builder: secretMarker never leaks into a successfully-built wrapper');
+      }
+    }
+
+    // Loader: the payload Proxy is supplied directly as
+    // wrapper.dictionary_payload on an otherwise-valid, already-built
+    // wrapper (so the wrapper's own stored hashes correspond to the
+    // Proxy's un-tampered target content).
+    {
+      const baseWrapper = await Snapshot.buildDictionarySnapshotWrapper(makeBuilderInput({}));
+      const { proxy: hostilePayload } = makeHostileScopeGetterPayload(baseWrapper.dictionary_payload);
+      const attackWrapper = Object.assign({}, baseWrapper, { dictionary_payload: hostilePayload });
+      let caught = null;
+      let loaded = null;
+      try { loaded = await Snapshot.loadDictionarySnapshotWrapper(attackWrapper); } catch (err) { caught = err; }
+      assert(!!loaded || !!caught, 'R2-2 loader: hostile scope-getter payload Proxy produces either a successful load or a thrown error (no silent hang/undefined)');
+      if (caught) {
+        assertSanitizedError(caught, 'R2-2 loader: any error thrown for the hostile scope-getter payload Proxy is sanitized {code,path}, never a native Error');
+        assert(!JSON.stringify(caught).includes(secretMarker), 'R2-2 loader: secretMarker never leaks into the thrown error');
+      }
+      if (loaded) {
+        assert(!JSON.stringify(loaded).includes(secretMarker), 'R2-2 loader: secretMarker never leaks into a successfully-loaded snapshot');
+      }
+    }
+  }
+
+  // ---- R2-3. Direct-read static guard: `dictionaryPayload.scope` (the
+  // specific live-reference read this Checkpoint closes) must never appear
+  // in the implementation's executable source, and - more broadly -
+  // `dictionaryPayload` must never be referenced with property/bracket
+  // access anywhere in build/load; its only legitimate uses are as an
+  // opaque argument passed into PrivateDictionaryLearningCore's own API
+  // functions (validatePrivateDictionary/normalizePrivateDictionary/
+  // hashPrivateDictionaryCanonical) or into isPlainObjectRoot(). Comments are
+  // stripped first so prose that legitimately NAMES the pattern being
+  // avoided (e.g. "never reads any `dictionaryPayload.*` property") does not
+  // false-positive the scan. ----
+  {
+    const rawSource = fs.readFileSync(SNAPSHOT_CORE_PATH, 'utf8');
+    // Minimal block/line comment stripper - safe for this file specifically
+    // because it contains no "//" or "/*" sequences inside string/regex
+    // literals (confirmed by inspection: no URLs, no such regex patterns).
+    const codeOnly = rawSource
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .map(line => {
+        const idx = line.indexOf('//');
+        return idx === -1 ? line : line.slice(0, idx);
+      })
+      .join('\n');
+
+    assert(!codeOnly.includes('dictionaryPayload.scope'), 'R2-3 static guard: source code (comments stripped) never contains the literal direct-read "dictionaryPayload.scope"');
+
+    // Broader guard: `dictionaryPayload` must never be followed by `.` or
+    // `[` anywhere in executable code - i.e. it is never dereferenced at
+    // all, only ever passed around as an opaque reference.
+    const dereferenced = /dictionaryPayload\s*[.[]/.test(codeOnly);
+    assert(!dereferenced, 'R2-3 static guard: `dictionaryPayload` is never dereferenced (no `.` or `[` access) anywhere in executable source - it is only ever passed as an opaque argument');
+
+    // Confirm the identifier is still genuinely present and used (a name
+    // that appears zero times would make the two assertions above vacuous).
+    const referenceCount = (codeOnly.match(/\bdictionaryPayload\b/g) || []).length;
+    assert(referenceCount >= 2, 'R2-3 static guard: `dictionaryPayload` identifier is genuinely present and used in both build/load (guard is not vacuous)');
+  }
+
   // ==========================================================================
   // S. Privacy
   // ==========================================================================
