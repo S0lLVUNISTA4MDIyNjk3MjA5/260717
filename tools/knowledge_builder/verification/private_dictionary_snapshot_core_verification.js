@@ -480,16 +480,41 @@ async function main() {
   {
     const wrapper = await Snapshot.buildDictionarySnapshotWrapper(makeBuilderInput({}));
 
-    // Proxy wrapping a nested metadata object
+    // Proxy wrapping a nested metadata object, with a hostile `get` trap.
+    // Checkpoint 3-R1: the core now reads every property exactly once via
+    // Object.getOwnPropertyDescriptor(), never via a `.property`/`get` access
+    // - so a hostile `get` trap must never fire at all (a strictly stronger
+    // guarantee than merely catching whatever it throws). A faithfully-
+    // forwarding `getOwnPropertyDescriptor` trap (the default, unless
+    // overridden) means this fixture is accepted and loads successfully.
+    {
+      let getTrapCalls = 0;
+      const hostileProvenance = new Proxy(clone(wrapper.provenance), {
+        get(target, key) { getTrapCalls++; if (key === 'generated_at') throw new Error('hostile trap fired'); return Reflect.get(target, key); }
+      });
+      const attack = Object.assign({}, wrapper, { provenance: hostileProvenance });
+      let caught = null;
+      let loaded = null;
+      try { loaded = await Snapshot.loadDictionarySnapshotWrapper(attack); } catch (err) { caught = err; }
+      assert(getTrapCalls === 0, 'R1-3 a hostile Proxy `get` trap on provenance is never invoked (only getOwnPropertyDescriptor is used)');
+      assert(!caught && !!loaded && loaded.provenance.generated_at === wrapper.provenance.generated_at, 'R Proxy `get` trap in provenance: faithfully-forwarded descriptor is accepted and loads correctly (get trap never fires to throw)');
+    }
+
+    // Proxy wrapping a nested metadata object, with a hostile
+    // `getOwnPropertyDescriptor` trap - THIS is the trap the core actually
+    // invokes, so a hostile implementation here must be caught fail-closed.
     {
       const hostileProvenance = new Proxy(clone(wrapper.provenance), {
-        get(target, key) { if (key === 'generated_at') throw new Error('hostile trap fired'); return Reflect.get(target, key); }
+        getOwnPropertyDescriptor(target, key) {
+          if (key === 'generated_at') throw new Error('hostile getOwnPropertyDescriptor trap fired');
+          return Reflect.getOwnPropertyDescriptor(target, key);
+        }
       });
       const attack = Object.assign({}, wrapper, { provenance: hostileProvenance });
       let caught = null;
       try { await Snapshot.loadDictionarySnapshotWrapper(attack); } catch (err) { caught = err; }
-      assert(!!caught, 'R Proxy trap in provenance is rejected (not silently accepted)');
-      assertSanitizedError(caught, 'R Proxy trap in provenance: thrown error is sanitized, no native Error leaks');
+      assert(!!caught, 'R hostile getOwnPropertyDescriptor trap on provenance is rejected (not silently accepted)');
+      assertSanitizedError(caught, 'R hostile getOwnPropertyDescriptor trap: thrown error is sanitized, no native Error leaks');
     }
 
     // accessor property on a nested metadata object
@@ -535,6 +560,139 @@ async function main() {
       assert(!!caught, 'R cyclic provenance.generator is rejected (not silently accepted, no stack overflow)');
       assertSanitizedError(caught, 'R cyclic metadata: thrown error is sanitized');
     }
+  }
+
+  // ==========================================================================
+  // P2-A4 Checkpoint 3-R1: Snapshot Atomicity / Fail-Closed Remediation
+  // ==========================================================================
+
+  // ---- R1-2. Async mutation verification (concurrent mutation during the
+  // pending Promise must never affect the already-captured result) ----
+  {
+    // Builder
+    {
+      const input = makeBuilderInput({});
+      const originalCanonicalTerm = input.dictionary_payload.entries[0].canonical_term;
+      const originalSnapshotId = input.snapshot_id;
+      const originalGeneratedAt = input.provenance.generated_at;
+      const originalUnresolvedCount = input.conflict_state.unresolved_count;
+
+      const promise = Snapshot.buildDictionarySnapshotWrapper(input);
+      // Mutate the caller-owned input object AFTER the call has started but
+      // BEFORE awaiting the result.
+      input.dictionary_payload.entries[0].canonical_term = 'MUTATED AFTER BUILD START';
+      input.snapshot_id = makeSnapshotId();
+      input.provenance.generated_at = '2099-01-01T00:00:00.000Z';
+      input.conflict_state.unresolved_count = 999;
+
+      const wrapper = await promise;
+      assert(wrapper.dictionary_payload.entries[0].canonical_term === originalCanonicalTerm, 'R1-2 builder result reflects only values captured at call start, not a post-start mutation (dictionary_payload)');
+      assert(wrapper.snapshot_id === originalSnapshotId, 'R1-2 builder result reflects only values captured at call start (snapshot_id)');
+      assert(wrapper.provenance.generated_at === originalGeneratedAt, 'R1-2 builder result reflects only values captured at call start (provenance.generated_at)');
+      assert(wrapper.conflict_state.unresolved_count === originalUnresolvedCount, 'R1-2 builder result reflects only values captured at call start (conflict_state)');
+
+      const loaded = await Snapshot.loadDictionarySnapshotWrapper(wrapper);
+      assert(loaded.snapshot_id === originalSnapshotId, 'R1-2 the builder result produced despite concurrent caller mutation loads successfully');
+    }
+
+    // Loader
+    {
+      const wrapper = await Snapshot.buildDictionarySnapshotWrapper(makeBuilderInput({}));
+      const mutableWrapper = clone(wrapper);
+      const promise = Snapshot.loadDictionarySnapshotWrapper(mutableWrapper);
+      mutableWrapper.dictionary_payload.entries[0].canonical_term = 'MUTATED AFTER LOAD START';
+      mutableWrapper.snapshot_id = makeSnapshotId();
+      mutableWrapper.provenance.generated_at = '2099-01-01T00:00:00.000Z';
+      mutableWrapper.conflict_state.unresolved_count = 999;
+
+      const loaded = await promise;
+      assert(loaded.dictionary_payload.entries[0].canonical_term === wrapper.dictionary_payload.entries[0].canonical_term, 'R1-2 loader result reflects only values captured at call start, not a post-start mutation (dictionary_payload)');
+      assert(loaded.snapshot_id === wrapper.snapshot_id, 'R1-2 loader result reflects only values captured at call start (snapshot_id)');
+      assert(loaded.provenance.generated_at === wrapper.provenance.generated_at, 'R1-2 loader result reflects only values captured at call start (provenance.generated_at)');
+      assert(loaded.conflict_state.unresolved_count === wrapper.conflict_state.unresolved_count, 'R1-2 loader result reflects only values captured at call start (conflict_state)');
+    }
+  }
+
+  // ---- R1-3. Stateful Proxy (root dictionary_payload descriptor must be
+  // read AT MOST ONCE - a Proxy whose getOwnPropertyDescriptor trap returns
+  // a valid descriptor on the first call and throws on any subsequent call
+  // must never observe more than one call) ----
+  {
+    const secretMarker = 'SECRET_STATEFUL_PROXY_MARKER_R1_3';
+
+    function makeStatefulPayloadProxy(target) {
+      let callCount = 0;
+      return {
+        proxy: new Proxy(target, {
+          getOwnPropertyDescriptor(t, key) {
+            if (key === 'dictionary_payload') {
+              callCount++;
+              if (callCount > 1) throw new Error(secretMarker);
+            }
+            return Reflect.getOwnPropertyDescriptor(t, key);
+          }
+        }),
+        getCallCount: () => callCount
+      };
+    }
+
+    // Builder
+    {
+      const rawInput = makeBuilderInput({});
+      const { proxy: hostileInput, getCallCount } = makeStatefulPayloadProxy(rawInput);
+      let caught = null;
+      let wrapper = null;
+      try { wrapper = await Snapshot.buildDictionarySnapshotWrapper(hostileInput); } catch (err) { caught = err; }
+      assert(getCallCount() <= 1, 'R1-3 builder reads the root dictionary_payload descriptor at most once (stateful Proxy proof)');
+      assert(!caught && !!wrapper, 'R1-3 builder succeeds against a dictionary_payload Proxy that only tolerates a single descriptor read');
+      if (caught) {
+        assertSanitizedError(caught, 'R1-3 builder: if rejected despite a single read, error is still sanitized');
+        assert(!JSON.stringify(caught).includes(secretMarker), 'R1-3 builder: secretMarker never leaks even on rejection');
+      }
+    }
+
+    // Loader
+    {
+      const wrapper = await Snapshot.buildDictionarySnapshotWrapper(makeBuilderInput({}));
+      const rawWrapper = clone(wrapper);
+      const { proxy: hostileWrapper, getCallCount } = makeStatefulPayloadProxy(rawWrapper);
+      let caught = null;
+      let loaded = null;
+      try { loaded = await Snapshot.loadDictionarySnapshotWrapper(hostileWrapper); } catch (err) { caught = err; }
+      assert(getCallCount() <= 1, 'R1-3 loader reads the root dictionary_payload descriptor at most once (stateful Proxy proof)');
+      assert(!caught && !!loaded, 'R1-3 loader succeeds against a dictionary_payload Proxy that only tolerates a single descriptor read');
+      if (caught) {
+        assertSanitizedError(caught, 'R1-3 loader: if rejected despite a single read, error is still sanitized');
+        assert(!JSON.stringify(caught).includes(secretMarker), 'R1-3 loader: secretMarker never leaks even on rejection');
+      }
+    }
+  }
+
+  // ---- R1-4. generated_at semantic (calendar-valid, round-trippable UTC
+  // timestamp) validation, not merely regex shape matching ----
+  {
+    const invalidTimestamps = [
+      '2026-13-01T00:00:00.000Z', // month 13
+      '2026-02-30T00:00:00.000Z', // Feb 30 (rolls over, does not round-trip)
+      '2026-01-01T24:00:00.000Z', // hour 24
+      '2026-01-01T00:60:00.000Z', // minute 60
+      '2026-01-01T00:00:60.000Z'  // second 60
+    ];
+    const wrapper = await Snapshot.buildDictionarySnapshotWrapper(makeBuilderInput({}));
+    for (const bad of invalidTimestamps) {
+      const tamperedWrapper = Object.assign({}, wrapper, { provenance: Object.assign({}, wrapper.provenance, { generated_at: bad }) });
+      await assertThrowsCode(() => Snapshot.loadDictionarySnapshotWrapper(tamperedWrapper), 'SNAPSHOT_PROVENANCE_INVALID', `R1-4 loader rejects calendar-invalid generated_at "${bad}" as SNAPSHOT_PROVENANCE_INVALID`);
+      await assertThrowsCode(() => Snapshot.buildDictionarySnapshotWrapper(makeBuilderInput({ provenance: makeProvenance({ generated_at: bad }) })), 'SNAPSHOT_PROVENANCE_INVALID', `R1-4 builder rejects calendar-invalid generated_at "${bad}"`);
+    }
+
+    // valid values, including a leap-day boundary case, are accepted and
+    // preserved byte-exact (no reformatting/rounding)
+    const leapDayInput = makeBuilderInput({ provenance: makeProvenance({ generated_at: '2024-02-29T12:34:56.789Z' }) });
+    const leapWrapper = await Snapshot.buildDictionarySnapshotWrapper(leapDayInput);
+    assert(leapWrapper.provenance.generated_at === '2024-02-29T12:34:56.789Z', 'R1-4 valid leap-day UTC timestamp (2024 is a leap year) is accepted unchanged');
+
+    const nonLeapYearInput = makeBuilderInput({ provenance: makeProvenance({ generated_at: '2023-02-29T00:00:00.000Z' }) });
+    await assertThrowsCode(() => Snapshot.buildDictionarySnapshotWrapper(nonLeapYearInput), 'SNAPSHOT_PROVENANCE_INVALID', 'R1-4 builder rejects Feb 29 in a non-leap year (2023) as SNAPSHOT_PROVENANCE_INVALID');
   }
 
   // ==========================================================================

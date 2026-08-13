@@ -122,42 +122,66 @@
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
-  // ---- §12 structural safety walker ----
+  // ---- §12 structural safety walker + atomic snapshot capture (R1-1/R1-2/
+  // R1-3 remediation) ----
   //
   // Adapted from the same generic technique private_dictionary_learning_
   // core.js uses for its own input (Proxy-safe via try/catch, cyclic
   // detection via an ancestors stack, prototype/descriptor/symbol-key
   // rejection). This is a wrapper-specific, independent instance of that
   // generic JS-safety pattern - NOT a copy of P2-A1's dictionary schema
-  // logic. `stopAtRootKeys` lets the ROOT-level scan verify a given key's
-  // OWN property descriptor (present, enumerable, plain data property) is
+  // logic.
+  //
+  // This walk does two things in ONE pass, in ONE synchronous call, so that
+  // no property of the caller-owned root object is EVER read more than
+  // once (Checkpoint 3-R1 §16 item R1-3: a stateful getter/Proxy trap that
+  // returns a valid value on the first read and throws/changes value on a
+  // second read must not be able to observe more than one read):
+  //
+  //   1. validates structural safety exactly as before, and
+  //   2. simultaneously builds an INDEPENDENT plain-object/array clone
+  //      ("snapshot") of the entire tree, using only the SAME
+  //      Object.getOwnPropertyDescriptor(...).value already fetched for
+  //      validation - never a second `.property` access.
+  //
+  // `stopAtRootKeys` lets the ROOT-level scan verify a given key's OWN
+  // property descriptor (present, enumerable, plain data property) is
   // benign WITHOUT recursing into its value - used for `dictionary_payload`,
   // whose internal content is validated exclusively by
   // PrivateDictionaryLearningCore.validatePrivateDictionary() (§12: "P2-A1
-  // validatorを迂回する独自property readを先に行わないこと").
+  // validatorを迂回する独自property readを先に行わないこと"). The captured
+  // snapshot stores that value as the SAME reference read here (one read,
+  // reused for every subsequent P2-A1 call) rather than a clone, since P2-A1
+  // owns copying/freezing it.
+  //
+  // From the point this function returns onward, buildDictionarySnapshotWrapper()/
+  // loadDictionarySnapshotWrapper() read ONLY the returned `snapshot` -
+  // never `input`/`wrapper` again, even across `await` (R1-1/R1-2: a
+  // caller that mutates its own object after starting the async call, or
+  // during it, cannot affect an already-captured snapshot).
 
   const MAX_NESTING_DEPTH = 6;
 
-  function structuralSafetyErrorsUnguarded(root, stopAtRootKeys) {
+  function captureStructuralSnapshotUnguarded(root, stopAtRootKeys) {
     const errors = [];
     const ancestors = [];
 
     function visit(value, path, depth, skipRecurse) {
-      if (value === null) return;
+      if (value === null) return null;
       const t = typeof value;
       if (t === 'function' || t === 'symbol' || t === 'bigint') {
         errors.push(snapshotError('SNAPSHOT_STRUCTURAL_SAFETY_VIOLATION', path));
-        return;
+        return undefined;
       }
-      if (t !== 'object') return;
-      if (skipRecurse) return;
+      if (t !== 'object') return value; // primitive: the descriptor .value already IS the captured value
+      if (skipRecurse) return value; // dictionary_payload etc: capture the single-read reference as-is, do not clone/recurse
       if (depth > MAX_NESTING_DEPTH) {
         errors.push(snapshotError('SNAPSHOT_STRUCTURAL_SAFETY_VIOLATION', path));
-        return;
+        return undefined;
       }
       if (ancestors.indexOf(value) !== -1) {
         errors.push(snapshotError('SNAPSHOT_STRUCTURAL_SAFETY_VIOLATION', path));
-        return;
+        return undefined;
       }
       ancestors.push(value);
 
@@ -170,6 +194,7 @@
       }
 
       const ownKeys = Reflect.ownKeys(value);
+      const clone = isArray ? [] : {};
       for (const key of ownKeys) {
         if (typeof key === 'symbol') {
           errors.push(snapshotError('SNAPSHOT_STRUCTURAL_SAFETY_VIOLATION', path));
@@ -185,6 +210,8 @@
           continue;
         }
 
+        // The ONE and ONLY read of this key on this object, for the entire
+        // lifetime of the build/load call.
         const desc = Object.getOwnPropertyDescriptor(value, key);
         if (!desc) continue;
         if (!desc.enumerable) {
@@ -198,21 +225,23 @@
 
         const childPath = isArray ? `${path}[${key}]` : `${path}.${key}`;
         const stop = depth === 0 && !isArray && stopAtRootKeys && stopAtRootKeys.indexOf(key) !== -1;
-        visit(desc.value, childPath, depth + 1, stop);
+        const childClone = visit(desc.value, childPath, depth + 1, stop);
+        if (isArray) clone.push(childClone); else clone[key] = childClone;
       }
 
       ancestors.pop();
+      return clone;
     }
 
-    visit(root, '$', 0, false);
-    return errors;
+    const snapshot = visit(root, '$', 0, false);
+    return { errors, snapshot };
   }
 
-  function structuralSafetyErrors(root, stopAtRootKeys) {
+  function captureStructuralSnapshot(root, stopAtRootKeys) {
     try {
-      return structuralSafetyErrorsUnguarded(root, stopAtRootKeys);
+      return captureStructuralSnapshotUnguarded(root, stopAtRootKeys);
     } catch (err) {
-      return [snapshotError('SNAPSHOT_STRUCTURAL_SAFETY_VIOLATION', '$')];
+      return { errors: [snapshotError('SNAPSHOT_STRUCTURAL_SAFETY_VIOLATION', '$')], snapshot: undefined };
     }
   }
 
@@ -316,9 +345,26 @@
   function checkSourceCommit(value, errors) {
     if (typeof value !== 'string' || !HEX40_RE.test(value)) errors.push(snapshotError('SNAPSHOT_SOURCE_COMMIT_INVALID', '$.source_commit'));
   }
+  // R1-4: `generated_at` must be a genuine, round-trippable UTC calendar
+  // timestamp, not merely a string matching the YYYY-MM-DDTHH:mm:ss.sssZ
+  // shape. The regex alone accepts structurally-shaped but calendar-invalid
+  // values (month 13, Feb 30, hour 24, minute/second 60). `new Date(...)`/
+  // `Date.prototype.toISOString()` are pure parsing/formatting functions -
+  // neither ever consults the wall clock - so comparing the parsed value's
+  // own canonical re-serialization against the original string catches
+  // every out-of-range field (whether the engine rejects it outright as NaN,
+  // or leniently rolls it over into a different, non-matching date) without
+  // reading "now" or depending on the local timezone.
+  function isValidCanonicalUtcTimestamp(value) {
+    if (typeof value !== 'string' || !GENERATED_AT_RE.test(value)) return false;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return false;
+    return parsed.toISOString() === value;
+  }
+
   function checkProvenance(value, errors) {
     if (!checkExactKeySet(value, PROVENANCE_KEYS, 'SNAPSHOT_PROVENANCE_INVALID', '$.provenance', errors)) return;
-    if (typeof value.generated_at !== 'string' || !GENERATED_AT_RE.test(value.generated_at)) {
+    if (!isValidCanonicalUtcTimestamp(value.generated_at)) {
       errors.push(snapshotError('SNAPSHOT_PROVENANCE_INVALID', '$.provenance.generated_at'));
     }
     if (!checkExactKeySet(value.generator, GENERATOR_KEYS, 'SNAPSHOT_PROVENANCE_INVALID', '$.provenance.generator', errors)) return;
@@ -382,22 +428,29 @@
   const DICTIONARY_PAYLOAD_STOP_KEYS = Object.freeze(['dictionary_payload']);
 
   async function buildDictionarySnapshotWrapper(input) {
-    const structural = structuralSafetyErrors(input, DICTIONARY_PAYLOAD_STOP_KEYS);
+    // STEP 1 (R1-1): structural safety + atomic snapshot capture in one
+    // synchronous pass. `input` is never read again anywhere below this
+    // point - only `snapshot` (an independent, freshly-built plain-object
+    // tree) and `dictionaryPayload` (the single reference captured for the
+    // one root key allowed to bypass deep cloning).
+    const { errors: structural, snapshot } = captureStructuralSnapshot(input, DICTIONARY_PAYLOAD_STOP_KEYS);
     if (structural.length) throwFirstError(structural);
 
     const errors = runFieldChecks(errs => {
-      if (!checkExactKeySet(input, BUILDER_INPUT_KEYS, 'SNAPSHOT_ROOT_INVALID', '$', errs)) return;
-      checkCommonFields(input, errs);
-      if (!isPlainObjectRoot(input.dictionary_payload)) errs.push(snapshotError('SNAPSHOT_PAYLOAD_INVALID', '$.dictionary_payload'));
+      if (!checkExactKeySet(snapshot, BUILDER_INPUT_KEYS, 'SNAPSHOT_ROOT_INVALID', '$', errs)) return;
+      checkCommonFields(snapshot, errs);
+      if (!isPlainObjectRoot(snapshot.dictionary_payload)) errs.push(snapshotError('SNAPSHOT_PAYLOAD_INVALID', '$.dictionary_payload'));
     });
     if (errors.length) throwFirstError(errors);
+
+    const dictionaryPayload = snapshot.dictionary_payload;
 
     // §4: dictionary_payload validation/serialization/hashing is exclusively
     // PrivateDictionaryLearningCore's responsibility - never re-implemented
     // here. A DICTIONARY_* rejection from validatePrivateDictionary() is
     // this payload's own legitimate invalidity, reported as
     // SNAPSHOT_PAYLOAD_INVALID (not a dependency failure).
-    const validation = callDependency(LearningCore.validatePrivateDictionary, [input.dictionary_payload], 'SNAPSHOT_DEPENDENCY_RESOLUTION_FAILED');
+    const validation = callDependency(LearningCore.validatePrivateDictionary, [dictionaryPayload], 'SNAPSHOT_DEPENDENCY_RESOLUTION_FAILED');
     if (!validation || typeof validation !== 'object' || typeof validation.valid !== 'boolean') {
       throw makeSnapshotError('SNAPSHOT_DEPENDENCY_RESOLUTION_FAILED', '$');
     }
@@ -406,16 +459,21 @@
     // §7: scope is derived from the (now validated) payload, never accepted
     // as separate builder input - by construction a wrapper this function
     // produces can never carry a scope/dictionary_payload.scope mismatch.
-    if (input.dictionary_payload.scope !== ALLOWED_SCOPE) {
+    if (dictionaryPayload.scope !== ALLOWED_SCOPE) {
       throw makeSnapshotError('SNAPSHOT_SCOPE_INVALID', '$.dictionary_payload.scope');
     }
     const scope = ALLOWED_SCOPE;
 
-    let dictionaryPayloadSha256;
+    // R1-1: obtain P2-A1's own deep-frozen copy FIRST, then hash THAT frozen
+    // copy - not the raw (still potentially caller-mutable) `dictionaryPayload`
+    // reference. From this point on the payload content itself is immutable,
+    // so nothing that happens after this `await` (including further awaits
+    // below) can change what gets hashed or embedded in the wrapper.
     let frozenPayload;
+    let dictionaryPayloadSha256;
     try {
-      dictionaryPayloadSha256 = await LearningCore.hashPrivateDictionaryCanonical(input.dictionary_payload);
-      frozenPayload = (await LearningCore.normalizePrivateDictionary(input.dictionary_payload)).dictionary;
+      frozenPayload = (await LearningCore.normalizePrivateDictionary(dictionaryPayload)).dictionary;
+      dictionaryPayloadSha256 = await LearningCore.hashPrivateDictionaryCanonical(frozenPayload);
     } catch (err) {
       throw makeSnapshotError('SNAPSHOT_HASH_FAILED', '$');
     }
@@ -423,75 +481,80 @@
       throw makeSnapshotError('SNAPSHOT_HASH_FAILED', '$');
     }
 
-    // Allowlist copy of every non-payload field - never a spread/
-    // Object.assign of caller input, so no alias to a caller-owned mutable
-    // object survives into the returned wrapper (§15).
+    // Allowlist copy of every non-payload field, read from `snapshot` (never
+    // `input` again) - no alias to a caller-owned mutable object survives
+    // into the returned wrapper (§15).
     const provenance = Object.freeze({
-      generated_at: input.provenance.generated_at,
-      generator: Object.freeze({ tool: input.provenance.generator.tool, version: input.provenance.generator.version })
+      generated_at: snapshot.provenance.generated_at,
+      generator: Object.freeze({ tool: snapshot.provenance.generator.tool, version: snapshot.provenance.generator.version })
     });
-    const sourceReviewArtifactIdentity = Object.freeze({ sha256: input.source_review_artifact_identity.sha256 });
-    const promotionRecordIdentity = Object.freeze({ sha256: input.promotion_record_identity.sha256 });
-    const conflictState = Object.freeze({ unresolved_count: input.conflict_state.unresolved_count });
+    const sourceReviewArtifactIdentity = Object.freeze({ sha256: snapshot.source_review_artifact_identity.sha256 });
+    const promotionRecordIdentity = Object.freeze({ sha256: snapshot.promotion_record_identity.sha256 });
+    const conflictState = Object.freeze({ unresolved_count: snapshot.conflict_state.unresolved_count });
 
     const fieldsForProjection = {
       wrapper_schema_version: WRAPPER_SCHEMA_VERSION,
-      snapshot_id: input.snapshot_id,
+      snapshot_id: snapshot.snapshot_id,
       dictionary_payload_sha256: dictionaryPayloadSha256,
-      snapshot_version: input.snapshot_version,
+      snapshot_version: snapshot.snapshot_version,
       scope,
       provenance,
       source_review_artifact_identity: sourceReviewArtifactIdentity,
       promotion_record_identity: promotionRecordIdentity,
-      source_commit: input.source_commit,
+      source_commit: snapshot.source_commit,
       conflict_state: conflictState,
-      supersedes: input.supersedes,
-      rollback_target: input.rollback_target
+      supersedes: snapshot.supersedes,
+      rollback_target: snapshot.rollback_target
     };
     const wrapperIntegritySha256 = await sha256HexOfCanonicalJson(buildIntegrityProjection(fieldsForProjection));
 
     return Object.freeze({
       wrapper_schema_version: WRAPPER_SCHEMA_VERSION,
-      snapshot_id: input.snapshot_id,
+      snapshot_id: snapshot.snapshot_id,
       dictionary_payload: frozenPayload,
       dictionary_payload_sha256: dictionaryPayloadSha256,
       wrapper_integrity_sha256: wrapperIntegritySha256,
-      snapshot_version: input.snapshot_version,
+      snapshot_version: snapshot.snapshot_version,
       scope,
       provenance,
       source_review_artifact_identity: sourceReviewArtifactIdentity,
       promotion_record_identity: promotionRecordIdentity,
-      source_commit: input.source_commit,
+      source_commit: snapshot.source_commit,
       conflict_state: conflictState,
-      supersedes: input.supersedes,
-      rollback_target: input.rollback_target
+      supersedes: snapshot.supersedes,
+      rollback_target: snapshot.rollback_target
     });
   }
 
   // ---- §11 loadDictionarySnapshotWrapper(wrapper): S10.1's 10-step order ----
 
   async function loadDictionarySnapshotWrapper(wrapper) {
-    // STEP 1: wrapper root / nested metadata structure validation.
-    // dictionary_payload's own descriptor is checked here (present,
-    // enumerable, plain data property) but its VALUE is never recursed into
-    // by this scan - only PrivateDictionaryLearningCore.validatePrivateDictionary()
-    // (STEP 2) ever reads into it, per §12.
-    const structural = structuralSafetyErrors(wrapper, DICTIONARY_PAYLOAD_STOP_KEYS);
+    // STEP 1 (R1-1): wrapper root / nested metadata structure validation,
+    // fused with atomic snapshot capture in one synchronous pass (see
+    // captureStructuralSnapshot() above). `wrapper` is never read again
+    // anywhere below this point. dictionary_payload's own descriptor is
+    // checked here (present, enumerable, plain data property) but its VALUE
+    // is never recursed into by this scan - only
+    // PrivateDictionaryLearningCore.validatePrivateDictionary() (STEP 2)
+    // ever reads into it, per §12.
+    const { errors: structural, snapshot } = captureStructuralSnapshot(wrapper, DICTIONARY_PAYLOAD_STOP_KEYS);
     if (structural.length) throwFirstError(structural);
 
     const errors = runFieldChecks(errs => {
-      if (!checkExactKeySet(wrapper, WRAPPER_KEYS, 'SNAPSHOT_ROOT_INVALID', '$', errs)) return;
-      checkWrapperSchemaVersion(wrapper.wrapper_schema_version, errs);
-      checkCommonFields(wrapper, errs);
-      checkScope(wrapper.scope, errs);
-      checkDictionaryPayloadHashFormat(wrapper.dictionary_payload_sha256, errs);
-      checkWrapperIntegrityHashFormat(wrapper.wrapper_integrity_sha256, errs);
-      if (!isPlainObjectRoot(wrapper.dictionary_payload)) errs.push(snapshotError('SNAPSHOT_PAYLOAD_INVALID', '$.dictionary_payload'));
+      if (!checkExactKeySet(snapshot, WRAPPER_KEYS, 'SNAPSHOT_ROOT_INVALID', '$', errs)) return;
+      checkWrapperSchemaVersion(snapshot.wrapper_schema_version, errs);
+      checkCommonFields(snapshot, errs);
+      checkScope(snapshot.scope, errs);
+      checkDictionaryPayloadHashFormat(snapshot.dictionary_payload_sha256, errs);
+      checkWrapperIntegrityHashFormat(snapshot.wrapper_integrity_sha256, errs);
+      if (!isPlainObjectRoot(snapshot.dictionary_payload)) errs.push(snapshotError('SNAPSHOT_PAYLOAD_INVALID', '$.dictionary_payload'));
     });
     if (errors.length) throwFirstError(errors);
 
+    const dictionaryPayload = snapshot.dictionary_payload;
+
     // STEP 2: dictionary_payload validated via PrivateDictionaryLearningCore.
-    const validation = callDependency(LearningCore.validatePrivateDictionary, [wrapper.dictionary_payload], 'SNAPSHOT_DEPENDENCY_RESOLUTION_FAILED');
+    const validation = callDependency(LearningCore.validatePrivateDictionary, [dictionaryPayload], 'SNAPSHOT_DEPENDENCY_RESOLUTION_FAILED');
     if (!validation || typeof validation !== 'object' || typeof validation.valid !== 'boolean') {
       throw makeSnapshotError('SNAPSHOT_DEPENDENCY_RESOLUTION_FAILED', '$');
     }
@@ -499,15 +562,29 @@
 
     // §7 cross-field contract: only read AFTER P2-A1 has validated the
     // payload (never before - §12).
-    if (wrapper.dictionary_payload.scope !== wrapper.scope) {
+    if (dictionaryPayload.scope !== snapshot.scope) {
       throw makeSnapshotError('SNAPSHOT_SCOPE_MISMATCH', '$.scope');
     }
 
+    // R1-1: obtain P2-A1's deep-frozen normalized copy ONCE, here, and use
+    // that SAME frozen copy as the Source of Truth for BOTH the recomputed
+    // hash (STEP 3) AND the final returned dictionary_payload (STEP 10).
+    // dictionaryPayload itself is never read again after this point, so a
+    // mutation of the caller's live object between STEP 3 and STEP 10 (across
+    // the STEP 7 await boundary) cannot desynchronize the verified hash from
+    // the returned payload content.
+    let frozenPayload;
+    try {
+      frozenPayload = (await LearningCore.normalizePrivateDictionary(dictionaryPayload)).dictionary;
+    } catch (err) {
+      throw makeSnapshotError('SNAPSHOT_HASH_FAILED', '$');
+    }
+
     // STEP 3: independent payload SHA recomputation (never trust the stored
-    // value at this point).
+    // value at this point), computed from the frozen copy above.
     let recomputedPayloadSha256;
     try {
-      recomputedPayloadSha256 = await LearningCore.hashPrivateDictionaryCanonical(wrapper.dictionary_payload);
+      recomputedPayloadSha256 = await LearningCore.hashPrivateDictionaryCanonical(frozenPayload);
     } catch (err) {
       throw makeSnapshotError('SNAPSHOT_HASH_FAILED', '$');
     }
@@ -515,9 +592,9 @@
       throw makeSnapshotError('SNAPSHOT_HASH_FAILED', '$');
     }
 
-    // STEP 4/5: compare against the stored value; stop here (never reach
-    // integrity-hash validation) on mismatch.
-    if (recomputedPayloadSha256 !== wrapper.dictionary_payload_sha256) {
+    // STEP 4/5: compare against the stored (captured) value; stop here
+    // (never reach integrity-hash validation) on mismatch.
+    if (recomputedPayloadSha256 !== snapshot.dictionary_payload_sha256) {
       throw makeSnapshotError('SNAPSHOT_PAYLOAD_HASH_MISMATCH', '$.dictionary_payload_sha256');
     }
 
@@ -526,60 +603,56 @@
     // dictionary_payload_sha256 field, even though by STEP 4 they are known
     // to be equal. This is what lets a simultaneous payload + stored-hash
     // tamper (Case B) still be caught at STEP 8/9 instead of silently
-    // validating.
+    // validating. All other fields come from the STEP 1 snapshot, not from
+    // `wrapper` again.
     const projection = buildIntegrityProjection({
-      wrapper_schema_version: wrapper.wrapper_schema_version,
-      snapshot_id: wrapper.snapshot_id,
+      wrapper_schema_version: snapshot.wrapper_schema_version,
+      snapshot_id: snapshot.snapshot_id,
       dictionary_payload_sha256: recomputedPayloadSha256,
-      snapshot_version: wrapper.snapshot_version,
-      scope: wrapper.scope,
-      provenance: wrapper.provenance,
-      source_review_artifact_identity: wrapper.source_review_artifact_identity,
-      promotion_record_identity: wrapper.promotion_record_identity,
-      source_commit: wrapper.source_commit,
-      conflict_state: wrapper.conflict_state,
-      supersedes: wrapper.supersedes,
-      rollback_target: wrapper.rollback_target
+      snapshot_version: snapshot.snapshot_version,
+      scope: snapshot.scope,
+      provenance: snapshot.provenance,
+      source_review_artifact_identity: snapshot.source_review_artifact_identity,
+      promotion_record_identity: snapshot.promotion_record_identity,
+      source_commit: snapshot.source_commit,
+      conflict_state: snapshot.conflict_state,
+      supersedes: snapshot.supersedes,
+      rollback_target: snapshot.rollback_target
     });
 
     // STEP 7: recompute wrapper_integrity_sha256.
     const recomputedIntegritySha256 = await sha256HexOfCanonicalJson(projection);
 
-    // STEP 8/9: compare against the stored value; fail on mismatch.
-    if (recomputedIntegritySha256 !== wrapper.wrapper_integrity_sha256) {
+    // STEP 8/9: compare against the stored (captured) value; fail on
+    // mismatch.
+    if (recomputedIntegritySha256 !== snapshot.wrapper_integrity_sha256) {
       throw makeSnapshotError('SNAPSHOT_INTEGRITY_HASH_MISMATCH', '$.wrapper_integrity_sha256');
     }
 
     // STEP 10: both hash validations succeeded - build and return the
     // deep-frozen validated snapshot handle. No alias to the caller's
     // (possibly mutable) wrapper input survives: every nested object is
-    // freshly allowlist-copied and frozen, and dictionary_payload comes from
-    // PrivateDictionaryLearningCore's own deep-frozen copy (never the
-    // caller's object).
-    let frozenPayload;
-    try {
-      frozenPayload = (await LearningCore.normalizePrivateDictionary(wrapper.dictionary_payload)).dictionary;
-    } catch (err) {
-      throw makeSnapshotError('SNAPSHOT_HASH_FAILED', '$');
-    }
-
+    // freshly allowlist-copied (from the STEP 1 snapshot) and frozen, and
+    // dictionary_payload reuses the SAME frozen copy obtained once above
+    // (never a fresh read of the caller's object, and never a second call
+    // to normalizePrivateDictionary).
     return Object.freeze({
-      snapshot_id: wrapper.snapshot_id,
-      snapshot_version: wrapper.snapshot_version,
-      scope: wrapper.scope,
+      snapshot_id: snapshot.snapshot_id,
+      snapshot_version: snapshot.snapshot_version,
+      scope: snapshot.scope,
       dictionary_payload: frozenPayload,
       dictionary_payload_sha256: recomputedPayloadSha256,
       wrapper_integrity_sha256: recomputedIntegritySha256,
       provenance: Object.freeze({
-        generated_at: wrapper.provenance.generated_at,
-        generator: Object.freeze({ tool: wrapper.provenance.generator.tool, version: wrapper.provenance.generator.version })
+        generated_at: snapshot.provenance.generated_at,
+        generator: Object.freeze({ tool: snapshot.provenance.generator.tool, version: snapshot.provenance.generator.version })
       }),
-      source_review_artifact_identity: Object.freeze({ sha256: wrapper.source_review_artifact_identity.sha256 }),
-      promotion_record_identity: Object.freeze({ sha256: wrapper.promotion_record_identity.sha256 }),
-      source_commit: wrapper.source_commit,
-      conflict_state: Object.freeze({ unresolved_count: wrapper.conflict_state.unresolved_count }),
-      supersedes: wrapper.supersedes,
-      rollback_target: wrapper.rollback_target
+      source_review_artifact_identity: Object.freeze({ sha256: snapshot.source_review_artifact_identity.sha256 }),
+      promotion_record_identity: Object.freeze({ sha256: snapshot.promotion_record_identity.sha256 }),
+      source_commit: snapshot.source_commit,
+      conflict_state: Object.freeze({ unresolved_count: snapshot.conflict_state.unresolved_count }),
+      supersedes: snapshot.supersedes,
+      rollback_target: snapshot.rollback_target
     });
   }
 
