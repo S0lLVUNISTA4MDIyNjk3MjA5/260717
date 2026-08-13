@@ -467,7 +467,7 @@ S5.1で定義したwrapper fieldの**正確な型・format**をここで固定�
 | `scope` | 完全一致文字列 `"PROJECT"` | **P2-A4初期sliceでは`PROJECT`のみ許可**（S7の`PROJECT-first`方針と整合）。`DOMAIN`/`SESSION` snapshotは今回生成・受理禁止。さらに`wrapper.scope === dictionary_payload.scope`必須（不一致はreject） |
 | `provenance` | `{ generated_at, generator }`（他field禁止） | `generated_at`: `YYYY-MM-DDTHH:mm:ss.sssZ`形式のcanonical UTC timestamp文字列、**caller supplied**（Snapshot core内部で現在時刻を生成しない）。`generator`: `{ tool, version }`（他field禁止）、両方non-empty string |
 | `source_review_artifact_identity` | `{ sha256 }`（他field禁止） | `sha256`は64 lowercase hex。**file nameやprivate termをidentityに使わない** |
-| `promotion_record_identity` | `{ sha256 }`（他field禁止） | `sha256`は64 lowercase hex。Checkpoint 4のPromotion Validator未実装のため、Checkpoint 3時点ではsynthetic value（呼び出し側が用意した仮値）を許容する |
+| `promotion_record_identity` | `{ sha256 }`（他field禁止） | `sha256`は64 lowercase hex。Checkpoint 4で`private_dictionary_promotion_core.js`が算出方法を正式固定した（S6.5.9）。Checkpoint 3時点ではPromotion Validator未実装のためsynthetic value（呼び出し側が用意した仮値）を許容していたが、Checkpoint 4以降は`promoteReviewedCandidatesToProjectDictionary()`の出力をこのfieldへ渡せる。ただしCheckpoint 4では`buildDictionarySnapshotWrapper()`自体は呼び出さない（接続は後続Checkpoint） |
 | `source_commit` | `^[0-9a-f]{40}$` | 生成時のrepository commit SHA |
 | `conflict_state` | `{ unresolved_count }`（他field禁止） | `unresolved_count`は non-negative safe integer。**private candidate名・alias名・conflict本文は一切含めない**（S17） |
 | `supersedes` | `null` または有効な`snapshot_id` format | `supersedes !== snapshot_id`必須（自己参照禁止）。**chain全体の存在確認・循環検査は今回対象外**（後続Checkpoint） |
@@ -620,6 +620,301 @@ Promotion Validatorのcanonical衝突検出（S6.4手順3）により別途弾�
    §28相当、完了報告に列挙）。
 5. 成功したcandidateのみでSnapshotをbuildし、`Explicit activation` は別の人間操作
    （自動実行しない）とする。
+
+### S6.5 Promotion Input 0.1 / Promotion Record 0.1 Contract（Checkpoint 4で正式固定）
+
+S6.1-S6.4の設計方針を、実装（`tools/knowledge_builder/core/private_dictionary_promotion_core.js`）
+が正本とする具体的なschemaとして固定する。**P2-A3 ACCEPT ≠ その場で自動ACTIVE登録**であり、
+本節が定めるPromotion Validator/Materializerが、review eligibility・identity/set consistency・
+conflict validation・既存PROJECT dictionaryとの整合・formal payload materializationのすべてを
+PASSした場合だけ、新規/更新entryをstatus `ACTIVE`としてformal payloadへ反映する。Snapshot build /
+activationは今回のscope外のまま（S5.5参照、後続Checkpointで接続する）。
+
+#### S6.5.1 UI非依存の原則
+
+Promotion coreは`tools/knowledge_builder/ui/*`（`review_state.js`/`private_review_import.js`/
+`private_review_export.js`を含む）へ**productionとして依存しない**。P2-A3 runtimeのReview State
+は現在ID-keyed mapを内部表現として使うが、Promotion coreはそれを直接入力契約にはしない。後続の
+UI adapterがReview Stateから生成できる、UI非依存の正規化済み入力として**Promotion Input 0.1**を
+定義する。
+
+#### S6.5.2 Promotion Input 0.1
+
+schema: `private-dictionary-promotion-input/0.1`。top-level fieldはadditional property禁止。
+
+| field | 内容 |
+|---|---|
+| `schema_version` | 完全一致文字列 `"private-dictionary-promotion-input/0.1"` |
+| `evaluation` | P2-A2 `private-dictionary-candidate-evaluation/0.1` Evaluation object（production codeは変更しない。candidate/alias IDの再生成禁止） |
+| `review_binding` | `{ review_schema_version, extraction_schema_version, source_fingerprints }`（下記） |
+| `candidate_decisions` | `[{ candidate_id, decision }]`（sorted array。`decision ∈ {UNREVIEWED, ACCEPT, REJECT, UNCERTAIN}`。`reason_code`/`note`/`decided_at`はPromotion semanticsへ入力しない — P2-A3 private Workbook側に残す） |
+| `alias_decisions` | `[{ alias_candidate_id, decision }]`（同上のdecision enum。Candidate decisionからの推定禁止） |
+| `conflict_resolutions` | `[{ conflict_id, resolution, selected_candidate_id }]`（`resolution ∈ {UNRESOLVED, SELECT_CANONICAL, REJECT_ALL, CONTEXT_DEPENDENT, UNCERTAIN}`。`SELECT_CANONICAL`以外では`selected_candidate_id === null`必須。`SELECT_CANONICAL`では`evaluation.conflicts[].conflicting_candidate_ids`の1件でなければならない） |
+| `base_snapshot` | `null`（新規PROJECT dictionary）または Checkpoint 3の正式Snapshot Wrapper 0.1。`null`でない場合、必ず`PrivateDictionarySnapshotCore.loadDictionarySnapshotWrapper()`を通す。stored payloadを直接信用しない。Promotion core自身がsnapshot integrity logicを再実装しない |
+| `target_dictionary_id` | `^pdict-[0-9a-f]{32}$`。caller supplied。自動random発番禁止。`base_snapshot !== null`の場合、`target_dictionary_id === base dictionary_payload.dictionary_id`必須 |
+| `target_version` | P2-A1 version contract（`^(0|[1-9][0-9]{0,15})$`）に従うdecimal string。初回（`base_snapshot === null`）は`"1"`必須。既存PROJECT dictionary更新時は`base dictionary_payload.version + 1`必須。version incrementはNumber coercionによるprecision lossを避けた安全なdecimal-string処理で行い、P2-A1の16桁上限を超える場合failする |
+| `source_review_artifact_identity` | `{ sha256 }`（64 lowercase hex）。元P2-A3 private Review Workbookのidentity。filenameは含めない。Promotion core自身はWorkbook bytesを読まない |
+| `source_commit` | `^[0-9a-f]{40}$` |
+
+**review_binding**:
+
+```json
+{
+  "review_schema_version": "private-dictionary-candidate-review/0.1",
+  "extraction_schema_version": "private-dictionary-candidate-evaluation/0.1",
+  "source_fingerprints": [ { "source_document_id": "...", "document_fingerprint": "..." } ]
+}
+```
+
+`review_binding.source_fingerprints`は`evaluation.source_fingerprints`と**完全set一致**必須
+（`{source_document_id, document_fingerprint}`の組で比較する。file nameはidentityに使わない）。
+`review_binding.extraction_schema_version === evaluation.schema_version`必須。
+
+#### S6.5.3 Review / Evaluation identity consistencyの独立検証
+
+Promotion coreはP2-A3 importerを信用するだけでなく、次を**独立して**検証する（P2-A3側で
+すでに検証されていたとしても、Promotion core自身が同じ保証を再確認する。fail-closed）。
+
+- `candidate_decisions`のID set === `evaluation.candidates`のID set（missing/extra/duplicate reject）
+- `alias_decisions`のID set === `evaluation.alias_candidates`のID set（同上）
+- `conflict_resolutions`のID set === `evaluation.conflicts`のID set（同上）
+- `review_binding.source_fingerprints` === `evaluation.source_fingerprints`（完全set一致）
+- `review_binding.extraction_schema_version` === `evaluation.schema_version`
+- `evaluation.candidates[]`/`evaluation.alias_candidates[]`は`scope === "SESSION"`かつ
+  `status === "PROBATION"`必須（P2-A2 contractどおり）。異なる場合はfail-closed
+
+#### S6.5.4 Candidate / Alias promotion eligibility（S6.2/S6.3の実装確定）
+
+**Candidateの基本条件**: `decision === ACCEPT`のみpromotion候補。`REJECT`/`UNCERTAIN`/
+`UNREVIEWED`は**local exclusion**（errorではない）。ただしConflictによりcandidateがblockされる
+場合はConflict semantics（S6.3）を優先する。
+
+**Conflict semantics（S6.3をそのまま実装。resolution enumごとの挙動）**:
+
+| resolution | 挙動 |
+|---|---|
+| `UNRESOLVED` | 当該conflictの`conflicting_candidate_ids`全件をpromotion candidateから除外。unresolved-for-promotionとしてcount |
+| `REJECT_ALL` | `conflicting_candidate_ids`全件を除外。人間による明示rejectのため、unresolved_countには含めない |
+| `CONTEXT_DEPENDENT` | 関与candidateをpromotion対象外。formal dictionaryへ一意化しない。unresolved-for-promotionとしてcount |
+| `UNCERTAIN` | 関与candidateをpromotion対象外。unresolved-for-promotionとしてcount |
+| `SELECT_CANONICAL` | `selected_candidate_id`へのalias mapping生成可能。ただし選択candidate自身がCandidate ACCEPTかつ他のblocking conflictに阻害されていない場合のみ。**非選択candidateは、選ばれなかったことだけを理由にpromotion対象外にしない**（S6.3の既存訂正どおり、各自の`candidate_decisions`と他Conflictの状態で独立判定する — 恒久検査として固定） |
+
+candidateが複数Conflictに関与し、1つでもblocking resolution（`UNRESOLVED`/`REJECT_ALL`/
+`CONTEXT_DEPENDENT`/`UNCERTAIN`）に入っていれば、そのcandidateはpromotion対象外。
+
+**Alias promotion eligibility**: 通常`alias_candidate`は次の全条件必須。
+
+1. `alias_decision === ACCEPT`
+2. `canonical_candidate_id`が存在する
+3. canonical candidate自身がpromotion eligible
+
+Candidate ACCEPTからAlias ACCEPTを推定してはならない。alias ACCEPTでもcanonicalが
+REJECT/UNCERTAIN/UNREVIEWED/blocking conflictの場合、aliasはlocal exclusion。
+
+P2-A2はconflicted aliasについて通常`alias_candidate`を生成せず、`evaluation.conflicts[]`へ
+分離する。そのため`SELECT_CANONICAL`のconflictは通常`alias_decisions`を要求しない。人間の
+`SELECT_CANONICAL`そのものが、そのconflict aliasについての明示判断であり、`alias_display →
+selected candidate canonical`のmappingとして扱う。
+
+#### S6.5.5 Formal normalization Source of Truth
+
+Promotion coreのconflict判定は独自normalizerを作らない。必ず`KnowledgeIdHashUtils.normalize`
+を使用する。P2-A2の`foldComparisonKey`をformal dictionary conflict判断へ再利用しない
+（formal P2-A1 dictionaryのnormalized keyは`KnowledgeIdHashUtils.normalize`がSource of Truthで
+あり、P2-A2の抽出段階normalizerとは別物として扱う）。
+
+#### S6.5.6 既存PROJECT dictionaryとの整合
+
+`base_snapshot === null`: 新規PROJECT dictionaryを作る。`base_snapshot !== null`:
+Snapshot Loaderで検証済みの`dictionary_payload`をbaseとする（`schema_version:
+private-dictionary-overlay/1.0`、`scope: PROJECT`必須）。既存entryは原則そのまま保持し、
+Promotionを理由に`status`/`source.kind`/`utility`/canonical display/`entry_id`を書き換えない。
+
+**既存ACTIVE canonicalへの再遭遇**: ACCEPT candidateのformal normalized canonical keyが、
+baseの既存ACTIVE canonicalと同一なら、新entryを重複生成せず既存の`entry_id`/`canonical_term`/
+`source`/`utility`/`status`を維持する（`existing_entry_candidate`として扱う）。当該candidateへ
+ACCEPTされた新aliasがある場合のみ、既存ACTIVE entryの`aliases`を拡張できる。accepted candidate
+自身を理由にcanonical displayを置換しない。追加aliasも存在せずsemantic changeがゼロなら、その
+candidateはno-op。
+
+**新entry ID**: 新しいformal entryだけ、
+`entry_id = "pde-" + await KnowledgeIdHashUtils.id128("private-dictionary-promotion-entry-id-v1",
+[target_dictionary_id, candidate_id])`とする。term文字列をIDへ直接埋め込まない
+（candidate_idから決定的に導出する）。同じ`target_dictionary_id + candidate_id`なら常に同じ
+`entry_id`。`id128`のfailure/invalid returnはsanitized fail-closedとする。
+
+**新entry materialization**: `status: "ACTIVE"`、`source: { kind: "DOCUMENT_EXTRACTED",
+content_included: false }`。`utility`は`candidate.metrics.exposure_count →
+exposure_count`、`candidate.metrics.document_support_count → document_support_count`、
+`candidate.metrics.alias_conflict_count → alias_conflict_count`のmappingのみ行い、P2-A2が
+unmeasuredと定義する`match_opportunity_count`/`candidate_gain`/`ranking_gain`/
+`candidate_noise_increase`はP2-A1の「utility initial value = 0」契約どおり0とする（推測値の
+生成禁止）。既存entryへaliasを追加する場合は既存utilityを一切変更しない。
+
+#### S6.5.7 Formal collision policy（local exclusion vs global fail-closed。S23旧#1を解決）
+
+local review exclusion（`REJECT`/`UNCERTAIN`/`UNREVIEWED`/blocking P2-A3 Conflict）は、当該
+candidate/aliasだけpromotionされず、Promotion全体は続行可能。一方、formal dictionaryへ適用した
+結果**意味が一意に決まらない**場合はglobal fail-closedとする。任意のcanonicalを勝手に選ばない。
+
+- 2つの別ACCEPT candidateが`KnowledgeIdHashUtils.normalize`後に同一canonical keyになる →
+  `PROMOTION_CANONICAL_COLLISION`
+- accepted candidate canonicalが既存ACTIVE alias keyと衝突する → `PROMOTION_ALIAS_COLLISION`系
+- accepted aliasが別canonicalのcanonical/aliasと衝突する → 同上
+- 同一normalized alias keyがpromotion batch内で異なるcanonicalへ向く → 同上
+
+**P2-A1 conflict semanticsの再利用**: 最終payload構築後、必ず
+`PrivateDictionaryLearningCore.validatePrivateDictionary()`を通す。さらに
+`createPrivateDictionaryLayerView()`→`detectDictionaryLookupConflicts([layerView])`を利用し、
+formal PROJECT layer内にlookup conflictが残っていないことを確認する。Promotion core独自に
+P2-A1のalias/canonical conflict algorithmをコピーして再実装しない。`conflicts.length > 0`なら
+Promotion全体をfail-closedする（`PROMOTION_DICTIONARY_CONFLICT`）。
+
+#### S6.5.8 No-change behavior
+
+Promotion処理後、base dictionaryとsemantic payloadが同一、または初回でeligible candidateが0
+なら、`PROMOTION_NO_CHANGES`としてfailする。versionだけを上げた空Snapshot候補を作らない。
+
+#### S6.5.9 Promotion Record 0.1
+
+Snapshot wrapperの`promotion_record_identity`（S5.5）へ将来そのまま渡せる、content-addressed
+Promotion Recordを生成する。schema: `private-dictionary-promotion-record/0.1`。PRIVATE internal
+artifactであり、raw term/alias/note/reason/evidence excerpt/filenameは一切含めない。
+
+```json
+{
+  "schema_version": "private-dictionary-promotion-record/0.1",
+  "source_review_artifact_sha256": "...",
+  "review_decision_fingerprint": "...",
+  "source_commit": "...",
+  "base_snapshot_id": null,
+  "base_wrapper_integrity_sha256": null,
+  "base_dictionary_payload_sha256": null,
+  "target_dictionary_id": "pdict-...",
+  "target_dictionary_version": "1",
+  "eligible_candidate_ids": [],
+  "created_entry_candidate_ids": [],
+  "existing_entry_candidate_ids": [],
+  "applied_alias_candidate_ids": [],
+  "applied_conflict_ids": [],
+  "no_op_alias_candidate_ids": [],
+  "excluded_counts": {
+    "candidate_not_accepted": 0,
+    "candidate_conflict_blocked": 0,
+    "alias_not_accepted": 0,
+    "alias_canonical_ineligible": 0,
+    "conflict_not_promotable": 0
+  },
+  "unresolved_conflict_count": 0,
+  "output_dictionary_payload_sha256": "...",
+  "content_included": false
+}
+```
+
+ID配列はordinal sort。`base_snapshot === null`ではbase 3 field（`base_snapshot_id`/
+`base_wrapper_integrity_sha256`/`base_dictionary_payload_sha256`）は`null`。`content_included`
+は常に`false`。`excluded_counts`の各fieldはnon-negative safe integer。
+
+**`unresolved_count`の意味**: `UNRESOLVED`/`CONTEXT_DEPENDENT`/`UNCERTAIN`のconflict件数のみ。
+`REJECT_ALL`は人間により解決済みのrejectなのでunresolved_countへ含めない。`SELECT_CANONICAL`も
+resolutionとしては解決済みなので含めない。
+
+**Review Decision Fingerprint**: Promotion RecordはWorkbook SHAだけにsemantic decision identity
+を依存させない。次のprojectionをcanonical sort後、`KnowledgeIdHashUtils.canonicalJson()`で
+canonical化し、`await KnowledgeIdHashUtils.hashParts("private-dictionary-promotion-review-decision-v1",
+[canonicalJsonProjection])`（64 lowercase hex）で算出する。raw note/reason/termは含めない。
+
+```json
+{
+  "review_schema_version": "...",
+  "extraction_schema_version": "...",
+  "source_fingerprints": [],
+  "candidate_decisions": [],
+  "alias_decisions": [],
+  "conflict_resolutions": []
+}
+```
+
+**Promotion Record Identity**: `promotion_record_identity.sha256 = await
+KnowledgeIdHashUtils.hashParts("private-dictionary-promotion-record-v1",
+[KnowledgeIdHashUtils.canonicalJson(promotionRecord)])`（64 lowercase hex）。production側で
+独自SHA/canonicalizerを新設しない。
+
+#### S6.5.10 Public API・出力・次Checkpointへの接続
+
+原則1 public APIのみ: `async function promoteReviewedCandidatesToProjectDictionary(input)`。
+戻り値（全体deep-freeze）:
+
+```json
+{
+  "dictionary_payload": {},
+  "dictionary_payload_sha256": "...",
+  "promotion_record": {},
+  "promotion_record_identity": { "sha256": "..." },
+  "conflict_state": { "unresolved_count": 0 },
+  "source_review_artifact_identity": { "sha256": "..." },
+  "source_commit": "..."
+}
+```
+
+`result.dictionary_payload`は`validatePrivateDictionary()`をPASSし、
+`result.dictionary_payload_sha256 === hashPrivateDictionaryCanonical(result.dictionary_payload)`
+を満たす。この戻り値は、次Checkpointで
+`PrivateDictionarySnapshotCore.buildDictionarySnapshotWrapper({ dictionary_payload:
+result.dictionary_payload, promotion_record_identity: result.promotion_record_identity,
+source_review_artifact_identity: result.source_review_artifact_identity, source_commit:
+result.source_commit, conflict_state: result.conflict_state, ... })`へそのまま接続可能な形に
+揃えてある。ただし**Checkpoint 4では`buildDictionarySnapshotWrapper()`を呼ばない**
+（Snapshot buildはまだ行わない。S6の全体図参照）。
+
+#### S6.5.11 明示的に実装しないもの（Checkpoint 4のNon-goals）
+
+P2-A3 Workbook parser・P2-A3→Promotion Input UI adapter・Snapshot build・Snapshot Activation
+Record・project configuration・`snapshot_id`/`snapshot_version`発番・Dictionary Resolver・
+`approvedDict`・matching配線・UI/Excel/graph/unknown queue・HUMAN-01/02/03 UX改善・DOMAIN scope
+promotion・automatic retirement/quarantine・rollback。
+
+#### S6.5.12 Atomicity・structural safety・error contract
+
+Promotion coreもasync boundaryを持つため、Checkpoint 3-R1/R2と同じatomicity原則を継承する。
+caller-owned inputをawait後に再読しない。最初の同期phaseで、Promotion semanticsに必要な
+evaluation/review/metadataをdescriptor-based安全readで内部plain snapshotへcopyする。
+`base_snapshot`についてはSnapshot Loader自身のatomic captureを利用し、Promotion functionが
+最初のawaitへ到達する前にbase Snapshot Loaderを呼び出し、Loader側の同期captureを開始させる。
+以後、caller input本体・`candidate_decisions`/`alias_decisions`/`conflict_resolutions`の各
+input arrayを再readしない。
+
+structural safety（Proxy trap・accessor・symbol key・unexpected non-enumerable・custom
+prototype・cycle・sparse/hostile array・unknown field）はfail-closed。private termをpath/error
+へ含めない。`evaluation`は今回利用するfieldだけをdescriptor-based allowlist readする
+（`evidence_refs`の内容をPromotion coreへコピーする必要はない）。
+
+外部throwは`Object.freeze({code, path})`のみ（Error instance/message/stack/cause/private value
+禁止）。最低限のerror code一覧: `PROMOTION_ROOT_INVALID`/`PROMOTION_UNKNOWN_FIELD`/
+`PROMOTION_SCHEMA_VERSION_INVALID`/`PROMOTION_EVALUATION_INVALID`/
+`PROMOTION_REVIEW_BINDING_INVALID`/`PROMOTION_SOURCE_MISMATCH`/
+`PROMOTION_CANDIDATE_SET_MISMATCH`/`PROMOTION_ALIAS_SET_MISMATCH`/
+`PROMOTION_CONFLICT_SET_MISMATCH`/`PROMOTION_DECISION_INVALID`/`PROMOTION_RESOLUTION_INVALID`/
+`PROMOTION_SELECTED_CANDIDATE_INVALID`/`PROMOTION_SCOPE_STATUS_INVALID`/
+`PROMOTION_TARGET_DICTIONARY_ID_INVALID`/`PROMOTION_TARGET_VERSION_INVALID`/
+`PROMOTION_BASE_SNAPSHOT_INVALID`/`PROMOTION_BASE_DICTIONARY_MISMATCH`/
+`PROMOTION_CANONICAL_COLLISION`/`PROMOTION_ALIAS_COLLISION`/`PROMOTION_DICTIONARY_CONFLICT`/
+`PROMOTION_ENTRY_ID_GENERATION_FAILED`/`PROMOTION_PAYLOAD_INVALID`/`PROMOTION_HASH_FAILED`/
+`PROMOTION_NO_CHANGES`/`PROMOTION_DEPENDENCY_RESOLUTION_FAILED`/
+`PROMOTION_STRUCTURAL_SAFETY_VIOLATION`。pathはallowlisted static field/indexのみ。
+canonical/aliasをpathへ入れない。Snapshot/P2-A1/id-hash dependencyのnative exceptionや内部code
+をそのまま外へ転送しない。
+
+**Privacy**: Promotion Recordへ含めてよいのはopaque IDs/hashes/counts/schema・version/source
+commitのみ。canonical term・alias term・review note・reason note・evidence excerpt・filename・
+sheet・page content・raw source・private normalized termは含めない。`dictionary_payload`自体は
+PRIVATE。Promotion RecordもPRIVATEだが`content_included: false`を維持する。console出力・
+network・filesystem・localStorage・sessionStorage・IndexedDB禁止。
+
+**Explicit activation禁止（S6.5.11と重複整理）**: 今回生成するのはformal dictionary payload +
+promotion recordまで。Snapshot Activation Record作成・ACTIVE snapshot selector変更・project
+configuration変更・latest snapshot探索・rollback実行・filesystem保存・auto-download・UI state
+変更は禁止。`entry.status === ACTIVE`と「Snapshotが現在選択されている」は別概念であり、混同しない。
 
 ---
 
@@ -1338,42 +1633,56 @@ matching実行（既存logic、変更なし）
   新設・確定した（S10.1）。格納された`dictionary_payload_sha256`を無検証のままwrapper hash
   inputとして信用しない、という制約も明記した。
 
+**Checkpoint 4で解決した項目**:
+
+- 旧#1（Checkpoint 1で追加）: Promotion Validatorがscope/canonical衝突を検出した際の粒度
+  （「該当candidateのみ除外」か「Promotion全体を停止」か）は、Checkpoint 4
+  （`private_dictionary_promotion_core.js`）で**解決した**。local review exclusion
+  （REJECT/UNCERTAIN/UNREVIEWED/blocking P2-A3 Conflict）とformal dictionary structural
+  conflict（別ACCEPT candidateが正規化後同一canonical keyになる等）を明確に区別し、前者は
+  当該candidate/aliasのみ除外してPromotion全体は続行、後者はPromotion全体をfail-closedで
+  停止する、という二層のpolicyとして確定した（S6.5.7）。
+- 旧#8（R2-2で追加）: 「Promotion Provenance Artifact」の具体的なschemaは、Checkpoint 4で
+  **Promotion Record 0.1**として解決した（S6.5.9）。content-addressing方式（`canonicalJson()`
+  → `hashParts()`）、`promotion_record_identity`との参照関係（Snapshot wrapperの
+  `promotion_record_identity`フィールドへ`promotion_record`自身のcontent hashを渡す）、
+  および semantic decision identity を Workbook SHA から独立させる `review_decision_fingerprint`
+  の算出方法を含め、すべて確定した。実装が本当に必要だったかという以前の留保も、Checkpoint 4の
+  要求により本Checkpointで実装対象として確定した。
+
 **残存・新規の未解決事項**:
 
-1. Promotion Validatorがscope/canonical衝突を検出した際、「該当candidateのみ除外」か
-   「Promotion全体を停止」かの粒度（S6.4）。
-2.（R2-1で範囲を再確定）`_tagInfo.approvedDict`（正式辞書由来のtag source）が既存tag-score
-   （Dice係数）へどの重みで寄与するか、具体的な係数設計は未確定（S13）。接続方式そのものは
-   R2-1で確定済みだが、係数は引き続き次Checkpointで設計する。
-3. Excel exportにおけるdictionary情報の具体的な列設計・sheet配置（S18）。
-4. Unknown term収集queueの永続化形式・辞書メンテナンス画面との具体的な接続方法（S11）。
-5. Conflict candidateをP2-A3のAlias Conflict機構へどう還流させるか、双方向のデータフロー
+1.（旧#2、R2-1で範囲を再確定）`_tagInfo.approvedDict`（正式辞書由来のtag source）が既存
+   tag-score（Dice係数）へどの重みで寄与するか、具体的な係数設計は未確定（S13）。接続方式
+   そのものはR2-1で確定済みだが、係数は引き続き次Checkpointで設計する。
+2.（旧#3）Excel exportにおけるdictionary情報の具体的な列設計・sheet配置（S18）。
+3.（旧#4）Unknown term収集queueの永続化形式・辞書メンテナンス画面との具体的な接続方法（S11）。
+4.（旧#5）Conflict candidateをP2-A3のAlias Conflict機構へどう還流させるか、双方向のデータフロー
    （S12.B）。
-6. matching tool側テキスト照合の comparison ID（現状formalな契約なし、
+5.（旧#6）matching tool側テキスト照合の comparison ID（現状formalな契約なし、
    current-state-analysis §4）と、Resolution Annotationの紐付けキーをどう設計するか
    — 数量subsystemの `comparison_id` 契約とは別に検討が必要。
-7. project configuration（S14のpinning元）の具体的な格納場所・形式
+6.（旧#7）project configuration（S14のpinning元）の具体的な格納場所・形式
    （案件ごとのファイル、matching tool起動時の読み込み経路等）は未設計。
-8.（R2-2で追加）`alias_rule_id`相当のrule起源追跡が実際に必要になった場合の
-   「Promotion Provenance Artifact」の具体的なschema（content-addressing方式、
-   `promotion_record_identity`との参照関係の具体形）は未設計（S4.1）。そもそもこの追跡が
-   実装Checkpointで本当に必要かどうか自体、未確定。
-9.（R2-1で追加）旧`deterministic normalization`案（Resolverが確定させた`canonical_term`を
+7.（旧#9、R2-1で追加）旧`deterministic normalization`案（Resolverが確定させた`canonical_term`を
    `normalizeForMatch()`前処理段階へオプション適用する）の採否・具体的な適用方法（S13）。
    `_tagInfo.approvedDict`経路とは独立した追加入力候補として残るが、Checkpoint 1-R2では
    決定しない。
-10.（R2-4で追加）Snapshot Activation Record（S5.4）の具体的な永続化場所・schema・
-    project configuration（S14）との関係の詳細設計（同一artifactに統合するか、別artifactとして
-    分離を維持するか）は未設計。
-11.（R3-1で追加）`shadowed_entry_refs`（非採用candidateの補助的な公開）を実装するか否か、
-    実装する場合の具体的なschemaは未設計（S4.1、必須契約ではなくoptional拡張として位置づけ）。
-12.（Checkpoint 3で追加）`snapshot_id`の発番方式は未設計（S5.5で「caller-supplied、Snapshot
-    core内部で自動発番しない」ことのみ確定。`dsnap-<hex32>`という発番元をどこで・どう決定するか
-    は後続Checkpointの対象）。
-13.（Checkpoint 3で追加）`snapshot_version`のchain monotonicity検証（版番号が実際に単調増加して
-    いるかの検証）、および`supersedes`/`rollback_target`が指すsnapshot chain全体の存在確認・
-    循環検査は、Checkpoint 3のSnapshot core（単一artifactの型検証のみ）では対象外のまま
+8.（旧#10、R2-4で追加）Snapshot Activation Record（S5.4）の具体的な永続化場所・schema・
+   project configuration（S14）との関係の詳細設計（同一artifactに統合するか、別artifactとして
+   分離を維持するか）は未設計。
+9.（旧#11、R3-1で追加）`shadowed_entry_refs`（非採用candidateの補助的な公開）を実装するか否か、
+   実装する場合の具体的なschemaは未設計（S4.1、必須契約ではなくoptional拡張として位置づけ）。
+10.（旧#12、Checkpoint 3で追加）`snapshot_id`の発番方式は未設計（S5.5で「caller-supplied、
+    Snapshot core内部で自動発番しない」ことのみ確定。`dsnap-<hex32>`という発番元をどこで・どう
+    決定するかは後続Checkpointの対象）。
+11.（旧#13、Checkpoint 3で追加）`snapshot_version`のchain monotonicity検証（版番号が実際に単調
+    増加しているかの検証）、および`supersedes`/`rollback_target`が指すsnapshot chain全体の存在
+    確認・循環検査は、Checkpoint 3のSnapshot core（単一artifactの型検証のみ）では対象外のまま
     （S5.5）。いつ・どの層（Snapshot core自体か、それとも呼び出し側か）で検証するかは未設計。
-14.（Checkpoint 3で追加）Dictionary Resolver（Snapshotから実際にterm解決を行う層）は
+12.（旧#14、Checkpoint 3で追加）Dictionary Resolver（Snapshotから実際にterm解決を行う層）は
     Checkpoint 3で未実装のまま。loaderは「validated snapshot handle」を返すところまでが境界
     （S5.5、S10.1 step10）であり、S4のResolver設計との接続方法は後続Checkpointで具体化する。
+13.（Checkpoint 4で追加）Promotion Input 0.1をP2-A3 Review State/Workbookから実際に生成する
+    UI adapterの具体的な実装方法・接続点（S6.5.1）は未設計。今回は「UI非依存の入力契約」の
+    固定のみが対象で、adapter自体は次Checkpoint以降の対象。

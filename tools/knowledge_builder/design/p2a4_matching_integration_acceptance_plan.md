@@ -256,3 +256,47 @@ delimiter split禁止・substring/fuzzy/AI推定禁止）を検証する。**R4-
 Checkpoint 1では上記すべてが**計画のみ**であり、実測・実装は行っていない。後続Checkpointで
 Dictionary Resolver・Promotion Validator・Snapshot生成が実装された時点で、本書のtest caseを
 具体的なverification scriptへ落とし込む。
+
+## S13. Promotion Validator / Project Dictionary Materialization検証項目（Checkpoint 4で新設）
+
+`private_dictionary_matching_integration_contract_0.1.md` S6.5で固定したPromotion Input 0.1 /
+Promotion Record 0.1契約を、`tools/knowledge_builder/verification/
+private_dictionary_promotion_core_verification.js`で検証する。最低限のcase一覧（各caseは
+verification script内のラベルと対応させる）。
+
+| # | 検証項目 |
+|---|---|
+| A | First PROJECT promotion: Candidate ACCEPT 1件、`base_snapshot=null`からPROJECT/ACTIVEの正式payloadを生成し、`target_version === "1"`であることを確認する |
+| B | Utility mapping: `exposure_count`/`document_support_count`/`alias_conflict_count`がP2-A2 metricsと一致し、unmeasured 4項目（`match_opportunity_count`/`candidate_gain`/`ranking_gain`/`candidate_noise_increase`）が0であることを確認する |
+| C | Candidate decision matrix: ACCEPTのみeligible。REJECT/UNCERTAIN/UNREVIEWEDはlocal exclusionであることを確認する |
+| D | Alias independence: candidate ACCEPT×alias UNREVIEWED→aliasなし、candidate ACCEPT×alias ACCEPT→aliasあり、candidate REJECT×alias ACCEPT→aliasなし、をそれぞれ確認しCandidate ACCEPTからalias ACCEPTが自動導出されないことを実証する |
+| E | Conflict matrix: `UNRESOLVED`/`REJECT_ALL`/`CONTEXT_DEPENDENT`/`UNCERTAIN`がそれぞれS6.5.4どおりcandidateをblockすることを確認する |
+| F | SELECT_CANONICAL: selected candidate ACCEPT→alias_displayがselected canonicalへ付与され、非selected candidate ACCEPTがSELECT_CANONICALで非選択だったことだけを理由にcanonical promotionから除外されないことを確認する |
+| G | SELECT_CANONICAL selected candidate not eligible: alias mappingが作られず、任意の別candidateへfallbackしないことを確認する |
+| H | Multiple conflicts: candidateが1件でもblocking conflictへ関与すれば除外されることを確認する |
+| I | Alias/candidate/conflict decision set exactness: missing/extra/duplicateがすべてrejectされることを確認する |
+| J | Source fingerprint mismatch: `review_binding`と`evaluation`の不一致がrejectされることを確認する |
+| K | SESSION/PROBATION boundary: evaluation candidate/aliasが別scope/statusならrejectされることを確認する |
+| L | Deterministic entry ID: 同じ`dictionary_id + candidate_id`で同一`pde-`IDになり、input array順変更で不変であることを確認する |
+| M | Existing ACTIVE canonical: base Snapshot内に同じformal normalized canonicalがある場合、新entryを重複生成せず`entry_id`/`canonical`/`source`/`utility`/`status`を保持することを確認する |
+| N | Existing canonical + new alias: 既存ACTIVE entryへapproved aliasだけ追加し、`utility`/`status`/`source`が変更されないことを確認する |
+| O | No-op promotion: semantic changeがない場合、`PROMOTION_NO_CHANGES`でfailし、versionだけ上げないことを確認する |
+| P | Formal canonical collision: 別candidateが正規化後同一canonical keyになる場合、global failすることを確認する |
+| Q | Alias/canonical conflict: P2-A1 lookup conflictが残る提案がglobal failすることを確認する |
+| R | P2-A1 validation: 成功時の`result.dictionary_payload`が`validatePrivateDictionary()`をPASSすることを確認する |
+| S | P2-A1 payload hash: `result.dictionary_payload_sha256 === hashPrivateDictionaryCanonical(result.dictionary_payload)`であることを確認する |
+| T | Promotion Record content privacy: term/alias/note/evidence/file名が`promotion_record`のserializationに存在しないことを確認する |
+| U | Review decision fingerprint determinism: 同一semantic decisionsで同一fingerprint、decision 1件変更でfingerprint変更、note/reasonだけの変更は影響しないことを確認する |
+| V | Promotion Record identity determinism: 同一Promotion Recordで同一identity、semantic field変更でidentity変更を確認する |
+| W | Base Snapshot tamper: Checkpoint 3 Loaderのrejectが`PROMOTION_BASE_SNAPSHOT_INVALID`へsanitizeされ、partial outputがないことを確認する |
+| X | Atomic caller mutation: promise取得直後のcaller input（candidate canonical/decision/selected_candidate_id/target_version/source_review_artifact_identity等）変更が開始時captureへ影響しないことを確認する |
+| Y | Hostile Proxy: native Error/secret leakageが0であることを確認する |
+| Z | Deep freeze / alias isolation: return root/dictionary_payload/entries/aliases/promotion_record/各arrays/identity/conflict_stateがすべてmutation不能で、caller mutation後もresultが不変であることを確認する |
+| AA | No I/O: fs/fetch/XHR/storage/consoleを一切使用しないことを確認する |
+| AB | No Snapshot build: Promotion coreが`buildDictionarySnapshotWrapper()`を呼ばないことを確認する（Snapshot Loader利用は許可） |
+| AC | No UI dependency: `tools/knowledge_builder/ui`へのrequire/importがないことを確認する |
+| AD | Input order invariance: `candidate_decisions`/`alias_decisions`/`conflict_resolutions`の順序を逆転してもdictionary payload hash / promotion record identityが同一であることを確認する |
+| AE | Existing regressions: P2-A1 710 PASS、Snapshot 191 PASSが維持されることを確認する |
+
+Checkpoint 4では上記A-AEをすべて実測・実装する（Checkpoint 1のS1-S11とは異なり、計画のみでは
+終わらせない）。
