@@ -935,6 +935,140 @@ promotion recordまで。Snapshot Activation Record作成・ACTIVE snapshot sele
 configuration変更・latest snapshot探索・rollback実行・filesystem保存・auto-download・UI state
 変更は禁止。`entry.status === ACTIVE`と「Snapshotが現在選択されている」は別概念であり、混同しない。
 
+### S6.6 Promotion → Snapshot Composition Contract（Checkpoint 5で正式固定）
+
+`tools/knowledge_builder/core/private_dictionary_promotion_snapshot_composition_core.js`は、
+Checkpoint 4の`PrivateDictionaryPromotionCore.promoteReviewedCandidatesToProjectDictionary()`と
+Checkpoint 3の`PrivateDictionarySnapshotCore.buildDictionarySnapshotWrapper()`/
+`loadDictionarySnapshotWrapper()`を「接続」するpure orchestration coreである。新しい辞書semantic
+algorithm（candidate/alias eligibility、conflict resolution、existing ACTIVE winner、
+normalization、hash、Promotion Record identity、wrapper integrity hash、Snapshot Loader
+validation、P2-A1 conflict detection）は一切再実装しない。Composition coreのproduction
+dependencyは`PrivateDictionaryPromotionCore`と`PrivateDictionarySnapshotCore`の2つのみで、
+P2-A1（`private_dictionary_learning_core.js`）や`id_hash_utils.js`をCompositionから直接requireし
+ない（orchestration layerであり、semantic/hash layerではないため）。
+
+**Composition Input 0.1**: schema
+`private-dictionary-promotion-snapshot-composition-input/0.1`。top-levelは`schema_version`/
+`promotion_input`/`snapshot_metadata`の3 fieldのみ、additional field禁止。
+
+- `promotion_input`: Checkpoint 4 `private-dictionary-promotion-input/0.1`そのもの。Composition
+  自身はその内部（`candidate_decisions`/`evaluation`等）をrecursiveに解析せず、root descriptorから
+  1回だけ読んだopaque referenceとしてPromotion Coreへそのまま渡す。Promotion Core自身のatomic
+  capture/structural safetyへ委ねる。
+- `snapshot_metadata`: `{ snapshot_id, snapshot_version, provenance }`のみ、additional field禁止。
+  `snapshot_id`/`snapshot_version`/`provenance`はいずれもCheckpoint 3 Builder契約そのまま・
+  caller supplied（Compositionでの自動発番・現在時刻生成は禁止）。Compositionは
+  descriptor-based safe captureでhostile Proxy/accessor/symbol key/unknown fieldを拒否するが、
+  format/timestamp妥当性等の詳細field validationはCheckpoint 3 Builderへ委譲し、timestamp
+  parser等を独自実装しない。
+
+**Public API**: 原則1 export、`async function
+promoteReviewedCandidatesAndBuildSnapshot(input)`。戻り値（全体deep-freeze）:
+`{ promotion_result, snapshot_wrapper, validated_snapshot }`。各coreの戻り値をそのまま保持し
+（既に各core側でdeep-freeze済みのため再clone不要）、Compositionはpublic schema artifactではなく
+in-memory composition handleとして扱う。
+
+**Promotion result → Snapshot Builder input mapping**: Promotion成功結果
+(`promotionResult`)を唯一のSource of Truthとし、以下をSnapshot Builderへ渡す。
+
+```json
+{
+  "dictionary_payload": "promotionResult.dictionary_payload",
+  "snapshot_id": "snapshotMetadata.snapshot_id",
+  "snapshot_version": "snapshotMetadata.snapshot_version",
+  "provenance": "snapshotMetadata.provenance",
+  "source_review_artifact_identity": "promotionResult.source_review_artifact_identity",
+  "promotion_record_identity": "promotionResult.promotion_record_identity",
+  "source_commit": "promotionResult.source_commit",
+  "conflict_state": "promotionResult.conflict_state",
+  "supersedes": "promotionResult.promotion_record.base_snapshot_id",
+  "rollback_target": null
+}
+```
+
+`dictionary_payload`/`source_review_artifact_identity`/`promotion_record_identity`/
+`source_commit`/`conflict_state`/`supersedes`/`rollback_target`はcallerから再入力させない
+（Promotion結果とCompositionの固定`null`だけがSource of Truth）。
+
+**`supersedes`の唯一のSource of Truth**: callerからsupersedesを受け取らず、
+`promotionResult.promotion_record.base_snapshot_id`をそのまま使う。初回promotion
+（`base_snapshot_id === null`）→`supersedes === null`。既存Snapshotからのpromotion
+（`base_snapshot_id === dsnap-...`）→`supersedes`は同一snapshot_id。caller が任意のsupersedesを
+指定できる経路は存在しない。
+
+**`rollback_target`**: Checkpoint 5では常に`null`固定。caller inputにも含めない。rollback
+semanticsは未実装のまま先取りしない。
+
+**`snapshot_version`**: caller-supplied、`Number.isSafeInteger(value) && value >= 1`
+（Checkpoint 3契約そのまま）。`dictionary_payload.version`と同一視しない。base
+`snapshot_version + 1`を強制しない。snapshot chain monotonicity検証はCheckpoint 3から引き続き
+未解決・別sliceのまま（automatic発番・latest lookupも今回対象外）。
+
+**3段階のbinding consistency gate**（いずれも独自hash再計算禁止、値比較のみ。§13-27参照）:
+
+1. *Promotion result consistency gate*（Builderを呼ぶ前）: `dictionary_payload_sha256`と
+   `promotion_record.output_dictionary_payload_sha256`、`dictionary_payload.dictionary_id`/
+   `version`と`promotion_record.target_dictionary_id`/`target_dictionary_version`、
+   `source_review_artifact_identity.sha256`と`promotion_record.source_review_artifact_sha256`、
+   `conflict_state.unresolved_count`と`promotion_record.unresolved_conflict_count`、
+   `source_commit`と`promotion_record.source_commit`の一致を検査する。不一致は
+   `COMPOSITION_PROMOTION_BINDING_MISMATCH`でfail-closed、Builderを呼ばない。
+2. *Snapshot Builder result consistency gate*（Loaderを呼ぶ前）: Builderが返す
+   `dictionary_payload_sha256`/`source_review_artifact_identity.sha256`/
+   `promotion_record_identity.sha256`/`source_commit`/`conflict_state.unresolved_count`が
+   `promotionResult`の対応値と一致し、`supersedes === promotionResult.promotion_record
+   .base_snapshot_id`、`rollback_target === null`、`snapshot_id`/`snapshot_version`が
+   `snapshotMetadata`の値と一致し、`scope === "PROJECT"`であることを検査する。不一致は
+   `COMPOSITION_SNAPSHOT_BINDING_MISMATCH`でfail-closed、Loaderを呼ばない。
+3. *Loader round-trip gate*（成功handle返却前）: Builder成功だけでComposition成功にせず、必ず
+   `loadDictionarySnapshotWrapper()`を通す。Loaderが返す値がPromotion結果・wrapperの対応値と
+   すべて一致することを検査する（`dictionary_payload_sha256`/`wrapper_integrity_sha256`/
+   `snapshot_id`/`snapshot_version`/`scope`/`source_review_artifact_identity.sha256`/
+   `promotion_record_identity.sha256`/`source_commit`/`conflict_state.unresolved_count`/
+   `supersedes`/`rollback_target`）。不一致は`COMPOSITION_LOAD_BINDING_MISMATCH`。
+
+**Payload identity / Promotion Record identityの三者一致**: `promotionResult
+.dictionary_payload_sha256`・`snapshotWrapper.dictionary_payload_sha256`・
+`validatedSnapshot.dictionary_payload_sha256`（および`promotion_record
+.output_dictionary_payload_sha256`）の完全一致でpayload identityを固定する。Composition自身は
+dictionary payload hashを計算しない。同様に`promotion_record_identity`もCheckpoint 4の結果を
+Builder/Loaderへそのまま渡し、Composition側で再hashしない。
+
+**Failure stage order**: (1) root/snapshot_metadata capture → (2) Promotion Core呼び出し開始
+（Composition自身の最初のawaitより前）→ (3) Promotion await → (4) Promotion binding gate →
+(5) Snapshot Builder → (6) Builder binding gate → (7) Snapshot Loader → (8) Loader binding gate
+→ (9) 成功handle返却。Promotion binding mismatch時にBuilderを呼ばない。Builder mismatch時に
+Loaderを呼ばない。partial handle返却禁止。
+
+**Atomicity**: Checkpoint 3-R1/R2・Checkpoint 4-R1と同じ原則を継承する。Composition関数開始時の
+同期phaseでroot/`schema_version`/`promotion_input`参照/`snapshot_metadata`を安全captureし、
+caller inputをawait後に再readしない。Promotion Core呼び出しはComposition自身の最初のawaitより
+前に開始し、Promotion Core自身の同期atomic captureがComposition呼び出し元へcontrolが戻る前に
+開始できる構造にする。
+
+**VALID SNAPSHOT CANDIDATE ≠ ACTIVE SELECTED SNAPSHOT**: SnapshotがBuild/Load成功することと、
+「このSnapshotを現在ACTIVEとして選択する」ことは別概念。今回の成功結果は妥当な
+Snapshot候補（VALID SNAPSHOT CANDIDATE）であり、Activation Record・active snapshot
+selector・project configuration・latest snapshot探索・rollback実行はCheckpoint 5の対象外
+のまま。
+
+**Error contract**: 外部throwは`Object.freeze({code, path})`のみ。最低限のcode一覧:
+`COMPOSITION_ROOT_INVALID`/`COMPOSITION_UNKNOWN_FIELD`/`COMPOSITION_SCHEMA_VERSION_INVALID`/
+`COMPOSITION_SNAPSHOT_METADATA_INVALID`/`COMPOSITION_STRUCTURAL_SAFETY_VIOLATION`/
+`COMPOSITION_DEPENDENCY_RESOLUTION_FAILED`/`COMPOSITION_PROMOTION_FAILED`/
+`COMPOSITION_PROMOTION_BINDING_MISMATCH`/`COMPOSITION_SNAPSHOT_BUILD_FAILED`/
+`COMPOSITION_SNAPSHOT_BINDING_MISMATCH`/`COMPOSITION_SNAPSHOT_LOAD_FAILED`/
+`COMPOSITION_LOAD_BINDING_MISMATCH`。Promotion内部の`PROMOTION_*`・Snapshot内部の`SNAPSHOT_*`を
+そのまま外部へ透過させない。pathはstatic allowlisted pathのみ、canonical/aliasを含めない。
+
+**Promotion → Snapshot接続の解決**: S23には「Promotion → Snapshot connection」という単独の
+未解決項目としては存在していなかったが（Checkpoint 3/4はそれぞれSnapshot buildを明示的に
+scope外としていたのみ）、本節により、Promotion結果からSnapshot Wrapperを構築しLoaderで検証する
+までの接続契約自体をCheckpoint 5で確定・解決した。ただし`snapshot_id`/`snapshot_version`の
+発番方式・chain monotonicity検証、Snapshot Activation Record、rollback、Dictionary Resolverは
+引き続き未解決のまま維持する（S23旧#10・#11・#12参照）。
+
 ---
 
 ## S7. Scope設計（初期実装の推奨）

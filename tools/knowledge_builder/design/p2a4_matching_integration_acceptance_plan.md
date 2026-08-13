@@ -317,3 +317,54 @@ Checkpoint 4-R1で追加した恒久検査。A-J全項目を今後も維持す�
 | R1-H | base PROJECT dictionaryに同一normalized canonical keyを持つACTIVE entryを2件作り、P2-A1 `mergeDictionaryLayersWithProvenance()`が選ぶ`selected_entry_ref_id`をPromotion側の独立取得と照合し、新aliasを追加した際にそのselected entryだけが更新されることを確認する |
 | R1-I | R1-Hのbase `entries[]`順序を逆転しても、P2-A1側`selected_entry_ref_id`・Promotionが更新するentry_id・output dictionary payload hash・Promotion Record identityがすべて同一であることを確認する（base array順依存禁止） |
 | R1-J | 既存M/N（single-entry既存canonical fixture）のregressionが維持されることを確認する |
+
+## S14. Promotion → Snapshot Composition検証項目（Checkpoint 5で新設）
+
+`private_dictionary_matching_integration_contract_0.1.md` S6.6で固定したComposition Input 0.1 /
+3段階binding gate契約を、`tools/knowledge_builder/verification/
+private_dictionary_promotion_snapshot_composition_core_verification.js`で検証する。最低限の
+case一覧（A-KK、実測・実装対象）。
+
+| # | 検証項目 |
+|---|---|
+| A | Initial end-to-end: base_snapshot=nullの有効Promotion Inputで、promotion→build→loadが全完走することを確認する |
+| B | Initial supersedes: `promotion_record.base_snapshot_id`/`snapshot_wrapper.supersedes`/`validated_snapshot.supersedes`がすべて`null`であることを確認する |
+| C | Update end-to-end: 有効base Snapshot付きPromotion Inputで、新Snapshotの生成+Loadが成功することを確認する |
+| D | Update supersedes Source of Truth: `snapshot_wrapper.supersedes === promotion_result.promotion_record.base_snapshot_id`、validatedも同一であることを確認する |
+| E | rollback_target fixed null: initial/updateとも`wrapper.rollback_target === null`かつ`validated.rollback_target === null`であることを確認する |
+| F | Payload hash four-way equality: `promotion_result.dictionary_payload_sha256`/`promotion_record.output_dictionary_payload_sha256`/`snapshot_wrapper.dictionary_payload_sha256`/`validated_snapshot.dictionary_payload_sha256`の完全一致を確認する |
+| G | Review identity continuity: Promotion/Wrapper/Validatedの`source_review_artifact_identity.sha256`が全一致することを確認する |
+| H | Promotion identity continuity: Promotion/Wrapper/Validatedの`promotion_record_identity.sha256`が全一致することを確認する |
+| I | source_commit continuity: Promotion/Wrapper/Validatedで全一致することを確認する |
+| J | conflict_state continuity: Promotion/Promotion Record/Wrapper/Validatedのunresolved countが整合することを確認する |
+| K | target dictionary identity: promotion recordのtarget_dictionary_id/versionが`dictionary_payload`のdictionary_id/versionと一致することを確認する |
+| L | Snapshot metadata: caller supplied snapshot_id/version/provenanceがwrapper/validatedへ同一で反映されることを確認する |
+| M | snapshot_version independent: dictionary version "1"でもsnapshot_version 7等を許容し、dictionary versionと同値強制していないことを確認する |
+| N | No auto identifiers: 同じcaller metadataなら決定的で、Compositionがrandom/clockを使用しないことを確認する |
+| O | Promotion failure sanitization: invalid Promotion Inputで外部errorが`COMPOSITION_PROMOTION_FAILED`のみであり、`PROMOTION_*`を直接漏らさないことを確認する |
+| P | Snapshot Builder failure sanitization: valid PromotionだがBuilderまで到達可能なinvalid snapshot metadata fixtureで`COMPOSITION_SNAPSHOT_BUILD_FAILED`へsanitizeされ、`SNAPSHOT_*`が直接漏洩しないことを確認する |
+| Q | Loader failure sanitization: vm等でSnapshot Builder出力をLoader前にdependency fault/tamperさせるfixtureで`COMPOSITION_SNAPSHOT_LOAD_FAILED`となり、partial success resultを返さないことを確認する |
+| R | Promotion binding mismatch: vm dependency stand-inでPromotion result内部のhash/identityを自己矛盾させ、Builderを呼ぶ前に`COMPOSITION_PROMOTION_BINDING_MISMATCH`となることを確認する |
+| S | Builder binding mismatch: Snapshot Builder stand-inがschema-validだがPromotionと異なるidentity/hashを返す場合、Loaderへ進む前に`COMPOSITION_SNAPSHOT_BINDING_MISMATCH`となることを確認する |
+| T | Loader binding mismatch: Loader stand-inがschema-valid風だが異なるidentityを返す場合、`COMPOSITION_LOAD_BINDING_MISMATCH`となることを確認する |
+| U | Atomic caller mutation: `const promise = compose(input)`直後await前にsnapshot_id/snapshot_version/provenance.generated_at/promotion_input decision/candidate termを変更しても、結果がcall開始時点captureだけを反映することを確認する |
+| V | Hostile composition root Proxy: getPrototypeOf/getOwnPropertyDescriptor/ownKeys trapがthrowしてもnative leakageが0であることを確認する |
+| W | Hostile snapshot_metadata Proxy: 同様にsanitized errorのみであることを確認する |
+| X | promotion_input opaque boundary: production sourceに`promotion_input.candidate_decisions`/`promotion_input.evaluation`等のsemantic dereferenceが存在しないことを静的に確認する |
+| Y | No direct P2-A1/id_hash dependency: production coreが`private_dictionary_learning_core.js`/`id_hash_utils.js`をrequire/importしないことを確認する |
+| Z | No I/O/UI/activation: fs/fetch/XHR/storage/console/UI importなし、Snapshot activation/project config/latest lookupが存在しないことを確認する |
+| AA | Deep freeze: return root/`promotion_result`/`snapshot_wrapper`/`validated_snapshot`が各既存core契約どおりfrozenであることを確認する |
+| BB | Input alias isolation: call完了後にcaller inputを変更してもresultが不変であることを確認する |
+| CC | Builder real implementation使用: 通常successテストでは実Checkpoint 3 Builderを使用することを確認する |
+| DD | Loader real implementation使用: 通常successテストでは実Loaderを使用することを確認する |
+| EE | Promotion real implementation使用: 通常successテストでは実Checkpoint 4 Promotion coreを使用することを確認する |
+| FF | Wrapper integrity real verification: 正常wrapperの`wrapper_integrity_sha256`がLoaderで通ることを確認する |
+| GG | Initial/update both PROJECT: `wrapper.scope`/`validated.scope`/`dictionary_payload.scope`がすべて`PROJECT`であることを確認する |
+| HH | No second hash implementation: production source内にSHA-256実装・`crypto.subtle.digest`・`createHash`等が追加されていないことを静的に確認する |
+| II | No Promotion Record rehash: `canonicalJson`/`hashParts`等を使って`promotion_record_identity`をComposition側で再計算していないことを確認する |
+| JJ | Old branch isolation: 作業完了後もremote`claude/private-dictionary-matching-integration-p2a4`が固定SHAのままであることを確認する |
+| KK | PR #15 isolation: PR #15のhead SHAが固定SHAのまま、`updated_at`が今回操作で変更されていないことを確認する |
+
+Checkpoint 5では上記A-KKをすべて実測・実装する。R/S/Tはvm sandboxによるdependency stand-in、
+A-N/CC/DD/EEは必ず実Checkpoint 3/4 coreを利用し、stand-in testだけでsuccessを証明しない
+（§34相当の原則）。
