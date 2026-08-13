@@ -737,6 +737,18 @@ ACCEPTされた新aliasがある場合のみ、既存ACTIVE entryの`aliases`を
 自身を理由にcanonical displayを置換しない。追加aliasも存在せずsemantic changeがゼロなら、その
 candidateはno-op。
 
+**既存ACTIVE canonical winnerのSource of Truth（Checkpoint 4-R1で確定）**: base PROJECT
+dictionaryの同一normalized canonical keyへ複数のACTIVE entryが対応しうる状況（本来生じるべき
+ではないが、base自体が別経路で構築された場合に備える）で、どのentryを「その正式canonical」として
+再利用するかは、Promotion core自身のwinner選択algorithm（scope priority・display ordinal
+tie-break・ACTIVE-only・conflict除外等）を独自実装しない。必ず
+`PrivateDictionaryLearningCore.createPrivateDictionaryLayerView(baseDictionaryPayload)` →
+`mergeDictionaryLayersWithProvenance([layerView])` を呼び出し、
+`provenance_index.canonical[normalizedKey].selected_entry_ref_id` が指すentryを、base
+dictionary entries配列から引き戻して再利用する。これはP2-A1自身の`effective_vocabulary`が
+その正規化keyへ解決する時と**完全に同一のentry**であり、base entries配列内の出現順序（走査順の
+「最後に見つかったもの」等）に依存しない。
+
 **新entry ID**: 新しいformal entryだけ、
 `entry_id = "pde-" + await KnowledgeIdHashUtils.id128("private-dictionary-promotion-entry-id-v1",
 [target_dictionary_id, candidate_id])`とする。term文字列をIDへ直接埋め込まない
@@ -901,9 +913,16 @@ prototype・cycle・sparse/hostile array・unknown field）はfail-closed。priv
 `PROMOTION_CANONICAL_COLLISION`/`PROMOTION_ALIAS_COLLISION`/`PROMOTION_DICTIONARY_CONFLICT`/
 `PROMOTION_ENTRY_ID_GENERATION_FAILED`/`PROMOTION_PAYLOAD_INVALID`/`PROMOTION_HASH_FAILED`/
 `PROMOTION_NO_CHANGES`/`PROMOTION_DEPENDENCY_RESOLUTION_FAILED`/
-`PROMOTION_STRUCTURAL_SAFETY_VIOLATION`。pathはallowlisted static field/indexのみ。
-canonical/aliasをpathへ入れない。Snapshot/P2-A1/id-hash dependencyのnative exceptionや内部code
-をそのまま外へ転送しない。
+`PROMOTION_STRUCTURAL_SAFETY_VIOLATION`/`PROMOTION_NORMALIZATION_FAILED`。pathはallowlisted
+static field/indexのみ。canonical/aliasをpathへ入れない。Snapshot/P2-A1/id-hash dependencyの
+native exceptionや内部codeをそのまま外へ転送しない。
+
+**`PROMOTION_NORMALIZATION_FAILED`（Checkpoint 4-R1で新設）**: `KnowledgeIdHashUtils.normalize()`
+（§S6.5.5のFormal normalization Source of Truth。materialization全体を通じてcanonical/alias
+key比較に使う）自身がthrow/reject/非string returnした場合に限り使用する専用code。この失敗は
+`PROMOTION_DEPENDENCY_RESOLUTION_FAILED`（モジュール解決自体の失敗専用、起動時のみ）とも
+`PROMOTION_HASH_FAILED`（review decision fingerprint / promotion record identityの
+canonicalJson→hashParts pipeline専用）とも意味が異なるため、両者と区別して一本化する。
 
 **Privacy**: Promotion Recordへ含めてよいのはopaque IDs/hashes/counts/schema・version/source
 commitのみ。canonical term・alias term・review note・reason note・evidence excerpt・filename・

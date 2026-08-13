@@ -300,3 +300,20 @@ verification script内のラベルと対応させる）。
 
 Checkpoint 4では上記A-AEをすべて実測・実装する（Checkpoint 1のS1-S11とは異なり、計画のみでは
 終わらせない）。
+
+### S13.1 Fail-closed / Existing-Winner恒久検査（Checkpoint 4-R1で追加）
+
+Checkpoint 4-R1で追加した恒久検査。A-J全項目を今後も維持する。
+
+| # | 検証項目 |
+|---|---|
+| R1-A | root getPrototypeOf hostile Proxy（`Error(secretMarker)`をthrow）→ sanitized errorのみ、secretMarker/native Error leakageが0であることを確認する |
+| R1-B | nested decision/evaluation objectのgetPrototypeOf trap → sanitized errorのみであることを確認する |
+| R1-C | 最初に到達するgetOwnPropertyDescriptor trap throw → sanitized errorのみであることを確認する |
+| R1-D | `KnowledgeIdHashUtils.normalize`がthrowする → native Error leakageが0、`PROMOTION_NORMALIZATION_FAILED`へsanitizeされることを確認する |
+| R1-E | `KnowledgeIdHashUtils.normalize`がreject（Promise-based異常系）する → leakageが0であることを確認する |
+| R1-F | `KnowledgeIdHashUtils.canonicalJson`がthrowする → leakageが0、`PROMOTION_HASH_FAILED`へsanitizeされることを確認する |
+| R1-G | 既存`hashParts`/`id128` sanitization（Checkpoint 4 テストY等）のregressionが維持されることを確認する |
+| R1-H | base PROJECT dictionaryに同一normalized canonical keyを持つACTIVE entryを2件作り、P2-A1 `mergeDictionaryLayersWithProvenance()`が選ぶ`selected_entry_ref_id`をPromotion側の独立取得と照合し、新aliasを追加した際にそのselected entryだけが更新されることを確認する |
+| R1-I | R1-Hのbase `entries[]`順序を逆転しても、P2-A1側`selected_entry_ref_id`・Promotionが更新するentry_id・output dictionary payload hash・Promotion Record identityがすべて同一であることを確認する（base array順依存禁止） |
+| R1-J | 既存M/N（single-entry既存canonical fixture）のregressionが維持されることを確認する |

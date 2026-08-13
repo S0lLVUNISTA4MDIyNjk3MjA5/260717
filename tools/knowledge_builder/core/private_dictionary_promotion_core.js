@@ -72,7 +72,7 @@
 
   const LearningCore = resolveDependency('./private_dictionary_learning_core.js', 'PrivateDictionaryLearningCore',
     ['validatePrivateDictionary', 'normalizePrivateDictionary', 'hashPrivateDictionaryCanonical',
-      'createPrivateDictionaryLayerView', 'detectDictionaryLookupConflicts']);
+      'createPrivateDictionaryLayerView', 'detectDictionaryLookupConflicts', 'mergeDictionaryLayersWithProvenance']);
   const SnapshotCore = resolveDependency('./private_dictionary_snapshot_core.js', 'PrivateDictionarySnapshotCore',
     ['loadDictionarySnapshotWrapper']);
   const IdHashUtils = resolveDependency('./id_hash_utils.js', 'KnowledgeIdHashUtils',
@@ -87,6 +87,50 @@
     } catch (err) {
       throw makePromotionError(dependencyFailureCode, '$');
     }
+  }
+
+  // R1-2: every KnowledgeIdHashUtils call this module makes (formal
+  // normalization, and the canonicalJson/hashParts pipeline behind the
+  // review-decision-fingerprint/promotion-record-identity hashes) is routed
+  // through one of these two wrappers - never called bare. An unexpected
+  // throw, rejection, or non-string return is sanitized to a single
+  // contract-fixed code per operation; the wrapper never copies any part of
+  // its input (a private canonical/alias term) into the thrown error.
+  //
+  // normalize() is §S6.5.5's Formal normalization Source of Truth, used
+  // throughout materialization (collision detection, existing-entry lookup,
+  // alias dedup) - a distinct operation from the review-decision-fingerprint/
+  // promotion-record-identity hash pipeline, so its failure is NOT reported
+  // as PROMOTION_HASH_FAILED (which is reserved for that hashParts/
+  // canonicalJson pipeline) nor as PROMOTION_DEPENDENCY_RESOLUTION_FAILED
+  // (reserved for module-level unavailability at load time, in
+  // resolveDependency() above) - it uses its own dedicated
+  // PROMOTION_NORMALIZATION_FAILED code, fixed in the design doc (S6.5.12).
+  async function safeNormalize(term) {
+    let result;
+    try {
+      result = await IdHashUtils.normalize(term);
+    } catch (err) {
+      throw makePromotionError('PROMOTION_NORMALIZATION_FAILED', '$');
+    }
+    if (typeof result !== 'string') throw makePromotionError('PROMOTION_NORMALIZATION_FAILED', '$');
+    return result;
+  }
+
+  // canonicalJson() is only ever used as the input-preparation step for the
+  // hashParts()-based review-decision-fingerprint/promotion-record-identity
+  // pipeline (§S6.5.9), so its failure shares PROMOTION_HASH_FAILED with
+  // that pipeline's own hashParts() failures (already sanitized via
+  // callDependencyAsync at the two call sites below).
+  function safeCanonicalJson(value) {
+    let result;
+    try {
+      result = IdHashUtils.canonicalJson(value);
+    } catch (err) {
+      throw makePromotionError('PROMOTION_HASH_FAILED', '$');
+    }
+    if (typeof result !== 'string') throw makePromotionError('PROMOTION_HASH_FAILED', '$');
+    return result;
   }
 
   // ---- §6/§27 formats ----
@@ -130,15 +174,64 @@
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
+  // ---- R1-1: single structural-primitive chokepoint. Every raw structural
+  // read this module performs on caller-owned (hostile-input-facing) data -
+  // Object.getPrototypeOf, Object.getOwnPropertyDescriptor, Reflect.ownKeys,
+  // Array.isArray - goes through exactly one of these four wrappers, never
+  // called bare. A Proxy whose trap throws for any of these operations must
+  // never leak a native Error: each wrapper catches unconditionally and
+  // returns the shared STRUCTURAL_READ_FAILED sentinel, which every caller
+  // treats identically to "the value did not have the expected shape" (fail-
+  // closed via the caller's own existing PROMOTION_STRUCTURAL_SAFETY_VIOLATION/
+  // PROMOTION_UNKNOWN_FIELD/PROMOTION_EVALUATION_INVALID path - never a new
+  // ad hoc error path). ----
+
+  const STRUCTURAL_READ_FAILED = Symbol('promotion-structural-read-failed');
+
+  function safeGetPrototypeOf(value) {
+    try { return Object.getPrototypeOf(value); } catch (err) { return STRUCTURAL_READ_FAILED; }
+  }
+  function safeOwnKeys(value) {
+    try { return Reflect.ownKeys(value); } catch (err) { return STRUCTURAL_READ_FAILED; }
+  }
+  function safeGetOwnPropertyDescriptor(container, key) {
+    try { return Object.getOwnPropertyDescriptor(container, key); } catch (err) { return STRUCTURAL_READ_FAILED; }
+  }
+  function safeIsArray(value) {
+    try { return Array.isArray(value); } catch (err) { return STRUCTURAL_READ_FAILED; }
+  }
+
+  // True only for a genuine, non-hostile plain object (not null, not an
+  // array, `Object.prototype` exactly) - every structural primitive used to
+  // determine this goes through the safe wrappers above, so a hostile
+  // `getPrototypeOf`/Array.isArray-triggering trap can never throw out of
+  // this check; it simply makes the value fail the check (treated the same
+  // as any other non-conforming shape).
+  function isSafePlainObject(value) {
+    if (typeof value !== 'object' || value === null) return false;
+    const isArr = safeIsArray(value);
+    if (isArr === STRUCTURAL_READ_FAILED || isArr) return false;
+    return safeGetPrototypeOf(value) === Object.prototype;
+  }
+  // True only for a genuine, non-hostile plain array (`Array.prototype` exactly).
+  function isSafePlainArray(value) {
+    const isArr = safeIsArray(value);
+    if (isArr === STRUCTURAL_READ_FAILED || !isArr) return false;
+    return safeGetPrototypeOf(value) === Array.prototype;
+  }
+
   // The ONE and ONLY read of `key` on `container`, for the entire lifetime of
-  // the call - a descriptor read never triggers a `get` trap (§26). Returns
+  // the call - a descriptor read never triggers a `get` trap (§26), and a
+  // hostile `getOwnPropertyDescriptor` trap that throws is caught by
+  // safeGetOwnPropertyDescriptor() above rather than propagating. Returns
   // `{ present, value }`; `present` is false for a missing, non-enumerable,
-  // or accessor property (a hostile accessor is treated as "absent", which
-  // downstream shape checks then reject as a normal missing-field error -
-  // never by invoking the accessor).
+  // accessor, or trap-throwing property (all treated identically as
+  // "absent", which downstream shape checks then reject as a normal
+  // missing-field error - never by invoking the accessor or leaking the
+  // trap's exception).
   function readOwnDataProperty(container, key) {
-    const desc = Object.getOwnPropertyDescriptor(container, key);
-    if (!desc || !desc.enumerable || !Object.prototype.hasOwnProperty.call(desc, 'value')) {
+    const desc = safeGetOwnPropertyDescriptor(container, key);
+    if (desc === STRUCTURAL_READ_FAILED || !desc || !desc.enumerable || !Object.prototype.hasOwnProperty.call(desc, 'value')) {
       return { present: false, value: undefined };
     }
     return { present: true, value: desc.value };
@@ -153,14 +246,12 @@
   // properties, accessor properties, and (for `strict`) any key outside
   // `allowedKeys`.
   function captureOwnedObject(value, path, allowedKeys, errors) {
-    if (!isPlainObjectRoot(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    if (!isSafePlainObject(value)) {
       errors.push(promotionError('PROMOTION_STRUCTURAL_SAFETY_VIOLATION', path));
       return null;
     }
-    let ownKeys;
-    try {
-      ownKeys = Reflect.ownKeys(value);
-    } catch (err) {
+    const ownKeys = safeOwnKeys(value);
+    if (ownKeys === STRUCTURAL_READ_FAILED) {
       errors.push(promotionError('PROMOTION_STRUCTURAL_SAFETY_VIOLATION', path));
       return null;
     }
@@ -187,19 +278,17 @@
   // JS array of the raw per-index values (NOT recursively cloned - callers
   // process each item their own way via captureOwnedObject/allowlist reads).
   function captureOwnedArray(value, path, errors) {
-    if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) {
+    if (!isSafePlainArray(value)) {
       errors.push(promotionError('PROMOTION_STRUCTURAL_SAFETY_VIOLATION', path));
       return null;
     }
-    let ownKeys;
-    try {
-      ownKeys = Reflect.ownKeys(value);
-    } catch (err) {
+    const ownKeys = safeOwnKeys(value);
+    if (ownKeys === STRUCTURAL_READ_FAILED) {
       errors.push(promotionError('PROMOTION_STRUCTURAL_SAFETY_VIOLATION', path));
       return null;
     }
-    const lengthDesc = Object.getOwnPropertyDescriptor(value, 'length');
-    if (!lengthDesc || typeof lengthDesc.value !== 'number' || !Number.isSafeInteger(lengthDesc.value) || lengthDesc.value < 0) {
+    const lengthDesc = safeGetOwnPropertyDescriptor(value, 'length');
+    if (lengthDesc === STRUCTURAL_READ_FAILED || !lengthDesc || typeof lengthDesc.value !== 'number' || !Number.isSafeInteger(lengthDesc.value) || lengthDesc.value < 0) {
       errors.push(promotionError('PROMOTION_STRUCTURAL_SAFETY_VIOLATION', path));
       return null;
     }
@@ -237,7 +326,7 @@
     return { source_document_id: obj.source_document_id, document_fingerprint: obj.document_fingerprint };
   }
 
-  function fingerprintSetKey(fp) { return `${fp.source_document_id} ${fp.document_fingerprint}`; }
+  function fingerprintSetKey(fp) { return `${fp.source_document_id} ${fp.document_fingerprint}`; }
 
   function captureFingerprintArray(raw, path, errors) {
     const arr = captureOwnedArray(raw, path, errors);
@@ -341,7 +430,7 @@
   // §26). Every read still goes through a single descriptor read. ----
 
   function captureEvaluationCandidate(raw, path, errors) {
-    if (!isPlainObjectRoot(raw) || Object.getPrototypeOf(raw) !== Object.prototype) {
+    if (!isSafePlainObject(raw)) {
       errors.push(promotionError('PROMOTION_EVALUATION_INVALID', path));
       return null;
     }
@@ -362,7 +451,7 @@
       errors.push(promotionError('PROMOTION_EVALUATION_INVALID', `${path}`));
       return null;
     }
-    if (!metricsR.present || !isPlainObjectRoot(metricsR.value) || Object.getPrototypeOf(metricsR.value) !== Object.prototype) {
+    if (!metricsR.present || !isSafePlainObject(metricsR.value)) {
       errors.push(promotionError('PROMOTION_EVALUATION_INVALID', `${path}.metrics`));
       return null;
     }
@@ -381,7 +470,7 @@
   }
 
   function captureEvaluationAliasCandidate(raw, path, errors) {
-    if (!isPlainObjectRoot(raw) || Object.getPrototypeOf(raw) !== Object.prototype) {
+    if (!isSafePlainObject(raw)) {
       errors.push(promotionError('PROMOTION_EVALUATION_INVALID', path));
       return null;
     }
@@ -413,7 +502,7 @@
   }
 
   function captureEvaluationConflict(raw, path, errors) {
-    if (!isPlainObjectRoot(raw) || Object.getPrototypeOf(raw) !== Object.prototype) {
+    if (!isSafePlainObject(raw)) {
       errors.push(promotionError('PROMOTION_EVALUATION_INVALID', path));
       return null;
     }
@@ -428,8 +517,14 @@
       errors.push(promotionError('PROMOTION_EVALUATION_INVALID', `${path}.alias_display`));
       return null;
     }
-    const idsArr = captureOwnedArray(idsR.present ? idsR.value : null, `${path}.conflicting_candidate_ids`, errors);
-    if (!idsArr) { errors.push(promotionError('PROMOTION_EVALUATION_INVALID', `${path}.conflicting_candidate_ids`)); return null; }
+    if (!idsR.present) {
+      errors.push(promotionError('PROMOTION_EVALUATION_INVALID', `${path}.conflicting_candidate_ids`));
+      return null;
+    }
+    // captureOwnedArray() already reports its own STRUCTURAL_SAFETY_VIOLATION
+    // on failure - never push a second, redundant error here.
+    const idsArr = captureOwnedArray(idsR.value, `${path}.conflicting_candidate_ids`, errors);
+    if (!idsArr) return null;
     const ids = [];
     for (const v of idsArr) {
       if (typeof v !== 'string' || v.length === 0) {
@@ -443,7 +538,7 @@
 
   function captureEvaluationSnapshot(raw) {
     const errors = [];
-    if (!isPlainObjectRoot(raw) || Object.getPrototypeOf(raw) !== Object.prototype) {
+    if (!isSafePlainObject(raw)) {
       return { errors: [promotionError('PROMOTION_EVALUATION_INVALID', '$.evaluation')], evaluation: null };
     }
     const svR = readOwnDataProperty(raw, 'schema_version');
@@ -522,13 +617,11 @@
 
   function captureRootSnapshot(input) {
     const errors = [];
-    if (!isPlainObjectRoot(input) || Object.getPrototypeOf(input) !== Object.prototype) {
+    if (!isSafePlainObject(input)) {
       return { errors: [promotionError('PROMOTION_ROOT_INVALID', '$')], snapshot: null };
     }
-    let ownKeys;
-    try {
-      ownKeys = Reflect.ownKeys(input);
-    } catch (err) {
+    const ownKeys = safeOwnKeys(input);
+    if (ownKeys === STRUCTURAL_READ_FAILED) {
       return { errors: [promotionError('PROMOTION_STRUCTURAL_SAFETY_VIOLATION', '$')], snapshot: null };
     }
     const raw = {};
@@ -558,7 +651,7 @@
     const conflictResolutions = captureConflictResolutionArray(raw.conflict_resolutions, '$.conflict_resolutions', errors);
     if (!conflictResolutions) return { errors, snapshot: null };
 
-    if (raw.base_snapshot !== null && !isPlainObjectRoot(raw.base_snapshot)) {
+    if (raw.base_snapshot !== null && !isSafePlainObject(raw.base_snapshot)) {
       return { errors: [promotionError('PROMOTION_BASE_SNAPSHOT_INVALID', '$.base_snapshot')], snapshot: null };
     }
 
@@ -718,12 +811,6 @@
 
   // ---- §S6.5.6/§S6.5.7 formal materialization ----
 
-  async function normalizeMany(strings) {
-    const out = [];
-    for (const s of strings) out.push(await IdHashUtils.normalize(s));
-    return out;
-  }
-
   function sortAliasesDeterministic(aliases, normalizedByDisplay) {
     return aliases.slice().sort((a, b) => {
       const ka = normalizedByDisplay.get(a), kb = normalizedByDisplay.get(b);
@@ -731,19 +818,44 @@
     });
   }
 
+  // R1-3: the existing-ACTIVE-canonical "winner" for a given normalized
+  // canonical key is never decided by Promotion core's own algorithm (no
+  // "last entry in the base array wins" or any other independent scope-
+  // priority/tie-break/ACTIVE-only/conflict-exclusion logic here). Instead
+  // this reuses P2-A1's OWN winner selection exactly as effective_vocabulary
+  // would compute it: build a single-layer PROJECT layer view from the base
+  // payload, run mergeDictionaryLayersWithProvenance() on it, and read back
+  // `provenance_index.canonical[normalizedKey].selected_entry_ref_id`. If
+  // the base dictionary happens to have more than one ACTIVE entry sharing a
+  // normalized canonical key, this is the exact same single entry P2-A1's
+  // own effective_vocabulary would resolve that key to - never a
+  // Promotion-core-invented alternative.
+  async function resolveExistingActiveCanonicalIndex(baseDictionaryPayload) {
+    const index = new Map();
+    if (!baseDictionaryPayload) return index;
+    const layerView = await callDependencyAsync(LearningCore.createPrivateDictionaryLayerView, LearningCore, [baseDictionaryPayload], 'PROMOTION_BASE_SNAPSHOT_INVALID');
+    const merged = await callDependencyAsync(LearningCore.mergeDictionaryLayersWithProvenance, LearningCore, [[layerView]], 'PROMOTION_BASE_SNAPSHOT_INVALID');
+    if (!merged || !merged.provenance_index || typeof merged.provenance_index.canonical !== 'object' || merged.provenance_index.canonical === null) {
+      throw makePromotionError('PROMOTION_BASE_SNAPSHOT_INVALID', '$.base_snapshot');
+    }
+    const entryById = new Map(baseDictionaryPayload.entries.map(e => [e.entry_id, e]));
+    for (const key of Object.keys(merged.provenance_index.canonical)) {
+      const info = merged.provenance_index.canonical[key];
+      const entry = info && entryById.get(info.selected_entry_ref_id);
+      if (!entry) throw makePromotionError('PROMOTION_BASE_SNAPSHOT_INVALID', '$.base_snapshot');
+      index.set(key, entry);
+    }
+    return index;
+  }
+
   async function materialize(snapshot, evaluation, eligibility, baseDictionaryPayload) {
     const { candidateEligible, aliasEligible, selectMapByConflictId } = eligibility;
 
-    // Existing ACTIVE entries index (canonical normalized key -> entry), and
-    // full set of existing normalized keys (canonical + alias) for
-    // collision detection.
     const existingEntries = baseDictionaryPayload ? baseDictionaryPayload.entries : [];
-    const existingActiveByCanonicalKey = new Map();
-    for (const e of existingEntries) {
-      if (e.status !== 'ACTIVE') continue;
-      const key = await IdHashUtils.normalize(e.canonical_term);
-      existingActiveByCanonicalKey.set(key, e);
-    }
+    // Source of Truth for "which existing ACTIVE entry does this normalized
+    // canonical key belong to" - P2-A1's own merge/provenance algorithm, per
+    // R1-3 (never Promotion core's own winner selection).
+    const existingActiveByCanonicalKey = await resolveExistingActiveCanonicalIndex(baseDictionaryPayload);
 
     // Accepted alias_candidates grouped by canonical_candidate_id.
     const acceptedAliasesByCanonicalId = new Map();
@@ -776,7 +888,7 @@
     for (const c of evaluation.candidates) {
       if (!candidateEligible.get(c.candidate_id)) continue;
       eligibleCandidateIds.push(c.candidate_id);
-      const key = await IdHashUtils.normalize(c.canonical_term);
+      const key = await safeNormalize(c.canonical_term);
       const existing = existingActiveByCanonicalKey.get(key);
       if (existing) {
         existingEntryCandidateIds.push(c.candidate_id);
@@ -832,16 +944,16 @@
     // Apply accepted aliases (regular + conflict-derived) to their target entry.
     for (const [candidateId, target] of targetByCandidateId) {
       const entry = outputEntriesById.get(target.entryId);
-      const canonicalKey = await IdHashUtils.normalize(entry.canonical_term);
+      const canonicalKey = await safeNormalize(entry.canonical_term);
       const existingKeys = new Set([canonicalKey]);
-      for (const al of entry.aliases) existingKeys.add(await IdHashUtils.normalize(al));
+      for (const al of entry.aliases) existingKeys.add(await safeNormalize(al));
 
       const candidates = [
         ...(acceptedAliasesByCanonicalId.get(candidateId) || []).map(x => ({ term: x.term, id: x.alias_candidate_id, kind: 'alias' })),
         ...(conflictAliasesByCandidateId.get(candidateId) || []).map(x => ({ term: x.term, id: null, kind: 'conflict' }))
       ];
       for (const item of candidates) {
-        const key = await IdHashUtils.normalize(item.term);
+        const key = await safeNormalize(item.term);
         if (existingKeys.has(key)) {
           if (item.kind === 'alias') noOpAliasCandidateIds.push(item.id);
           continue;
@@ -856,7 +968,7 @@
     const outputEntries = Array.from(outputEntriesById.values());
     for (const entry of outputEntries) {
       const normalizedByDisplay = new Map();
-      for (const al of entry.aliases) normalizedByDisplay.set(al, await IdHashUtils.normalize(al));
+      for (const al of entry.aliases) normalizedByDisplay.set(al, await safeNormalize(al));
       entry.aliases = sortAliasesDeterministic(entry.aliases, normalizedByDisplay);
     }
     outputEntries.sort((a, b) => ordinalCompare(a.entry_id, b.entry_id));
@@ -917,14 +1029,14 @@
       alias_decisions: canonicalAliasDecisions(snapshot.alias_decisions),
       conflict_resolutions: canonicalConflictResolutions(snapshot.conflict_resolutions)
     };
-    const canonical = IdHashUtils.canonicalJson(projection);
+    const canonical = safeCanonicalJson(projection);
     const fingerprint = await callDependencyAsync(IdHashUtils.hashParts, IdHashUtils, ['private-dictionary-promotion-review-decision-v1', [canonical]], 'PROMOTION_HASH_FAILED');
     if (typeof fingerprint !== 'string' || !HEX64_RE.test(fingerprint)) throw makePromotionError('PROMOTION_HASH_FAILED', '$');
     return fingerprint;
   }
 
   async function computePromotionRecordIdentity(promotionRecord) {
-    const canonical = IdHashUtils.canonicalJson(promotionRecord);
+    const canonical = safeCanonicalJson(promotionRecord);
     const identity = await callDependencyAsync(IdHashUtils.hashParts, IdHashUtils, ['private-dictionary-promotion-record-v1', [canonical]], 'PROMOTION_HASH_FAILED');
     if (typeof identity !== 'string' || !HEX64_RE.test(identity)) throw makePromotionError('PROMOTION_HASH_FAILED', '$');
     return identity;

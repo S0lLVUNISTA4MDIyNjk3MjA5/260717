@@ -16,13 +16,16 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const vm = require('vm');
 
 const PROMOTION_CORE_PATH = path.join(__dirname, '..', 'core', 'private_dictionary_promotion_core.js');
 const LEARNING_CORE_PATH = path.join(__dirname, '..', 'core', 'private_dictionary_learning_core.js');
 const SNAPSHOT_CORE_PATH = path.join(__dirname, '..', 'core', 'private_dictionary_snapshot_core.js');
+const ID_HASH_UTILS_PATH = path.join(__dirname, '..', 'core', 'id_hash_utils.js');
 const Promotion = require(PROMOTION_CORE_PATH);
 const LearningCore = require(LEARNING_CORE_PATH);
 const Snapshot = require(SNAPSHOT_CORE_PATH);
+const IdHashUtils = require(ID_HASH_UTILS_PATH);
 
 let failures = 0;
 function assert(cond, message) {
@@ -50,6 +53,88 @@ function assertSanitizedError(err, message) {
     Object.keys(err).sort().join(',') === 'code,path' &&
     typeof err.code === 'string' && typeof err.path === 'string';
   assert(ok, message);
+}
+// Cross-realm-safe variant for errors thrown inside a vm sandbox: such an
+// error's [[Prototype]] belongs to the SANDBOX's own Object.prototype, a
+// different object from this script's Object.prototype, so identity
+// comparison is meaningless there (mirrors the same precedent already used
+// in private_dictionary_snapshot_core_verification.js's Section T).
+function assertSanitizedErrorCrossRealm(err, message) {
+  const ok = !!err && typeof err === 'object' &&
+    Object.prototype.toString.call(err) === '[object Object]' &&
+    Object.keys(err).sort().join(',') === 'code,path' &&
+    typeof err.code === 'string' && typeof err.path === 'string';
+  assert(ok, message);
+}
+
+// ---- R1-2 vm-sandboxed dependency-failure fixture infrastructure ----
+//
+// KnowledgeIdHashUtils is resolved once, at module-load time, into a frozen
+// `const IdHashUtils` closed over by every function in
+// private_dictionary_promotion_core.js - it cannot be monkey-patched from
+// outside after the fact. To exercise "normalize()/canonicalJson() itself
+// throws/rejects at CALL time" (as opposed to Section T-style "the
+// dependency is missing/malformed at LOAD time"), the module source is
+// re-executed fresh inside an isolated vm context whose `require('./id_hash_
+// utils.js')` returns a hostile stand-in with only the specific function
+// under test overridden - `normalize`/`hashParts`/`id128` otherwise stay the
+// REAL implementations so materialization can proceed far enough to
+// actually invoke the function being tested.
+//
+// A vm-sandboxed module builds its own object literals against the
+// SANDBOX's own Object.prototype, which is a different object from this
+// script's (or private_dictionary_learning_core.js's) Object.prototype - so
+// two adaptations are required for a full, realistic run:
+//   1. the Promotion Input passed in must be constructed via the sandbox's
+//      OWN JSON.parse (toSandboxValue()), not a plain object literal built
+//      in this (outer) realm, or the module's own hostile-input structural-
+//      safety checks would reject it as "wrong realm" before ever reaching
+//      the function under test;
+//   2. the REAL, already-loaded LearningCore passed in as the sandboxed
+//      module's `./private_dictionary_learning_core.js` dependency must
+//      have its consumed functions wrapped in a JSON round-trip adapter
+//      (crossRealmLearningCore()), so a materialized dictionary_payload
+//      built inside the sandbox is re-homed to THIS realm before reaching
+//      LearningCore's own (outer-realm) structural-safety checks, and any
+//      return value is re-homed back to the sandbox realm before the
+//      sandboxed code inspects it further.
+function loadPromotionCoreInSandbox(customRequire) {
+  const sandbox = {};
+  sandbox.globalThis = sandbox;
+  sandbox.module = { exports: {} };
+  sandbox.require = customRequire;
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(PROMOTION_CORE_PATH, 'utf8'), sandbox, { filename: 'private_dictionary_promotion_core.js (sandbox)' });
+  return sandbox;
+}
+function toSandboxValue(sandbox, value) {
+  sandbox.__fixture_json__ = JSON.stringify(value);
+  const result = vm.runInContext('JSON.parse(globalThis.__fixture_json__)', sandbox);
+  delete sandbox.__fixture_json__;
+  return result;
+}
+function jsonRoundTrip(value) { return value === undefined ? value : JSON.parse(JSON.stringify(value)); }
+function crossRealmLearningCore() {
+  const fnNames = ['validatePrivateDictionary', 'normalizePrivateDictionary', 'hashPrivateDictionaryCanonical', 'createPrivateDictionaryLayerView', 'detectDictionaryLookupConflicts', 'mergeDictionaryLayersWithProvenance'];
+  const out = Object.assign({}, LearningCore);
+  for (const name of fnNames) {
+    const real = LearningCore[name];
+    out[name] = function(...args) {
+      const adapted = args.map(jsonRoundTrip);
+      const result = real.apply(LearningCore, adapted);
+      if (result && typeof result.then === 'function') return result.then(jsonRoundTrip);
+      return jsonRoundTrip(result);
+    };
+  }
+  return out;
+}
+function sandboxRequireStub(hostileIdHashUtils) {
+  return function(mod) {
+    if (mod.indexOf('id_hash_utils') !== -1) return hostileIdHashUtils;
+    if (mod.indexOf('private_dictionary_learning_core') !== -1) return crossRealmLearningCore();
+    if (mod.indexOf('private_dictionary_snapshot_core') !== -1) return Snapshot;
+    throw new Error('unexpected require() in sandbox: ' + mod);
+  };
 }
 
 // ---- synthetic fixture helpers (no real dictionary/customer/product data) ----
@@ -860,6 +945,226 @@ async function main() {
 
     assert(resultA.dictionary_payload_sha256 === resultB.dictionary_payload_sha256, 'AD reversing candidate_decisions/alias_decisions array order does not change dictionary_payload hash');
     assert(resultA.promotion_record_identity.sha256 === resultB.promotion_record_identity.sha256, 'AD reversing input array order does not change promotion_record_identity');
+  }
+
+  // ==========================================================================
+  // P2-A4 Checkpoint 4-R1: Promotion Fail-Closed / Existing-Winner Remediation
+  // ==========================================================================
+
+  // ---- R1-A. root getPrototypeOf hostile Proxy ----
+  {
+    const secretMarker = 'SECRET_R1_A_ROOT_GETPROTOTYPEOF';
+    const input = makeSimpleInput({});
+    const hostileRoot = new Proxy(input, {
+      getPrototypeOf(target) { throw new Error(secretMarker); }
+    });
+    let caught = null;
+    try { await Promotion.promoteReviewedCandidatesToProjectDictionary(hostileRoot); } catch (err) { caught = err; }
+    assert(!!caught, 'R1-A root getPrototypeOf hostile Proxy is rejected (not silently accepted)');
+    assertSanitizedError(caught, 'R1-A root getPrototypeOf hostile Proxy: thrown error is sanitized {code,path}');
+    assert(!JSON.stringify(caught).includes(secretMarker), 'R1-A root getPrototypeOf hostile Proxy: secretMarker never leaks');
+  }
+
+  // ---- R1-B. nested decision/evaluation object getPrototypeOf hostile Proxy ----
+  {
+    const secretMarkerEval = 'SECRET_R1_B_EVALUATION_GETPROTOTYPEOF';
+    const input = makeSimpleInput({});
+    const hostileEvaluation = new Proxy(input.evaluation, {
+      getPrototypeOf(target) { throw new Error(secretMarkerEval); }
+    });
+    const attack = Object.assign({}, input, { evaluation: hostileEvaluation });
+    let caught = null;
+    try { await Promotion.promoteReviewedCandidatesToProjectDictionary(attack); } catch (err) { caught = err; }
+    assert(!!caught, 'R1-B nested evaluation getPrototypeOf hostile Proxy is rejected');
+    assertSanitizedError(caught, 'R1-B nested evaluation getPrototypeOf hostile Proxy: thrown error is sanitized');
+    assert(!JSON.stringify(caught).includes(secretMarkerEval), 'R1-B nested evaluation getPrototypeOf hostile Proxy: secretMarker never leaks');
+
+    const secretMarkerDecision = 'SECRET_R1_B_DECISION_GETPROTOTYPEOF';
+    const input2 = makeSimpleInput({});
+    const hostileDecision = new Proxy(input2.candidate_decisions[0], {
+      getPrototypeOf(target) { throw new Error(secretMarkerDecision); }
+    });
+    const attack2 = Object.assign({}, input2, { candidate_decisions: [hostileDecision] });
+    let caught2 = null;
+    try { await Promotion.promoteReviewedCandidatesToProjectDictionary(attack2); } catch (err) { caught2 = err; }
+    assert(!!caught2, 'R1-B nested candidate_decisions[0] getPrototypeOf hostile Proxy is rejected');
+    assertSanitizedError(caught2, 'R1-B nested decision getPrototypeOf hostile Proxy: thrown error is sanitized');
+    assert(!JSON.stringify(caught2).includes(secretMarkerDecision), 'R1-B nested decision getPrototypeOf hostile Proxy: secretMarker never leaks');
+  }
+
+  // ---- R1-C. first getOwnPropertyDescriptor trap throw ----
+  {
+    const secretMarker = 'SECRET_R1_C_GETOWNPROPERTYDESCRIPTOR';
+    const input = makeSimpleInput({});
+    let callCount = 0;
+    const hostileRoot = new Proxy(input, {
+      getOwnPropertyDescriptor(target, key) {
+        callCount++;
+        throw new Error(secretMarker);
+      }
+    });
+    let caught = null;
+    try { await Promotion.promoteReviewedCandidatesToProjectDictionary(hostileRoot); } catch (err) { caught = err; }
+    assert(callCount >= 1, 'R1-C setup: the getOwnPropertyDescriptor trap was actually invoked');
+    assert(!!caught, 'R1-C first getOwnPropertyDescriptor trap throw is rejected');
+    assertSanitizedError(caught, 'R1-C getOwnPropertyDescriptor hostile Proxy: thrown error is sanitized');
+    assert(!JSON.stringify(caught).includes(secretMarker), 'R1-C getOwnPropertyDescriptor hostile Proxy: secretMarker never leaks');
+  }
+
+  // ---- shared fixture for R1-D/E/F: a minimal valid single-candidate input,
+  // reconstructed inside each sandbox via toSandboxValue(). ----
+  function makeVmFixtureInput() {
+    const candidateId = makeId('pdc');
+    const evaluation = makeEvaluation({ candidates: [makeEvaluationCandidate({ candidate_id: candidateId })] });
+    return {
+      schema_version: 'private-dictionary-promotion-input/0.1',
+      evaluation,
+      review_binding: makeReviewBinding(evaluation, {}),
+      candidate_decisions: [{ candidate_id: candidateId, decision: 'ACCEPT' }],
+      alias_decisions: [], conflict_resolutions: [], base_snapshot: null,
+      target_dictionary_id: makeId('pdict'), target_version: '1',
+      source_review_artifact_identity: { sha256: 'b'.repeat(64) }, source_commit: 'c'.repeat(40)
+    };
+  }
+
+  // ---- R1-D. KnowledgeIdHashUtils.normalize() throws ----
+  {
+    const secretMarker = 'SECRET_R1_D_NORMALIZE_THROW';
+    const hostileIdHashUtils = Object.assign({}, IdHashUtils, {
+      normalize: () => { throw new Error(secretMarker); }
+    });
+    const sandbox = loadPromotionCoreInSandbox(sandboxRequireStub(hostileIdHashUtils));
+    const realmInput = toSandboxValue(sandbox, makeVmFixtureInput());
+    let caught = null;
+    try { await sandbox.module.exports.promoteReviewedCandidatesToProjectDictionary(realmInput); } catch (err) { caught = err; }
+    assert(!!caught, 'R1-D normalize() throw is caught (not left as an unhandled rejection)');
+    assert(caught && caught.code === 'PROMOTION_NORMALIZATION_FAILED', 'R1-D normalize() throw is sanitized to PROMOTION_NORMALIZATION_FAILED');
+    assertSanitizedErrorCrossRealm(caught, 'R1-D normalize() throw: thrown error is the sanitized {code,path} shape');
+    assert(!String((caught && caught.message) || '').includes(secretMarker) && !String((caught && caught.stack) || '').includes(secretMarker), 'R1-D normalize() throw: native Error.message/.stack never leaks');
+  }
+
+  // ---- R1-E. KnowledgeIdHashUtils.normalize() rejects ----
+  {
+    const secretMarker = 'SECRET_R1_E_NORMALIZE_REJECT';
+    const hostileIdHashUtils = Object.assign({}, IdHashUtils, {
+      normalize: () => Promise.reject(new Error(secretMarker))
+    });
+    const sandbox = loadPromotionCoreInSandbox(sandboxRequireStub(hostileIdHashUtils));
+    const realmInput = toSandboxValue(sandbox, makeVmFixtureInput());
+    let caught = null;
+    try { await sandbox.module.exports.promoteReviewedCandidatesToProjectDictionary(realmInput); } catch (err) { caught = err; }
+    assert(!!caught, 'R1-E normalize() rejection is caught (not left as an unhandled rejection)');
+    assert(caught && caught.code === 'PROMOTION_NORMALIZATION_FAILED', 'R1-E normalize() rejection is sanitized to PROMOTION_NORMALIZATION_FAILED');
+    assertSanitizedErrorCrossRealm(caught, 'R1-E normalize() rejection: thrown error is the sanitized {code,path} shape');
+    assert(!String((caught && caught.message) || '').includes(secretMarker), 'R1-E normalize() rejection: native Error.message never leaks');
+  }
+
+  // ---- R1-F. KnowledgeIdHashUtils.canonicalJson() throws ----
+  {
+    const secretMarker = 'SECRET_R1_F_CANONICALJSON_THROW';
+    const hostileIdHashUtils = Object.assign({}, IdHashUtils, {
+      canonicalJson: () => { throw new Error(secretMarker); }
+    });
+    const sandbox = loadPromotionCoreInSandbox(sandboxRequireStub(hostileIdHashUtils));
+    const realmInput = toSandboxValue(sandbox, makeVmFixtureInput());
+    let caught = null;
+    try { await sandbox.module.exports.promoteReviewedCandidatesToProjectDictionary(realmInput); } catch (err) { caught = err; }
+    assert(!!caught, 'R1-F canonicalJson() throw is caught (not left as an unhandled rejection)');
+    assert(caught && caught.code === 'PROMOTION_HASH_FAILED', 'R1-F canonicalJson() throw is sanitized to PROMOTION_HASH_FAILED');
+    assertSanitizedErrorCrossRealm(caught, 'R1-F canonicalJson() throw: thrown error is the sanitized {code,path} shape');
+    assert(!String((caught && caught.message) || '').includes(secretMarker) && !String((caught && caught.stack) || '').includes(secretMarker), 'R1-F canonicalJson() throw: native Error.message/.stack never leaks');
+  }
+
+  // ---- R1-G. existing hashParts/id128 sanitization regression (already
+  // covered end-to-end by Checkpoint 4's Y/AA; re-asserted here by name to
+  // keep the R1 checklist self-contained). ----
+  {
+    const rawSource = fs.readFileSync(PROMOTION_CORE_PATH, 'utf8');
+    assert(rawSource.includes("'PROMOTION_ENTRY_ID_GENERATION_FAILED'"), 'R1-G source still sanitizes id128() (entry ID generation) failures to PROMOTION_ENTRY_ID_GENERATION_FAILED');
+    assert(rawSource.includes("callDependencyAsync(IdHashUtils.hashParts"), 'R1-G source still routes every hashParts() call through the sanitizing callDependencyAsync() wrapper');
+  }
+
+  // ---- R1-H/R1-I. Existing-ACTIVE-canonical winner Source of Truth: base
+  // PROJECT dictionary with 2 ACTIVE entries sharing one normalized
+  // canonical key (differing only in collapsible internal whitespace, so
+  // the winner is content-determined, not insertion-order-determined).
+  // R1-H verifies Promotion updates exactly the entry P2-A1's own
+  // mergeDictionaryLayersWithProvenance() independently selects; R1-I
+  // reverses the base entries[] array and requires the identical winner,
+  // updated entry_id, output dictionary payload hash, and Promotion Record
+  // identity. ----
+  {
+    const dictId = makeId('pdict');
+    const entryA = makeBaseEntry({ canonical_term: 'Duplicate Canonical Term H', aliases: ['Old Alias HA'] });
+    const entryB = makeBaseEntry({ canonical_term: 'Duplicate  Canonical Term H', aliases: ['Old Alias HB'] }); // extra internal space -> same normalized key, different display
+    const candidateId = makeId('pdc');
+    const aliasCandidateId = makeId('pda');
+    const newAliasTerm = 'Brand New Alias H';
+    const sharedFingerprints = [makeFingerprint({})];
+    // Fixed so that ONLY base entries[] order varies between the two
+    // runPromotion() calls below - buildRealSnapshotWrapper() defaults
+    // snapshot_id to a fresh random value per call otherwise, which would
+    // make promotion_record.base_snapshot_id (and hence
+    // promotion_record_identity) differ for a reason unrelated to R1-I.
+    const sharedSnapshotId = 'dsnap-' + randHex(16);
+
+    async function independentWinner(entriesOrder) {
+      const basePayload = makeBaseDictionaryPayload(dictId, entriesOrder);
+      const layerView = await LearningCore.createPrivateDictionaryLayerView(basePayload);
+      const merged = await LearningCore.mergeDictionaryLayersWithProvenance([layerView]);
+      const keys = Object.keys(merged.provenance_index.canonical);
+      return merged.provenance_index.canonical[keys[0]].selected_entry_ref_id;
+    }
+    async function runPromotion(entriesOrder) {
+      const basePayload = makeBaseDictionaryPayload(dictId, entriesOrder);
+      const baseSnapshot = await buildRealSnapshotWrapper(basePayload, { snapshot_id: sharedSnapshotId });
+      const candidate = makeEvaluationCandidate({ candidate_id: candidateId, canonical_term: 'Duplicate Canonical Term H' });
+      const alias = { alias_candidate_id: aliasCandidateId, canonical_candidate_id: candidateId, alias_term: newAliasTerm, scope: 'SESSION', status: 'PROBATION', rule_ids: [], evidence_refs: [] };
+      const input = makeInput({
+        candidates: [candidate], aliasCandidates: [alias], baseSnapshot, targetDictionaryId: dictId, targetVersion: '2',
+        sourceFingerprints: clone(sharedFingerprints)
+      });
+      return Promotion.promoteReviewedCandidatesToProjectDictionary(input);
+    }
+
+    const winnerOriginal = await independentWinner([entryA, entryB]);
+    const winnerReversed = await independentWinner([entryB, entryA]);
+    assert(winnerOriginal === winnerReversed, 'R1-I independent P2-A1 oracle: selected_entry_ref_id is identical regardless of base entries[] order');
+    assert(winnerOriginal === entryA.entry_id || winnerOriginal === entryB.entry_id, 'R1-H setup: the independently-obtained winner is one of the two duplicate-canonical base entries');
+
+    const resultOriginal = await runPromotion([entryA, entryB]);
+    assert(resultOriginal.dictionary_payload.entries.length === 2, 'R1-H output retains both pre-existing duplicate-canonical entries (no merge/dedup by Promotion core)');
+    const updatedOriginal = resultOriginal.dictionary_payload.entries.find(e => e.entry_id === winnerOriginal);
+    assert(!!updatedOriginal && updatedOriginal.aliases.indexOf(newAliasTerm) !== -1, 'R1-H Promotion updates exactly the P2-A1-selected winner entry with the new alias');
+    const otherOriginal = resultOriginal.dictionary_payload.entries.find(e => e.entry_id !== winnerOriginal);
+    assert(!!otherOriginal && otherOriginal.aliases.indexOf(newAliasTerm) === -1, 'R1-H the non-selected duplicate-canonical entry is left untouched');
+
+    const resultReversed = await runPromotion([entryB, entryA]);
+    const updatedReversed = resultReversed.dictionary_payload.entries.find(e => e.entry_id === winnerOriginal);
+    assert(!!updatedReversed && updatedReversed.aliases.indexOf(newAliasTerm) !== -1, 'R1-I Promotion updates the identical entry_id regardless of base entries[] order');
+    assert(resultOriginal.dictionary_payload_sha256 === resultReversed.dictionary_payload_sha256, 'R1-I output dictionary payload hash is identical regardless of base entries[] order');
+    assert(resultOriginal.promotion_record_identity.sha256 === resultReversed.promotion_record_identity.sha256, 'R1-I Promotion Record identity is identical regardless of base entries[] order');
+  }
+
+  // ---- R1-J. existing M/N single-entry fixture regression (re-run inline;
+  // the full M/N blocks above already exercise this - this is an explicit
+  // marker so the R1 checklist stays self-contained). ----
+  {
+    const canonicalTerm = 'Existing Canonical Term R1J';
+    const existingEntry = makeBaseEntry({ canonical_term: canonicalTerm, aliases: ['Old Alias R1J'] });
+    const dictId = makeId('pdict');
+    const basePayload = makeBaseDictionaryPayload(dictId, [existingEntry]);
+    const baseSnapshot = await buildRealSnapshotWrapper(basePayload, {});
+    const candidateId = makeId('pdc');
+    const alias = makeEvaluationAlias(candidateId, { alias_term: 'New Alias R1J' });
+    const input = makeInput({
+      candidates: [makeEvaluationCandidate({ candidate_id: candidateId, canonical_term: canonicalTerm })],
+      aliasCandidates: [alias], baseSnapshot, targetDictionaryId: dictId, targetVersion: '2'
+    });
+    const result = await Promotion.promoteReviewedCandidatesToProjectDictionary(input);
+    assert(result.dictionary_payload.entries.length === 1, 'R1-J single-entry existing-canonical fixture: still no duplicate entry created');
+    assert(result.dictionary_payload.entries[0].entry_id === existingEntry.entry_id, 'R1-J single-entry existing-canonical fixture: entry_id still preserved via the P2-A1-backed winner index');
+    assert(result.dictionary_payload.entries[0].aliases.indexOf('Old Alias R1J') !== -1 && result.dictionary_payload.entries[0].aliases.indexOf('New Alias R1J') !== -1, 'R1-J single-entry existing-canonical fixture: old and new aliases both present');
   }
 
   // ==========================================================================
