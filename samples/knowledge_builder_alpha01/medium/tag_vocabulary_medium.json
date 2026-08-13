@@ -1,0 +1,18 @@
+{
+  "schema": "trace-tag-vocabulary/1.0",
+  "vocabulary_id": "knowledge-builder-medium-sample",
+  "vocabulary_version": "1.0.0",
+  "allowed_tags": [
+    "温度",
+    "圧力",
+    "電源",
+    "冷房能力",
+    "騒音",
+    "質量",
+    "寸法",
+    "保守",
+    "安全",
+    "試験"
+  ],
+  "aliases": {}
+}

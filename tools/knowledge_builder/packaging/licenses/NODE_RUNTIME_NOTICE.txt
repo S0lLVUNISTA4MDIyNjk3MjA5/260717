@@ -1,0 +1,42 @@
+P2-A3 Private Dictionary Candidate Review UI - Bundled Node.js Runtime Notice
+==============================================================================
+
+This package bundles an unmodified official Node.js runtime binary so that
+the review UI can run on Windows without requiring a separate Node.js
+installation.
+
+  Component:        Node.js
+  Version bundled:   v24.14.0
+  Upstream project:  https://nodejs.org/
+  Official download: https://nodejs.org/dist/v24.14.0/
+  License:           MIT-style; see NODE_LICENSE.txt in this same directory
+                      for the full, unmodified upstream license text (this
+                      text is the license shipped with the v24.14.0 source
+                      release, copied verbatim and not edited in any way).
+
+  Architectures included in this package:
+    runtime/win-x64/node.exe
+    runtime/win-arm64/node.exe
+
+  Integrity:
+    Each bundled node.exe is the official binary published by the Node.js
+    project for v24.14.0, verified by this package's build process against
+    the SHA-256 checksums published by the Node.js project for that release
+    before being included in this package. Neither binary has been patched,
+    recompiled, or otherwise modified.
+
+  What this runtime is used for:
+    start_review_ui.cmd launches "node app/server.js" using the bundled
+    binary matching the machine's detected architecture (win-x64 or
+    win-arm64). That server process serves the review UI's static files
+    (HTML/CSS/JS) to the machine's own browser over 127.0.0.1 only; it does
+    not open any network connection beyond the local machine. See the
+    package README (README_JA.md / README_JA.html) for the full privacy
+    and network-boundary description of this tool.
+
+  Node.js is a trademark of the OpenJS Foundation. This package is not an
+  official Node.js distribution and is not affiliated with, endorsed by, or
+  sponsored by the OpenJS Foundation or the Node.js project; it merely
+  redistributes an unmodified official binary alongside this tool's own
+  application code, as permitted by the Node.js license reproduced in
+  NODE_LICENSE.txt.
