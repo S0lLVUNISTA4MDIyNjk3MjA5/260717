@@ -276,6 +276,25 @@
     if (a !== b) throw makeCompositionError(code, path);
   }
 
+  // ---- R1-2/R1-3 (§S6.6 Checkpoint 5-R1): a binding gate (and, for the
+  // Promotion gate, the immediately-following Builder input construction -
+  // §4) must never let a native TypeError/Error/Proxy-trap-throw escape,
+  // however malformed or hostile the upstream dependency result is. `fn` is
+  // run inside this boundary; if it throws an already-sanitized
+  // {code, path} error carrying the SAME `code` this boundary owns, that
+  // error (with its more specific `path`) is preserved as-is; any other
+  // throw (native TypeError from a null/undefined dereference, a Proxy trap
+  // throwing an arbitrary Error, etc.) is replaced with a fresh sanitized
+  // error at `fallbackPath` - never the original message/stack/cause. ----
+  function runFailClosedBoundary(fn, code, fallbackPath) {
+    try {
+      return fn();
+    } catch (err) {
+      if (err && typeof err === 'object' && err.code === code && typeof err.path === 'string') throw err;
+      throw makeCompositionError(code, fallbackPath);
+    }
+  }
+
   function checkPromotionBinding(promotionResult) {
     const code = 'COMPOSITION_PROMOTION_BINDING_MISMATCH';
     checkEqual(promotionResult.dictionary_payload_sha256, promotionResult.promotion_record.output_dictionary_payload_sha256, code, '$.promotion_result.dictionary_payload_sha256');
@@ -333,8 +352,17 @@
     // returns to the caller, protecting `promotion_input` from a
     // mutate-after-call-start attack exactly like a direct
     // promoteReviewedCandidatesToProjectDictionary() caller would be
-    // protected.
-    const promotionPromise = PromotionCore.promoteReviewedCandidatesToProjectDictionary(snapshot.promotionInputRaw);
+    // protected. R1-1 (§S6.6 Checkpoint 5-R1): the call itself can throw
+    // synchronously (a hostile/malformed dependency need not return a
+    // rejected Promise at all) - that throw must not leak a native Error,
+    // so it is sanitized here, on the same call-start line, still strictly
+    // before this function's own first `await`.
+    let promotionPromise;
+    try {
+      promotionPromise = PromotionCore.promoteReviewedCandidatesToProjectDictionary(snapshot.promotionInputRaw);
+    } catch (err) {
+      throw makeCompositionError('COMPOSITION_PROMOTION_FAILED', '$.promotion_input');
+    }
 
     let promotionResult;
     try {
@@ -343,21 +371,31 @@
       throw makeCompositionError('COMPOSITION_PROMOTION_FAILED', '$.promotion_input');
     }
 
-    // §11: Promotion result consistency gate - BEFORE calling the Builder.
-    checkPromotionBinding(promotionResult);
-
-    const builderInput = {
-      dictionary_payload: promotionResult.dictionary_payload,
-      snapshot_id: snapshot.snapshotMetadata.snapshot_id,
-      snapshot_version: snapshot.snapshotMetadata.snapshot_version,
-      provenance: snapshot.snapshotMetadata.provenance,
-      source_review_artifact_identity: promotionResult.source_review_artifact_identity,
-      promotion_record_identity: promotionResult.promotion_record_identity,
-      source_commit: promotionResult.source_commit,
-      conflict_state: promotionResult.conflict_state,
-      supersedes: promotionResult.promotion_record.base_snapshot_id,
-      rollback_target: null
-    };
+    // §11 + R1-2/R1-3: Promotion result consistency gate, BEFORE calling the
+    // Builder, combined with the Builder input construction that
+    // immediately follows it into one Composition-controlled fail-closed
+    // boundary (§4) - a malformed/hostile promotionResult (null, missing
+    // promotion_record, missing nested identity object, a Proxy get trap
+    // that throws, ...) can never leak a native TypeError/Error out of
+    // either step; it is always converted to COMPOSITION_PROMOTION_BINDING_
+    // MISMATCH. Promotion/Snapshot result shapes are still never
+    // re-implemented as a second schema validator here - only equality
+    // comparisons and plain reference reads.
+    const builderInput = runFailClosedBoundary(() => {
+      checkPromotionBinding(promotionResult);
+      return {
+        dictionary_payload: promotionResult.dictionary_payload,
+        snapshot_id: snapshot.snapshotMetadata.snapshot_id,
+        snapshot_version: snapshot.snapshotMetadata.snapshot_version,
+        provenance: snapshot.snapshotMetadata.provenance,
+        source_review_artifact_identity: promotionResult.source_review_artifact_identity,
+        promotion_record_identity: promotionResult.promotion_record_identity,
+        source_commit: promotionResult.source_commit,
+        conflict_state: promotionResult.conflict_state,
+        supersedes: promotionResult.promotion_record.base_snapshot_id,
+        rollback_target: null
+      };
+    }, 'COMPOSITION_PROMOTION_BINDING_MISMATCH', '$.promotion_result');
 
     let snapshotWrapper;
     try {
@@ -366,8 +404,12 @@
       throw makeCompositionError('COMPOSITION_SNAPSHOT_BUILD_FAILED', '$.snapshot_metadata');
     }
 
-    // §12: Snapshot Builder result consistency gate - BEFORE calling the Loader.
-    checkBuilderBinding(promotionResult, snapshotWrapper, snapshot.snapshotMetadata);
+    // §12: Snapshot Builder result consistency gate - BEFORE calling the
+    // Loader. R1-2: a malformed/hostile snapshotWrapper can never leak a
+    // native TypeError out of this gate.
+    runFailClosedBoundary(() => {
+      checkBuilderBinding(promotionResult, snapshotWrapper, snapshot.snapshotMetadata);
+    }, 'COMPOSITION_SNAPSHOT_BINDING_MISMATCH', '$.snapshot_wrapper');
 
     let validatedSnapshot;
     try {
@@ -377,7 +419,11 @@
     }
 
     // §13: Loader round-trip gate - BEFORE returning a success handle.
-    checkLoaderBinding(promotionResult, snapshotWrapper, validatedSnapshot);
+    // R1-2: a malformed/hostile validatedSnapshot can never leak a native
+    // TypeError out of this gate, and no partial result is ever returned.
+    runFailClosedBoundary(() => {
+      checkLoaderBinding(promotionResult, snapshotWrapper, validatedSnapshot);
+    }, 'COMPOSITION_LOAD_BINDING_MISMATCH', '$.validated_snapshot');
 
     // §22: promotion_result/snapshot_wrapper/validated_snapshot are already
     // deep-frozen by their respective cores - only the composition

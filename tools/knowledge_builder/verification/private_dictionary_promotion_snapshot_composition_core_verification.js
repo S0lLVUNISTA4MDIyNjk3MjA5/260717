@@ -787,6 +787,233 @@ async function main() {
     assert(!codeOnly.includes('hashParts'), 'II source code (comments stripped) never calls hashParts() (no independent Promotion Record re-hashing)');
   }
 
+  // ==========================================================================
+  // R1-A. Promotion dependency synchronous throw (Checkpoint 5-R1)
+  // ==========================================================================
+  {
+    const secretMarker = 'SECRET_R1A_SYNC_THROW';
+    const hostilePromotionCore = {
+      promoteReviewedCandidatesToProjectDictionary() { throw new Error(secretMarker); }
+    };
+    const hostileSnapshotCore = {
+      buildDictionarySnapshotWrapper: async () => { throw new Error('should never be reached'); },
+      loadDictionarySnapshotWrapper: async () => { throw new Error('should never be reached'); }
+    };
+    const sandbox = loadCompositionCoreInSandbox(sandboxRequireStub(hostilePromotionCore, hostileSnapshotCore));
+    const input = makeCompositionInput(makeSimplePromotionInput({}), {});
+    const realmInput = toSandboxValue(sandbox, input);
+    let caught = null;
+    try { await sandbox.module.exports.promoteReviewedCandidatesAndBuildSnapshot(realmInput); } catch (err) { caught = err; }
+    assert(!!caught && caught.code === 'COMPOSITION_PROMOTION_FAILED', 'R1-A synchronous throw from the Promotion dependency (not a rejected Promise) is sanitized to COMPOSITION_PROMOTION_FAILED');
+    assertSanitizedErrorCrossRealm(caught, 'R1-A synchronous Promotion throw: thrown error is the sanitized {code,path} shape');
+    assert(!JSON.stringify(caught).includes(secretMarker), 'R1-A synchronous Promotion throw: no native Error/secret leakage');
+  }
+
+  // ==========================================================================
+  // R1-B. Promotion dependency returns null
+  // ==========================================================================
+  {
+    let builderCalled = false;
+    const hostilePromotionCore = { promoteReviewedCandidatesToProjectDictionary: async () => null };
+    const hostileSnapshotCore = {
+      buildDictionarySnapshotWrapper: async () => { builderCalled = true; throw new Error('should never be reached'); },
+      loadDictionarySnapshotWrapper: async () => { throw new Error('should never be reached'); }
+    };
+    const sandbox = loadCompositionCoreInSandbox(sandboxRequireStub(hostilePromotionCore, hostileSnapshotCore));
+    const input = makeCompositionInput(makeSimplePromotionInput({}), {});
+    const realmInput = toSandboxValue(sandbox, input);
+    let caught = null;
+    try { await sandbox.module.exports.promoteReviewedCandidatesAndBuildSnapshot(realmInput); } catch (err) { caught = err; }
+    assert(!!caught && caught.code === 'COMPOSITION_PROMOTION_BINDING_MISMATCH', 'R1-B Promotion dependency returning null is rejected as COMPOSITION_PROMOTION_BINDING_MISMATCH');
+    assert(!builderCalled, 'R1-B Snapshot Builder is never called when the Promotion dependency returns null');
+    assertSanitizedErrorCrossRealm(caught, 'R1-B null Promotion result: thrown error is the sanitized {code,path} shape');
+  }
+
+  // ==========================================================================
+  // R1-C. Promotion result missing promotion_record
+  // ==========================================================================
+  {
+    let builderCalled = false;
+    const fakePromotionResult = {
+      dictionary_payload: { schema_version: 'private-dictionary-overlay/1.0', dictionary_id: makeId('pdict'), version: '1', scope: 'PROJECT', entries: [] },
+      dictionary_payload_sha256: 'e'.repeat(64),
+      // promotion_record intentionally omitted
+      promotion_record_identity: { sha256: 'f'.repeat(64) },
+      conflict_state: { unresolved_count: 0 },
+      source_review_artifact_identity: { sha256: 'b'.repeat(64) },
+      source_commit: 'c'.repeat(40)
+    };
+    const hostilePromotionCore = { promoteReviewedCandidatesToProjectDictionary: async () => fakePromotionResult };
+    const hostileSnapshotCore = {
+      buildDictionarySnapshotWrapper: async () => { builderCalled = true; throw new Error('should never be reached'); },
+      loadDictionarySnapshotWrapper: async () => { throw new Error('should never be reached'); }
+    };
+    const sandbox = loadCompositionCoreInSandbox(sandboxRequireStub(hostilePromotionCore, hostileSnapshotCore));
+    const input = makeCompositionInput(makeSimplePromotionInput({}), {});
+    const realmInput = toSandboxValue(sandbox, input);
+    let caught = null;
+    try { await sandbox.module.exports.promoteReviewedCandidatesAndBuildSnapshot(realmInput); } catch (err) { caught = err; }
+    assert(!!caught && caught.code === 'COMPOSITION_PROMOTION_BINDING_MISMATCH', 'R1-C Promotion result missing promotion_record is rejected as COMPOSITION_PROMOTION_BINDING_MISMATCH (no native TypeError leakage)');
+    assert(!builderCalled, 'R1-C Snapshot Builder is never called when promotion_record is missing');
+    assertSanitizedErrorCrossRealm(caught, 'R1-C missing promotion_record: thrown error is the sanitized {code,path} shape');
+  }
+
+  // ==========================================================================
+  // R1-D. Builder dependency returns null
+  // ==========================================================================
+  {
+    let loaderCalled = false;
+    const hostileSnapshotCore = Object.assign({}, realCrossRealmSnapshotCore(), {
+      buildDictionarySnapshotWrapper: async () => null,
+      loadDictionarySnapshotWrapper: async () => { loaderCalled = true; throw new Error('should never be reached'); }
+    });
+    const sandbox = loadCompositionCoreInSandbox(sandboxRequireStub(realCrossRealmPromotionCore(), hostileSnapshotCore));
+    const input = makeCompositionInput(makeSimplePromotionInput({}), {});
+    const realmInput = toSandboxValue(sandbox, input);
+    let caught = null;
+    try { await sandbox.module.exports.promoteReviewedCandidatesAndBuildSnapshot(realmInput); } catch (err) { caught = err; }
+    assert(!!caught && caught.code === 'COMPOSITION_SNAPSHOT_BINDING_MISMATCH', 'R1-D Builder dependency returning null is rejected as COMPOSITION_SNAPSHOT_BINDING_MISMATCH');
+    assert(!loaderCalled, 'R1-D Snapshot Loader is never called when the Builder dependency returns null');
+    assertSanitizedErrorCrossRealm(caught, 'R1-D null Builder result: thrown error is the sanitized {code,path} shape');
+  }
+
+  // ==========================================================================
+  // R1-E. Builder result missing nested identity object
+  // ==========================================================================
+  {
+    let loaderCalled = false;
+    const realSnapshot = realCrossRealmSnapshotCore();
+    const hostileSnapshotCore = Object.assign({}, realSnapshot, {
+      buildDictionarySnapshotWrapper: async (builderInput) => {
+        const real = await realSnapshot.buildDictionarySnapshotWrapper(builderInput);
+        const corrupted = Object.assign({}, real);
+        delete corrupted.source_review_artifact_identity; // nested identity object missing
+        return Object.freeze(corrupted);
+      },
+      loadDictionarySnapshotWrapper: async () => { loaderCalled = true; throw new Error('should never be reached'); }
+    });
+    const sandbox = loadCompositionCoreInSandbox(sandboxRequireStub(realCrossRealmPromotionCore(), hostileSnapshotCore));
+    const input = makeCompositionInput(makeSimplePromotionInput({}), {});
+    const realmInput = toSandboxValue(sandbox, input);
+    let caught = null;
+    try { await sandbox.module.exports.promoteReviewedCandidatesAndBuildSnapshot(realmInput); } catch (err) { caught = err; }
+    assert(!!caught && caught.code === 'COMPOSITION_SNAPSHOT_BINDING_MISMATCH', 'R1-E Builder result missing nested source_review_artifact_identity is rejected as COMPOSITION_SNAPSHOT_BINDING_MISMATCH (no native TypeError leakage)');
+    assert(!loaderCalled, 'R1-E Snapshot Loader is never called when the Builder result is missing a nested identity object');
+    assertSanitizedErrorCrossRealm(caught, 'R1-E Builder missing nested identity: thrown error is the sanitized {code,path} shape');
+  }
+
+  // ==========================================================================
+  // R1-F. Loader dependency returns null
+  // ==========================================================================
+  {
+    const realSnapshot = realCrossRealmSnapshotCore();
+    const hostileSnapshotCore = Object.assign({}, realSnapshot, {
+      loadDictionarySnapshotWrapper: async () => null
+    });
+    const sandbox = loadCompositionCoreInSandbox(sandboxRequireStub(realCrossRealmPromotionCore(), hostileSnapshotCore));
+    const input = makeCompositionInput(makeSimplePromotionInput({}), {});
+    const realmInput = toSandboxValue(sandbox, input);
+    let caught = null;
+    let result = null;
+    try { result = await sandbox.module.exports.promoteReviewedCandidatesAndBuildSnapshot(realmInput); } catch (err) { caught = err; }
+    assert(!result, 'R1-F Loader dependency returning null never returns a partial success result');
+    assert(!!caught && caught.code === 'COMPOSITION_LOAD_BINDING_MISMATCH', 'R1-F Loader dependency returning null is rejected as COMPOSITION_LOAD_BINDING_MISMATCH');
+    assertSanitizedErrorCrossRealm(caught, 'R1-F null Loader result: thrown error is the sanitized {code,path} shape');
+  }
+
+  // ==========================================================================
+  // R1-G. Loader result missing nested identity object
+  // ==========================================================================
+  {
+    const realSnapshot = realCrossRealmSnapshotCore();
+    const hostileSnapshotCore = Object.assign({}, realSnapshot, {
+      loadDictionarySnapshotWrapper: async (w) => {
+        const real = await realSnapshot.loadDictionarySnapshotWrapper(w);
+        const corrupted = Object.assign({}, real);
+        delete corrupted.promotion_record_identity; // nested identity object missing
+        return Object.freeze(corrupted);
+      }
+    });
+    const sandbox = loadCompositionCoreInSandbox(sandboxRequireStub(realCrossRealmPromotionCore(), hostileSnapshotCore));
+    const input = makeCompositionInput(makeSimplePromotionInput({}), {});
+    const realmInput = toSandboxValue(sandbox, input);
+    let caught = null;
+    let result = null;
+    try { result = await sandbox.module.exports.promoteReviewedCandidatesAndBuildSnapshot(realmInput); } catch (err) { caught = err; }
+    assert(!result, 'R1-G Loader result missing nested identity never returns a partial success result');
+    assert(!!caught && caught.code === 'COMPOSITION_LOAD_BINDING_MISMATCH', 'R1-G Loader result missing nested promotion_record_identity is rejected as COMPOSITION_LOAD_BINDING_MISMATCH (no native TypeError leakage)');
+    assertSanitizedErrorCrossRealm(caught, 'R1-G Loader missing nested identity: thrown error is the sanitized {code,path} shape');
+  }
+
+  // ==========================================================================
+  // R1-H. Hostile dependency-result Proxy (get trap)
+  // ==========================================================================
+  {
+    const secretMarker = 'SECRET_R1H_HOSTILE_PROXY';
+    let builderCalled = false;
+    const basePromotionResult = {
+      dictionary_payload: { schema_version: 'private-dictionary-overlay/1.0', dictionary_id: makeId('pdict'), version: '1', scope: 'PROJECT', entries: [] },
+      dictionary_payload_sha256: 'e'.repeat(64),
+      promotion_record: {
+        schema_version: 'private-dictionary-promotion-record/0.1',
+        source_review_artifact_sha256: 'b'.repeat(64), review_decision_fingerprint: 'a'.repeat(64),
+        source_commit: 'c'.repeat(40), base_snapshot_id: null, base_wrapper_integrity_sha256: null, base_dictionary_payload_sha256: null,
+        target_dictionary_id: makeId('pdict'), target_dictionary_version: '1',
+        eligible_candidate_ids: [], created_entry_candidate_ids: [], existing_entry_candidate_ids: [],
+        applied_alias_candidate_ids: [], applied_conflict_ids: [], no_op_alias_candidate_ids: [],
+        excluded_counts: { candidate_not_accepted: 0, candidate_conflict_blocked: 0, alias_not_accepted: 0, alias_canonical_ineligible: 0, conflict_not_promotable: 0 },
+        unresolved_conflict_count: 0,
+        output_dictionary_payload_sha256: 'e'.repeat(64),
+        content_included: false
+      },
+      promotion_record_identity: { sha256: 'f'.repeat(64) },
+      conflict_state: { unresolved_count: 0 },
+      source_review_artifact_identity: { sha256: 'b'.repeat(64) },
+      source_commit: 'c'.repeat(40)
+    };
+    const hostilePromotionResult = new Proxy(basePromotionResult, {
+      get(target, prop, receiver) {
+        if (prop === 'dictionary_payload_sha256') throw new Error(secretMarker);
+        return Reflect.get(target, prop, receiver);
+      }
+    });
+    const hostilePromotionCore = { promoteReviewedCandidatesToProjectDictionary: async () => hostilePromotionResult };
+    const hostileSnapshotCore = {
+      buildDictionarySnapshotWrapper: async () => { builderCalled = true; throw new Error('should never be reached'); },
+      loadDictionarySnapshotWrapper: async () => { throw new Error('should never be reached'); }
+    };
+    const sandbox = loadCompositionCoreInSandbox(sandboxRequireStub(hostilePromotionCore, hostileSnapshotCore));
+    const input = makeCompositionInput(makeSimplePromotionInput({}), {});
+    const realmInput = toSandboxValue(sandbox, input);
+    let caught = null;
+    try { await sandbox.module.exports.promoteReviewedCandidatesAndBuildSnapshot(realmInput); } catch (err) { caught = err; }
+    assert(!!caught && caught.code === 'COMPOSITION_PROMOTION_BINDING_MISMATCH', 'R1-H hostile Promotion-result Proxy get trap is sanitized to COMPOSITION_PROMOTION_BINDING_MISMATCH');
+    assert(!builderCalled, 'R1-H Snapshot Builder is never called when the Promotion binding gate hits a hostile Proxy trap');
+    assertSanitizedErrorCrossRealm(caught, 'R1-H hostile Promotion-result Proxy: thrown error is the sanitized {code,path} shape');
+    assert(!JSON.stringify(caught).includes(secretMarker), 'R1-H hostile Promotion-result Proxy: no native Error/secret leakage');
+  }
+
+  // ==========================================================================
+  // R1-I. Atomicity regression (Promotion call still issued before
+  // Composition's own first await, after the R1-1 sanitization change)
+  // ==========================================================================
+  {
+    let called = false;
+    const hostilePromotionCore = {
+      promoteReviewedCandidatesToProjectDictionary: async (rawInput) => {
+        called = true;
+        return PromotionCore.promoteReviewedCandidatesToProjectDictionary(jsonRoundTrip(rawInput));
+      }
+    };
+    const sandbox = loadCompositionCoreInSandbox(sandboxRequireStub(hostilePromotionCore, realCrossRealmSnapshotCore()));
+    const input = makeCompositionInput(makeSimplePromotionInput({}), {});
+    const realmInput = toSandboxValue(sandbox, input);
+    const promise = sandbox.module.exports.promoteReviewedCandidatesAndBuildSnapshot(realmInput);
+    assert(called === true, "R1-I Promotion dependency call is issued synchronously, before Composition's own first await (ordering preserved after R1-1 fix)");
+    const result = await promise;
+    assert(!!result.validated_snapshot, 'R1-I end-to-end promotion still succeeds after confirming synchronous call-start ordering');
+  }
+
   console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }
