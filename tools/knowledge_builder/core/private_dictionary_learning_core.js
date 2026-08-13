@@ -1159,9 +1159,24 @@
     });
   }
 
-  // ---- §14.4 mergeDictionaryLayers(layerViews) ----
+  // ---- §14.4 mergeDictionaryLayers(layerViews) / mergeDictionaryLayersWithProvenance(layerViews) ----
+  //
+  // P2-A4 Checkpoint 2: both public functions below share exactly ONE winner-
+  // selection implementation (computeDictionaryLayerMerge). Neither function
+  // reimplements scope-priority/tie-break/conflict semantics independently.
+  // mergeDictionaryLayers() discards the provenance_index byproduct and
+  // returns precisely the same 4 fields it always has (contract-frozen,
+  // Checkpoint 1 S4.1); mergeDictionaryLayersWithProvenance() additionally
+  // returns provenance_index, which records - for each canonical/alias key
+  // that actually survives into effective_vocabulary - the single winning
+  // layer entry (scope/status/dictionary_fingerprint/entry_ref_id) that the
+  // existing priority-then-ordinal winner selection already determines.
+  // provenance_index never carries more than one ref per key: the existing
+  // selection algorithm itself only ever keeps one winner per key, so a
+  // "contributing refs array" would misrepresent effective_vocabulary's own
+  // single-selection semantics (design contract S4.1).
 
-  async function mergeDictionaryLayers(layerViews) {
+  async function computeDictionaryLayerMerge(layerViews) {
     const layerValidation = validateDictionaryLayerViews(layerViews);
     if (!layerValidation.valid) throwFirstError(layerValidation.errors);
 
@@ -1171,7 +1186,12 @@
     const { conflicts, excluded_lookup_key_tokens } = await detectDictionaryLookupConflicts(layerViews);
     const { conflictedKeys } = computeLookupResolution(layerViews);
 
-    const canonicalGroups = new Map(); // canonicalKey -> { candidates:[], aliasMap:Map<key,{priority,display,key}> }
+    // canonicalKey -> { candidates:[{priority,display,entry_ref_id,scope,status,dictionary_fingerprint}],
+    //                    aliasMap:Map<key,{priority,display,entry_ref_id,scope,status,dictionary_fingerprint}> }
+    // 追加した4 field (entry_ref_id/scope/status/dictionary_fingerprint) はwinner選択の
+    // 比較（priority, ordinalCompare(display)）に一切関与しない - 既存のeffective_vocabulary
+    // 選択結果をbit-for-bit変えない、provenance追跡専用の付随情報。
+    const canonicalGroups = new Map();
     for (const layer of layerViews) {
       const priority = SCOPE_PRIORITY.indexOf(layer.scope);
       for (const entry of layer.entries) {
@@ -1179,13 +1199,21 @@
         if (conflictedKeys.has(entry.canonical_key)) continue;
         let group = canonicalGroups.get(entry.canonical_key);
         if (!group) { group = { candidates: [], aliasMap: new Map() }; canonicalGroups.set(entry.canonical_key, group); }
-        group.candidates.push({ priority, display: entry.canonical_display });
+        group.candidates.push({
+          priority, display: entry.canonical_display,
+          entry_ref_id: entry.entry_ref_id, scope: layer.scope,
+          status: entry.status, dictionary_fingerprint: layer.dictionary_fingerprint
+        });
         for (const alias of entry.aliases) {
           if (conflictedKeys.has(alias.key)) continue;
           if (alias.key === entry.canonical_key) continue;
           const existing = group.aliasMap.get(alias.key);
           if (!existing || priority < existing.priority || (priority === existing.priority && ordinalCompare(alias.display, existing.display) < 0)) {
-            group.aliasMap.set(alias.key, { priority, display: alias.display });
+            group.aliasMap.set(alias.key, {
+              priority, display: alias.display,
+              entry_ref_id: entry.entry_ref_id, scope: layer.scope,
+              status: entry.status, dictionary_fingerprint: layer.dictionary_fingerprint
+            });
           }
         }
       }
@@ -1194,13 +1222,29 @@
     const sortedCanonicalKeys = Array.from(canonicalGroups.keys()).sort(ordinalCompare);
     const allowedTags = [];
     const flatAliasCandidates = []; // { aliasKey, display, canonicalDisplay }
+    const canonicalProvenanceEntries = []; // [canonicalKey, frozen provenance record]
+    const aliasProvenanceCandidates = []; // { aliasKey, entry_ref_id, scope, status, dictionary_fingerprint, canonical_key }
     for (const key of sortedCanonicalKeys) {
       const group = canonicalGroups.get(key);
       group.candidates.sort((a, b) => (a.priority - b.priority) || ordinalCompare(a.display, b.display));
-      const chosenDisplay = group.candidates[0].display;
+      const winner = group.candidates[0];
+      const chosenDisplay = winner.display;
       allowedTags.push(chosenDisplay);
+      canonicalProvenanceEntries.push([key, Object.freeze({
+        selected_entry_ref_id: winner.entry_ref_id,
+        selected_scope: winner.scope,
+        selected_status: winner.status,
+        selected_dictionary_fingerprint: winner.dictionary_fingerprint,
+        resolution_kind: 'canonical'
+      })]);
       for (const [aliasKey, aliasInfo] of group.aliasMap) {
         flatAliasCandidates.push({ aliasKey, display: aliasInfo.display, canonicalDisplay: chosenDisplay });
+        aliasProvenanceCandidates.push({
+          aliasKey,
+          entry_ref_id: aliasInfo.entry_ref_id, scope: aliasInfo.scope,
+          status: aliasInfo.status, dictionary_fingerprint: aliasInfo.dictionary_fingerprint,
+          canonical_key: key
+        });
       }
     }
     // 修正4: layerViewsの走査順に依存しないよう、alias candidateを
@@ -1213,11 +1257,25 @@
     );
     const aliasEntries = flatAliasCandidates.map(c => [c.display, c.canonicalDisplay]);
 
+    // provenance_index.alias: normalized alias keyのordinal順。conflict除外後は
+    // 各alias keyが高々1つのcanonical groupにしか属さない（同一lookup keyが複数の
+    // 異なるcanonical keyへ解決される場合はconflictedKeysへ入り、両groupから
+    // continueで除外されるため）ので、単純にaliasKeyでsortするだけで一意に決まる。
+    aliasProvenanceCandidates.sort((a, b) => ordinalCompare(a.aliasKey, b.aliasKey));
+    const aliasProvenanceEntries = aliasProvenanceCandidates.map(c => [c.aliasKey, Object.freeze({
+      selected_entry_ref_id: c.entry_ref_id,
+      selected_scope: c.scope,
+      selected_status: c.status,
+      selected_dictionary_fingerprint: c.dictionary_fingerprint,
+      canonical_key: c.canonical_key,
+      resolution_kind: 'alias'
+    })]);
+
     const sourceFingerprints = SCOPE_PRIORITY
       .filter(scope => seenScopes.has(scope))
       .map(scope => layerViews.find(l => l.scope === scope).dictionary_fingerprint);
 
-    return Object.freeze({
+    return {
       effective_vocabulary: Object.freeze({
         allowed_tags: Object.freeze(allowedTags),
         // Object.fromEntries uses CreateDataPropertyOrThrow, so an alias display
@@ -1226,7 +1284,35 @@
       }),
       conflicts: conflicts,
       excluded_lookup_key_tokens: excluded_lookup_key_tokens,
-      source_fingerprints: Object.freeze(sourceFingerprints)
+      source_fingerprints: Object.freeze(sourceFingerprints),
+      // Object.fromEntries protects canonical_key/alias_key values (however
+      // adversarial, e.g. a normalized key literally "__proto__") the same
+      // way the aliases map above already does.
+      provenance_index: Object.freeze({
+        canonical: Object.freeze(Object.fromEntries(canonicalProvenanceEntries)),
+        alias: Object.freeze(Object.fromEntries(aliasProvenanceEntries))
+      })
+    };
+  }
+
+  async function mergeDictionaryLayers(layerViews) {
+    const result = await computeDictionaryLayerMerge(layerViews);
+    return Object.freeze({
+      effective_vocabulary: result.effective_vocabulary,
+      conflicts: result.conflicts,
+      excluded_lookup_key_tokens: result.excluded_lookup_key_tokens,
+      source_fingerprints: result.source_fingerprints
+    });
+  }
+
+  async function mergeDictionaryLayersWithProvenance(layerViews) {
+    const result = await computeDictionaryLayerMerge(layerViews);
+    return Object.freeze({
+      effective_vocabulary: result.effective_vocabulary,
+      conflicts: result.conflicts,
+      excluded_lookup_key_tokens: result.excluded_lookup_key_tokens,
+      source_fingerprints: result.source_fingerprints,
+      provenance_index: result.provenance_index
     });
   }
 
@@ -1320,6 +1406,7 @@
     serializePrivateDictionaryCanonical,
     hashPrivateDictionaryCanonical,
     mergeDictionaryLayers,
+    mergeDictionaryLayersWithProvenance,
     detectDictionaryLookupConflicts,
     createKnowledgeDictionaryBinding,
     createSanitizedLearningSummary,

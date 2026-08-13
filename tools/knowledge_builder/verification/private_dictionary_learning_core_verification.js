@@ -828,13 +828,14 @@ async function main() {
       await Core.createSanitizedLearningSummary(dict); calledApis.add('createSanitizedLearningSummary');
       const sView = await Core.createStandardDictionaryLayerView(vocab); calledApis.add('createStandardDictionaryLayerView');
       await Core.mergeDictionaryLayers([pView, sView]); calledApis.add('mergeDictionaryLayers');
+      await Core.mergeDictionaryLayersWithProvenance([pView, sView]); calledApis.add('mergeDictionaryLayersWithProvenance');
       await Core.detectDictionaryLookupConflicts([pView, sView]); calledApis.add('detectDictionaryLookupConflicts');
       Core.createKnowledgeDictionaryBinding({ dictionary_id: dict.dictionary_id, version: dict.version, scope: dict.scope, sha256: 'd'.repeat(64), entry_count: 1, content_included: false }); calledApis.add('createKnowledgeDictionaryBinding');
       Core.validateDictionaryStateTransition('PROBATION', 'ACTIVE'); calledApis.add('validateDictionaryStateTransition');
     } catch (e) { threw = true; console.error(e); }
-    assert(!threw, 'input deep-freeze後も各APIが動作すること (all 12 exported functions tolerate frozen input)');
+    assert(!threw, 'input deep-freeze後も各APIが動作すること (all 13 exported functions tolerate frozen input)');
     assert(Object.keys(Core).sort().join(',') === Array.from(calledApis).sort().join(','),
-      'Step6R#8 deep-freeze coverage explicitly tracks all 12 exported APIs including parsePrivateDictionaryJson');
+      'Step6R#8 deep-freeze coverage explicitly tracks all 13 exported APIs including parsePrivateDictionaryJson (P2-A4 Checkpoint 2: mergeDictionaryLayersWithProvenance added)');
   }
 
   {
@@ -1979,6 +1980,241 @@ async function main() {
     for (const [label, body, marker] of ALLOWLIST_BOUNDARY_CASES) {
       runParserImpersonationCase(label, body, marker);
     }
+  }
+
+  // ======================================================================
+  // P2-A4 Checkpoint 2: mergeDictionaryLayersWithProvenance() - additive
+  // provenance-preserving merge core. Checks A-M below are the permanent
+  // checks required by the Checkpoint 2 directive. All fixtures are
+  // synthetic (fabricated placeholder terms) - no real dictionary/customer/
+  // product content is used anywhere in this section.
+  // ======================================================================
+
+  // ---- A. Existing output compatibility ----
+  {
+    const dictProject = makeDictionary([
+      makeEntry({ canonical_term: 'Compat Canonical Term', aliases: ['Compat Alias One'] })
+    ], { scope: 'PROJECT' });
+    const dictDomain = makeDictionary([
+      makeEntry({ canonical_term: 'Compat Canonical Term', aliases: ['Compat Alias Two'] }),
+      makeEntry({ canonical_term: 'Compat Conflict X', aliases: ['Compat Conflict Shared'] })
+    ], { scope: 'DOMAIN' });
+    const dictSession = makeDictionary([
+      makeEntry({ canonical_term: 'Compat Conflict Y', aliases: ['Compat Conflict Shared'] })
+    ], { scope: 'SESSION' });
+    const layerViews = [
+      await Core.createPrivateDictionaryLayerView(dictProject),
+      await Core.createPrivateDictionaryLayerView(dictDomain),
+      await Core.createPrivateDictionaryLayerView(dictSession)
+    ];
+    const oldResult = await Core.mergeDictionaryLayers(layerViews);
+    const newResult = await Core.mergeDictionaryLayersWithProvenance(layerViews);
+    assert(JSON.stringify(oldResult.effective_vocabulary) === JSON.stringify(newResult.effective_vocabulary),
+      'P2-A4 Checkpoint2-A effective_vocabulary byte-identical between mergeDictionaryLayers and mergeDictionaryLayersWithProvenance');
+    assert(JSON.stringify(oldResult.conflicts) === JSON.stringify(newResult.conflicts),
+      'P2-A4 Checkpoint2-A conflicts byte-identical between mergeDictionaryLayers and mergeDictionaryLayersWithProvenance');
+    assert(JSON.stringify(oldResult.excluded_lookup_key_tokens) === JSON.stringify(newResult.excluded_lookup_key_tokens),
+      'P2-A4 Checkpoint2-A excluded_lookup_key_tokens byte-identical between mergeDictionaryLayers and mergeDictionaryLayersWithProvenance');
+    assert(JSON.stringify(oldResult.source_fingerprints) === JSON.stringify(newResult.source_fingerprints),
+      'P2-A4 Checkpoint2-A source_fingerprints byte-identical between mergeDictionaryLayers and mergeDictionaryLayersWithProvenance');
+    assert(Object.keys(oldResult).sort().join(',') === 'conflicts,effective_vocabulary,excluded_lookup_key_tokens,source_fingerprints',
+      'P2-A4 Checkpoint2-A mergeDictionaryLayers() return shape is unchanged (exactly the original 4 fields, no provenance_index leak)');
+    assert(Object.keys(newResult).sort().join(',') === 'conflicts,effective_vocabulary,excluded_lookup_key_tokens,provenance_index,source_fingerprints',
+      'P2-A4 Checkpoint2-A mergeDictionaryLayersWithProvenance() return shape adds exactly provenance_index on top of the original 4 fields');
+  }
+
+  // ---- B. PROJECT vs DOMAIN winner provenance ----
+  {
+    const canonicalTerm = 'Scope Priority Canonical PD';
+    const viewProject = await Core.createPrivateDictionaryLayerView(makeDictionary([makeEntry({ canonical_term: canonicalTerm, aliases: [] })], { scope: 'PROJECT' }));
+    const viewDomain = await Core.createPrivateDictionaryLayerView(makeDictionary([makeEntry({ canonical_term: canonicalTerm, aliases: [] })], { scope: 'DOMAIN' }));
+    const merged = await Core.mergeDictionaryLayers([viewProject, viewDomain]);
+    const withProv = await Core.mergeDictionaryLayersWithProvenance([viewProject, viewDomain]);
+    assert(merged.effective_vocabulary.allowed_tags.includes(canonicalTerm), 'setup for P2-A4 Checkpoint2-B (canonical present in effective_vocabulary)');
+    const canonicalKey = IdHashUtils.normalize(canonicalTerm);
+    const provRecord = withProv.provenance_index.canonical[canonicalKey];
+    assert(!!provRecord, 'P2-A4 Checkpoint2-B provenance_index.canonical contains the winning canonical key');
+    assert(provRecord.selected_scope === 'PROJECT', 'P2-A4 Checkpoint2-B PROJECT outranks DOMAIN (selected_scope === PROJECT, matches existing SCOPE_PRIORITY)');
+    assert(provRecord.selected_entry_ref_id === viewProject.entries[0].entry_ref_id, 'P2-A4 Checkpoint2-B selected_entry_ref_id is the PROJECT layer entry_ref_id');
+    assert(provRecord.selected_status === 'ACTIVE', 'P2-A4 Checkpoint2-B selected_status is ACTIVE');
+    assert(provRecord.selected_dictionary_fingerprint === viewProject.dictionary_fingerprint, 'P2-A4 Checkpoint2-B selected_dictionary_fingerprint matches the PROJECT layer fingerprint');
+    assert(provRecord.resolution_kind === 'canonical', 'P2-A4 Checkpoint2-B resolution_kind is canonical');
+  }
+
+  // ---- C. SESSION > PROJECT winner ----
+  {
+    const canonicalTerm = 'Scope Priority Canonical SP';
+    const viewSession = await Core.createPrivateDictionaryLayerView(makeDictionary([makeEntry({ canonical_term: canonicalTerm, aliases: [] })], { scope: 'SESSION' }));
+    const viewProject = await Core.createPrivateDictionaryLayerView(makeDictionary([makeEntry({ canonical_term: canonicalTerm, aliases: [] })], { scope: 'PROJECT' }));
+    const merged = await Core.mergeDictionaryLayers([viewSession, viewProject]);
+    const withProv = await Core.mergeDictionaryLayersWithProvenance([viewSession, viewProject]);
+    assert(merged.effective_vocabulary.allowed_tags.includes(canonicalTerm), 'setup for P2-A4 Checkpoint2-C (canonical present in effective_vocabulary)');
+    const canonicalKey = IdHashUtils.normalize(canonicalTerm);
+    const provRecord = withProv.provenance_index.canonical[canonicalKey];
+    assert(!!provRecord, 'P2-A4 Checkpoint2-C provenance_index.canonical contains the winning canonical key');
+    assert(provRecord.selected_scope === 'SESSION', 'P2-A4 Checkpoint2-C SESSION outranks PROJECT (selected_scope === SESSION, matches existing SCOPE_PRIORITY)');
+    assert(provRecord.selected_entry_ref_id === viewSession.entries[0].entry_ref_id, 'P2-A4 Checkpoint2-C selected_entry_ref_id is the SESSION layer entry_ref_id');
+  }
+
+  // ---- D. Canonical deterministic tie behavior ----
+  {
+    // Two distinct display strings that normalize to the SAME canonical_key
+    // (whitespace collapsing) within a single layer/scope - the only way an
+    // existing genuine priority tie can occur, since validateDictionaryLayerViews
+    // rejects duplicate scopes across layerViews (DICTIONARY_LAYER_SCOPE_DUPLICATE)
+    // and no rule requires canonical_key uniqueness *within* one layer.
+    const displayA = 'Tie Break Canonical Term';
+    const displayB = 'Tie Break  Canonical Term'; // double space -> same normalized key
+    const keyA = IdHashUtils.normalize(displayA);
+    const keyB = IdHashUtils.normalize(displayB);
+    assert(keyA === keyB, 'setup for P2-A4 Checkpoint2-D (two distinct display strings normalize to the same canonical_key)');
+    const dict = makeDictionary([
+      makeEntry({ canonical_term: displayA, aliases: [] }),
+      makeEntry({ canonical_term: displayB, aliases: [] })
+    ], { scope: 'PROJECT' });
+    const view = await Core.createPrivateDictionaryLayerView(dict);
+    const merged = await Core.mergeDictionaryLayers([view]);
+    const withProv = await Core.mergeDictionaryLayersWithProvenance([view]);
+    // Same comparison the existing implementation itself uses (ordinalCompare = plain `<`).
+    const expectedWinnerDisplay = displayA < displayB ? displayA : displayB;
+    assert(merged.effective_vocabulary.allowed_tags.includes(expectedWinnerDisplay),
+      'P2-A4 Checkpoint2-D existing ordinal tie-break winner appears unchanged in effective_vocabulary');
+    const expectedWinnerEntry = view.entries.find(e => e.canonical_display === expectedWinnerDisplay);
+    const provRecord = withProv.provenance_index.canonical[keyA];
+    assert(!!provRecord, 'P2-A4 Checkpoint2-D provenance_index.canonical contains the tied canonical key');
+    assert(provRecord.selected_entry_ref_id === expectedWinnerEntry.entry_ref_id,
+      'P2-A4 Checkpoint2-D provenance winner entry_ref_id matches the existing ordinal tie-break winner exactly');
+  }
+
+  // ---- E. Alias winner provenance ----
+  {
+    const canonicalTerm = 'Alias Priority Canonical Term';
+    const sharedAlias = 'Alias Priority Shared Alias';
+    const viewProject = await Core.createPrivateDictionaryLayerView(makeDictionary([makeEntry({ canonical_term: canonicalTerm, aliases: [sharedAlias] })], { scope: 'PROJECT' }));
+    const viewDomain = await Core.createPrivateDictionaryLayerView(makeDictionary([makeEntry({ canonical_term: canonicalTerm, aliases: [sharedAlias] })], { scope: 'DOMAIN' }));
+    const merged = await Core.mergeDictionaryLayers([viewProject, viewDomain]);
+    const withProv = await Core.mergeDictionaryLayersWithProvenance([viewProject, viewDomain]);
+    assert(merged.effective_vocabulary.aliases[sharedAlias] === canonicalTerm, 'setup for P2-A4 Checkpoint2-E (alias resolves to the shared canonical)');
+    const aliasKey = IdHashUtils.normalize(sharedAlias);
+    const provRecord = withProv.provenance_index.alias[aliasKey];
+    assert(!!provRecord, 'P2-A4 Checkpoint2-E provenance_index.alias contains the winning alias key');
+    assert(provRecord.selected_scope === 'PROJECT', 'P2-A4 Checkpoint2-E PROJECT outranks DOMAIN for the alias winner too (matches existing aliasMap upsert priority)');
+    assert(provRecord.selected_entry_ref_id === viewProject.entries[0].entry_ref_id, 'P2-A4 Checkpoint2-E selected_entry_ref_id is the PROJECT layer entry_ref_id');
+    assert(provRecord.canonical_key === IdHashUtils.normalize(canonicalTerm), 'P2-A4 Checkpoint2-E canonical_key matches the alias\'s resolved canonical');
+    assert(provRecord.resolution_kind === 'alias', 'P2-A4 Checkpoint2-E resolution_kind is alias');
+  }
+
+  // ---- F. Conflict exclusion ----
+  {
+    const collideA = makeEntry({ canonical_term: 'Provenance Conflict Canonical X', aliases: ['Provenance Conflict Shared'] });
+    const collideB = makeEntry({ canonical_term: 'Provenance Conflict Canonical Y', aliases: ['Provenance Conflict Shared'] });
+    const viewA = await Core.createPrivateDictionaryLayerView(makeDictionary([collideA], { scope: 'DOMAIN' }));
+    const viewB = await Core.createPrivateDictionaryLayerView(makeDictionary([collideB], { scope: 'PROJECT' }));
+    const oldMerged = await Core.mergeDictionaryLayers([viewA, viewB]);
+    const withProv = await Core.mergeDictionaryLayersWithProvenance([viewA, viewB]);
+    assert(JSON.stringify(withProv.conflicts) === JSON.stringify(oldMerged.conflicts), 'P2-A4 Checkpoint2-F conflict records identical between mergeDictionaryLayers and mergeDictionaryLayersWithProvenance');
+    assert(!containsText(withProv.effective_vocabulary, 'Provenance Conflict Shared'), 'P2-A4 Checkpoint2-F effective_vocabulary excludes the conflicted alias (unchanged local-exclusion semantics)');
+    const conflictedAliasKey = IdHashUtils.normalize('Provenance Conflict Shared');
+    assert(!Object.prototype.hasOwnProperty.call(withProv.provenance_index.alias, conflictedAliasKey), 'P2-A4 Checkpoint2-F provenance_index.alias excludes the conflicted lookup key (never listed as a winner)');
+    const keyX = IdHashUtils.normalize('Provenance Conflict Canonical X');
+    const keyY = IdHashUtils.normalize('Provenance Conflict Canonical Y');
+    assert(!!withProv.provenance_index.canonical[keyX] && !!withProv.provenance_index.canonical[keyY],
+      'P2-A4 Checkpoint2-F non-conflicted canonicals still appear in provenance_index (only the conflicted alias key is excluded, not the whole dictionary)');
+  }
+
+  // ---- G. Non-ACTIVE exclusion ----
+  {
+    for (const status of ['PROBATION', 'OBSERVING', 'QUARANTINED', 'RETIRED']) {
+      const canonicalTerm = `Non Active Canonical Term ${status}`;
+      const dict = makeDictionary([makeEntry({ canonical_term: canonicalTerm, status, aliases: [`Non Active Alias ${status}`] })], { scope: 'PROJECT' });
+      const view = await Core.createPrivateDictionaryLayerView(dict);
+      const withProv = await Core.mergeDictionaryLayersWithProvenance([view]);
+      assert(withProv.effective_vocabulary.allowed_tags.length === 0, `setup for P2-A4 Checkpoint2-G (${status} entry excluded from effective_vocabulary)`);
+      assert(Object.keys(withProv.provenance_index.canonical).length === 0, `P2-A4 Checkpoint2-G ${status} entry excluded from provenance_index.canonical`);
+      assert(Object.keys(withProv.provenance_index.alias).length === 0, `P2-A4 Checkpoint2-G ${status} entry excluded from provenance_index.alias`);
+    }
+  }
+
+  // ---- H. Input order invariance ----
+  {
+    const viewA = await Core.createPrivateDictionaryLayerView(makeDictionary([makeEntry({ canonical_term: 'Order Invariance Canonical A', aliases: ['Order Invariance Alias A'] })], { scope: 'DOMAIN' }));
+    const viewB = await Core.createPrivateDictionaryLayerView(makeDictionary([makeEntry({ canonical_term: 'Order Invariance Canonical B', aliases: ['Order Invariance Alias B'] })], { scope: 'PROJECT' }));
+    const forward = await Core.mergeDictionaryLayersWithProvenance([viewA, viewB]);
+    const reversed = await Core.mergeDictionaryLayersWithProvenance([viewB, viewA]);
+    assert(JSON.stringify(forward.effective_vocabulary) === JSON.stringify(reversed.effective_vocabulary), 'P2-A4 Checkpoint2-H effective_vocabulary is input-order-invariant');
+    assert(JSON.stringify(forward.conflicts) === JSON.stringify(reversed.conflicts), 'P2-A4 Checkpoint2-H conflicts is input-order-invariant');
+    assert(JSON.stringify(forward.provenance_index) === JSON.stringify(reversed.provenance_index), 'P2-A4 Checkpoint2-H provenance_index is input-order-invariant');
+  }
+
+  // ---- I. Deep freeze ----
+  {
+    const dict = makeDictionary([makeEntry({ canonical_term: 'Freeze Check Canonical', aliases: ['Freeze Check Alias'] })], { scope: 'PROJECT' });
+    const view = await Core.createPrivateDictionaryLayerView(dict);
+    const withProv = await Core.mergeDictionaryLayersWithProvenance([view]);
+    assert(Object.isFrozen(withProv), 'P2-A4 Checkpoint2-I root result is frozen');
+    assert(Object.isFrozen(withProv.provenance_index), 'P2-A4 Checkpoint2-I provenance_index is frozen');
+    assert(Object.isFrozen(withProv.provenance_index.canonical), 'P2-A4 Checkpoint2-I provenance_index.canonical is frozen');
+    assert(Object.isFrozen(withProv.provenance_index.alias), 'P2-A4 Checkpoint2-I provenance_index.alias is frozen');
+    const canonicalKeys = Object.keys(withProv.provenance_index.canonical);
+    assert(canonicalKeys.length > 0, 'setup for P2-A4 Checkpoint2-I (at least one canonical provenance record present)');
+    assert(canonicalKeys.every(k => Object.isFrozen(withProv.provenance_index.canonical[k])), 'P2-A4 Checkpoint2-I each canonical provenance record is frozen');
+    const aliasKeys = Object.keys(withProv.provenance_index.alias);
+    assert(aliasKeys.length > 0, 'setup for P2-A4 Checkpoint2-I (at least one alias provenance record present)');
+    assert(aliasKeys.every(k => Object.isFrozen(withProv.provenance_index.alias[k])), 'P2-A4 Checkpoint2-I each alias provenance record is frozen');
+
+    const frozenView = deepFreeze(await Core.createPrivateDictionaryLayerView(makeDictionary([makeEntry({ canonical_term: 'Frozen Input Canonical', aliases: [] })], { scope: 'PROJECT' })));
+    let threwOnFrozenInput = false;
+    try { await Core.mergeDictionaryLayersWithProvenance([frozenView]); } catch (e) { threwOnFrozenInput = true; console.error(e); }
+    assert(!threwOnFrozenInput, 'P2-A4 Checkpoint2-I mergeDictionaryLayersWithProvenance() works normally with a fully frozen input layerView');
+  }
+
+  // ---- J. Prototype safety ----
+  {
+    const dict = makeDictionary([
+      makeEntry({ canonical_term: '__proto__', aliases: ['constructor'] })
+    ], { scope: 'PROJECT' });
+    const view = await Core.createPrivateDictionaryLayerView(dict);
+    const withProv = await Core.mergeDictionaryLayersWithProvenance([view]);
+    assert(Object.getPrototypeOf(withProv.provenance_index.canonical) === Object.prototype,
+      'P2-A4 Checkpoint2-J canonical_key "__proto__" does not rewire provenance_index.canonical\'s actual prototype');
+    assert(Object.prototype.hasOwnProperty.call(withProv.provenance_index.canonical, '__proto__'),
+      'P2-A4 Checkpoint2-J canonical_key "__proto__" is created as an own data property (CreateDataPropertyOrThrow), not a prototype write');
+    assert(Object.getPrototypeOf(withProv.provenance_index.alias) === Object.prototype,
+      'P2-A4 Checkpoint2-J alias_key "constructor" does not rewire provenance_index.alias\'s actual prototype');
+    assert(Object.prototype.hasOwnProperty.call(withProv.provenance_index.alias, 'constructor'),
+      'P2-A4 Checkpoint2-J alias_key "constructor" is created as an own data property');
+    assert(typeof withProv.provenance_index.canonical.__proto__ === 'object' && withProv.provenance_index.canonical.__proto__ !== null && withProv.provenance_index.canonical.__proto__.resolution_kind === 'canonical',
+      'P2-A4 Checkpoint2-J the "__proto__"-named property holds a real provenance record (own-property lookup shadows the inherited accessor), not a broken prototype link');
+  }
+
+  // ---- K. Error parity ----
+  {
+    const invalidLayerViews = [makeLayerView('BOGUS_SCOPE_VALUE', [])];
+    let oldErr = null, newErr = null;
+    try { await Core.mergeDictionaryLayers(invalidLayerViews); } catch (e) { oldErr = e; }
+    try { await Core.mergeDictionaryLayersWithProvenance(invalidLayerViews); } catch (e) { newErr = e; }
+    assert(!!oldErr && !!newErr, 'setup for P2-A4 Checkpoint2-K (both APIs throw on the same invalid input)');
+    assert(!!oldErr && oldErr.code === 'DICTIONARY_LAYER_SCOPE_INVALID' && oldErr.path === '$[0].scope', 'setup for P2-A4 Checkpoint2-K (fixture produces the expected error on the existing API)');
+    assert(!!newErr && oldErr.code === newErr.code && oldErr.path === newErr.path,
+      'P2-A4 Checkpoint2-K mergeDictionaryLayers and mergeDictionaryLayersWithProvenance fail with identical code/path for the same invalid input');
+  }
+
+  // ---- L. Privacy ----
+  {
+    const secretTerm = 'PRIVATE_SECRET_CANONICAL_TERM_CHECKPOINT2L';
+    const badLayerViews = [makeLayerView('PROJECT', [
+      makeLayerEntry('PROJECT', { canonical_display: secretTerm, canonical_key: 'MISMATCHED_KEY_ON_PURPOSE' })
+    ])];
+    let err = null;
+    try { await Core.mergeDictionaryLayersWithProvenance(badLayerViews); } catch (e) { err = e; }
+    assert(!!err, 'setup for P2-A4 Checkpoint2-L (invalid fixture carrying a synthetic secret term throws)');
+    assert(!!err && !containsText(err, secretTerm), 'P2-A4 Checkpoint2-L error thrown by mergeDictionaryLayersWithProvenance never leaks the secret canonical term into code/path');
+  }
+
+  // ---- M. Export coverage ----
+  {
+    assert(Object.keys(Core).length === 13, 'P2-A4 Checkpoint2-M core exports exactly 13 public APIs (12 pre-existing + mergeDictionaryLayersWithProvenance)');
+    assert(typeof Core.mergeDictionaryLayersWithProvenance === 'function', 'P2-A4 Checkpoint2-M mergeDictionaryLayersWithProvenance is exported as a function');
   }
 
   console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);
