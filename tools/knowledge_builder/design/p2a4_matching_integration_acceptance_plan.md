@@ -18,6 +18,10 @@ false-negative評価で扱うよう修正（S1.2）。
 `wrapper_integrity_sha256`対象範囲拡張、S13.1新設）に対応してS11の項目#2-4を修正し、
 approvedDict tag挙動・duplicate mapping provenanceに関する項目#8-13を新設した（R3-4）。
 
+**R4改訂**: Checkpoint 1-R4にて、contract文書R4改訂（S10.1のSnapshot Loader validation順序新設、
+S13.1のtokenization 0.1固定）に対応し、S11.1（raw payload tamper Case A/B/C）と
+S11.2（approvedDict tokenization検証9項目）を新設した（R4-2/R4-4）。
+
 ---
 
 ## S1. 検証の基本方針
@@ -209,6 +213,41 @@ S5.2のR3-2改訂（`wrapper_integrity_sha256`対象範囲の拡張）に合わ�
 | 11（R3-4で新設） | approvedDict由来tagに対する`manualRemove`の適用 | S13.1項目5 | approvedDict由来のtagを`manualRemove`で指定した場合、`composeFinalTags()`の最終`_tags`から除外されることを確認する（他sourceと同じ除外挙動であることの直接検証） |
 | 12（R3-4で新設） | `maxTagsPerRow`境界でのapprovedDict扱い | S13.1項目6 | `maxTagsPerRow`ちょうどの件数・1件超過の境界値fixtureで、approvedDict専用の予約枠が存在しない（他sourceと同じ共有上限に従う）ことを確認する |
 | 13（R3-4で新設） | approvedDictとad hoc dictのprovenance分離（stats/evidence） | S13.1項目10 | 同一tagが`.dict`のみ／`.approvedDict`のみ／両方、の3パターンでfixtureを用意し、`tagSourceSetForRow()`の返す集合がそれぞれ正しく`dict`/`approvedDict`/両方を含むこと、`evaluateTagMatch()`のevidenceから当該sharedTagの由来source集合を辿れることを確認する |
+
+### S11.1 Snapshot Loader validation順序 / tamper検出（R4-1・R4-2で新設）
+
+S10.1で固定した10ステップのvalidation順序を検証する。**R4-4の項目7-9に対応**する
+tamper acceptanceを3ケースで定義する。3ケースはいずれも「dictionary_payloadだけ」
+「payload+格納hash」「metadataだけ」という**改ざん範囲の違い**によって、どのstepで
+検知されるかが異なる点を検証する。
+
+| Case | 改ざん内容 | stored `dictionary_payload_sha256` | stored `wrapper_integrity_sha256` | 期待結果 |
+|---|---|---|---|---|
+| A（raw payload tamper、R4-4項目7） | `dictionary_payload`のみ1 byte変更 | 変更なし | 変更なし | S10.1 step3-4で再計算payload SHAが不一致 → **payload hash mismatchでFAIL**（step5、INVALID SNAPSHOT）。step6以降（wrapper integrity検証）へは進まない |
+| B（stored payload hash tamper、R4-4項目8） | `dictionary_payload` + 格納`dictionary_payload_sha256`の**両方**を、互いに整合する値へ変更 | 変更あり（改ざん後の payload と整合する値） | 変更なし | S10.1 step3-4のpayload hash検証は**一致してしまう**（改ざん後payloadと改ざん後格納hashが整合するため）。しかしstep6で使うのはstep3の再計算値（＝改ざん後payloadから計算した値）であり、これは元の`wrapper_integrity_sha256`計算時に使われた値と異なるため、step7-8で**wrapper integrity mismatchとしてFAIL**する（S10.1が「格納された`dictionary_payload_sha256`を無検証のままwrapper hash inputとして信用しない」設計になっているため検知できる — この設計を採用しなかった場合、Case Bは見逃される） |
+| C（immutable metadata tamper、R4-4項目9） | `dictionary_payload`は無変更。`scope`等のimmutable metadata fieldのみ1 byte変更 | 変更なし | 変更なし | S10.1 step3-4のpayload hash検証は一致する。step6-8で、改ざんされたmetadata fieldがwrapper integrity projectionへ算入されるため（S5.2で全immutable fieldが対象、対象外なし）、**wrapper integrity mismatchでFAIL**する |
+
+**Case Bが本検証の核心**: Case Bは、S10.1が「格納`dictionary_payload_sha256`を無検証のまま
+wrapper hash inputとして信用しない」という設計を採らなかった場合に**見逃されてしまう**
+改ざんパターンである。verification scriptは、Case Bのfixtureに対して確実にFAILを検出することを
+必須assertionとする（PASSしてしまえばS10.1のstep3再計算の意義が検証できていないことを意味する）。
+
+### S11.2 approvedDict tokenization（0.1固定規則）の検証（R4-3・R4-4で新設）
+
+S13.1で固定した0.1 tokenization規則（scalar全体一致・array要素別・object対象外・
+delimiter split禁止・substring/fuzzy/AI推定禁止）を検証する。**R4-4の項目1-6に対応**する。
+
+| # | 検証項目 | 対応するcontract節 | 検証方法（案） |
+|---|---|---|---|
+| 1（R4-4項目1） | scalar canonical exact一致 | S13.1項目1-2 | field値（scalar string）が`effective_vocabulary.allowed_tags`のいずれかと正規化後完全一致する場合に、対応するcanonical tagがapprovedDictへ生成されることを確認する |
+| 2（R4-4項目2） | scalar alias exact一致 | S13.1項目1-2 | field値（scalar string）が`effective_vocabulary.aliases`のいずれかのkeyと正規化後完全一致する場合に、対応するcanonical display（alias解決後の値）がapprovedDictへ生成されることを確認する |
+| 3（R4-4項目3） | `"prefix" + alias + "suffix"`は不一致 | S13.1項目1・3 | alias文字列の前後に余分な文字列を付加したfield値（例:「関連: セーフティ装置」）を用意し、approvedDict tagが**生成されない**ことを確認する（部分文字列一致・delimiter分割のいずれによっても救済されないことを検証する） |
+| 4（R4-4項目4） | `"alias1 / alias2"`は0.1では分割せず不一致 | S13.1項目1・3 | 複数のalias候補をdelimiter（`/`等）で連結した1つのscalar field値を用意し、approvedDict tagが**生成されない**ことを確認する（delimiter split禁止の直接検証） |
+| 5（R4-4項目5） | Array `["alias1","alias2"]`は各要素を独立評価 | S13.1項目1 | 同じ2つのalias値を配列要素として個別に持つfield（`["alias1","alias2"]`）を用意し、**両方**の要素がそれぞれ独立にapprovedDict tagへ解決されることを確認する（4のdelimiter連結文字列との対比で、arrayとscalarの扱いの違いを実証する） |
+| 6（R4-4項目6） | object値は無視 | S13.1項目1 | field値がobject型（例: `{ display: "セーフティ装置" }`）であるfixtureを用意し、object内部の文字列と`effective_vocabulary`が一致していても、approvedDict tagが**生成されない**ことを確認する |
+| 7（R4-4項目7） | raw payload tamper検出 | S10.1（Case A） | S11.1 Case Aの検証（上表参照） |
+| 8（R4-4項目8） | stored payload hash tamper検出 | S10.1（Case B） | S11.1 Case Bの検証（上表参照） |
+| 9（R4-4項目9） | immutable metadata tamper検出 | S10.1（Case C） | S11.1 Case Cの検証（上表参照） |
 
 ---
 

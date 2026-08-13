@@ -50,6 +50,15 @@ P2-A4「Private Dictionary Application / Matching Integration」の設計契約�
   `composeFinalTags()`/`buildTagDisplayMap()`/`buildTagIndex()`/`evaluateTagMatch()`等）に
   基づき10項目で確定（R3-3）。
 
+**R4改訂**: Checkpoint 1-R4にて、以下を反映。変更点は各節に(R4-n)として明記する。
+
+- S10.1（新設）: Snapshot Loaderのhash validation順序を10ステップで正式contract化。
+  格納された`dictionary_payload_sha256`を無検証のままwrapper integrity hash inputとして
+  信用しない、という制約を明記（R4-1）。
+- S13.1: `_tagInfo.approvedDict`のtokenization規則をP2-A4 0.1として完全固定
+  （scalar=value全体、array=要素ごと、object=対象外、delimiter split/substring/fuzzy/AI推定
+  すべて禁止）。S23旧#13を解決済みへ移動（R4-3）。
+
 ---
 
 ## S0. 目的とKPI（要約。詳細は acceptance plan 側）
@@ -666,6 +675,63 @@ validation失敗後にpartial resolverを残してはならない（既存 `pref
 適用して続行」は明確に禁止する（NG-8）。Invalid Snapshotの原因（hash不一致/schema不正/
 内部conflict）を問わず、Resolver自体を有効化しないという一段階の判断のみを許可する。
 
+### S10.1 Snapshot Loader Validation Order（R4-1で新設）
+
+「validate snapshot」（上図）の内部を、次の**10ステップの厳密な順序**として正式contract化する。
+実装Checkpointはこの順序を変更してはならない。
+
+```text
+1. wrapper構造validation
+   （S5.1のSnapshot Wrapper Schemaに沿ったfield構成・型チェック。不正ならINVALID SNAPSHOT）
+        |
+        v
+2. dictionary_payloadをP2-A1 validatePrivateDictionary()相当で検証
+   （private_dictionary_learning_core.jsの既存validation関数をそのまま呼ぶ。再実装しない）
+        |
+        v
+3. dictionary_payloadから hashPrivateDictionaryCanonical() で payload SHAを再計算
+   （wrapperに格納された値をそのまま信用せず、Loader自身が入力から独立に計算する）
+        |
+        v
+4. 再計算したpayload SHAと、wrapperに格納された dictionary_payload_sha256 を比較
+        |
+        v
+5. 不一致 → INVALID SNAPSHOT（S10案B: 辞書無効化、以降のstepへ進まない）
+        |  （一致した場合のみ次へ進む）
+        v
+6. 再計算したpayload SHA（stepで得た値。wrapper格納値ではなく、stepで独立に検証済みの値）を
+   用いてwrapper integrity projection（S5.2のhash対象fieldのcanonical構造体）を構築する
+        |
+        v
+7. 構築したprojectionから wrapper_integrity_sha256 を再計算する
+        |
+        v
+8. 再計算したwrapper_integrity_sha256と、wrapperに格納された wrapper_integrity_sha256 を比較
+        |
+        v
+9. 不一致 → INVALID SNAPSHOT（S10案B、以降のstepへ進まない）
+        |  （一致した場合のみ次へ進む）
+        v
+10. 両hash（payload・wrapper integrity）のvalidationが成功した場合のみ、
+    Dictionary Resolverの構築を開始する（S10「build complete resolver」以降へ進む）
+```
+
+**必須制約**: wrapperに格納された`dictionary_payload_sha256`の値そのものを、
+`wrapper_integrity_sha256`のhash input（S5.2の「`dictionary_payload_sha256`という文字列として
+算入」）として**無検証のまま信用してはならない**。step6の「wrapper integrity projectionの構築」
+には、必ずstep3で**Loader自身が独立に再計算した**payload SHA（＝step4で一致検証済みの値）を
+使う。もしstep6でwrapper格納値の`dictionary_payload_sha256`をそのまま使ってしまうと、
+攻撃者（またはbit破損）が`dictionary_payload`と格納済み`dictionary_payload_sha256`を**両方**
+一貫して改ざんした場合（R4-2 Case B）でも、`wrapper_integrity_sha256`の再計算がその改ざん済み
+値を正として使ってしまい、改ざんを見逃す可能性がある。step3で独立再計算した値をstep6で使う
+ことで、`dictionary_payload`自体の改ざん（Case A）と、payload+格納hashの同時改ざん（Case B）の
+**両方**を、それぞれ異なるstepで確実に検知できる設計とする。
+
+**partial resolver禁止**: 10ステップのいずれかでINVALID SNAPSHOTと判定された場合、
+それまでに構築しかけたResolver状態を一切外部（matching engine・UI）へ渡さない。既存の
+「例外を投げず型付きdiagnosticsを返す、しかし部分結果は決して外に出さない」パターン
+（`preflightJsonGraph()`等、current-state-analysis §14参照）をそのまま踏襲する。
+
 ---
 
 ## S11. Unknown Termの扱い
@@ -841,7 +907,8 @@ Checkpointで行う**（Checkpoint 1-R2は設計のみで、この変更を含�
 `effectiveNonCodeTagSet()`(L5406)、`buildTagIndex()`(L5423)、`evaluateTagMatch()`(L5460)、
 `candidateEntriesForSys()`(L5561)、`tagSourcesFor()`(L5940)、`synonymBaseTagsForText()`(L4304)。
 
-**1. `effective_vocabulary`からapprovedDict tagを生成する正確な一致規則**:
+**1. `effective_vocabulary`からapprovedDict tagを生成する正確な一致規則**（R4-3でtokenization
+規則を0.1として完全固定）:
 既存`.dict`の生成元`synonymBaseTagsForText()`は、`tagSourceText()`が返す**複数fieldを
 連結した1つの長いtext**に対し、`compiledSynonymIndex()`/`synonymGroupsForText()`で
 正規化済みtermの**部分文字列出現**（`n.startsWith(t.term, i)`を全開始位置iで走査、L4144-4160）
@@ -850,26 +917,50 @@ Checkpointで行う**（Checkpoint 1-R2は設計のみで、この変更を含�
 （索引がsynonymMap専用に構築されているため）。
 
 R3-3では、`.dict`と同じ「連結text中の部分文字列出現」方式を`effective_vocabulary`へそのまま
-横展開せず、**より保守的な規則**を採用する: `tagSourceFields()`が返す各fieldの値を
-**連結する前に、field単位で個別に**正規化し、その正規化済み値が`effective_vocabulary`の
-canonical display（`allowed_tags`）またはalias display（`aliases`のkey）と**完全一致**する
-場合にのみtagを生成する（部分文字列としての出現では生成しない）。
+横展開せず、**より保守的な規則**を採用することとした。R4-3で、この規則を**P2-A4 0.1として
+field型ごとに完全固定**する。`tagSourceFields()`が返す各field名について、`row[field]`の
+**生の値**（`tagSourceText()`のように連結する前の値）を型ごとに次のように扱う
+（`tagSourceText()`のL4287-4297自体が、array要素を個別に`normalizeText()`して`parts`へ
+push し、object型を`typeof value !== 'object'`のguardで暗黙的に除外している既存の型別扱いと
+整合させた設計）:
+
+- **scalar（string/number等、arrayでもobjectでもない値）**: field値**全体を1つのvalue**として
+  正規化し、`effective_vocabulary`のcanonical/alias displayと比較する。**value内部を
+  delimiter（`/`・`、`・`,`等）で分割してからそれぞれ比較する処理は、P2-A4 0.1では
+  一切行わない**（delimiter split禁止）。
+- **Array**: 既存`tagSourceText()`が配列要素を個別に`parts`へpushする扱い（L4292-4293）と
+  整合させ、**配列の各要素を個別のvalueとして**扱い、要素ごとに独立して正規化・比較する
+  （1要素内でのdelimiter分割は行わない。要素そのものが1つのvalueである）。
+- **object**: `tagSourceText()`が`typeof value !== 'object'`のguardでobject値を暗黙的に
+  除外している既存パターンと同様、**approvedDict resolutionの対象外**とする（object値を
+  文字列化して比較する処理は行わない）。
 
 **2. canonical exact / approved aliasの正規化規則**:
 `.dict`と同じ正規化primitive（`normalizeForMatch()`、`normalizeTagValue()`）を再利用する。
-新しい正規化ロジックは追加しない。canonical exact一致は「field正規化値 ==
-`normalizeForMatch(canonical display)`」、approved alias一致は「field正規化値 ==
-`normalizeForMatch(alias display)`」で判定し、後者はhitした場合`effective_vocabulary.aliases`の
-対応するcanonical displayをtag値として採用する（`effective_vocabulary.aliases`が
-`{alias表示名→canonical表示名}`という向きであることに整合、current-state-analysis §18.1）。
+新しい正規化ロジックは追加しない。
 
-**3. substring / fuzzy / AI推定の要否**: **原則禁止する。** 上記1の通り、`.dict`が採用する
-「連結text中の部分文字列出現」方式は、正式に承認された辞書由来のtagとしては再現率
-（recall）を過剰に広げ、意図しない文脈への誤付与（false positive）を招くリスクがある。
+- **canonical exact**: 「normalized whole value == `normalizeForMatch(canonical display)`」
+  （`effective_vocabulary.allowed_tags`のいずれか）。
+- **approved alias**: 「normalized whole value == `normalizeForMatch(alias display)`」
+  （`effective_vocabulary.aliases`のkeyのいずれか）で判定し、hitした場合
+  `effective_vocabulary.aliases`の対応するcanonical displayをtag値として採用する
+  （`effective_vocabulary.aliases`が`{alias表示名→canonical表示名}`という向きであることに
+  整合、current-state-analysis §18.1）。
+
+いずれも**「normalized whole value」全体**に対する等価比較のみであり、value内の一部分だけが
+一致するケース（例: `"prefix" + alias + "suffix"`という連結文字列や、`"alias1 / alias2"`という
+delimiter区切り文字列）は、上記1のscalar規則により**一致しない**（P2-A4 0.1では不一致として
+扱う。将来のtokenization対応は別version/別sliceで検討する）。
+
+**3. substring / fuzzy / AI推定の要否**: **禁止する（P2-A4 0.1で完全固定）。** 上記1の通り、
+`.dict`が採用する「連結text中の部分文字列出現」方式は、正式に承認された辞書由来のtagとしては
+再現率（recall）を過剰に広げ、意図しない文脈への誤付与（false positive）を招くリスクがある。
 approvedDictはP2-A3レビュー→Promotion Validatorを経た正式知識であるため、ad hoc辞書より
-**高い精度（precision）を優先**する設計とし、field値の完全一致のみを許可する。
-fuzzy一致（編集距離等）・AI推定は初期実装では一切行わない（将来的にscore係数（S13の
-unresolved design question）と合わせて再検討してよいが、Checkpoint 1-R3では決定しない）。
+**高い精度（precision）を優先**する設計とし、value全体の完全一致のみを許可する。
+**substring一致（部分文字列出現）・delimiter split後の部分一致・fuzzy一致（編集距離等）・
+AI推定は、P2-A4 0.1では一切行わない。** これはunresolved design questionではなく、
+**0.1の確定contract**である（将来的にscore係数（S13のunresolved design question）と
+合わせてtokenization方式自体を再検討してよいが、それは別version/別sliceの対象とする）。
 
 **4. `composeFinalTags()`でのsource priority**: 既存の`ordered`配列構築順序
 （`manualAdd, explicit, dict, code`、L4338-4343）へ、`approvedDict`を**`explicit`と`dict`の間**
@@ -1164,6 +1255,22 @@ matching実行（既存logic、変更なし）
   manualRemove適用・maxTagsPerRow・high-frequency pruning・display解決・stats識別）を
   実コード確認済みの既存関数を根拠にR3-3で確定した（S13.1）。
 
+**R4で解決した項目**:
+
+- 旧#13（R3-3で追加）: `_tagInfo.approvedDict`のtokenization（field値内部の分割要否）は、
+  R4-3で**P2-A4 0.1として完全固定し解決した**。scalar値はvalue全体を1つのvalueとして扱い
+  delimiter分割を行わない、array値は既存`tagSourceText()`の型別扱い（L4287-4297）と整合させ
+  各要素を個別valueとして扱う、object値はapprovedDict resolution対象外とする。substring・
+  fuzzy・AI推定も明示的に禁止した（S13.1項目1-3）。将来的なdelimiter/tokenization対応は
+  別version/別sliceの対象として切り離した。
+- Snapshot Loaderのhash validation順序（新規）: wrapper構造validation →
+  `validatePrivateDictionary()`相当の`dictionary_payload`検証 → payload SHA再計算 →
+  格納`dictionary_payload_sha256`との比較 → 不一致ならINVALID → 再計算済みpayload SHAを
+  用いたwrapper integrity projection構築 → `wrapper_integrity_sha256`再計算 → 格納値との比較 →
+  不一致ならINVALID → 両hash成功後のみResolver構築、という10ステップの厳密な順序をR4-1で
+  新設・確定した（S10.1）。格納された`dictionary_payload_sha256`を無検証のままwrapper hash
+  inputとして信用しない、という制約も明記した。
+
 **残存・新規の未解決事項**:
 
 1. Promotion Validatorがscope/canonical衝突を検出した際、「該当candidateのみ除外」か
@@ -1197,7 +1304,3 @@ matching実行（既存logic、変更なし）
     既存`mergeDictionaryLayers()`の戻り値がbit-for-bit不変であることが必須要件（S4.1）。
 12.（R3-1で追加）`shadowed_entry_refs`（非採用candidateの補助的な公開）を実装するか否か、
     実装する場合の具体的なschemaは未設計（S4.1、必須契約ではなくoptional拡張として位置づけ）。
-13.（R3-3で追加）`_tagInfo.approvedDict`の一致規則（field値の完全一致、S13.1項目1）における、
-    単一field値内でのtokenization（区切り文字での分割要否）の具体的な仕様は未設計。
-    「連結text全体への部分文字列走査は行わない」という方針（S13.1項目3）のみ確定しており、
-    field値そのものの内部分割方式は後続実装Checkpointで設計する。
