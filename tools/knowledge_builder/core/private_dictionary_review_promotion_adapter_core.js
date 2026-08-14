@@ -85,6 +85,15 @@
 
   const MAX_MAP_SIZE = 20000;
 
+  // §R1: generic structural-capture size/depth guards. These bound the
+  // capture of an opaque, externally-owned (P2-A2 Evaluation / Snapshot)
+  // tree that this module never semantically interprets, so the limits are
+  // deliberately generous - large enough not to reject any legitimate
+  // existing Evaluation/Snapshot artifact - and exist only to fail closed
+  // on pathological/hostile input (unbounded recursion, node-count abuse).
+  const STRUCTURAL_CAPTURE_MAX_DEPTH = 64;
+  const STRUCTURAL_CAPTURE_MAX_NODES = 200000;
+
   function ordinalCompare(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
 
   // ---- R1-1-style single structural-primitive chokepoint (independent copy
@@ -178,6 +187,70 @@
     return out;
   }
 
+  // §R1: generic, semantic-agnostic structural capture. Unlike
+  // captureOwnedObject()/captureOwnedArray() (which require this module to
+  // already own/enumerate the exact allowed key set - i.e. semantic schema
+  // knowledge), this function recursively clones an ARBITRARY JSON-like
+  // value tree - null, string, boolean, finite number, safe plain object,
+  // safe plain array, in any nesting - into fresh, deeply frozen, same-realm
+  // copies, without interpreting a single field's meaning. It exists solely
+  // to give `evaluation` and non-null `base_snapshot` (both opaque,
+  // externally-owned P2-A2/Snapshot schemas this Adapter must never
+  // semantically validate) atomic-capture/alias-isolation, so the Adapter's
+  // successful output can never share a reference with caller-owned input
+  // and a caller mutating its own copy after calling this module can never
+  // affect the result. Every reachable value is read from the caller-owned
+  // source AT MOST ONCE (via the same safe descriptor-read primitives used
+  // everywhere else in this module) - this function performs no re-reads of
+  // anything it has already read. Rejected (fails closed with `errCode` at
+  // the offending `path`): function, symbol, bigint, `undefined`, NaN/
+  // Infinity, any accessor (getter/setter) property, any object whose own
+  // prototype is not exactly `Object.prototype`/`Array.prototype` (Date,
+  // RegExp, Map, Set, class instances, `null`-prototype objects, hostile
+  // exotic objects), sparse arrays, symbol-keyed or `__proto__`/`prototype`/
+  // `constructor` own keys, cyclic structures, and structures exceeding the
+  // depth/node-count guards above. It never invokes `JSON.stringify`/
+  // `JSON.parse`, never uses `structuredClone`, and never inspects a
+  // property name to decide anything - the same capture rule applies to
+  // every key.
+  function captureStructuralValue(value, path, errCode, budget, cycleStack, depth) {
+    if (value === null) return null;
+    const t = typeof value;
+    if (t === 'string' || t === 'boolean') return value;
+    if (t === 'number') {
+      if (!Number.isFinite(value)) throwAdapterError(errCode, path);
+      return value;
+    }
+    if (t !== 'object') throwAdapterError(errCode, path); // function, symbol, bigint, undefined
+    if (depth > STRUCTURAL_CAPTURE_MAX_DEPTH) throwAdapterError(errCode, path);
+    if (cycleStack.has(value)) throwAdapterError(errCode, path);
+    budget.count += 1;
+    if (budget.count > STRUCTURAL_CAPTURE_MAX_NODES) throwAdapterError(errCode, path);
+
+    if (isSafePlainArray(value)) {
+      cycleStack.add(value);
+      const arr = captureOwnedArray(value, path, errCode);
+      const out = arr.map((item, i) => captureStructuralValue(item, `${path}[${i}]`, errCode, budget, cycleStack, depth + 1));
+      cycleStack.delete(value);
+      return Object.freeze(out);
+    }
+    if (isSafePlainObject(value)) {
+      cycleStack.add(value);
+      const ownKeys = safeOwnKeys(value);
+      if (ownKeys === STRUCTURAL_READ_FAILED) throwAdapterError(errCode, path);
+      const out = {};
+      for (const key of ownKeys) {
+        rejectHostileKey(key, errCode, path);
+        const { present, value: v } = readOwnDataProperty(value, key);
+        if (!present) throwAdapterError(errCode, `${path}.${String(key)}`);
+        out[key] = captureStructuralValue(v, `${path}.${String(key)}`, errCode, budget, cycleStack, depth + 1);
+      }
+      cycleStack.delete(value);
+      return Object.freeze(out);
+    }
+    throwAdapterError(errCode, path); // Date/RegExp/Map/Set/class instance/hostile exotic object
+  }
+
   // §S24.2: the P2-A3 Review State's `candidate_decisions`/`alias_decisions`/
   // `conflict_resolutions` are ID-keyed plain objects (maps), not arrays.
   // Captures every own key as a decision-item id, and every value through
@@ -225,7 +298,7 @@
     if (typeof obj.document_fingerprint !== 'string' || obj.document_fingerprint.length === 0) throwAdapterError(errCode, `${path}.document_fingerprint`);
     return { source_document_id: obj.source_document_id, document_fingerprint: obj.document_fingerprint };
   }
-  function fingerprintKey(fp) { return `${fp.source_document_id} ${fp.document_fingerprint}`; }
+  function fingerprintKey(fp) { return `${fp.source_document_id} ${fp.document_fingerprint}`; }
 
   function setsEqual(a, b) {
     if (a.size !== b.size) return false;
@@ -236,46 +309,62 @@
     return setsEqual(new Set(a.map(fingerprintKey)), new Set(b.map(fingerprintKey)));
   }
 
-  // §S24.5: the minimal, P2-A2-externally-owned slice of `evaluation` this
-  // module ever reads - schema_version, source_fingerprints, and the three
-  // id lists - purely to validate whole-set binding against the Review
-  // State before array-projecting it. Every other `evaluation` field
-  // (canonical_term, metrics, rule_ids, evidence_refs, ...) is never read;
-  // full P2-A2 schema validation is Promotion core's own responsibility
-  // when it later receives this Adapter's output.
-  function captureEvaluationBindingSlice(evaluationRaw) {
-    if (!isSafePlainObject(evaluationRaw)) throwAdapterError('REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', '$.evaluation');
-    const svR = readOwnDataProperty(evaluationRaw, 'schema_version');
-    if (!svR.present || typeof svR.value !== 'string' || svR.value.length === 0) {
+  // §S24.5/§R1: the minimal, P2-A2-externally-owned slice of `evaluation`
+  // this module ever reads - schema_version, source_fingerprints, and the
+  // three id lists - purely to validate whole-set binding against the
+  // Review State before array-projecting it. Every other `evaluation` field
+  // (canonical_term, metrics, rule_ids, evidence_refs, ...) is never
+  // interpreted; full P2-A2 schema validation is Promotion core's own
+  // responsibility when it later receives this Adapter's output.
+  //
+  // Takes `evaluationCaptured` - the ALREADY structurally-captured (via
+  // captureStructuralValue()) frozen, safe, same-realm copy of `evaluation`,
+  // never the caller's raw reference. Because the value has already passed
+  // through the generic structural-capture chokepoint (which itself used
+  // the safe descriptor-read primitives to read every property exactly
+  // once), plain `.` property access here is safe and reads nothing a
+  // second time from caller-owned state; it merely inspects data this
+  // module already owns a private copy of. This function still performs no
+  // semantic validation of any field's meaning beyond the minimal shape
+  // needed to build the binding slice - the generic capture step enforces
+  // no shape at all.
+  function captureEvaluationBindingSlice(evaluationCaptured) {
+    if (!isSafePlainObject(evaluationCaptured)) throwAdapterError('REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', '$.evaluation');
+    const schemaVersion = evaluationCaptured.schema_version;
+    if (typeof schemaVersion !== 'string' || schemaVersion.length === 0) {
       throwAdapterError('REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', '$.evaluation.schema_version');
     }
 
-    const fpR = readOwnDataProperty(evaluationRaw, 'source_fingerprints');
-    if (!fpR.present) throwAdapterError('REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', '$.evaluation.source_fingerprints');
-    const fpArr = captureOwnedArray(fpR.value, '$.evaluation.source_fingerprints', 'REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID');
-    const fingerprints = fpArr.map((item, i) => captureFingerprintItem(item, `$.evaluation.source_fingerprints[${i}]`, 'REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID'));
+    const fpValue = evaluationCaptured.source_fingerprints;
+    if (!isSafePlainArray(fpValue)) throwAdapterError('REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', '$.evaluation.source_fingerprints');
+    const fingerprints = fpValue.map((item, i) => {
+      const p = `$.evaluation.source_fingerprints[${i}]`;
+      if (!isSafePlainObject(item)) throwAdapterError('REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', p);
+      if (typeof item.source_document_id !== 'string' || item.source_document_id.length === 0) throwAdapterError('REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', `${p}.source_document_id`);
+      if (typeof item.document_fingerprint !== 'string' || item.document_fingerprint.length === 0) throwAdapterError('REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', `${p}.document_fingerprint`);
+      return { source_document_id: item.source_document_id, document_fingerprint: item.document_fingerprint };
+    });
 
     function idList(field, idKey, path) {
-      const r = readOwnDataProperty(evaluationRaw, field);
-      if (!r.present) throwAdapterError('REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', path);
-      const arr = captureOwnedArray(r.value, path, 'REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID');
+      const arr = evaluationCaptured[field];
+      if (!isSafePlainArray(arr)) throwAdapterError('REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', path);
       const ids = [];
       const seen = new Set();
       for (let i = 0; i < arr.length; i++) {
         if (!isSafePlainObject(arr[i])) throwAdapterError('REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', `${path}[${i}]`);
-        const idR = readOwnDataProperty(arr[i], idKey);
-        if (!idR.present || typeof idR.value !== 'string' || idR.value.length === 0) {
+        const idVal = arr[i][idKey];
+        if (typeof idVal !== 'string' || idVal.length === 0) {
           throwAdapterError('REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', `${path}[${i}].${idKey}`);
         }
-        if (seen.has(idR.value)) throwAdapterError('REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', `${path}[${i}].${idKey}`);
-        seen.add(idR.value);
-        ids.push(idR.value);
+        if (seen.has(idVal)) throwAdapterError('REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', `${path}[${i}].${idKey}`);
+        seen.add(idVal);
+        ids.push(idVal);
       }
       return ids;
     }
 
     return {
-      schema_version: svR.value,
+      schema_version: schemaVersion,
       source_fingerprints: fingerprints,
       candidate_ids: idList('candidates', 'candidate_id', '$.evaluation.candidates'),
       alias_ids: idList('alias_candidates', 'alias_candidate_id', '$.evaluation.alias_candidates'),
@@ -297,9 +386,6 @@
     const ROOT_KEYS = ['evaluation', 'review_state', 'base_snapshot', 'target_dictionary_id', 'target_version', 'source_commit'];
     const root = captureOwnedObject(input, '$', ROOT_KEYS, 'REVIEW_PROMOTION_ADAPTER_ROOT_INVALID');
 
-    const evaluationRaw = root.evaluation;       // opaque single-read reference; never re-read
-    const baseSnapshotRaw = root.base_snapshot;  // opaque single-read reference; never re-read, never dereferenced
-
     if (typeof root.target_dictionary_id !== 'string' || !DICTIONARY_ID_RE.test(root.target_dictionary_id)) {
       throwAdapterError('REVIEW_PROMOTION_ADAPTER_TARGET_INVALID', '$.target_dictionary_id');
     }
@@ -309,13 +395,39 @@
     if (typeof root.source_commit !== 'string' || !HEX40_RE.test(root.source_commit)) {
       throwAdapterError('REVIEW_PROMOTION_ADAPTER_TARGET_INVALID', '$.source_commit');
     }
-    // §13: base_snapshot semantic validation is exclusively
-    // PrivateDictionarySnapshotCore.loadDictionarySnapshotWrapper()'s (called
-    // by Promotion, never by this Adapter) - the only check performed here
-    // is the same minimal null-or-safe-plain-object gate Promotion itself
-    // applies before ever dereferencing it.
-    if (baseSnapshotRaw !== null && !isSafePlainObject(baseSnapshotRaw)) {
-      throwAdapterError('REVIEW_PROMOTION_ADAPTER_BASE_SNAPSHOT_INVALID', '$.base_snapshot');
+
+    // §R1: atomic structural capture of `evaluation` and (non-null)
+    // `base_snapshot` - a generic, semantic-agnostic recursive clone into
+    // fresh, frozen, same-realm copies (captureStructuralValue(), defined
+    // above). This is the ONLY read of these two caller-owned trees; from
+    // this point on the captured copies - never `root.evaluation`/
+    // `root.base_snapshot` - are used anywhere, including in the success
+    // output, so that output can never alias caller-owned state and a
+    // caller mutating its own `evaluation`/`base_snapshot` object after
+    // calling this function can never affect the result (§15). This step
+    // performs zero semantic validation of Evaluation/Snapshot field
+    // meaning - that remains exclusively Promotion/Snapshot core's own
+    // responsibility, unchanged, when they later receive this Adapter's
+    // output.
+    const evaluationCaptured = captureStructuralValue(
+      root.evaluation, '$.evaluation', 'REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID',
+      { count: 0 }, new Set(), 0
+    );
+    let baseSnapshotCaptured = null;
+    if (root.base_snapshot !== null) {
+      baseSnapshotCaptured = captureStructuralValue(
+        root.base_snapshot, '$.base_snapshot', 'REVIEW_PROMOTION_ADAPTER_BASE_SNAPSHOT_INVALID',
+        { count: 0 }, new Set(), 0
+      );
+      // §13: base_snapshot semantic validation is exclusively
+      // PrivateDictionarySnapshotCore.loadDictionarySnapshotWrapper()'s
+      // (called by Promotion, never by this Adapter) - the only check
+      // performed here, on the already-captured copy, is the same minimal
+      // safe-plain-object gate Promotion itself applies before ever
+      // dereferencing it.
+      if (!isSafePlainObject(baseSnapshotCaptured)) {
+        throwAdapterError('REVIEW_PROMOTION_ADAPTER_BASE_SNAPSHOT_INVALID', '$.base_snapshot');
+      }
     }
 
     // ---- review_state structural capture ----
@@ -347,7 +459,7 @@
     }
 
     // ---- evaluation binding minimal slice ----
-    const evalSlice = captureEvaluationBindingSlice(evaluationRaw);
+    const evalSlice = captureEvaluationBindingSlice(evaluationCaptured);
 
     // ---- §S24.5 whole-set binding checks (both directions; a single
     // mismatch anywhere fails closed before any decision array is built) ----
@@ -415,7 +527,7 @@
 
     return Object.freeze({
       schema_version: SCHEMA_VERSION,
-      evaluation: evaluationRaw,
+      evaluation: evaluationCaptured,
       review_binding: Object.freeze({
         review_schema_version: reviewObj.review_schema_version,
         extraction_schema_version: reviewObj.extraction_schema_version,
@@ -424,7 +536,7 @@
       candidate_decisions: Object.freeze(candidateDecisions),
       alias_decisions: Object.freeze(aliasDecisions),
       conflict_resolutions: Object.freeze(conflictResolutions),
-      base_snapshot: baseSnapshotRaw,
+      base_snapshot: baseSnapshotCaptured,
       target_dictionary_id: root.target_dictionary_id,
       target_version: root.target_version,
       source_review_artifact_identity: Object.freeze({ sha256 }),

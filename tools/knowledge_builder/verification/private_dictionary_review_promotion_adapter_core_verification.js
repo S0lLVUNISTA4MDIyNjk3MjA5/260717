@@ -19,11 +19,36 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const CORE_PATH = path.join(__dirname, '..', 'core', 'private_dictionary_review_promotion_adapter_core.js');
 const Adapter = require(CORE_PATH);
 const Promotion = require(path.join(__dirname, '..', 'core', 'private_dictionary_promotion_core.js'));
+const Snapshot = require(path.join(__dirname, '..', 'core', 'private_dictionary_snapshot_core.js'));
 const IdHashUtils = require(path.join(__dirname, '..', 'core', 'id_hash_utils.js'));
+
+function randHex(n) { return crypto.randomBytes(n).toString('hex'); }
+
+// Builds a real, valid Snapshot Wrapper (via the real, unmodified Snapshot
+// core) around a fresh empty dictionary payload - for R1 base_snapshot
+// end-to-end fixtures. Mirrors the equivalent helper in
+// private_dictionary_promotion_core_verification.js.
+async function buildRealSnapshotWrapper(dictionaryId, overrides) {
+  const dictionaryPayload = { schema_version: 'private-dictionary-overlay/1.0', dictionary_id: dictionaryId, version: '1', scope: 'PROJECT', entries: [] };
+  const builderInput = Object.assign({
+    dictionary_payload: dictionaryPayload,
+    snapshot_id: 'dsnap-' + randHex(16),
+    snapshot_version: 1,
+    provenance: { generated_at: '2026-08-14T00:00:00.000Z', generator: { tool: 'synthetic-test-tool', version: '0.1.0' } },
+    source_review_artifact_identity: { sha256: 'f'.repeat(64) },
+    promotion_record_identity: { sha256: '1'.repeat(64) },
+    source_commit: '2'.repeat(40),
+    conflict_state: { unresolved_count: 0 },
+    supersedes: null,
+    rollback_target: null
+  }, overrides);
+  return Snapshot.buildDictionarySnapshotWrapper(builderInput);
+}
 
 // Strips /* */ block comments and // line comments (but not string/regex
 // contents) so a static token scan never false-positives on this file's own
@@ -294,7 +319,8 @@ async function main() {
     const reviewState = makeReviewState(evaluation);
     const fakeBaseSnapshot = { wrapper_schema_version: 'private-dictionary-snapshot-wrapper/0.1', snapshot_id: 'dsnap-' + 'b'.repeat(32) };
     const output = await Adapter.buildPromotionInputFromReview(makeInput(evaluation, reviewState, { base_snapshot: fakeBaseSnapshot }));
-    assert(output.base_snapshot === fakeBaseSnapshot, 'U caller-supplied base_snapshot is passed through to the Promotion boundary as the same opaque reference (Adapter never reads its fields)');
+    assert(output.base_snapshot !== fakeBaseSnapshot, 'U caller-supplied base_snapshot is structurally captured into a fresh copy, never passed through as the same reference (§R1)');
+    assert(output.base_snapshot.wrapper_schema_version === fakeBaseSnapshot.wrapper_schema_version && output.base_snapshot.snapshot_id === fakeBaseSnapshot.snapshot_id, 'U the captured base_snapshot copy has identical semantic content to the caller-supplied object');
   }
 
   // ==========================================================================
@@ -325,16 +351,25 @@ async function main() {
   {
     const evaluation = makeEvaluation();
     const reviewState = makeReviewState(evaluation);
-    const input = makeInput(evaluation, reviewState);
+    const fakeBaseSnapshot = { wrapper_schema_version: 'private-dictionary-snapshot-wrapper/0.1', snapshot_id: 'dsnap-' + 'b'.repeat(32), nested: { detail: { level: 'original' } } };
+    const input = makeInput(evaluation, reviewState, { base_snapshot: fakeBaseSnapshot });
     const p = Adapter.buildPromotionInputFromReview(input);
     // Synchronous mutation immediately after the call - the function's
     // synchronous prefix (everything up to its one internal await) has
     // already captured every value it needs by the time this line runs.
     input.review_state.candidate_decisions['cand-1'].decision = 'REJECT';
     input.target_dictionary_id = 'pdict-' + 'f'.repeat(32);
+    input.evaluation.candidates[0].canonical_term = 'MUTATED CANONICAL TERM';
+    input.evaluation.candidates[0].metrics.exposure_count = 999999;
+    input.base_snapshot.snapshot_id = 'dsnap-' + 'f'.repeat(32);
+    input.base_snapshot.nested.detail.level = 'MUTATED';
     const output = await p;
     assert(output.candidate_decisions.find(d => d.candidate_id === 'cand-1').decision === 'ACCEPT', 'AA post-call mutation of a nested decision never affects the already-captured result');
     assert(output.target_dictionary_id === 'pdict-' + 'a'.repeat(32), 'AA post-call mutation of a root scalar field never affects the already-captured result');
+    assert(output.evaluation.candidates[0].canonical_term === 'Primary Compressor', 'AA post-call mutation of a nested evaluation.candidates[0].canonical_term field never affects the already-captured result');
+    assert(output.evaluation.candidates[0].metrics.exposure_count === 3, 'AA post-call mutation of a doubly-nested evaluation.candidates[0].metrics field never affects the already-captured result');
+    assert(output.base_snapshot.snapshot_id === 'dsnap-' + 'b'.repeat(32), 'AA post-call mutation of a nested base_snapshot.snapshot_id field never affects the already-captured result');
+    assert(output.base_snapshot.nested.detail.level === 'original', 'AA post-call mutation of a doubly-nested base_snapshot field never affects the already-captured result');
   }
 
   // ==========================================================================
@@ -430,12 +465,19 @@ async function main() {
   {
     const evaluation = makeEvaluation();
     const reviewState = makeReviewState(evaluation);
-    const input = makeInput(evaluation, reviewState);
+    const fakeBaseSnapshot = { wrapper_schema_version: 'private-dictionary-snapshot-wrapper/0.1', snapshot_id: 'dsnap-' + 'b'.repeat(32) };
+    const input = makeInput(evaluation, reviewState, { base_snapshot: fakeBaseSnapshot });
     const output = await Adapter.buildPromotionInputFromReview(input);
     assert(output.review_binding !== reviewState, 'AG review_binding is a fresh object, not the raw review_state reference');
     assert(output.review_binding.source_fingerprints !== reviewState.source_fingerprints, 'AG review_binding.source_fingerprints is a fresh array, not aliasing review_state.source_fingerprints');
     assert(output.candidate_decisions !== reviewState.candidate_decisions, 'AG candidate_decisions is a fresh array, not the raw review_state map');
     assert(output.conflict_resolutions[0] !== reviewState.conflict_resolutions['conflict-1'], 'AG conflict_resolutions[0] is a fresh object, not aliasing the raw review_state entry');
+    // §R1: evaluation/base_snapshot atomic-capture alias isolation.
+    assert(output.evaluation !== input.evaluation, 'AG output.evaluation is a fresh object, not the raw caller evaluation reference');
+    assert(output.evaluation.candidates !== input.evaluation.candidates, 'AG output.evaluation.candidates is a fresh array, not aliasing the caller evaluation candidates array');
+    assert(output.evaluation.candidates[0] !== input.evaluation.candidates[0], 'AG output.evaluation.candidates[0] is a fresh object, not aliasing the caller evaluation candidate');
+    assert(output.evaluation.candidates[0].metrics !== input.evaluation.candidates[0].metrics, 'AG output.evaluation.candidates[0].metrics is a fresh object, not aliasing the caller nested metrics object');
+    assert(output.base_snapshot !== input.base_snapshot, 'AG non-null output.base_snapshot is a fresh object, not the raw caller base_snapshot reference');
   }
 
   // ==========================================================================
@@ -448,6 +490,21 @@ async function main() {
     assert(Object.isFrozen(standardOutput.alias_decisions) && Object.isFrozen(standardOutput.alias_decisions[0]), 'AH alias_decisions array and its elements are frozen');
     assert(Object.isFrozen(standardOutput.conflict_resolutions) && Object.isFrozen(standardOutput.conflict_resolutions[0]), 'AH conflict_resolutions array and its elements are frozen');
     assert(Object.isFrozen(standardOutput.source_review_artifact_identity), 'AH source_review_artifact_identity is frozen');
+    // §R1: the structurally-captured evaluation (and, when non-null,
+    // base_snapshot) must be immutable in effect at every level, not just
+    // the top-level Promotion Input fields.
+    assert(Object.isFrozen(standardOutput.evaluation), 'AH captured evaluation is frozen');
+    assert(Object.isFrozen(standardOutput.evaluation.candidates), 'AH captured evaluation.candidates array is frozen');
+    assert(Object.isFrozen(standardOutput.evaluation.candidates[0]), 'AH captured evaluation.candidates[0] is frozen');
+    assert(Object.isFrozen(standardOutput.evaluation.candidates[0].metrics), 'AH captured evaluation.candidates[0].metrics is frozen');
+
+    const evaluationWithSnapshot = makeEvaluation();
+    const reviewStateWithSnapshot = makeReviewState(evaluationWithSnapshot);
+    const fakeBaseSnapshot = { wrapper_schema_version: 'private-dictionary-snapshot-wrapper/0.1', snapshot_id: 'dsnap-' + 'b'.repeat(32), nested: { detail: { level: 'x' } } };
+    const outputWithSnapshot = await Adapter.buildPromotionInputFromReview(makeInput(evaluationWithSnapshot, reviewStateWithSnapshot, { base_snapshot: fakeBaseSnapshot }));
+    assert(Object.isFrozen(outputWithSnapshot.base_snapshot), 'AH captured non-null base_snapshot is frozen');
+    assert(Object.isFrozen(outputWithSnapshot.base_snapshot.nested), 'AH captured base_snapshot nested object is frozen');
+    assert(Object.isFrozen(outputWithSnapshot.base_snapshot.nested.detail), 'AH captured base_snapshot doubly-nested object is frozen');
   }
 
   // ==========================================================================
@@ -501,6 +558,244 @@ async function main() {
     assert(!adapterSrc.includes('private_dictionary_promotion_core'), 'AM the Adapter core itself never requires/calls PrivateDictionaryPromotionCore (only this verification file does, per §19)');
     const record = await Promotion.promoteReviewedCandidatesToProjectDictionary(standardOutput);
     assert(record.dictionary_payload.entries.some(e => e.canonical_term === 'Primary Compressor'), 'AM the real Promotion core materialization genuinely ran on Adapter output (not a stand-in)');
+  }
+
+  // ==========================================================================
+  // R1-A/B. Reference-inequality: evaluation and non-null base_snapshot never
+  // alias caller input.
+  // ==========================================================================
+  {
+    const evaluation = makeEvaluation();
+    const reviewState = makeReviewState(evaluation);
+    const fakeBaseSnapshot = { wrapper_schema_version: 'private-dictionary-snapshot-wrapper/0.1', snapshot_id: 'dsnap-' + 'b'.repeat(32) };
+    const input = makeInput(evaluation, reviewState, { base_snapshot: fakeBaseSnapshot });
+    const output = await Adapter.buildPromotionInputFromReview(input);
+    assert(output.evaluation !== input.evaluation, 'R1-A output.evaluation !== input.evaluation');
+    assert(output.base_snapshot !== input.base_snapshot, 'R1-B non-null output.base_snapshot !== input.base_snapshot');
+  }
+
+  // ==========================================================================
+  // R1-C/D. Pre-await mutation immunity for nested evaluation/base_snapshot
+  // fields, including a field Promotion actually reads (canonical_term) plus
+  // at least one other.
+  // ==========================================================================
+  {
+    const evaluation = makeEvaluation();
+    const reviewState = makeReviewState(evaluation);
+    const fakeBaseSnapshot = { wrapper_schema_version: 'private-dictionary-snapshot-wrapper/0.1', snapshot_id: 'dsnap-' + 'b'.repeat(32), nested: { detail: { level: 'original' } } };
+    const input = makeInput(evaluation, reviewState, { base_snapshot: fakeBaseSnapshot });
+    const p = Adapter.buildPromotionInputFromReview(input);
+    // Mutate BEFORE awaiting - the synchronous prefix of buildPromotionInputFromReview
+    // has already completed (this line runs after the call returns a Promise,
+    // which only happens once the synchronous prefix has finished executing).
+    input.evaluation.candidates[0].canonical_term = 'MUTATED';
+    input.evaluation.candidates[0].scope = 'MUTATED_SCOPE';
+    input.evaluation.alias_candidates[0].alias_term = 'MUTATED ALIAS';
+    input.base_snapshot.snapshot_id = 'dsnap-' + 'f'.repeat(32);
+    input.base_snapshot.nested.detail.level = 'MUTATED';
+    const output = await p;
+    assert(output.evaluation.candidates[0].canonical_term === 'Primary Compressor', 'R1-C pre-await mutation of evaluation.candidates[0].canonical_term (a field Promotion reads) never affects the result');
+    assert(output.evaluation.candidates[0].scope === 'SESSION', 'R1-C pre-await mutation of evaluation.candidates[0].scope never affects the result');
+    assert(output.evaluation.alias_candidates[0].alias_term === 'PC Unit', 'R1-C pre-await mutation of evaluation.alias_candidates[0].alias_term never affects the result');
+    assert(output.base_snapshot.snapshot_id === 'dsnap-' + 'b'.repeat(32), 'R1-D pre-await mutation of base_snapshot.snapshot_id never affects the result');
+    assert(output.base_snapshot.nested.detail.level === 'original', 'R1-D pre-await mutation of a doubly-nested base_snapshot field never affects the result');
+  }
+
+  // ==========================================================================
+  // R1-E. Post-await (call fully completed) mutation immunity.
+  // ==========================================================================
+  {
+    const evaluation = makeEvaluation();
+    const reviewState = makeReviewState(evaluation);
+    const fakeBaseSnapshot = { wrapper_schema_version: 'private-dictionary-snapshot-wrapper/0.1', snapshot_id: 'dsnap-' + 'b'.repeat(32) };
+    const input = makeInput(evaluation, reviewState, { base_snapshot: fakeBaseSnapshot });
+    const output = await Adapter.buildPromotionInputFromReview(input);
+    input.evaluation.candidates[0].canonical_term = 'MUTATED AFTER COMPLETION';
+    input.base_snapshot.snapshot_id = 'dsnap-' + 'e'.repeat(32);
+    assert(output.evaluation.candidates[0].canonical_term === 'Primary Compressor', 'R1-E post-completion mutation of evaluation never affects the already-returned result');
+    assert(output.base_snapshot.snapshot_id === 'dsnap-' + 'b'.repeat(32), 'R1-E post-completion mutation of base_snapshot never affects the already-returned result');
+  }
+
+  // ==========================================================================
+  // R1-F. Captured evaluation, through the REAL unmodified Promotion core,
+  // genuinely succeeds end-to-end - including after the caller mutates its
+  // own evaluation object post-call.
+  // ==========================================================================
+  {
+    const evaluation = makeEvaluation();
+    const reviewState = makeReviewState(evaluation);
+    const input = makeInput(evaluation, reviewState);
+    const output = await Adapter.buildPromotionInputFromReview(input);
+    input.evaluation.candidates[0].canonical_term = 'SHOULD NOT APPEAR IN PROMOTION';
+    const record = await Promotion.promoteReviewedCandidatesToProjectDictionary(output);
+    assert(record.dictionary_payload.entries.some(e => e.canonical_term === 'Primary Compressor'), 'R1-F the real Promotion core materializes the captured (not raw, not caller-mutated) evaluation content');
+    assert(!record.dictionary_payload.entries.some(e => e.canonical_term === 'SHOULD NOT APPEAR IN PROMOTION'), 'R1-F post-call caller mutation of evaluation never leaks into real Promotion materialization');
+  }
+
+  // ==========================================================================
+  // R1-G. A valid real base Snapshot wrapper (built via the real, unmodified
+  // Snapshot core), through Adapter -> real Promotion -> real Snapshot
+  // Loader, genuinely succeeds end-to-end. Reference-equality alone (R1-B) is
+  // insufficient proof; this exercises the actual Loader on the captured copy.
+  // ==========================================================================
+  {
+    const dictId = 'pdict-' + randHex(16);
+    const baseSnapshot = await buildRealSnapshotWrapper(dictId, {});
+    const evaluation = makeEvaluation();
+    const reviewState = makeReviewState(evaluation);
+    const input = makeInput(evaluation, reviewState, { base_snapshot: baseSnapshot, target_dictionary_id: dictId, target_version: '2' });
+    const output = await Adapter.buildPromotionInputFromReview(input);
+    const record = await Promotion.promoteReviewedCandidatesToProjectDictionary(output);
+    assert(record.dictionary_payload.version === '2', 'R1-G real Promotion + real Snapshot Loader genuinely processed the captured base_snapshot (correct incremented version)');
+    assert(record.promotion_record.base_snapshot_id === baseSnapshot.snapshot_id, 'R1-G Promotion record base_snapshot_id matches the real base Snapshot loaded from the captured copy');
+    assert(record.dictionary_payload.entries.some(e => e.canonical_term === 'Primary Compressor'), 'R1-G materialization genuinely ran on top of the loaded base snapshot');
+  }
+
+  // ==========================================================================
+  // R1-H/I. Hostile Proxy deep inside evaluation/base_snapshot -> sanitized
+  // fail-closed, no leakage.
+  // ==========================================================================
+  {
+    const secretMarker = 'R1H_DEEP_EVALUATION_SECRET';
+    const evaluation = makeEvaluation();
+    evaluation.candidates[0].metrics = new Proxy({ exposure_count: 1 }, {
+      getOwnPropertyDescriptor(target, prop) { throw new Error(secretMarker); }
+    });
+    const reviewState = makeReviewState(evaluation);
+    const err = await assertRejectsWithCode(() => Adapter.buildPromotionInputFromReview(makeInput(evaluation, reviewState)), 'REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', 'R1-H a hostile Proxy deep inside evaluation (candidates[0].metrics) fails closed with a sanitized code');
+    assert(!JSON.stringify(err).includes(secretMarker), 'R1-H no secret leakage from the deep hostile evaluation Proxy');
+  }
+  {
+    const secretMarker = 'R1I_DEEP_BASE_SNAPSHOT_SECRET';
+    const evaluation = makeEvaluation();
+    const reviewState = makeReviewState(evaluation);
+    const hostileBaseSnapshot = {
+      wrapper_schema_version: 'private-dictionary-snapshot-wrapper/0.1',
+      nested: new Proxy({ snapshot_id: 'dsnap-' + 'b'.repeat(32) }, {
+        getOwnPropertyDescriptor(target, prop) { throw new Error(secretMarker); }
+      })
+    };
+    const err = await assertRejectsWithCode(() => Adapter.buildPromotionInputFromReview(makeInput(evaluation, reviewState, { base_snapshot: hostileBaseSnapshot })), 'REVIEW_PROMOTION_ADAPTER_BASE_SNAPSHOT_INVALID', 'R1-I a hostile Proxy deep inside base_snapshot fails closed with a sanitized code');
+    assert(!JSON.stringify(err).includes(secretMarker), 'R1-I no secret leakage from the deep hostile base_snapshot Proxy');
+  }
+
+  // ==========================================================================
+  // R1-J. A stateful descriptor getter on evaluation/base_snapshot is never
+  // read twice for the same property.
+  // ==========================================================================
+  {
+    let readCount = 0;
+    const realEvaluation = makeEvaluation();
+    const hostileEvaluation = new Proxy(realEvaluation, {
+      getOwnPropertyDescriptor(target, prop) {
+        if (prop === 'schema_version') readCount++;
+        return Object.getOwnPropertyDescriptor(target, prop);
+      },
+      ownKeys(target) { return Reflect.ownKeys(target); }
+    });
+    const reviewState = makeReviewState(realEvaluation);
+    const output = await Adapter.buildPromotionInputFromReview(makeInput(hostileEvaluation, reviewState));
+    assert(readCount === 1, 'R1-J evaluation.schema_version descriptor is read exactly once from a stateful Proxy trap');
+    assert(output.evaluation.schema_version === 'private-dictionary-candidate-evaluation/0.1', 'R1-J the single observed value is captured correctly');
+  }
+  {
+    let readCount = 0;
+    const evaluation = makeEvaluation();
+    const reviewState = makeReviewState(evaluation);
+    const realBaseSnapshot = { wrapper_schema_version: 'private-dictionary-snapshot-wrapper/0.1', snapshot_id: 'dsnap-' + 'b'.repeat(32) };
+    const hostileBaseSnapshot = new Proxy(realBaseSnapshot, {
+      getOwnPropertyDescriptor(target, prop) {
+        if (prop === 'snapshot_id') readCount++;
+        return Object.getOwnPropertyDescriptor(target, prop);
+      },
+      ownKeys(target) { return Reflect.ownKeys(target); }
+    });
+    const output = await Adapter.buildPromotionInputFromReview(makeInput(evaluation, reviewState, { base_snapshot: hostileBaseSnapshot }));
+    assert(readCount === 1, 'R1-J base_snapshot.snapshot_id descriptor is read exactly once from a stateful Proxy trap');
+    assert(output.base_snapshot.snapshot_id === 'dsnap-' + 'b'.repeat(32), 'R1-J the single observed base_snapshot value is captured correctly');
+  }
+
+  // ==========================================================================
+  // R1-K/L. Nested non-aliasing proof for evaluation/base_snapshot (arrays
+  // and nested objects, not just the top-level reference).
+  // ==========================================================================
+  {
+    const evaluation = makeEvaluation();
+    const reviewState = makeReviewState(evaluation);
+    const input = makeInput(evaluation, reviewState);
+    const output = await Adapter.buildPromotionInputFromReview(input);
+    assert(output.evaluation.candidates !== input.evaluation.candidates, 'R1-K output.evaluation.candidates does not alias input.evaluation.candidates');
+    assert(output.evaluation.candidates[0] !== input.evaluation.candidates[0], 'R1-K output.evaluation.candidates[0] does not alias input.evaluation.candidates[0]');
+    assert(output.evaluation.candidates[0].metrics !== input.evaluation.candidates[0].metrics, 'R1-K output.evaluation.candidates[0].metrics does not alias the caller nested metrics object');
+    assert(output.evaluation.alias_candidates !== input.evaluation.alias_candidates, 'R1-K output.evaluation.alias_candidates does not alias input.evaluation.alias_candidates');
+    assert(output.evaluation.conflicts[0].conflicting_candidate_ids !== input.evaluation.conflicts[0].conflicting_candidate_ids, 'R1-K output.evaluation.conflicts[0].conflicting_candidate_ids does not alias the caller nested array');
+  }
+  {
+    const evaluation = makeEvaluation();
+    const reviewState = makeReviewState(evaluation);
+    const fakeBaseSnapshot = { wrapper_schema_version: 'private-dictionary-snapshot-wrapper/0.1', snapshot_id: 'dsnap-' + 'b'.repeat(32), entries: [{ entry_id: 'pde-' + 'a'.repeat(32) }] };
+    const input = makeInput(evaluation, reviewState, { base_snapshot: fakeBaseSnapshot });
+    const output = await Adapter.buildPromotionInputFromReview(input);
+    assert(output.base_snapshot.entries !== input.base_snapshot.entries, 'R1-L output.base_snapshot.entries does not alias input.base_snapshot.entries');
+    assert(output.base_snapshot.entries[0] !== input.base_snapshot.entries[0], 'R1-L output.base_snapshot.entries[0] does not alias input.base_snapshot.entries[0]');
+  }
+
+  // ==========================================================================
+  // R1-M. Captured evaluation/base_snapshot are externally-immutable in
+  // semantic effect: an attempted mutation of the captured copy never
+  // changes it.
+  // ==========================================================================
+  {
+    const evaluation = makeEvaluation();
+    const reviewState = makeReviewState(evaluation);
+    const fakeBaseSnapshot = { wrapper_schema_version: 'private-dictionary-snapshot-wrapper/0.1', snapshot_id: 'dsnap-' + 'b'.repeat(32) };
+    const output = await Adapter.buildPromotionInputFromReview(makeInput(evaluation, reviewState, { base_snapshot: fakeBaseSnapshot }));
+    let evalMutationThrew = false;
+    try { output.evaluation.candidates[0].canonical_term = 'ATTEMPTED MUTATION'; } catch (err) { evalMutationThrew = true; }
+    assert(evalMutationThrew || output.evaluation.candidates[0].canonical_term === 'Primary Compressor', 'R1-M attempted mutation of the captured evaluation either throws (strict mode) or has no effect');
+    let snapMutationThrew = false;
+    try { output.base_snapshot.snapshot_id = 'dsnap-' + 'f'.repeat(32); } catch (err) { snapMutationThrew = true; }
+    assert(snapMutationThrew || output.base_snapshot.snapshot_id === 'dsnap-' + 'b'.repeat(32), 'R1-M attempted mutation of the captured base_snapshot either throws (strict mode) or has no effect');
+  }
+
+  // ==========================================================================
+  // R1-N. Cyclic evaluation/base_snapshot -> fail closed.
+  // ==========================================================================
+  {
+    const evaluation = makeEvaluation();
+    evaluation.candidates[0].cyclic = evaluation.candidates[0];
+    const reviewState = makeReviewState(evaluation);
+    await assertRejectsWithCode(() => Adapter.buildPromotionInputFromReview(makeInput(evaluation, reviewState)), 'REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', 'R1-N a cyclic evaluation structure fails closed');
+  }
+  {
+    const evaluation = makeEvaluation();
+    const reviewState = makeReviewState(evaluation);
+    const cyclicBaseSnapshot = { wrapper_schema_version: 'private-dictionary-snapshot-wrapper/0.1' };
+    cyclicBaseSnapshot.self = cyclicBaseSnapshot;
+    await assertRejectsWithCode(() => Adapter.buildPromotionInputFromReview(makeInput(evaluation, reviewState, { base_snapshot: cyclicBaseSnapshot })), 'REVIEW_PROMOTION_ADAPTER_BASE_SNAPSHOT_INVALID', 'R1-N a cyclic base_snapshot structure fails closed');
+  }
+
+  // ==========================================================================
+  // R1-O. Unsupported custom prototype / accessor property / symbol-keyed
+  // artifact inside evaluation -> sanitized rejection.
+  // ==========================================================================
+  {
+    const evaluation = makeEvaluation();
+    evaluation.candidates[0].weirdDate = new Date('2026-01-01T00:00:00.000Z');
+    const reviewState = makeReviewState(evaluation);
+    await assertRejectsWithCode(() => Adapter.buildPromotionInputFromReview(makeInput(evaluation, reviewState)), 'REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', 'R1-O a nested Date (custom prototype, not Object.prototype) inside evaluation fails closed');
+  }
+  {
+    const evaluation = makeEvaluation();
+    Object.defineProperty(evaluation.candidates[0], 'weirdAccessor', { get() { return 'x'; }, enumerable: true, configurable: true });
+    const reviewState = makeReviewState(evaluation);
+    await assertRejectsWithCode(() => Adapter.buildPromotionInputFromReview(makeInput(evaluation, reviewState)), 'REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', 'R1-O an accessor (getter) property inside evaluation fails closed');
+  }
+  {
+    const evaluation = makeEvaluation();
+    evaluation.candidates[0][Symbol('weird')] = 'x';
+    const reviewState = makeReviewState(evaluation);
+    await assertRejectsWithCode(() => Adapter.buildPromotionInputFromReview(makeInput(evaluation, reviewState)), 'REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID', 'R1-O a symbol-keyed own property inside evaluation fails closed');
   }
 
   console.log(`\n${failed === 0 ? 'ALL PASS' : `${failed} FAILURE(S)`}`);

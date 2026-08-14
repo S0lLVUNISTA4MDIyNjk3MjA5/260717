@@ -2195,3 +2195,66 @@ Promotionの実行・Snapshot生成・Snapshot Activation・Matching配線は行
 parse（SheetJS/FileReader/Blob/browser UI）はAdapter pure coreに一切持ち込まない。
 HUMAN-01/02/03（日本語UI文言改善）はUI integration checkpointへ委譲し、本Checkpointには
 含めない。
+
+### S24.9 Checkpoint 8-R1 追補: evaluation/base_snapshot atomic capture（MAJOR-01是正）
+
+Checkpoint 8初期実装は`review_state`側のみfresh captureし、`evaluation`と非null
+`base_snapshot`はcaller-owned raw referenceのまま成功output（Promotion Input 0.1の
+`evaluation`/`base_snapshot`フィールド）へ格納していた。独立レビューでMAJOR-01として
+指摘され、本追補でこれを是正する。S24.1〜S24.8の決定事項（review artifact identity設計、
+evaluation binding方式、decision projection規則、Promotion Input 0.1 shape、error
+sanitization方針）はいずれも変更しない。
+
+**是正内容**:
+
+- `output.evaluation`は常に`input.evaluation`と異なる参照になる。非null
+  `output.base_snapshot`は常に`input.base_snapshot`と異なる参照になる（`null`は`null`の
+  ままpass-through）。これにより、callerが呼び出し直後に自身の`evaluation`/
+  `base_snapshot`オブジェクトを変更しても、Adapterの成功結果は一切影響を受けない
+  （既存4 coreが確立したatomic capture / TOCTOU防止規律を、`evaluation`/`base_snapshot`
+  にも適用する）。
+
+- **structural capture（構造的複製）とsemantic validation（意味検証）の責務分離**:
+  Adapterは`captureStructuralValue()`という汎用・非semantic的な再帰copierを新設した。
+  これは`null`/文字列/真偽値/有限数値/安全なplain object/安全なplain arrayという
+  JSON互換の値treeを、field名や意味を一切解釈せずfresh・frozen・same-realmな複製へ
+  変換するだけの関数であり、`evaluation`固有のfield（`canonical_term`/`metrics`/
+  `rule_ids`/`evidence_refs`等）にもSnapshot wrapper固有のfield（`dictionary_payload`/
+  `snapshot_id`等）にも一切依存しない。P2-A2 EvaluationやSnapshot wrapperの意味論的
+  schema検証は本Checkpoint以前と変わらず、Promotion core / Snapshot core自身
+  （Adapterの呼び出し先ではなく、Adapterの出力を受け取った**後で**caller側が呼ぶ）の
+  排他的責務のままである。S24.5のevaluation binding最小集合検証（`captureEvaluationBindingSlice()`）
+  は、この構造的複製が完了した**後**の安全な複製値に対して行うよう変更した
+  （生のcaller参照への再読み取りを発生させないため）。
+
+- `evaluation`のcapture結果は、そのままではPromotion Inputの`evaluation`フィールドに
+  必要な全fieldを失わずに保持する（S24.5の最小bindingスライスだけを保持する方式には
+  戻さない）。これにより、Adapter出力を実際の（変更していない）Promotion coreへ渡した
+  ときの意味論的検証・materializationが従来通り成功することを維持する。
+
+- 非null`base_snapshot`も同じ`captureStructuralValue()`を通す。`null`はそのまま`null`。
+  captureされた値がsafe plain objectであることの最小gate（Promotion自身が
+  `PrivateDictionarySnapshotCore.loadDictionarySnapshotWrapper()`を呼ぶ前に行うのと同じ
+  最小チェック）はcapture後の値に対して引き続き行うが、Snapshot wrapperのfield意味論
+  （`wrapper_schema_version`のformatや`snapshot_id`のhash整合性等）はAdapterが検証しない
+  という既存方針は変わらない。latest/active Snapshotやproject config検索も引き続き
+  行わない。
+
+- 単一読み取り（single-read）/TOCTOU規律は`captureStructuralValue()`にも適用される:
+  到達可能な各値は、既存の安全descriptor読み取りprimitive
+  （`Object.getOwnPropertyDescriptor`ベースの`readOwnDataProperty()`等、S24.5と同一の
+  R1-1パターン）を通じて**最大1回**だけ読み取られる。読み取り後に`captureEvaluationBindingSlice()`
+  がbinding最小集合を導出する際は、captureされた安全な複製に対する通常のproperty
+  accessのみを行い、caller所有の生参照を再度読み取ることはない。
+
+- capture結果（`evaluation`・非null`base_snapshot`とその配下の全nested object/array）は
+  `Object.freeze()`により全階層でfrozenとなり、外部から見て不変となる。
+
+**この追補が変更しないもの（既存Checkpoint 8決定の継続）**: review artifact identity設計
+（S24.4、caller入力として受理しない・content-derived・`hashParts`再利用・専用namespace・
+Promotionの`review_decision_fingerprint`との分離）はそのまま。evaluation binding
+（S24.5の6項目・両方向set一致）・decision projection規則（S24.6）・Promotion Input 0.1
+shape（S24.3）・sort規則・error sanitization方針（S24.7、code一覧は既存8種のまま
+追加なし — 新しいfailureは既存の`REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID`/
+`REVIEW_PROMOTION_ADAPTER_BASE_SNAPSHOT_INVALID`を再利用し、専用codeを新設しない）は
+一切変更しない。
