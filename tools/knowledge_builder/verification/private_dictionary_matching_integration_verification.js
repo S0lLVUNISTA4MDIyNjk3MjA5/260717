@@ -1141,7 +1141,7 @@ async function main() {
       globalThis.__r2aAccessCount = 0;
       globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
         if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
-        const validAnnotation = { original_term: input.terms[0], resolved_canonical: input.terms[0], resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-x', dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE' };
+        const validAnnotation = { original_term: input.terms[0], resolved_canonical: input.terms[0], resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-' + 'a'.repeat(32), dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE' };
         const annotationsProxy = new Proxy([validAnnotation], {
           get(target, prop, receiver) {
             if (prop === '0') {
@@ -1176,7 +1176,7 @@ async function main() {
         if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
         const term = input.terms[0];
         const hostileAnnotation = {
-          dictionary_entry_id: 'pde-x', dictionary_snapshot_id: globalThis.__binding.snapshot_id,
+          dictionary_entry_id: 'pde-' + 'a'.repeat(32), dictionary_snapshot_id: globalThis.__binding.snapshot_id,
           wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE'
         };
         Object.defineProperty(hostileAnnotation, 'original_term', { get() { globalThis.__r2bReadCounts.original_term++; if (globalThis.__r2bReadCounts.original_term > 1) throw new Error('R2B_SECOND_READ_original_term'); return term; } });
@@ -1214,7 +1214,7 @@ async function main() {
         const term = input.terms[0];
         const hostileAnnotation = {
           original_term: term, resolution_type: 'EXACT_CANONICAL',
-          dictionary_entry_id: 'pde-x', dictionary_snapshot_id: globalThis.__binding.snapshot_id,
+          dictionary_entry_id: 'pde-' + 'a'.repeat(32), dictionary_snapshot_id: globalThis.__binding.snapshot_id,
           wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE'
         };
         Object.defineProperty(hostileAnnotation, 'resolved_canonical', { get() {
@@ -1280,7 +1280,7 @@ async function main() {
       globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
         if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
         const term = input.terms[0];
-        const target = { original_term: term, resolved_canonical: term, resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-x', dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE' };
+        const target = { original_term: term, resolved_canonical: term, resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-' + 'a'.repeat(32), dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE' };
         const proxied = new Proxy(target, {});
         globalThis.__r2eRawAnnotation = proxied;
         return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [proxied] };
@@ -1298,9 +1298,280 @@ async function main() {
     run(sandbox, `globalThis.__r2eRawAnnotation.original_term = 'MUTATED_AFTER_CAPTURE';`);
     const sidecarTermAfterMutation = run(sandbox, 'mergedResult.sysList[0]._approvedDictResolution.annotations[0].original_term');
     assert(sidecarTermAfterMutation === 'R2E Term', 'R2-E sidecar annotation is a disconnected snapshot, not a live view of the raw (Proxy) dependency object - unaffected by post-capture mutation');
-    const expectedShape = run(sandbox, `JSON.stringify({ original_term: 'R2E Term', resolved_canonical: 'R2E Term', resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-x', dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE' })`);
+    const expectedShape = run(sandbox, `JSON.stringify({ original_term: 'R2E Term', resolved_canonical: 'R2E Term', resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-' + 'a'.repeat(32), dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE' })`);
     const actualShape = run(sandbox, 'JSON.stringify(mergedResult.sysList[0]._approvedDictResolution.annotations[0])');
     assert(actualShape === expectedShape, 'R2-E captured sidecar annotation has the correct field values');
+  }
+
+  // ==========================================================================
+  // P2-A4 Checkpoint 7-R3 hardening tests (R3-A .. R3-H): closes the same
+  // TOCTOU class one level up (the batch result's own annotations/binding
+  // collection reads) and exhaustively validates the 8-field annotation
+  // contract's primitive/null polarity and cross-consistency with the
+  // already-captured batch binding.
+  // ==========================================================================
+
+  // --------------------------------------------------------------------------
+  // R3-A. result.annotations is read exactly once - a stateful Proxy result
+  // returning a DIFFERENT array on a second access must never be observed.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.__r3aGetterReadCount = 0;
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const term = input.terms[0];
+        const arrayA = [{ original_term: term, resolved_canonical: term, resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-' + 'a'.repeat(32), dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE' }];
+        const arrayB = [{ original_term: term, resolved_canonical: 'INJECTED_VIA_ARRAY_B', resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-' + 'b'.repeat(32), dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE' }];
+        const rawResult = { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding };
+        return new Proxy(rawResult, {
+          get(target, prop, receiver) {
+            if (prop === 'annotations') {
+              globalThis.__r3aGetterReadCount++;
+              return globalThis.__r3aGetterReadCount === 1 ? arrayA : arrayB;
+            }
+            return Reflect.get(target, prop, receiver);
+          }
+        });
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'R3A Term' }], []);
+    const readCount = run(sandbox, 'globalThis.__r3aGetterReadCount');
+    assert(readCount === 1, 'R3-A production reads result.annotations exactly once');
+    assert(sysList[0]._tagInfo.approvedDict.length === 1, 'R3-A tag is applied from the first (array A) observation only');
+    const sidecarCanonical = run(sandbox, 'mergedResult.sysList[0]._approvedDictResolution.annotations[0].resolved_canonical');
+    assert(sidecarCanonical === 'R3A Term', 'R3-A sidecar reflects array A content only, never array B (INJECTED_VIA_ARRAY_B)');
+  }
+
+  // --------------------------------------------------------------------------
+  // R3-B. result.annotations getter throws on the first read - must still
+  // fail closed with zero leakage.
+  // --------------------------------------------------------------------------
+  {
+    const secretMarker = 'R3B_ANNOTATIONS_GETTER_SECRET';
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const rawResult = { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding };
+        Object.defineProperty(rawResult, 'annotations', { get() { throw new Error(${JSON.stringify(secretMarker)}); } });
+        return rawResult;
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    let sysList, threw = false;
+    try { ({ sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'R3B Term' }], [])); }
+    catch (_e) { threw = true; }
+    assert(!threw, 'R3-B no native throw escapes annotateAllTraceTags() when result.annotations getter throws');
+    if (!threw) {
+      assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R3-B partial commit = 0 after an annotations-getter throw');
+      const warn = run(sandbox, 'traceTagState.approvedDictWarningCode');
+      assert(warn === 'APPROVED_DICT_RESOLUTION_FAILED', 'R3-B warning code sanitized to APPROVED_DICT_RESOLUTION_FAILED');
+      assert(!JSON.stringify(warn).includes(secretMarker), 'R3-B no secret leakage into the warning code');
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // R3-C. dictionary_entry_id is an object (not a primitive) - fail closed,
+  // and no object reference ever reaches the sidecar.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const term = input.terms[0];
+        const hostileAnnotation = { original_term: term, resolved_canonical: term, resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: { evil: true }, dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE' };
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [hostileAnnotation] };
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'R3C Term' }], []);
+    assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R3-C object-valued dictionary_entry_id fails the whole apply');
+    assert(run(sandbox, 'traceTagState.approvedDictWarningCode') === 'APPROVED_DICT_RESOLUTION_FAILED', 'R3-C genuinely fails closed (not merely an empty-but-successful resolution)');
+    const sidecar = run(sandbox, 'mergedResult.sysList[0]._approvedDictResolution');
+    assert(!sidecar || (Array.isArray(sidecar.annotations) && sidecar.annotations.length === 0), 'R3-C no object reference leaks into the sidecar');
+  }
+
+  // --------------------------------------------------------------------------
+  // R3-D. dictionary_snapshot_id disagrees with the captured batch binding -
+  // fail closed.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const term = input.terms[0];
+        const hostileAnnotation = { original_term: term, resolved_canonical: term, resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-' + 'c'.repeat(32), dictionary_snapshot_id: 'dsnap-' + 'z'.repeat(32), wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE' };
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [hostileAnnotation] };
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'R3D Term' }], []);
+    assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R3-D dictionary_snapshot_id mismatched with the batch binding fails the whole apply');
+    assert(run(sandbox, 'traceTagState.approvedDictWarningCode') === 'APPROVED_DICT_RESOLUTION_FAILED', 'R3-D genuinely fails closed');
+  }
+
+  // --------------------------------------------------------------------------
+  // R3-E. wrapper_integrity_sha256 disagrees with the captured batch
+  // binding - fail closed.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const term = input.terms[0];
+        const hostileAnnotation = { original_term: term, resolved_canonical: term, resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-' + 'd'.repeat(32), dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: 'f'.repeat(64), scope: 'PROJECT', status: 'ACTIVE' };
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [hostileAnnotation] };
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'R3E Term' }], []);
+    assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R3-E wrapper_integrity_sha256 mismatched with the batch binding fails the whole apply');
+    assert(run(sandbox, 'traceTagState.approvedDictWarningCode') === 'APPROVED_DICT_RESOLUTION_FAILED', 'R3-E genuinely fails closed');
+  }
+
+  // --------------------------------------------------------------------------
+  // R3-F. scope != PROJECT and status != ACTIVE are each individually
+  // rejected for a resolved (EXACT_CANONICAL) annotation.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const term = input.terms[0];
+        const hostileAnnotation = { original_term: term, resolved_canonical: term, resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-' + 'd'.repeat(32), dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'STANDARD', status: 'ACTIVE' };
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [hostileAnnotation] };
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'R3F Scope Term' }], []);
+    assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R3-F scope != PROJECT rejects the annotation, whole apply fails');
+    assert(run(sandbox, 'traceTagState.approvedDictWarningCode') === 'APPROVED_DICT_RESOLUTION_FAILED', 'R3-F scope check genuinely fails closed');
+  }
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const term = input.terms[0];
+        const hostileAnnotation = { original_term: term, resolved_canonical: term, resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-' + 'e'.repeat(32), dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'PROBATION' };
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [hostileAnnotation] };
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'R3F Status Term' }], []);
+    assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R3-F status != ACTIVE rejects the annotation, whole apply fails');
+    assert(run(sandbox, 'traceTagState.approvedDictWarningCode') === 'APPROVED_DICT_RESOLUTION_FAILED', 'R3-F status check genuinely fails closed');
+  }
+
+  // --------------------------------------------------------------------------
+  // R3-G. UNKNOWN_TERM/DICTIONARY_CONFLICT with a non-null
+  // dictionary_entry_id / scope / status are each individually rejected.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const term = input.terms[0];
+        const hostileAnnotation = { original_term: term, resolved_canonical: null, resolution_type: 'UNKNOWN_TERM', dictionary_entry_id: 'pde-' + 'f'.repeat(32), dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: null, status: null };
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [hostileAnnotation] };
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'R3G EntryId Term' }], []);
+    assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R3-G UNKNOWN_TERM with non-null dictionary_entry_id rejects the annotation');
+    assert(run(sandbox, 'traceTagState.approvedDictWarningCode') === 'APPROVED_DICT_RESOLUTION_FAILED', 'R3-G non-null dictionary_entry_id check genuinely fails closed');
+  }
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const term = input.terms[0];
+        const hostileAnnotation = { original_term: term, resolved_canonical: null, resolution_type: 'DICTIONARY_CONFLICT', dictionary_entry_id: null, dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: null };
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [hostileAnnotation] };
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'R3G Scope Term' }], []);
+    assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R3-G DICTIONARY_CONFLICT with non-null scope rejects the annotation');
+    assert(run(sandbox, 'traceTagState.approvedDictWarningCode') === 'APPROVED_DICT_RESOLUTION_FAILED', 'R3-G non-null scope check genuinely fails closed');
+  }
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const term = input.terms[0];
+        const hostileAnnotation = { original_term: term, resolved_canonical: null, resolution_type: 'UNKNOWN_TERM', dictionary_entry_id: null, dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: null, status: 'ACTIVE' };
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [hostileAnnotation] };
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'R3G Status Term' }], []);
+    assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R3-G UNKNOWN_TERM with non-null status rejects the annotation');
+    assert(run(sandbox, 'traceTagState.approvedDictWarningCode') === 'APPROVED_DICT_RESOLUTION_FAILED', 'R3-G non-null status check genuinely fails closed');
+  }
+
+  // --------------------------------------------------------------------------
+  // R3-H. A normal, valid annotation's 8 contract-field getters are each
+  // read exactly once, and the final sidecar annotation is frozen with all
+  // 8 fields primitive (string or null).
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.__r3hReadCounts = {};
+      ['original_term','resolved_canonical','resolution_type','dictionary_entry_id','dictionary_snapshot_id','wrapper_integrity_sha256','scope','status'].forEach(f => { globalThis.__r3hReadCounts[f] = 0; });
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const term = input.terms[0];
+        const values = { original_term: term, resolved_canonical: term, resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-' + '9'.repeat(32), dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE' };
+        const countedAnnotation = {};
+        Object.keys(values).forEach(field => {
+          Object.defineProperty(countedAnnotation, field, { get() { globalThis.__r3hReadCounts[field]++; return values[field]; }, enumerable: true });
+        });
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [countedAnnotation] };
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    await setMergedResultAndAnnotate(sandbox, [{ desc: 'R3H Term' }], []);
+    const counts = run(sandbox, 'JSON.stringify(globalThis.__r3hReadCounts)');
+    const expectedCounts = JSON.stringify({ original_term: 1, resolved_canonical: 1, resolution_type: 1, dictionary_entry_id: 1, dictionary_snapshot_id: 1, wrapper_integrity_sha256: 1, scope: 1, status: 1 });
+    assert(counts === expectedCounts, 'R3-H all 8 annotation contract fields are read exactly once each');
+    const isFrozen = run(sandbox, 'Object.isFrozen(mergedResult.sysList[0]._approvedDictResolution.annotations[0])');
+    assert(isFrozen === true, 'R3-H final sidecar annotation is frozen');
+    const allPrimitive = run(sandbox, `Object.entries(mergedResult.sysList[0]._approvedDictResolution.annotations[0]).every(([k,v]) => v === null || typeof v === 'string')`);
+    assert(allPrimitive === true, 'R3-H all 8 sidecar annotation fields are primitive string or null');
   }
 
   console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);

@@ -3471,33 +3471,75 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     return APPROVED_DICT_BINDING_FIELDS.every(field => a[field] === b[field]);
   }
 
+  // P2-A4 Checkpoint 7-R3 (§2): reads each of the 7 batch-binding contract
+  // fields from the raw (possibly hostile/Proxy-backed) Resolver result
+  // EXACTLY ONCE into local primitives, and returns a brand-new frozen
+  // plain object built purely from them - or null if the raw value itself
+  // is not an object. Callers must never hold or re-read the raw binding
+  // reference after calling this; all downstream comparisons/storage use
+  // only the returned captured copy.
+  function captureApprovedDictBatchBinding(rawBinding) {
+    if (!rawBinding || typeof rawBinding !== 'object') return null;
+    const captured = {};
+    APPROVED_DICT_BINDING_FIELDS.forEach(field => { captured[field] = rawBinding[field]; });
+    return Object.freeze({ ...captured });
+  }
+
   const APPROVED_DICT_RESOLUTION_TYPES = new Set(['EXACT_CANONICAL', 'APPROVED_ALIAS', 'UNKNOWN_TERM', 'DICTIONARY_CONFLICT']);
 
   // P2-A4 Checkpoint 7-R2 (§2): the exact Checkpoint 6 Resolution Annotation
   // contract fields this tool ever reads from a raw dependency annotation.
   const APPROVED_DICT_ANNOTATION_FIELDS = ['original_term', 'resolved_canonical', 'resolution_type', 'dictionary_entry_id', 'dictionary_snapshot_id', 'wrapper_integrity_sha256', 'scope', 'status'];
 
-  // P2-A4 Checkpoint 7-R2 (§2): closes a TOCTOU window where a stateful/
-  // hostile Proxy annotation could return one value during validation and a
-  // different value when later consumed for tagging/display/sidecar. This
-  // function reads each contract field from the raw annotation EXACTLY
-  // ONCE into a local primitive, validates using ONLY those already-read
-  // primitives (never re-touching the raw object), and returns a brand-new
-  // frozen plain object built purely from the captured values - or null if
-  // the captured shape is invalid. Callers must never hold or re-read the
-  // raw annotation reference after calling this. This is a dependency
-  // output binding/schema guard, not a reimplementation of dictionary
-  // semantics.
-  function captureApprovedDictAnnotation(rawAnnotation, expectedTerm) {
+  // P2-A4 Checkpoint 7-R3 (§3): dictionary_entry_id format contract, reused
+  // verbatim from private_dictionary_learning_core.js's ENTRY_ID_RE (never
+  // re-derived independently).
+  const APPROVED_DICT_ENTRY_ID_PATTERN = /^pde-[0-9a-f]{32}$/;
+
+  // P2-A4 Checkpoint 7-R2/R3 (§2/§3): closes a TOCTOU window where a
+  // stateful/hostile Proxy annotation could return one value during
+  // validation and a different value when later consumed for tagging/
+  // display/sidecar. This function reads each contract field from the raw
+  // annotation EXACTLY ONCE into a local primitive, validates using ONLY
+  // those already-read primitives (never re-touching the raw object), and
+  // returns a brand-new frozen plain object built purely from the captured
+  // values - or null if the captured shape is invalid. Callers must never
+  // hold or re-read the raw annotation reference after calling this. This
+  // is a dependency output binding/schema guard, not a reimplementation of
+  // dictionary semantics: it confirms the 8-field Checkpoint 6 Resolution
+  // Annotation contract (every field a primitive string or null, the
+  // resolution_type-appropriate null/non-null polarity, dictionary_entry_id
+  // matching the pde-<hex32> contract, scope/status fixed values, and
+  // dictionary_snapshot_id/wrapper_integrity_sha256 agreeing with the
+  // already-captured batch binding) - it never re-selects a canonical/alias
+  // winner or re-derives conflict semantics itself.
+  function captureApprovedDictAnnotation(rawAnnotation, expectedTerm, capturedBatchBinding) {
     if (!rawAnnotation || typeof rawAnnotation !== 'object') return null;
     const captured = {};
     APPROVED_DICT_ANNOTATION_FIELDS.forEach(field => { captured[field] = rawAnnotation[field]; });
+
+    // §3: every contract field must be a primitive string or null - never
+    // an object/array/function/symbol/Proxy carried into the sidecar.
+    for (const field of APPROVED_DICT_ANNOTATION_FIELDS) {
+      const v = captured[field];
+      if (v !== null && typeof v !== 'string') return null;
+    }
+
     if (!APPROVED_DICT_RESOLUTION_TYPES.has(captured.resolution_type)) return null;
     if (captured.original_term !== expectedTerm) return null;
+    if (!capturedBatchBinding || captured.dictionary_snapshot_id !== capturedBatchBinding.snapshot_id) return null;
+    if (captured.wrapper_integrity_sha256 !== capturedBatchBinding.wrapper_integrity_sha256) return null;
+
     if (captured.resolution_type === 'EXACT_CANONICAL' || captured.resolution_type === 'APPROVED_ALIAS') {
-      if (typeof captured.resolved_canonical !== 'string' || !captured.resolved_canonical) return null;
-    } else if (captured.resolved_canonical !== null) {
-      return null;
+      if (!captured.resolved_canonical) return null;
+      if (!APPROVED_DICT_ENTRY_ID_PATTERN.test(captured.dictionary_entry_id || '')) return null;
+      if (captured.scope !== 'PROJECT') return null;
+      if (captured.status !== 'ACTIVE') return null;
+    } else {
+      if (captured.resolved_canonical !== null) return null;
+      if (captured.dictionary_entry_id !== null) return null;
+      if (captured.scope !== null) return null;
+      if (captured.status !== null) return null;
     }
     return Object.freeze({ ...captured });
   }
@@ -3518,7 +3560,13 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         // Loader-backed validation (terms:[]) - this tool never calls
         // PrivateDictionarySnapshotCore directly.
         const result = await core.resolveDictionaryTerms({ schema_version: APPROVED_DICT_RESOLUTION_INPUT_SCHEMA_VERSION, snapshot_wrapper: snapshotWrapper, terms: [] });
-        approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:true, snapshotWrapper, snapshotBinding: result.snapshot_binding, lastErrorCode:null };
+        // P2-A4 Checkpoint 7-R3 (§2): result.snapshot_binding is read
+        // exactly once and captured into a fresh frozen copy - the raw
+        // (possibly hostile) binding reference is never stored long-term.
+        const rawBinding = result.snapshot_binding;
+        const capturedBinding = captureApprovedDictBatchBinding(rawBinding);
+        if (!capturedBinding) { const e = new Error('malformed batch binding'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e; }
+        approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:true, snapshotWrapper, snapshotBinding: capturedBinding, lastErrorCode:null };
       } catch (err) {
         approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:false, snapshotWrapper:null, snapshotBinding:null, lastErrorCode: approvedDictSanitizeErrorCode(err) };
       }
@@ -3622,27 +3670,56 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       } catch (err) {
         const e = new Error('resolver call failed'); e.code = approvedDictSanitizeErrorCode(err); throw e;
       }
-      if (!result || typeof result !== 'object'
-        || result.schema_version !== APPROVED_DICT_RESOLUTION_BATCH_SCHEMA_VERSION
-        || !Array.isArray(result.annotations)
-        || result.annotations.length !== chunk.length) {
+      if (!result || typeof result !== 'object') {
         const e = new Error('malformed resolver result'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e;
       }
-      if (!approvedDictBindingsEqual(result.snapshot_binding, expectedBinding)) {
+      // P2-A4 Checkpoint 7-R3 (§1): schema_version/snapshot_binding/
+      // annotations are each read from the raw result EXACTLY ONCE here -
+      // result.schema_version, result.snapshot_binding, and
+      // result.annotations are never accessed again anywhere below. A
+      // stateful/hostile Proxy result that would return a different
+      // annotations array on a second access can therefore never be
+      // observed differently by different parts of this function.
+      let rawSchemaVersion, rawSnapshotBinding, rawAnnotations;
+      try {
+        rawSchemaVersion = result.schema_version;
+        rawSnapshotBinding = result.snapshot_binding;
+        rawAnnotations = result.annotations;
+      } catch (err) {
+        const e = new Error('resolver result observation failed'); e.code = approvedDictSanitizeErrorCode(err); throw e;
+      }
+      if (rawSchemaVersion !== APPROVED_DICT_RESOLUTION_BATCH_SCHEMA_VERSION
+        || !Array.isArray(rawAnnotations)
+        || rawAnnotations.length !== chunk.length) {
+        const e = new Error('malformed resolver result'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e;
+      }
+      // §2: the batch binding is likewise captured (single read per field)
+      // into a fresh frozen copy before any comparison/storage - never
+      // trusted as a live raw object reference.
+      let capturedBinding;
+      try {
+        capturedBinding = captureApprovedDictBatchBinding(rawSnapshotBinding);
+      } catch (err) {
+        const e = new Error('batch binding observation failed'); e.code = approvedDictSanitizeErrorCode(err); throw e;
+      }
+      if (!capturedBinding || !approvedDictBindingsEqual(capturedBinding, expectedBinding)) {
         const e = new Error('binding mismatch'); e.code = 'APPROVED_DICT_BINDING_MISMATCH'; throw e;
       }
-      // P2-A4 Checkpoint 7-R2 (§2/§3): read each annotation from the raw
-      // dependency array EXACTLY ONCE (result.annotations[i] is never
-      // accessed a second time for the same i), capture+validate its
-      // fields in one guarded pass, and store only the resulting frozen,
-      // safe copy. A single malformed/reordered/throwing annotation
-      // anywhere in the batch fails the whole apply - no partial commit -
-      // and never leaks a native error's message/stack/cause.
+      // P2-A4 Checkpoint 7-R2/R3 (§2/§3): read each annotation from the
+      // captured annotations array EXACTLY ONCE (rawAnnotations[i] is never
+      // accessed a second time for the same i, and result.annotations is
+      // never re-read), capture+validate its 8-field contract (including
+      // cross-checking dictionary_snapshot_id/wrapper_integrity_sha256
+      // against the already-captured batch binding) in one guarded pass,
+      // and store only the resulting frozen, safe copy. A single
+      // malformed/reordered/throwing annotation anywhere in the batch
+      // fails the whole apply - no partial commit - and never leaks a
+      // native error's message/stack/cause.
       for (let i = 0; i < chunk.length; i++) {
         let captured;
         try {
-          const rawAnnotation = result.annotations[i];
-          captured = captureApprovedDictAnnotation(rawAnnotation, chunk[i].term);
+          const rawAnnotation = rawAnnotations[i];
+          captured = captureApprovedDictAnnotation(rawAnnotation, chunk[i].term, capturedBinding);
         } catch (err) {
           const e = new Error('annotation observation failed'); e.code = approvedDictSanitizeErrorCode(err); throw e;
         }
