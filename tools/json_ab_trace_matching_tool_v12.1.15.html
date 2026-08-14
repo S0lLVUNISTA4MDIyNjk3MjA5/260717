@@ -67,11 +67,16 @@
   <!-- B-4b Checkpoint 3: レビュー済みprojectionの正式エクスポート接続（pure export core） -->
   <script src="./trace_comparison_review_export_core.js"></script>
   <!-- P2-A4 Checkpoint 7: Dictionary Resolver browser依存（Checkpoint 3-6の既存production fileをそのまま使用。
-       コピー・bundle複製・inline転記は行わない。依存順は厳密に固定: id_hash_utils -> learning -> snapshot -> resolver。 -->
+       コピー・bundle複製・inline転記は行わない。依存順は厳密に固定: id_hash_utils -> learning -> snapshot -> resolver。
+       P2-A4 Checkpoint 10: Snapshot Activation core（Project Snapshot Pin再生成のみに使用、
+       Activation Record関連APIはmatching selectorとして使わない）をsnapshot core同様の
+       既存productionファイルとして追加。snapshotより後・resolverより前に置く必要はないが、
+       既存4本の並びを崩さないため末尾へ追加する。 -->
   <script src="./knowledge_builder/core/id_hash_utils.js"></script>
   <script src="./knowledge_builder/core/private_dictionary_learning_core.js"></script>
   <script src="./knowledge_builder/core/private_dictionary_snapshot_core.js"></script>
   <script src="./knowledge_builder/core/private_dictionary_resolver_core.js"></script>
+  <script src="./knowledge_builder/core/private_dictionary_snapshot_activation_core.js"></script>
   <style>
     :root {
       --primary: #2563eb;
@@ -3579,16 +3584,153 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     });
   }
 
+  // P2-A4 Checkpoint 10 (§20-22/§S26.6): generic, semantic-agnostic
+  // structural capture - an independent copy of the same technique
+  // private_dictionary_review_promotion_adapter_core.js's
+  // captureStructuralValue() uses (Checkpoint 8-R1). Exists solely to give
+  // the Snapshot Wrapper this tool retains for LATER reuse (the real
+  // per-row term-resolution calls below, via approvedDictionaryRuntime.
+  // snapshotWrapper) a stable, alias-free lifetime independent of whatever
+  // the caller does to its own object afterward - it does NOT reimplement
+  // Snapshot/dictionary semantics (format/hash validation remains
+  // exclusively the real Snapshot Loader's job, invoked fresh on every
+  // actual resolveDictionaryTerms() call, exactly as before). Simply
+  // Object.freeze()-ing the caller's raw object is not used here - that
+  // would mutate a caller-owned object, which is forbidden.
+  const APPROVED_DICT_STRUCTURAL_CAPTURE_MAX_DEPTH = 64;
+  const APPROVED_DICT_STRUCTURAL_CAPTURE_MAX_NODES = 200000;
+  const APPROVED_DICT_STRUCTURAL_READ_FAILED = Symbol('approved-dict-structural-read-failed');
+
+  function approvedDictSafeGetPrototypeOf(value) {
+    try { return Object.getPrototypeOf(value); } catch (_e) { return APPROVED_DICT_STRUCTURAL_READ_FAILED; }
+  }
+  function approvedDictSafeOwnKeys(value) {
+    try { return Reflect.ownKeys(value); } catch (_e) { return APPROVED_DICT_STRUCTURAL_READ_FAILED; }
+  }
+  function approvedDictSafeGetOwnPropertyDescriptor(container, key) {
+    try { return Object.getOwnPropertyDescriptor(container, key); } catch (_e) { return APPROVED_DICT_STRUCTURAL_READ_FAILED; }
+  }
+  function approvedDictSafeIsArray(value) {
+    try { return Array.isArray(value); } catch (_e) { return APPROVED_DICT_STRUCTURAL_READ_FAILED; }
+  }
+  // Realm-agnostic prototype check: rather than comparing against this
+  // execution context's own `Object.prototype` reference (which, under this
+  // repository's own Node vm-sandbox verification harness, does NOT equal
+  // the prototype of an object LITERAL evaluated inside that same sandbox -
+  // a documented pre-existing harness quirk from Checkpoint 7-R2, since the
+  // harness deliberately overwrites the sandbox's global `Object`/`Array`
+  // bindings with the outer realm's, while literal object/array creation
+  // still uses the sandbox's OWN internal realm intrinsics), this checks
+  // that the value's prototype is ITSELF prototype-less (`Object.
+  // getPrototypeOf(proto) === null`) - true for a plain object's prototype
+  // in ANY realm, and false for Date/RegExp/Map/Set/class-instance
+  // prototypes (which sit one level deeper in the chain). This is exactly
+  // as strict against custom-prototype/exotic-object input as a same-realm
+  // identity check, without being realm-dependent.
+  function approvedDictIsSafePlainObject(value) {
+    if (typeof value !== 'object' || value === null) return false;
+    const isArr = approvedDictSafeIsArray(value);
+    if (isArr === APPROVED_DICT_STRUCTURAL_READ_FAILED || isArr) return false;
+    const proto = approvedDictSafeGetPrototypeOf(value);
+    if (proto === APPROVED_DICT_STRUCTURAL_READ_FAILED || proto === null) return false;
+    return approvedDictSafeGetPrototypeOf(proto) === null;
+  }
+  function approvedDictIsSafePlainArray(value) {
+    // Array.isArray() is realm-agnostic per spec (identifies the internal
+    // exotic-Array slot regardless of which realm's Array constructor
+    // created the value), so no further prototype check is needed here.
+    const isArr = approvedDictSafeIsArray(value);
+    return isArr !== APPROVED_DICT_STRUCTURAL_READ_FAILED && isArr === true;
+  }
+  function approvedDictReadOwnDataProperty(container, key) {
+    const desc = approvedDictSafeGetOwnPropertyDescriptor(container, key);
+    if (desc === APPROVED_DICT_STRUCTURAL_READ_FAILED || !desc || !desc.enumerable || !Object.prototype.hasOwnProperty.call(desc, 'value')) {
+      return { present: false, value: undefined };
+    }
+    return { present: true, value: desc.value };
+  }
+  function approvedDictCaptureStructuralValue(value, path, depth, budget, ancestors) {
+    if (value === null) return null;
+    const t = typeof value;
+    if (t === 'string' || t === 'boolean') return value;
+    if (t === 'number') {
+      if (!Number.isFinite(value)) { const e = new Error('non-finite number'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e; }
+      return value;
+    }
+    if (t !== 'object') { const e = new Error('unsupported value type'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e; } // function/symbol/bigint/undefined
+    if (depth > APPROVED_DICT_STRUCTURAL_CAPTURE_MAX_DEPTH) { const e = new Error('depth exceeded'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e; }
+    if (ancestors.indexOf(value) !== -1) { const e = new Error('cyclic structure'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e; }
+    budget.count += 1;
+    if (budget.count > APPROVED_DICT_STRUCTURAL_CAPTURE_MAX_NODES) { const e = new Error('node budget exceeded'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e; }
+
+    if (approvedDictIsSafePlainArray(value)) {
+      ancestors.push(value);
+      // `length` is a legitimate non-enumerable own data property on every
+      // array (per spec) - read its descriptor directly rather than through
+      // approvedDictReadOwnDataProperty(), which intentionally rejects
+      // non-enumerable properties (that check exists to reject hostile
+      // hidden fields, not to reject the one property every real array is
+      // guaranteed to expose this way).
+      const lengthDesc = approvedDictSafeGetOwnPropertyDescriptor(value, 'length');
+      if (lengthDesc === APPROVED_DICT_STRUCTURAL_READ_FAILED || !lengthDesc || typeof lengthDesc.value !== 'number' || !Number.isSafeInteger(lengthDesc.value) || lengthDesc.value < 0) {
+        const e = new Error('bad array length'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e;
+      }
+      const out = [];
+      for (let i = 0; i < lengthDesc.value; i++) {
+        const { present, value: v } = approvedDictReadOwnDataProperty(value, String(i));
+        if (!present) { const e = new Error('sparse array'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e; }
+        out.push(approvedDictCaptureStructuralValue(v, `${path}[${i}]`, depth + 1, budget, ancestors));
+      }
+      ancestors.pop();
+      return Object.freeze(out);
+    }
+    if (approvedDictIsSafePlainObject(value)) {
+      ancestors.push(value);
+      const ownKeys = approvedDictSafeOwnKeys(value);
+      if (ownKeys === APPROVED_DICT_STRUCTURAL_READ_FAILED) { const e = new Error('ownKeys failed'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e; }
+      const out = {};
+      for (const key of ownKeys) {
+        if (typeof key === 'symbol' || key === '__proto__' || key === 'prototype' || key === 'constructor') {
+          const e = new Error('hostile key'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e;
+        }
+        const { present, value: v } = approvedDictReadOwnDataProperty(value, key);
+        if (!present) { const e = new Error('accessor or missing property'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e; }
+        out[key] = approvedDictCaptureStructuralValue(v, `${path}.${key}`, depth + 1, budget, ancestors);
+      }
+      ancestors.pop();
+      return Object.freeze(out);
+    }
+    const e = new Error('unsupported exotic object'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e; // Date/RegExp/Map/Set/class instance/hostile exotic object
+  }
+  function captureApprovedDictSnapshotWrapperForSession(rawWrapper) {
+    return approvedDictCaptureStructuralValue(rawWrapper, '$', 0, { count: 0 }, []);
+  }
+
   async function setApprovedDictionarySnapshotForMatching(snapshotWrapper) {
     const core = approvedDictResolverCore();
     if (!core) {
       approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:false, snapshotWrapper:null, snapshotBinding:null, lastErrorCode:'APPROVED_DICT_RESOLVER_UNAVAILABLE' };
     } else {
       try {
+        // P2-A4 Checkpoint 10 (§S26.6): capture a fresh, frozen, alias-free
+        // structural copy of the caller-owned snapshotWrapper FIRST -
+        // synchronously, before anything else in this function, and before
+        // the Resolver call's own await. This is the ONLY read of the raw
+        // reference; from here on `capturedWrapper` (never `snapshotWrapper`
+        // again) is used both for the pin-validation call below AND for
+        // long-term session storage, so a caller mutating its own wrapper
+        // object after this call returns can never change what this
+        // session subsequently uses for real term resolution.
+        let capturedWrapper;
+        try {
+          capturedWrapper = captureApprovedDictSnapshotWrapperForSession(snapshotWrapper);
+        } catch (err) {
+          const e = new Error('snapshot wrapper capture failed'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e;
+        }
         // §10: Snapshot pin validation goes through the Resolver's own
         // Loader-backed validation (terms:[]) - this tool never calls
         // PrivateDictionarySnapshotCore directly.
-        const result = await core.resolveDictionaryTerms({ schema_version: APPROVED_DICT_RESOLUTION_INPUT_SCHEMA_VERSION, snapshot_wrapper: snapshotWrapper, terms: [] });
+        const result = await core.resolveDictionaryTerms({ schema_version: APPROVED_DICT_RESOLUTION_INPUT_SCHEMA_VERSION, snapshot_wrapper: capturedWrapper, terms: [] });
         if (!result || typeof result !== 'object') {
           const e = new Error('malformed pin result'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e;
         }
@@ -3621,7 +3763,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
           const e = new Error('pin batch binding observation failed'); e.code = approvedDictSanitizeErrorCode(err); throw e;
         }
         if (!capturedBinding) { const e = new Error('malformed pin batch binding'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e; }
-        approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:true, snapshotWrapper, snapshotBinding: capturedBinding, lastErrorCode:null };
+        approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:true, snapshotWrapper: capturedWrapper, snapshotBinding: capturedBinding, lastErrorCode:null };
       } catch (err) {
         approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:false, snapshotWrapper:null, snapshotBinding:null, lastErrorCode: approvedDictSanitizeErrorCode(err) };
       }
@@ -3653,9 +3795,157 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     });
   }
 
+  /* P2-A4 Checkpoint 10 (§S26): Project Snapshot Pin -> matching session
+     explicit runtime binding gate. NEVER a Snapshot selector search - both
+     `project_pin` and `snapshot_wrapper` must be supplied explicitly by the
+     caller. Snapshot Activation Record (ACTIVE/SUPERSEDED/ROLLED_BACK) is
+     never consulted here or anywhere in this tool - it is not a matching
+     selector (S25.1/S25.4). No filesystem/localStorage/sessionStorage/
+     IndexedDB/network lookup of any kind. */
+
+  const APPROVED_DICT_PROJECT_PIN_SCHEMA_VERSION = 'private-dictionary-project-snapshot-pin/0.1';
+  const APPROVED_DICT_PROJECT_ID_MAX_LEN = 200;
+  const APPROVED_DICT_PROJECT_PIN_KEYS = ['schema_version', 'project_id', 'snapshot_binding'];
+
+  // §S26.7: the ONLY codes setApprovedDictionaryProjectPinForMatching() ever
+  // throws. Documented allowlist (not consulted by any sanitizer function -
+  // every throw site below constructs one of these four codes directly, so
+  // no Activation-core/Snapshot-core-internal code, native Error, or
+  // caller-owned data can ever be surfaced through this path).
+  const APPROVED_DICT_PROJECT_PIN_ERROR_CODE_ALLOWLIST = new Set([
+    'APPROVED_DICT_PROJECT_PIN_INVALID',
+    'APPROVED_DICT_PROJECT_PIN_MISMATCH',
+    'APPROVED_DICT_PROJECT_PIN_BIND_FAILED',
+    'APPROVED_DICT_PROJECT_PIN_POST_BIND_MISMATCH'
+  ]);
+
+  function approvedDictProjectPinError(code) {
+    const e = new Error('project pin operation failed');
+    e.code = code;
+    return e;
+  }
+
+  // Captures `rawPin` into a fresh, frozen, alias-free representation, or
+  // returns null on any structural/format problem. Every property is read
+  // from the raw (possibly hostile) reference AT MOST ONCE. The nested
+  // 7-field `snapshot_binding` reuses the existing, unmodified Checkpoint
+  // 7 captureApprovedDictBatchBinding() - the same format contract, never
+  // re-derived - so this tool's Pin binding format can never drift from its
+  // existing Snapshot-pin binding format.
+  function capturePrivateDictionaryProjectPin(rawPin) {
+    if (!approvedDictIsSafePlainObject(rawPin)) return null;
+    const ownKeys = approvedDictSafeOwnKeys(rawPin);
+    if (ownKeys === APPROVED_DICT_STRUCTURAL_READ_FAILED) return null;
+    if (ownKeys.length !== APPROVED_DICT_PROJECT_PIN_KEYS.length) return null;
+    for (const k of ownKeys) {
+      if (typeof k === 'symbol' || APPROVED_DICT_PROJECT_PIN_KEYS.indexOf(k) === -1) return null;
+    }
+    const schemaVersionRead = approvedDictReadOwnDataProperty(rawPin, 'schema_version');
+    const projectIdRead = approvedDictReadOwnDataProperty(rawPin, 'project_id');
+    const snapshotBindingRead = approvedDictReadOwnDataProperty(rawPin, 'snapshot_binding');
+    if (!schemaVersionRead.present || !projectIdRead.present || !snapshotBindingRead.present) return null;
+    if (schemaVersionRead.value !== APPROVED_DICT_PROJECT_PIN_SCHEMA_VERSION) return null;
+    if (typeof projectIdRead.value !== 'string' || projectIdRead.value.length === 0 || projectIdRead.value.length > APPROVED_DICT_PROJECT_ID_MAX_LEN) return null;
+    let capturedBinding;
+    try {
+      capturedBinding = captureApprovedDictBatchBinding(snapshotBindingRead.value);
+    } catch (_err) {
+      return null;
+    }
+    if (!capturedBinding) return null;
+    return Object.freeze({ schema_version: schemaVersionRead.value, project_id: projectIdRead.value, snapshot_binding: capturedBinding });
+  }
+
+  function approvedDictProjectPinsEqual(a, b) {
+    if (!a || !b) return false;
+    if (a.schema_version !== b.schema_version) return false;
+    if (a.project_id !== b.project_id) return false;
+    return approvedDictBindingsEqual(a.snapshot_binding, b.snapshot_binding);
+  }
+
+  function approvedDictProjectPinActivationCore() {
+    const core = globalThis.PrivateDictionarySnapshotActivationCore;
+    if (!core || typeof core.buildProjectSnapshotPin !== 'function') return null;
+    return core;
+  }
+
+  // §S26.2/§S26.4-8: the sole new public entry point. Reports failure by
+  // throwing a sanitized {code} - it never mutates
+  // `approvedDictionaryRuntime` unless/until it has actually delegated to
+  // the existing setSnapshot path (§S26.5 transaction semantics).
+  async function setApprovedDictionaryProjectPinForMatching(input) {
+    // STEP 1 (synchronous, single-read, before any await): capture
+    // `project_pin` fully. `input`/`input.project_pin` are never read again
+    // anywhere below this point - only `capturedPin` is used, including
+    // after every await below.
+    const revisionAtStart = approvedDictionaryRuntime.revision;
+    let capturedPin, rawSnapshotWrapper;
+    try {
+      if (!approvedDictIsSafePlainObject(input)) throw approvedDictProjectPinError('APPROVED_DICT_PROJECT_PIN_INVALID');
+      const rawProjectPin = input.project_pin;
+      rawSnapshotWrapper = input.snapshot_wrapper;
+      capturedPin = capturePrivateDictionaryProjectPin(rawProjectPin);
+    } catch (_err) {
+      throw approvedDictProjectPinError('APPROVED_DICT_PROJECT_PIN_INVALID');
+    }
+    if (!capturedPin) throw approvedDictProjectPinError('APPROVED_DICT_PROJECT_PIN_INVALID');
+
+    const activationCore = approvedDictProjectPinActivationCore();
+    if (!activationCore) throw approvedDictProjectPinError('APPROVED_DICT_PROJECT_PIN_BIND_FAILED');
+
+    // §S26.4: regenerate the FORMAL Pin from the real Snapshot Loader (via
+    // Checkpoint 9's buildProjectSnapshotPin()) using the caller-supplied
+    // project_id + snapshot_wrapper, and compare it against the
+    // caller-supplied Pin captured in STEP 1. Snapshot/dictionary semantics
+    // are never reimplemented here - the real Loader (invoked inside
+    // buildProjectSnapshotPin) is the sole Source of Truth.
+    let regeneratedPin;
+    try {
+      regeneratedPin = await activationCore.buildProjectSnapshotPin({ project_id: capturedPin.project_id, snapshot_wrapper: rawSnapshotWrapper });
+    } catch (_err) {
+      throw approvedDictProjectPinError('APPROVED_DICT_PROJECT_PIN_MISMATCH');
+    }
+    if (!approvedDictProjectPinsEqual(capturedPin, regeneratedPin)) {
+      throw approvedDictProjectPinError('APPROVED_DICT_PROJECT_PIN_MISMATCH');
+    }
+
+    // §S26.8 race guard: if another operation has already committed a
+    // newer session state while this operation's own async pre-bind
+    // validation was in flight, abort BEFORE this (now-stale) operation's
+    // own delegated commit - never let a slower, earlier-started operation
+    // overwrite a newer one. Mirrors the existing revisionAtStart pattern
+    // used for long-running matching resolution (see markTraceTagsDirty
+    // callers below).
+    if (approvedDictionaryRuntime.revision !== revisionAtStart) {
+      throw approvedDictProjectPinError('APPROVED_DICT_PROJECT_PIN_BIND_FAILED');
+    }
+
+    // §S26.5: pre-bind gate passed - delegate to the EXISTING, unmodified
+    // -contract setSnapshot path (which performs the real Resolver-backed
+    // empty-batch Loader validation, per Checkpoint 7 §10, and captures its
+    // own alias-free copy of the wrapper per §S26.6).
+    const bindStatus = await setApprovedDictionarySnapshotForMatching(rawSnapshotWrapper);
+    if (!bindStatus.active) {
+      throw approvedDictProjectPinError('APPROVED_DICT_PROJECT_PIN_BIND_FAILED');
+    }
+
+    // §S26.5/§S26.7 post-bind gate: the session's own just-captured binding
+    // must exactly match the already pre-bind-verified Pin. A mismatch here
+    // can only mean a dependency/environment inconsistency between the
+    // pre-bind and bind steps; fail closed and never leave a
+    // partially-committed session behind.
+    if (!approvedDictBindingsEqual(bindStatus.snapshotBinding, capturedPin.snapshot_binding)) {
+      clearApprovedDictionarySnapshotForMatching();
+      throw approvedDictProjectPinError('APPROVED_DICT_PROJECT_PIN_POST_BIND_MISMATCH');
+    }
+
+    return approvedDictionaryMatchingStatus();
+  }
+
   if (!globalThis.PrivateDictionaryMatchingSession) {
     globalThis.PrivateDictionaryMatchingSession = Object.freeze({
       setSnapshot: setApprovedDictionarySnapshotForMatching,
+      setProjectPin: setApprovedDictionaryProjectPinForMatching,
       clearSnapshot: clearApprovedDictionarySnapshotForMatching,
       getStatus: approvedDictionaryMatchingStatus
     });

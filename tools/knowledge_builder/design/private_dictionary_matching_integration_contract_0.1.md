@@ -2592,3 +2592,183 @@ error sanitization方針（新規error codeなし、既存`ACTIVATION_HISTORY_IN
 はいずれも公開APIへ追加しない（引き続き`buildSnapshotActivationRecord`/
 `transitionSnapshotActivation`/`buildProjectSnapshotPin`の3関数のみが公開API、
 指示§7の「巨大なutility API群は公開しない」方針を維持）。
+
+---
+
+## S26. Checkpoint 10: Project Snapshot Pin → Matching Session Explicit Runtime Wiring
+
+S25で確定した`private-dictionary-project-snapshot-pin/0.1`を、Checkpoint 7の
+`PrivateDictionaryMatchingSession`へ明示的に接続するruntime boundaryを固定する。
+対象は`tools/json_ab_trace_matching_tool_v12.1.15.html`のみ。Checkpoint 9
+Activation coreおよびその他保護対象coreは変更しない。
+
+### S26.1 責務
+
+```text
+Project Snapshot Pin（caller供給） + Snapshot Wrapper（caller供給）
+        ↓
+pre-bind formal Pin gate（Checkpoint 9 buildProjectSnapshotPin()を再利用し再検証）
+        ↓
+既存 setApprovedDictionarySnapshotForMatching()（Checkpoint 7、契約不変）
+        ↓
+post-bind exact binding一致確認
+        ↓
+matching session ready
+```
+
+Activation Recordはmatching selectorとして一切参照しない（S25.1/S25.4の原則を
+継承）。latest/newest/max-version探索、project_idによるSnapshot探索、filesystem/
+localStorage/sessionStorage/IndexedDB/network lookupのいずれも実装しない
+（persistent storage/UI selectorはCheckpoint 10の対象外、後続Checkpoint）。
+
+### S26.2 Public API（additive extension）
+
+既存`PrivateDictionaryMatchingSession`（`setSnapshot`/`clearSnapshot`/`getStatus`）の
+契約は一切変更しない。新規operationを1つだけ追加する:
+
+```js
+PrivateDictionaryMatchingSession.setProjectPin({ project_pin, snapshot_wrapper })
+```
+
+内部関数名: `setApprovedDictionaryProjectPinForMatching(input)`（既存命名規則
+`setApprovedDictionary...ForMatching`を踏襲）。戻り値は成功時
+`approvedDictionaryMatchingStatus()`と同一shape。失敗時は`{code}`のみのsanitized
+errorをthrowする（既存`setSnapshot`が状態mutationで失敗を表現するのとは異なり、
+S26.5のtransaction semantics上、pre-bind失敗は「状態遷移なし」を意味するため
+throwで表現する方が自然であり、`getStatus()`is a独立した問い合わせ経路として
+残る）。
+
+### S26.3 Runtime input（探索なし、二入力必須）
+
+`project_pin`と`snapshot_wrapper`は両方callerが明示的に供給する。Project Pinには
+`dictionary_payload`が含まれない（S25.3）ため、Pin単体からSnapshotを復元・探索する
+ことは構造的に不可能。本coreはfilesystem/localStorage/sessionStorage/IndexedDB/
+network/GitHub/Activation Record参照によるSnapshot探索を一切行わない。
+
+### S26.4 Pre-bind formal Pin gate
+
+1. `input.project_pin`を同期的に安全capture（新設`capturePrivateDictionaryProjectPin()`、
+   root形状 = 完全一致3 key、`schema_version`固定文字列一致、`project_id`
+   非空・上限200文字、`snapshot_binding`はCheckpoint 7既存
+   `captureApprovedDictBatchBinding()`（7-field format、無改変で再利用）。
+2. `PrivateDictionarySnapshotActivationCore.buildProjectSnapshotPin({ project_id:
+   capturedPin.project_id, snapshot_wrapper })`（Checkpoint 9、無改変）を呼び出し、
+   実Snapshot Loaderで検証済みのformal Pinを**再生成**する。
+3. caller供給Pin（step 1でcapture済み）とregenerated Pin（step 2の結果）を、
+   `schema_version`/`project_id`/7-field bindingの全項目についてexact equality
+   比較する（既存`approvedDictBindingsEqual()`を7-field比較に再利用）。1
+   fieldでも不一致ならfail-closed（新規`APPROVED_DICT_PROJECT_PIN_MISMATCH`）。
+
+これによりSnapshot/dictionary意味論の再実装を避ける — 実際の検証は常にCheckpoint 9
+`buildProjectSnapshotPin()`経由の実Snapshot Loaderが行う。
+
+### S26.5 Existing setSnapshot delegation / post-bind gate / transaction semantics
+
+Pre-bind gateを通過した場合のみ、既存`setApprovedDictionarySnapshotForMatching(snapshot_wrapper)`
+（Checkpoint 7、契約無変更）へ委譲する。formal Pin検証だけでsessionをactiveにしない
+（Resolver-backed empty-batch Loader検証を必ず経由、S26.6参照）。
+
+委譲成功後、`getStatus()`相当の戻り値`snapshotBinding`とPre-bind gateで検証済みの
+Pin `snapshot_binding`が完全一致することを再確認する（post-bind gate）。不一致
+（dependency drift等の理論上のケース）ならfail-closedし、`clearApprovedDictionarySnapshotForMatching()`
+相当の操作で今回の部分commitをクリアする。
+
+Transaction semantics（3ケース、恒久固定）:
+
+```text
+OLD ACTIVE --pre-bind failure--------------------> OLD ACTIVE unchanged
+OLD ACTIVE --pre-bind success, setSnapshot success-> NEW ACTIVE
+OLD ACTIVE --pre-bind success, setSnapshot/post-bind failure-> INACTIVE fail-closed
+```
+
+pre-bind失敗時は`approvedDictionaryRuntime`を一切mutateしない（revisionも進めない
+— 「操作の試行」自体はsessionの意味論的commitmentではないため。§S26.8のrace
+protectionとも整合する）。pre-bind成功後にsetSnapshot/post-bindのいずれかが
+失敗した場合は、既存sessionを保持する選択肢を取らない（「無効なreplacement
+要求のために有効なsessionを破壊しない」原則は、あくまでpre-bind段階でのみ適用
+され、一度実際のbind処理へ進んだ後の失敗は明示的にinactiveへfail-closedする —
+旧sessionのSnapshot wrapper参照を安全に保持したままrollbackする設計は複雑さに
+見合わないため、Checkpoint 10では先取りしない）。
+
+### S26.6 Snapshot Wrapper lifetime / caller alias isolation（最重要指摘への対処）
+
+指示§20-22で指摘された通り、既存Checkpoint 7の`setApprovedDictionarySnapshotForMatching()`
+は成功時にcaller供給`snapshotWrapper`の**生参照**をsession stateへ保持しており
+（後続の実term解決呼び出し、L3722で再利用される）、Pin確立後にcallerが元の
+wrapper objectをmutationすると、そのsessionが後続matchingで使用する意味内容が
+変化しうるという問題があった。
+
+**是正**: `setApprovedDictionarySnapshotForMatching()`内部に、caller供給
+`snapshotWrapper`を関数の最初（Resolver呼び出しより前、同期的）で汎用構造capture
+する処理を追加する。新設`captureApprovedDictSnapshotWrapperForSession()`は、
+Adapter core（Checkpoint 8-R1）の`captureStructuralValue()`と同じ技法の独立コピー
+（本ファイル独自実装）: `null`/文字列/真偽値/有限数値/安全なplain object/安全な
+plain arrayのみを許容し、function/symbol/bigint/accessor/hostile Proxy/循環参照/
+深さ超過を`APPROVED_DICT_RESOLUTION_FAILED`でfail-closedしつつ、fresh・
+deep-frozen・alias-freeな複製を返す。**単純に`Object.freeze(生wrapper)`する
+ことは行わない**（caller-owned objectを変更してはいけないため）。
+
+以降、Resolver検証呼び出し・session state保存の両方でこの`capturedWrapper`
+（生`snapshotWrapper`ではなく）を使用する。これにより、`setProjectPin`成功後に
+callerが元の`snapshot_wrapper`をmutationしても、sessionが保持し後続matching
+resolutionで使用する意味内容は一切変化しない。
+
+この修正は`setApprovedDictionarySnapshotForMatching()`の**契約**
+（引数shape・返り値shape・error code・Resolver-backed検証経路）を一切変更しない
+内部実装の強化であり、既存Checkpoint 7 verification（215 PASS/0 FAIL）の
+挙動には影響しない（有効なwrapperをcall後にmutationしないという既存test群の
+前提は、この修正下でも従来通り成功する）。
+
+Snapshot Loaderが返すvalidated handle（13 field、`wrapper_schema_version`を
+含まない）をそのままResolver inputへ再利用できるとは仮定しない（S5.5参照、
+Loaderのvalidated handleとwrapper自体はfield構成が異なる）。本coreはSnapshot
+core/Resolver coreのhash/schema semanticsを一切再実装しない — 汎用構造capture
+はJSON互換の値treeを意味非依存に複製するのみである。
+
+### S26.7 Error contract
+
+matching HTML既存の`APPROVED_DICT_ERROR_CODE_ALLOWLIST`（sanitized codeのみを
+UI/statusへ出す既存原則、Checkpoint 7-R1）に、Project Pin専用の4 codeを追加する:
+
+| code | 意味 |
+|---|---|
+| `APPROVED_DICT_PROJECT_PIN_INVALID` | `project_pin`のroot/schema/7-field bindingが形式的に不正 |
+| `APPROVED_DICT_PROJECT_PIN_MISMATCH` | pre-bind: caller供給PinとSnapshot Loaderから再生成したformal Pinが不一致（Snapshot自体の検証失敗を含む） |
+| `APPROVED_DICT_PROJECT_PIN_BIND_FAILED` | 既存`setSnapshot`委譲の失敗、またはrace検出によるabort |
+| `APPROVED_DICT_PROJECT_PIN_POST_BIND_MISMATCH` | post-bind: session確立後のbindingがPinと不一致 |
+
+既存4 code（`APPROVED_DICT_RESOLVER_UNAVAILABLE`/`APPROVED_DICT_RESOLUTION_FAILED`/
+`APPROVED_DICT_BINDING_MISMATCH`/`APPROVED_DICT_SESSION_CHANGED`）は変更しない。
+Activation core/Snapshot core内部codeの透過、native Error/message/stack/cause/
+private dictionary term/filenameの漏洩は一切禁止（既存原則を継承）。
+
+### S26.8 Atomic capture / race protection
+
+`input.project_pin`は関数開始時点、最初の`await`（`buildProjectSnapshotPin()`呼び出し）
+より前に完全captureする。以降`input`/`input.project_pin`を再readしない。
+
+Race protection: 関数開始時に`revisionAtStart = approvedDictionaryRuntime.revision`を
+同期capture。pre-bind gate通過後・既存`setSnapshot`委譲の直前に
+`approvedDictionaryRuntime.revision !== revisionAtStart`を再確認し、変化していれば
+（自身の非同期pre-bind検証中に別operationが既にsessionをcommit済みという意味）
+`APPROVED_DICT_PROJECT_PIN_BIND_FAILED`でabortし、委譲を行わない（＝他operationの
+新しいcommitmentを上書きしない）。既存`annotateAllTraceTags`の`revisionAtStart`
+チェック（L3806/3896）と同じ設計思想を踏襲する。委譲呼び出し自体の内部await中に
+発生する残余のrace windowは、既存`setSnapshot`自体の契約（無条件commit）を変更
+できない制約下では完全には閉じられない ── この残余範囲は既存コードベースが
+同種のrace（長時間実行中のmatching resolutionに対するrevisionチェック）に対して
+採用している水準と同じ許容範囲として明記する。
+
+### S26.9 No persistence / No UI selector
+
+localStorage/sessionStorage/IndexedDB/filesystem/FileReader/Blob download/network/
+project config file I/Oは一切実装しない。Snapshot選択ダイアログ・Project選択UI・
+Activation管理UI・file picker・自動起動時loadも実装しない。Project Snapshot Pin
+のpersistence adapterおよびUI selectorは後続Checkpointの対象。
+
+### S26.10 Script dependency / load order
+
+`private_dictionary_snapshot_activation_core.js`をformal browser dependencyとして
+`<script src>`へ追加する。既存`private_dictionary_snapshot_core.js`（Activation
+coreの唯一の依存）より後、Resolver core等の既存Checkpoint 3-6 scriptと同じ並びで
+追加し、既存load orderを破壊しない。
