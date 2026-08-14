@@ -3473,20 +3473,33 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
 
   const APPROVED_DICT_RESOLUTION_TYPES = new Set(['EXACT_CANONICAL', 'APPROVED_ALIAS', 'UNKNOWN_TERM', 'DICTIONARY_CONFLICT']);
 
-  // P2-A4 Checkpoint 7-R1 (§3/§4): per-annotation Resolver output binding/
-  // schema guard. This is NOT a re-implementation of dictionary semantics -
-  // it only confirms the shape matching tool code actually reads is sane
-  // and that the annotation truly corresponds to the term it claims to
-  // (guards against a reordered/swapped annotation batch mis-tagging a
-  // different row than the one whose value was resolved).
-  function approvedDictAnnotationIsValid(annotation, expectedTerm) {
-    if (!annotation || typeof annotation !== 'object') return false;
-    if (!APPROVED_DICT_RESOLUTION_TYPES.has(annotation.resolution_type)) return false;
-    if (annotation.original_term !== expectedTerm) return false;
-    if (annotation.resolution_type === 'EXACT_CANONICAL' || annotation.resolution_type === 'APPROVED_ALIAS') {
-      return typeof annotation.resolved_canonical === 'string' && annotation.resolved_canonical.length > 0;
+  // P2-A4 Checkpoint 7-R2 (§2): the exact Checkpoint 6 Resolution Annotation
+  // contract fields this tool ever reads from a raw dependency annotation.
+  const APPROVED_DICT_ANNOTATION_FIELDS = ['original_term', 'resolved_canonical', 'resolution_type', 'dictionary_entry_id', 'dictionary_snapshot_id', 'wrapper_integrity_sha256', 'scope', 'status'];
+
+  // P2-A4 Checkpoint 7-R2 (§2): closes a TOCTOU window where a stateful/
+  // hostile Proxy annotation could return one value during validation and a
+  // different value when later consumed for tagging/display/sidecar. This
+  // function reads each contract field from the raw annotation EXACTLY
+  // ONCE into a local primitive, validates using ONLY those already-read
+  // primitives (never re-touching the raw object), and returns a brand-new
+  // frozen plain object built purely from the captured values - or null if
+  // the captured shape is invalid. Callers must never hold or re-read the
+  // raw annotation reference after calling this. This is a dependency
+  // output binding/schema guard, not a reimplementation of dictionary
+  // semantics.
+  function captureApprovedDictAnnotation(rawAnnotation, expectedTerm) {
+    if (!rawAnnotation || typeof rawAnnotation !== 'object') return null;
+    const captured = {};
+    APPROVED_DICT_ANNOTATION_FIELDS.forEach(field => { captured[field] = rawAnnotation[field]; });
+    if (!APPROVED_DICT_RESOLUTION_TYPES.has(captured.resolution_type)) return null;
+    if (captured.original_term !== expectedTerm) return null;
+    if (captured.resolution_type === 'EXACT_CANONICAL' || captured.resolution_type === 'APPROVED_ALIAS') {
+      if (typeof captured.resolved_canonical !== 'string' || !captured.resolved_canonical) return null;
+    } else if (captured.resolved_canonical !== null) {
+      return null;
     }
-    return annotation.resolved_canonical === null;
+    return Object.freeze({ ...captured });
   }
 
   function clearApprovedDictRowSidecars(rows) {
@@ -3618,17 +3631,24 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       if (!approvedDictBindingsEqual(result.snapshot_binding, expectedBinding)) {
         const e = new Error('binding mismatch'); e.code = 'APPROVED_DICT_BINDING_MISMATCH'; throw e;
       }
-      // §3/§4: validate EVERY annotation in this chunk (shape, allowed
-      // resolution_type, resolved_canonical polarity, and original_term ==
-      // the exact term this position was resolved for) before accepting
-      // ANY of them. A single malformed/reordered annotation anywhere in
-      // the batch fails the whole apply - no partial commit.
+      // P2-A4 Checkpoint 7-R2 (§2/§3): read each annotation from the raw
+      // dependency array EXACTLY ONCE (result.annotations[i] is never
+      // accessed a second time for the same i), capture+validate its
+      // fields in one guarded pass, and store only the resulting frozen,
+      // safe copy. A single malformed/reordered/throwing annotation
+      // anywhere in the batch fails the whole apply - no partial commit -
+      // and never leaks a native error's message/stack/cause.
       for (let i = 0; i < chunk.length; i++) {
-        if (!approvedDictAnnotationIsValid(result.annotations[i], chunk[i].term)) {
-          const e = new Error('malformed resolver annotation'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e;
+        let captured;
+        try {
+          const rawAnnotation = result.annotations[i];
+          captured = captureApprovedDictAnnotation(rawAnnotation, chunk[i].term);
+        } catch (err) {
+          const e = new Error('annotation observation failed'); e.code = approvedDictSanitizeErrorCode(err); throw e;
         }
+        if (!captured) { const e = new Error('malformed resolver annotation'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e; }
+        resolved.push({ ...chunk[i], annotation: captured });
       }
-      for (let i = 0; i < chunk.length; i++) resolved.push({ ...chunk[i], annotation: result.annotations[i] });
     }
     return resolved;
   }

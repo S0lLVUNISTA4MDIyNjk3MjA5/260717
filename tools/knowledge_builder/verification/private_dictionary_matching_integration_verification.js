@@ -1123,6 +1123,186 @@ async function main() {
     });
   }
 
+  // ==========================================================================
+  // P2-A4 Checkpoint 7-R2 hardening tests (R2-A .. R2-E): closes a TOCTOU
+  // window where a stateful/hostile Resolver annotation could be observed
+  // differently during validation vs. later consumption.
+  // ==========================================================================
+
+  // --------------------------------------------------------------------------
+  // R2-A. annotations[0] is read exactly once - a stateful Proxy returning a
+  // DIFFERENT value on a second access must never be observed.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.__r2aAccessCount = 0;
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const validAnnotation = { original_term: input.terms[0], resolved_canonical: input.terms[0], resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-x', dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE' };
+        const annotationsProxy = new Proxy([validAnnotation], {
+          get(target, prop, receiver) {
+            if (prop === '0') {
+              globalThis.__r2aAccessCount++;
+              return globalThis.__r2aAccessCount === 1 ? validAnnotation : null;
+            }
+            return Reflect.get(target, prop, receiver);
+          }
+        });
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: annotationsProxy };
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'R2A Term' }], []);
+    const accessCount = run(sandbox, 'globalThis.__r2aAccessCount');
+    assert(accessCount === 1, 'R2-A production reads annotations[0] exactly once (no second/stale observation)');
+    assert(sysList[0]._tagInfo.approvedDict.length === 1, 'R2-A the single (first) observation is used correctly - tag applied');
+  }
+
+  // --------------------------------------------------------------------------
+  // R2-B. Each annotation field is read exactly once during capture - a
+  // getter that throws on its second access must never actually be
+  // re-invoked.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.__r2bReadCounts = { resolution_type: 0, resolved_canonical: 0, original_term: 0 };
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const term = input.terms[0];
+        const hostileAnnotation = {
+          dictionary_entry_id: 'pde-x', dictionary_snapshot_id: globalThis.__binding.snapshot_id,
+          wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE'
+        };
+        Object.defineProperty(hostileAnnotation, 'original_term', { get() { globalThis.__r2bReadCounts.original_term++; if (globalThis.__r2bReadCounts.original_term > 1) throw new Error('R2B_SECOND_READ_original_term'); return term; } });
+        Object.defineProperty(hostileAnnotation, 'resolved_canonical', { get() { globalThis.__r2bReadCounts.resolved_canonical++; if (globalThis.__r2bReadCounts.resolved_canonical > 1) throw new Error('R2B_SECOND_READ_resolved_canonical'); return term; } });
+        Object.defineProperty(hostileAnnotation, 'resolution_type', { get() { globalThis.__r2bReadCounts.resolution_type++; if (globalThis.__r2bReadCounts.resolution_type > 1) throw new Error('R2B_SECOND_READ_resolution_type'); return 'EXACT_CANONICAL'; } });
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [hostileAnnotation] };
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    let sysList, threw = false;
+    try { ({ sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'R2B Term' }], [])); }
+    catch (_e) { threw = true; }
+    assert(!threw, 'R2-B a getter that throws on its second access never actually throws (fields read exactly once)');
+    if (!threw) {
+      const counts = run(sandbox, 'JSON.stringify(globalThis.__r2bReadCounts)');
+      assert(counts === JSON.stringify({ resolution_type: 1, resolved_canonical: 1, original_term: 1 }), 'R2-B each annotation field is read exactly once (no re-read after validation)');
+      assert(sysList[0]._tagInfo.approvedDict.length === 1, 'R2-B single-read-per-field capture still correctly applies the tag');
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // R2-C. resolved_canonical returns a DIFFERENT value on a second read
+  // ("Safe Canonical" then "Injected Canonical") - the tag/display/sidecar
+  // must reflect the first (captured) value only, and the getter must be
+  // read exactly once.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.__r2cReadCount = 0;
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const term = input.terms[0];
+        const hostileAnnotation = {
+          original_term: term, resolution_type: 'EXACT_CANONICAL',
+          dictionary_entry_id: 'pde-x', dictionary_snapshot_id: globalThis.__binding.snapshot_id,
+          wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE'
+        };
+        Object.defineProperty(hostileAnnotation, 'resolved_canonical', { get() {
+          globalThis.__r2cReadCount++;
+          return globalThis.__r2cReadCount === 1 ? 'Safe Canonical' : 'Injected Canonical';
+        } });
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [hostileAnnotation] };
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    await setMergedResultAndAnnotate(sandbox, [{ desc: 'R2C Term' }], []);
+    const readCount = run(sandbox, 'globalThis.__r2cReadCount');
+    assert(readCount === 1, 'R2-C resolved_canonical getter is read exactly once');
+    const tags = run(sandbox, 'mergedResult.sysList[0]._tagInfo.approvedDict');
+    assert(tags.length === 1, 'R2-C exactly one approvedDict tag committed');
+    sandbox.__tagKeyC = tags[0];
+    const display = run(sandbox, 'mergedResult.sysList[0]._tagDisplayMap[globalThis.__tagKeyC]');
+    assert(display === 'Safe Canonical', 'R2-C final display is Safe Canonical only, never Injected Canonical');
+    const sidecarCanonical = run(sandbox, 'mergedResult.sysList[0]._approvedDictResolution.annotations[0].resolved_canonical');
+    assert(sidecarCanonical === 'Safe Canonical', 'R2-C sidecar records Safe Canonical only, never Injected Canonical');
+  }
+
+  // --------------------------------------------------------------------------
+  // R2-D. A property getter throws on the FIRST capture-time read (not just
+  // a second/stale one) - must still fail closed with zero leakage.
+  // --------------------------------------------------------------------------
+  {
+    const secretMarker = 'R2D_FIRST_READ_SECRET';
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const hostileAnnotation = {};
+        Object.defineProperty(hostileAnnotation, 'original_term', { get() { throw new Error(${JSON.stringify(secretMarker)}); } });
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [hostileAnnotation] };
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    let sysList, threw = false;
+    try { ({ sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'R2D Term' }], [])); }
+    catch (_e) { threw = true; }
+    assert(!threw, 'R2-D no native throw escapes annotateAllTraceTags() when a getter throws on the first capture-time read');
+    if (!threw) {
+      assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R2-D partial commit = 0 after a first-capture-read throw');
+      const warn = run(sandbox, 'traceTagState.approvedDictWarningCode');
+      assert(warn === 'APPROVED_DICT_RESOLUTION_FAILED', 'R2-D warning code sanitized to APPROVED_DICT_RESOLUTION_FAILED');
+      assert(!JSON.stringify(warn).includes(secretMarker), 'R2-D no secret leakage into the warning code');
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // R2-E. The sidecar's stored annotation is a fresh, frozen, plain-object
+  // capture - never the raw (possibly Proxy) dependency annotation itself.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    run(sandbox, `
+      globalThis.__r2eRawAnnotation = null;
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        const term = input.terms[0];
+        const target = { original_term: term, resolved_canonical: term, resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-x', dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE' };
+        const proxied = new Proxy(target, {});
+        globalThis.__r2eRawAnnotation = proxied;
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [proxied] };
+      } };
+    `);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    await setMergedResultAndAnnotate(sandbox, [{ desc: 'R2E Term' }], []);
+    const isSameRef = run(sandbox, 'mergedResult.sysList[0]._approvedDictResolution.annotations[0] === globalThis.__r2eRawAnnotation');
+    assert(isSameRef === false, 'R2-E sidecar annotation is NOT the same reference as the raw (Proxy) dependency annotation');
+    const isFrozen = run(sandbox, 'Object.isFrozen(mergedResult.sysList[0]._approvedDictResolution.annotations[0])');
+    assert(isFrozen === true, 'R2-E sidecar annotation is frozen');
+    // Mutate the raw (still-referenced) Proxy/target AFTER capture - a
+    // fresh, disconnected snapshot must be unaffected, whereas a live
+    // pass-through of the raw Proxy would reflect the mutation.
+    run(sandbox, `globalThis.__r2eRawAnnotation.original_term = 'MUTATED_AFTER_CAPTURE';`);
+    const sidecarTermAfterMutation = run(sandbox, 'mergedResult.sysList[0]._approvedDictResolution.annotations[0].original_term');
+    assert(sidecarTermAfterMutation === 'R2E Term', 'R2-E sidecar annotation is a disconnected snapshot, not a live view of the raw (Proxy) dependency object - unaffected by post-capture mutation');
+    const expectedShape = run(sandbox, `JSON.stringify({ original_term: 'R2E Term', resolved_canonical: 'R2E Term', resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-x', dictionary_snapshot_id: globalThis.__binding.snapshot_id, wrapper_integrity_sha256: globalThis.__binding.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE' })`);
+    const actualShape = run(sandbox, 'JSON.stringify(mergedResult.sysList[0]._approvedDictResolution.annotations[0])');
+    assert(actualShape === expectedShape, 'R2-E captured sidecar annotation has the correct field values');
+  }
+
   console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }
