@@ -623,6 +623,128 @@ async function main() {
   }
 
   // ==========================================================================
+  // R1-A/R1-B. normalize() returns a rejected Promise (Checkpoint 6-R1) +
+  // unhandledRejection audit
+  // ==========================================================================
+  {
+    const secretMarker = 'SECRET_R1AB_NORMALIZE_REJECT';
+    const hostileIdHashUtils = { normalize() { return Promise.reject(new Error(secretMarker)); } };
+    const sandbox = loadResolverCoreInSandbox(sandboxRequireStub(realCrossRealmSnapshotCore(), realCrossRealmLearningCore(), hostileIdHashUtils));
+    const entry = makeEntry({ canonical_term: 'Reject Normalize Term', aliases: [] });
+    const payload = makeDictionaryPayload([entry]);
+    const wrapper = await buildRealWrapper(payload, {});
+    const input = makeResolutionInput(wrapper, ['Reject Normalize Term']);
+    const realmInput = toSandboxValue(sandbox, input);
+
+    let unhandledCount = 0;
+    const onUnhandled = () => { unhandledCount++; };
+    process.on('unhandledRejection', onUnhandled);
+    let caught = null;
+    try {
+      try { await sandbox.module.exports.resolveDictionaryTerms(realmInput); } catch (err) { caught = err; }
+      // Give the event loop several turns to surface any unhandledRejection
+      // our own fix failed to consume, before asserting the audit count.
+      await new Promise(resolve => setImmediate(resolve));
+      await new Promise(resolve => setImmediate(resolve));
+      await new Promise(resolve => setTimeout(resolve, 10));
+    } finally {
+      process.removeListener('unhandledRejection', onUnhandled);
+    }
+    assert(!!caught && caught.code === 'RESOLVER_NORMALIZATION_FAILED', 'R1-A normalize() returning a rejected Promise is sanitized to RESOLVER_NORMALIZATION_FAILED');
+    assertSanitizedErrorCrossRealm(caught, 'R1-A rejected-Promise normalize: thrown error is the sanitized {code,path} shape');
+    assert(!JSON.stringify(caught).includes(secretMarker), 'R1-A rejected-Promise normalize: no native Error/secret leakage');
+    assert(unhandledCount === 0, 'R1-B rejected Promise from normalize() is fully consumed - zero unhandledRejection events observed');
+  }
+
+  // ==========================================================================
+  // R1-C. normalize() returns a resolving Promise/thenable (async normalize
+  // never implicitly adopted as a real feature)
+  // ==========================================================================
+  {
+    const entry = makeEntry({ canonical_term: 'Resolve Normalize Term', aliases: [] });
+    const payload = makeDictionaryPayload([entry]);
+    const wrapper = await buildRealWrapper(payload, {});
+
+    const hostileIdHashUtils1 = { normalize() { return Promise.resolve('some-normalized-value'); } };
+    const sandbox1 = loadResolverCoreInSandbox(sandboxRequireStub(realCrossRealmSnapshotCore(), realCrossRealmLearningCore(), hostileIdHashUtils1));
+    const input1 = makeResolutionInput(wrapper, ['Resolve Normalize Term']);
+    const realmInput1 = toSandboxValue(sandbox1, input1);
+    let caught1 = null;
+    try { await sandbox1.module.exports.resolveDictionaryTerms(realmInput1); } catch (err) { caught1 = err; }
+    assert(!!caught1 && caught1.code === 'RESOLVER_NORMALIZATION_FAILED', 'R1-C normalize() returning a resolving Promise is rejected as RESOLVER_NORMALIZATION_FAILED (async normalize never implicitly adopted)');
+    assertSanitizedErrorCrossRealm(caught1, 'R1-C resolving Promise normalize: thrown error is the sanitized {code,path} shape');
+
+    const hostileIdHashUtils2 = { normalize() { return { then(resolve) { resolve('x'); } }; } };
+    const sandbox2 = loadResolverCoreInSandbox(sandboxRequireStub(realCrossRealmSnapshotCore(), realCrossRealmLearningCore(), hostileIdHashUtils2));
+    const input2 = makeResolutionInput(wrapper, ['Resolve Normalize Term']);
+    const realmInput2 = toSandboxValue(sandbox2, input2);
+    let caught2 = null;
+    try { await sandbox2.module.exports.resolveDictionaryTerms(realmInput2); } catch (err) { caught2 = err; }
+    assert(!!caught2 && caught2.code === 'RESOLVER_NORMALIZATION_FAILED', 'R1-C normalize() returning a custom resolving thenable is rejected as RESOLVER_NORMALIZATION_FAILED');
+  }
+
+  // ==========================================================================
+  // R1-D. Hostile thenable (get then() throws)
+  // ==========================================================================
+  {
+    const secretMarker = 'SECRET_R1D_HOSTILE_THEN_GETTER';
+    const hostileThenable = {};
+    Object.defineProperty(hostileThenable, 'then', { get() { throw new Error(secretMarker); } });
+    const hostileIdHashUtils = { normalize() { return hostileThenable; } };
+    const sandbox = loadResolverCoreInSandbox(sandboxRequireStub(realCrossRealmSnapshotCore(), realCrossRealmLearningCore(), hostileIdHashUtils));
+    const entry = makeEntry({ canonical_term: 'Hostile Then Term', aliases: [] });
+    const payload = makeDictionaryPayload([entry]);
+    const wrapper = await buildRealWrapper(payload, {});
+    const input = makeResolutionInput(wrapper, ['Hostile Then Term']);
+    const realmInput = toSandboxValue(sandbox, input);
+    let caught = null;
+    try { await sandbox.module.exports.resolveDictionaryTerms(realmInput); } catch (err) { caught = err; }
+    assert(!!caught && caught.code === 'RESOLVER_NORMALIZATION_FAILED', 'R1-D hostile thenable (get then() throws) is sanitized to RESOLVER_NORMALIZATION_FAILED');
+    assertSanitizedErrorCrossRealm(caught, 'R1-D hostile then getter: thrown error is the sanitized {code,path} shape');
+    assert(!JSON.stringify(caught).includes(secretMarker), 'R1-D hostile then getter: no native Error/secret leakage');
+  }
+
+  // ==========================================================================
+  // R1-E. Existing sync normalize still resolves normally
+  // ==========================================================================
+  {
+    const entry = makeEntry({ canonical_term: 'R1E Sync Term', aliases: ['R1E Alias'] });
+    const payload = makeDictionaryPayload([entry]);
+    const wrapper = await buildRealWrapper(payload, {});
+    const result = await Resolver.resolveDictionaryTerms(makeResolutionInput(wrapper, ['R1E Sync Term', 'R1E Alias', 'R1E Unknown']));
+    assert(result.annotations[0].resolution_type === 'EXACT_CANONICAL', 'R1-E synchronous normalize still resolves EXACT_CANONICAL correctly');
+    assert(result.annotations[1].resolution_type === 'APPROVED_ALIAS', 'R1-E synchronous normalize still resolves APPROVED_ALIAS correctly');
+    assert(result.annotations[2].resolution_type === 'UNKNOWN_TERM', 'R1-E synchronous normalize still resolves UNKNOWN_TERM correctly');
+  }
+
+  // ==========================================================================
+  // R1-F. First-await ordering regression (Snapshot Loader call still
+  // issued before Resolver's own first await, even with an
+  // asynchronously-misbehaving normalize())
+  // ==========================================================================
+  {
+    let loaderCalled = false;
+    const hostileSnapshotCore = {
+      loadDictionarySnapshotWrapper: async (w) => {
+        loaderCalled = true;
+        return realCrossRealmSnapshotCore().loadDictionarySnapshotWrapper(w);
+      }
+    };
+    const hostileIdHashUtils = { normalize() { return Promise.reject(new Error('R1F_UNUSED')); } };
+    const sandbox = loadResolverCoreInSandbox(sandboxRequireStub(hostileSnapshotCore, realCrossRealmLearningCore(), hostileIdHashUtils));
+    const entry = makeEntry({ canonical_term: 'Ordering Term', aliases: [] });
+    const payload = makeDictionaryPayload([entry]);
+    const wrapper = await buildRealWrapper(payload, {});
+    const input = makeResolutionInput(wrapper, ['Ordering Term']);
+    const realmInput = toSandboxValue(sandbox, input);
+    const promise = sandbox.module.exports.resolveDictionaryTerms(realmInput);
+    assert(loaderCalled === true, "R1-F Snapshot Loader call is issued synchronously, before Resolver's own first await (even though normalize() will later reject asynchronously)");
+    let caught = null;
+    try { await promise; } catch (err) { caught = err; }
+    assert(!!caught && caught.code === 'RESOLVER_NORMALIZATION_FAILED', 'R1-F end-to-end still resolves to RESOLVER_NORMALIZATION_FAILED after confirming ordering');
+  }
+
+  // ==========================================================================
   // X. Snapshot dependency failure
   // ==========================================================================
   {

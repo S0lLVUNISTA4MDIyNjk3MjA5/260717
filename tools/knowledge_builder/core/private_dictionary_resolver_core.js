@@ -275,34 +275,58 @@
     };
   }
 
-  // ---- §15/§9 formal normalization. Computed once, synchronously, right
-  // after input capture and BEFORE the Snapshot Loader call is issued -
-  // still strictly before this module's own first `await` (§10). A term
-  // whose normalize() result is the empty string is a distinct input-
-  // validation failure (RESOLVER_TERM_INVALID), never silently treated as
-  // UNKNOWN_TERM. normalize() itself misbehaving (throw / non-string
-  // return) is RESOLVER_NORMALIZATION_FAILED. ----
+  // ---- §15/§9 formal normalization (R1-1, §S6.6 Checkpoint 6-R1: the
+  // formal normalize() contract is synchronous-string-only - a sync throw,
+  // a non-string return, OR a Promise/thenable return (whether it resolves
+  // or rejects) are ALL treated as a malformed dependency result and
+  // sanitized to RESOLVER_NORMALIZATION_FAILED alike; Resolver never
+  // implicitly adopts an async normalize() as a real feature). Called from
+  // the caller AFTER the Snapshot Loader call has already been issued
+  // (§10/R1-4 below), so this function's own internal `await` (used only to
+  // safely consume a hostile thenable return, never to change normal-path
+  // behavior) can never delay/reorder the Loader's own atomic capture. A
+  // term whose normalize() result is the empty string is a distinct
+  // input-validation failure (RESOLVER_TERM_INVALID), never silently
+  // treated as UNKNOWN_TERM. ----
 
-  function captureNormalizedTerms(terms, errors) {
+  async function captureNormalizedTerms(terms, errors) {
     const out = [];
     for (let i = 0; i < terms.length; i++) {
       const idxPath = `$.terms[${i}]`;
       let normalizedKey;
+      let threw = false;
       try {
         normalizedKey = IdHashUtils.normalize(terms[i]);
       } catch (err) {
-        errors.push(resolverError('RESOLVER_NORMALIZATION_FAILED', idxPath));
-        return null;
+        threw = true;
       }
-      if (typeof normalizedKey !== 'string') {
-        errors.push(resolverError('RESOLVER_NORMALIZATION_FAILED', idxPath));
-        return null;
+      if (!threw && typeof normalizedKey === 'string') {
+        if (normalizedKey.length === 0) {
+          errors.push(resolverError('RESOLVER_TERM_INVALID', idxPath));
+          return null;
+        }
+        out.push(normalizedKey);
+        continue;
       }
-      if (normalizedKey.length === 0) {
-        errors.push(resolverError('RESOLVER_TERM_INVALID', idxPath));
-        return null;
+      // R1-1: any non-string, non-thrown return is defensively `await`-ed
+      // here (a no-op for a plain value; for a genuine Promise/thenable -
+      // including a hostile one whose own `.then` getter throws - `await`
+      // is the one mechanism that both resolves AND properly attaches a
+      // rejection handler in the same step, per the ECMAScript Await/
+      // PromiseResolve algorithms). The settled/rejected value itself is
+      // never inspected; only its settlement is consumed so it can never
+      // surface later as a Node.js unhandledRejection.
+      if (!threw && normalizedKey !== null && (typeof normalizedKey === 'object' || typeof normalizedKey === 'function')) {
+        try {
+          await normalizedKey;
+        } catch (err) {
+          // Rejection (or a hostile `.then` getter throw surfaced via
+          // Await) intentionally discarded - still RESOLVER_NORMALIZATION_
+          // FAILED below regardless of outcome.
+        }
       }
-      out.push(normalizedKey);
+      errors.push(resolverError('RESOLVER_NORMALIZATION_FAILED', idxPath));
+      return null;
     }
     return out;
   }
@@ -333,20 +357,33 @@
     const { errors: rootErrors, snapshot } = captureRootSnapshot(input);
     if (rootErrors.length) throwFirstError(rootErrors);
 
-    const normErrors = [];
-    const normalizedKeys = captureNormalizedTerms(snapshot.terms, normErrors);
-    if (!normalizedKeys) throwFirstError(normErrors);
-
-    // §10: the Snapshot Loader call is issued SYNCHRONOUSLY now, before this
-    // function's own first `await` - the Loader's own atomic capture (its
-    // own STEP 1, synchronous) therefore completes before control ever
-    // returns to a caller who might try to mutate the wrapper input.
+    // §10/R1-4 (Checkpoint 6-R1): the Snapshot Loader call is issued
+    // SYNCHRONOUSLY here, immediately after root capture and strictly
+    // before this function's own first `await` - the Loader's own atomic
+    // capture (its own STEP 1, synchronous) therefore completes before
+    // control ever returns to a caller who might try to mutate the wrapper
+    // input. Normalization (below) is deliberately sequenced AFTER this
+    // call-start, specifically so that captureNormalizedTerms()'s own
+    // defensive `await` (needed to safely consume a hostile
+    // Promise/thenable normalize() return, R1-1) can never delay or
+    // reorder the Loader's own atomic capture.
     let loadPromise;
     try {
       loadPromise = SnapshotCore.loadDictionarySnapshotWrapper(snapshot.snapshotWrapperRaw);
     } catch (err) {
       throw makeResolverError('RESOLVER_SNAPSHOT_LOAD_FAILED', '$.snapshot_wrapper');
     }
+    // Attached immediately (synchronously, same tick) so that, however long
+    // normalization processing takes below, a rejection of loadPromise can
+    // never surface as a Node.js unhandledRejection - this does not affect
+    // `await loadPromise` below, which still resolves/rejects independently
+    // for this function's own control flow (a Promise may have multiple,
+    // independent reaction handlers).
+    loadPromise.catch(() => {});
+
+    const normErrors = [];
+    const normalizedKeys = await captureNormalizedTerms(snapshot.terms, normErrors);
+    if (!normalizedKeys) throwFirstError(normErrors);
 
     let validatedSnapshot;
     try {
