@@ -888,6 +888,241 @@ async function main() {
     assert(setCalls.length === 0, 'AZ setApprovedDictionarySnapshotForMatching() never calls localStorage.setItem()');
   }
 
+  // ==========================================================================
+  // P2-A4 Checkpoint 7-R1 hardening tests (R1-A .. R1-I)
+  // ==========================================================================
+
+  function fabricatedBinding() {
+    return { snapshot_id: 'dsnap-' + 'a'.repeat(32), snapshot_version: 1, wrapper_integrity_sha256: 'b'.repeat(64), dictionary_payload_sha256: 'c'.repeat(64), dictionary_id: 'pdict-x', dictionary_version: '1', scope: 'PROJECT' };
+  }
+  // A hand-written stand-in resolver that answers the terms:[] pin-validation
+  // call normally (so setApprovedDictionarySnapshotForMatching() succeeds and
+  // active=true), then defers to `onResolve` for any real (non-empty) call.
+  function pinnableStandInResolver(sandbox, onResolveSrc) {
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        if (input.terms.length === 0) return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding, annotations: [] };
+        return (${onResolveSrc})(input);
+      } };
+    `);
+  }
+
+  // --------------------------------------------------------------------------
+  // R1-A. Unknown Resolver error code laundering (pin-time)
+  // --------------------------------------------------------------------------
+  {
+    const secretMarker = 'PRIVATE_SECRET_TERM';
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    run(sandbox, `globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async () => { const e = { code: ${JSON.stringify(secretMarker)} }; throw e; } };`);
+    const status = await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    assert(status.lastErrorCode === 'APPROVED_DICT_RESOLUTION_FAILED', 'R1-A an unknown/non-allowlisted Resolver error code is laundered to APPROVED_DICT_RESOLUTION_FAILED');
+    assert(!JSON.stringify(status).includes(secretMarker), 'R1-A no leakage of the raw Resolver-internal error code (PRIVATE_SECRET_TERM) into status');
+  }
+
+  // --------------------------------------------------------------------------
+  // R1-B. Hostile error-code getter (pin-time) never throws natively
+  // --------------------------------------------------------------------------
+  {
+    const secretMarker = 'SECRET_R1B_HOSTILE_GETTER';
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async () => {
+        const hostile = {};
+        Object.defineProperty(hostile, 'code', { get() { throw new Error(${JSON.stringify(secretMarker)}); } });
+        throw hostile;
+      } };
+    `);
+    let status, threw = false;
+    try { status = await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})'); }
+    catch (_e) { threw = true; }
+    assert(!threw, 'R1-B setApprovedDictionarySnapshotForMatching() never rejects natively on a throwing err.code getter');
+    if (!threw) {
+      assert(status.active === false, 'R1-B active=false after a hostile error-code getter rejection');
+      assert(status.lastErrorCode === 'APPROVED_DICT_RESOLUTION_FAILED', 'R1-B lastErrorCode sanitized to APPROVED_DICT_RESOLUTION_FAILED');
+      assert(!JSON.stringify(status).includes(secretMarker), 'R1-B no secret leakage from the hostile getter into status');
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // R1-C. Same laundering applies mid-apply (not just at pin time)
+  // --------------------------------------------------------------------------
+  {
+    const secretMarker = 'R1C_INTERNAL_RESOLVER_CODE';
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    pinnableStandInResolver(sandbox, `(input) => { const e = { code: ${JSON.stringify(secretMarker)} }; throw e; }`);
+    const status0 = await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    assert(status0.active === true, 'R1-C setup: pin succeeds via the terms:[] validation call');
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'R1C Term' }], []);
+    assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R1-C apply-time Resolver reject with an unknown code -> no approvedDict tags');
+    const warn = run(sandbox, 'traceTagState.approvedDictWarningCode');
+    assert(warn === 'APPROVED_DICT_RESOLUTION_FAILED', 'R1-C apply-time unknown Resolver error code is laundered too');
+    assert(!JSON.stringify(warn).includes(secretMarker), 'R1-C no leakage during apply-time laundering');
+  }
+
+  // --------------------------------------------------------------------------
+  // R1-D. Malformed (null) second-row annotation fails the whole apply,
+  // no native TypeError leakage, no partial commit for row0.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    pinnableStandInResolver(sandbox, `(input) => ({
+      schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding,
+      annotations: [ { original_term: input.terms[0], resolved_canonical: input.terms[0], resolution_type: 'EXACT_CANONICAL' }, null ]
+    })`);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    let sysList, threw = false;
+    try { ({ sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'Row0 Term' }, { desc: 'Row1 Term' }], [])); }
+    catch (_e) { threw = true; }
+    assert(!threw, 'R1-D no native TypeError leakage - annotateAllTraceTags() never throws on a malformed second-row annotation');
+    if (!threw) {
+      assert(run(sandbox, 'traceTagState.approvedDictWarningCode') === 'APPROVED_DICT_RESOLUTION_FAILED', 'R1-D malformed (null) row1 annotation sets the generic failure code');
+      assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R1-D row0 (structurally valid annotation) approvedDict stays empty - no partial commit');
+      assert(sysList[1]._tagInfo.approvedDict.length === 0, 'R1-D row1 (null annotation) approvedDict stays empty');
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // R1-E. Unknown resolution_type fails the whole apply, partial commit 0.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    pinnableStandInResolver(sandbox, `(input) => ({
+      schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding,
+      annotations: [ { original_term: input.terms[0], resolved_canonical: input.terms[0], resolution_type: 'EVIL_TYPE' } ]
+    })`);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'Evil Type Term' }], []);
+    assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R1-E unknown resolution_type ("EVIL_TYPE") fails the whole apply, partial commit 0');
+    assert(run(sandbox, 'traceTagState.approvedDictWarningCode') === 'APPROVED_DICT_RESOLUTION_FAILED', 'R1-E unknown resolution_type sets the generic failure code');
+  }
+
+  // --------------------------------------------------------------------------
+  // R1-F. EXACT_CANONICAL with a malformed resolved_canonical (null / object)
+  // fails the whole apply.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    pinnableStandInResolver(sandbox, `(input) => ({
+      schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding,
+      annotations: [ { original_term: input.terms[0], resolved_canonical: null, resolution_type: 'EXACT_CANONICAL' } ]
+    })`);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'Null Canonical Term' }], []);
+    assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R1-F EXACT_CANONICAL with resolved_canonical=null fails the whole apply');
+  }
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    pinnableStandInResolver(sandbox, `(input) => ({
+      schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding,
+      annotations: [ { original_term: input.terms[0], resolved_canonical: { evil:true }, resolution_type: 'EXACT_CANONICAL' } ]
+    })`);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'Object Canonical Term' }], []);
+    assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R1-F EXACT_CANONICAL with resolved_canonical=object fails the whole apply');
+  }
+
+  // --------------------------------------------------------------------------
+  // R1-G. Reordered/swapped annotation batch fails the whole apply - never
+  // assigns a canonical tag resolved for one row to a different row.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__binding = fabricatedBinding();
+    pinnableStandInResolver(sandbox, `(input) => ({
+      schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: globalThis.__binding,
+      annotations: [
+        { original_term: input.terms[1], resolved_canonical: input.terms[1], resolution_type: 'EXACT_CANONICAL' },
+        { original_term: input.terms[0], resolved_canonical: input.terms[0], resolution_type: 'EXACT_CANONICAL' }
+      ]
+    })`);
+    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'Swap Term A' }, { desc: 'Swap Term B' }], []);
+    assert(sysList[0]._tagInfo.approvedDict.length === 0, 'R1-G reordered annotation batch fails the whole apply (row0 gets no tag)');
+    assert(sysList[1]._tagInfo.approvedDict.length === 0, 'R1-G reordered annotation batch fails the whole apply (row1 gets no wrong-row tag)');
+  }
+
+  // --------------------------------------------------------------------------
+  // R1-H. Snapshot-switch stale display closure: re-annotating the SAME row
+  // under a new Snapshot (same normalized canonical key, different display)
+  // must show the NEW Snapshot's display, never the old one.
+  // --------------------------------------------------------------------------
+  {
+    const rowH = { desc: 'Switch Alias' };
+    const entryA = makeEntry({ canonical_term: 'Canonical Term', aliases: ['Switch Alias'] });
+    const wrapperA = await buildWrapper([entryA]);
+    const sandbox = loadMatchingToolSandbox();
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__wrapperA = wrapperA;
+    const statusA = await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching(globalThis.__wrapperA)');
+    assert(statusA.active === true, 'R1-H setup: Snapshot A pin succeeds');
+    await setMergedResultAndAnnotate(sandbox, [rowH], []);
+    const tagKey = run(sandbox, 'mergedResult.sysList[0]._tagInfo.approvedDict[0]');
+    assert(!!tagKey, 'R1-H setup: row resolves an approvedDict tag under Snapshot A');
+    sandbox.__tagKeyH = tagKey;
+    const displayA = run(sandbox, 'mergedResult.sysList[0]._tagDisplayMap[globalThis.__tagKeyH]');
+    assert(displayA === 'Canonical Term', 'R1-H setup: display A recorded as expected under Snapshot A');
+
+    // Snapshot B: same normalized canonical key (case-different display),
+    // via an entry with a different snapshot binding.
+    const entryB = makeEntry({ canonical_term: 'CANONICAL TERM', aliases: ['Switch Alias'] });
+    const wrapperB = await buildWrapper([entryB]);
+    sandbox.__wrapperB = wrapperB;
+    const statusB = await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching(globalThis.__wrapperB)');
+    assert(statusB.active === true, 'R1-H setup: Snapshot B pin succeeds');
+    assert(JSON.stringify(statusB.snapshotBinding) !== JSON.stringify(statusA.snapshotBinding), 'R1-H setup: Snapshot B binding genuinely differs from Snapshot A');
+
+    await setMergedResultAndAnnotate(sandbox, [rowH], []);
+    const tagKeyB = run(sandbox, 'mergedResult.sysList[0]._tagInfo.approvedDict[0]');
+    assert(tagKeyB === tagKey, 'R1-H setup: same normalized canonical key resolves under Snapshot A and Snapshot B');
+    const displayB = run(sandbox, 'mergedResult.sysList[0]._tagDisplayMap[globalThis.__tagKeyH]');
+    assert(displayB === 'CANONICAL TERM', 'R1-H after Snapshot switch, _tagDisplayMap shows the Snapshot B resolved_canonical display, never the stale Snapshot A display');
+    const sidecarBinding = run(sandbox, 'JSON.stringify(mergedResult.sysList[0]._approvedDictResolution.snapshot_binding)');
+    assert(sidecarBinding === JSON.stringify(statusB.snapshotBinding), 'R1-H current Resolver display Source of Truth: sidecar binding reflects Snapshot B, not Snapshot A');
+  }
+
+  // --------------------------------------------------------------------------
+  // R1-I. Empty-term row sidecar (§9): rows with 0 eligible terms still get
+  // an _approvedDictResolution runtime-provenance sidecar with annotations:[].
+  // --------------------------------------------------------------------------
+  {
+    const entry = makeEntry({ canonical_term: 'Sidecar Guard Term', aliases: [] });
+    const wrapper = await buildWrapper([entry]);
+    const sandbox = loadMatchingToolSandbox();
+    configureSingleFieldKeyPair(sandbox);
+    sandbox.__wrapper = wrapper;
+    const status = await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching(globalThis.__wrapper)');
+    assert(status.active === true, 'R1-I setup: Snapshot pin succeeds');
+    const objectOnlyRow = { desc: { nested: 'object values are never term-ified' } };
+    const overlengthOnlyRow = { desc: 'x'.repeat(300) };
+    const whitespaceOnlyRow = { desc: '   　  ' };
+    const rows = [objectOnlyRow, overlengthOnlyRow, whitespaceOnlyRow];
+    const { sysList } = await setMergedResultAndAnnotate(sandbox, rows, []);
+    const schemaVersion = run(sandbox, 'APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION');
+    const labels = ['object-only', 'overlength-only', 'whitespace-only'];
+    rows.forEach((_row, i) => {
+      const sidecar = sysList[i]._approvedDictResolution;
+      assert(!!sidecar, `R1-I ${labels[i]} row (0 eligible terms) still gets an _approvedDictResolution sidecar`);
+      if (sidecar) {
+        assert(sidecar.schema_version === schemaVersion, `R1-I ${labels[i]} row sidecar schema_version matches the row sidecar contract`);
+        assert(Array.isArray(sidecar.annotations) && sidecar.annotations.length === 0, `R1-I ${labels[i]} row sidecar has an empty annotations array (no formal resolution fabricated)`);
+        assert(JSON.stringify(sidecar.snapshot_binding) === JSON.stringify(status.snapshotBinding), `R1-I ${labels[i]} row sidecar records the current Snapshot binding as runtime provenance`);
+      }
+    });
+  }
+
   console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }

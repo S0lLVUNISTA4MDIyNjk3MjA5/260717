@@ -3441,16 +3441,52 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     return core;
   }
 
+  // P2-A4 Checkpoint 7-R1 (§1): the ONLY codes this tool's UI/status may
+  // ever surface. Any other code - including Resolver-internal RESOLVER_*
+  // codes, which are not this tool's concern to expose - is laundered to
+  // the generic APPROVED_DICT_RESOLUTION_FAILED below.
+  const APPROVED_DICT_ERROR_CODE_ALLOWLIST = new Set([
+    'APPROVED_DICT_RESOLVER_UNAVAILABLE',
+    'APPROVED_DICT_RESOLUTION_FAILED',
+    'APPROVED_DICT_BINDING_MISMATCH',
+    'APPROVED_DICT_SESSION_CHANGED'
+  ]);
+
   // Never copies message/stack/cause/raw term into UI-visible state - only a
-  // known, sanitized code string ever leaves this function.
+  // known, allowlisted code string ever leaves this function. The err.code
+  // read itself is guarded: a hostile rejection value with a throwing
+  // `code` getter must never escape this function as a native exception.
   function approvedDictSanitizeErrorCode(err) {
-    if (err && typeof err === 'object' && typeof err.code === 'string' && err.code) return err.code;
+    try {
+      const code = err && typeof err === 'object' ? err.code : undefined;
+      if (typeof code === 'string' && APPROVED_DICT_ERROR_CODE_ALLOWLIST.has(code)) return code;
+    } catch (_readErr) {
+      // hostile getter threw - fall through to the generic sanitized code.
+    }
     return 'APPROVED_DICT_RESOLUTION_FAILED';
   }
 
   function approvedDictBindingsEqual(a, b) {
     if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
     return APPROVED_DICT_BINDING_FIELDS.every(field => a[field] === b[field]);
+  }
+
+  const APPROVED_DICT_RESOLUTION_TYPES = new Set(['EXACT_CANONICAL', 'APPROVED_ALIAS', 'UNKNOWN_TERM', 'DICTIONARY_CONFLICT']);
+
+  // P2-A4 Checkpoint 7-R1 (§3/§4): per-annotation Resolver output binding/
+  // schema guard. This is NOT a re-implementation of dictionary semantics -
+  // it only confirms the shape matching tool code actually reads is sane
+  // and that the annotation truly corresponds to the term it claims to
+  // (guards against a reordered/swapped annotation batch mis-tagging a
+  // different row than the one whose value was resolved).
+  function approvedDictAnnotationIsValid(annotation, expectedTerm) {
+    if (!annotation || typeof annotation !== 'object') return false;
+    if (!APPROVED_DICT_RESOLUTION_TYPES.has(annotation.resolution_type)) return false;
+    if (annotation.original_term !== expectedTerm) return false;
+    if (annotation.resolution_type === 'EXACT_CANONICAL' || annotation.resolution_type === 'APPROVED_ALIAS') {
+      return typeof annotation.resolved_canonical === 'string' && annotation.resolved_canonical.length > 0;
+    }
+    return annotation.resolved_canonical === null;
   }
 
   function clearApprovedDictRowSidecars(rows) {
@@ -3582,6 +3618,16 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       if (!approvedDictBindingsEqual(result.snapshot_binding, expectedBinding)) {
         const e = new Error('binding mismatch'); e.code = 'APPROVED_DICT_BINDING_MISMATCH'; throw e;
       }
+      // §3/§4: validate EVERY annotation in this chunk (shape, allowed
+      // resolution_type, resolved_canonical polarity, and original_term ==
+      // the exact term this position was resolved for) before accepting
+      // ANY of them. A single malformed/reordered annotation anywhere in
+      // the batch fails the whole apply - no partial commit.
+      for (let i = 0; i < chunk.length; i++) {
+        if (!approvedDictAnnotationIsValid(result.annotations[i], chunk[i].term)) {
+          const e = new Error('malformed resolver annotation'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e;
+        }
+      }
       for (let i = 0; i < chunk.length; i++) resolved.push({ ...chunk[i], annotation: result.annotations[i] });
     }
     return resolved;
@@ -3628,15 +3674,16 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       return resultStats;
     }
 
-    // §19/§45: discard the entire pending result if the session-local
-    // Snapshot pin changed while this (possibly long-running, chunked)
-    // resolution was in flight. No partial/mixed-snapshot commit.
-    if (approvedDictionaryRuntime.revision !== revisionAtStart) {
-      traceTagState.approvedDictWarningCode = 'APPROVED_DICT_SESSION_CHANGED';
-      return resultStats;
-    }
-
-    traceTagState.approvedDictWarningCode = null;
+    // P2-A4 Checkpoint 7-R1 (§5): true pending-before-commit. Every row's
+    // next _tagInfo/_tags/_tagDisplayMap/_approvedDictResolution is built
+    // into a plain pending record first - no row is mutated
+    // (setHiddenRowProp) during this prepare phase. Only after ALL rows on
+    // both sides have been prepared without error, AND the session pin is
+    // reconfirmed unchanged, does the commit phase run. This guarantees a
+    // failure anywhere during preparation (or a session-revision race)
+    // leaves every row's approvedDict state exactly as the baseline pass
+    // left it - never a partial mix of old/new rows.
+    const pendingTagged = [];
     rowTermIndices.forEach((indices, key) => {
       const sepIndex = key.indexOf(':');
       const side = key.slice(0, sepIndex);
@@ -3660,17 +3707,54 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         }
       });
       const info = row._tagInfo && typeof row._tagInfo === 'object' ? row._tagInfo : { explicit:[], approvedDict:[], dict:[], code:[], manualAdd:[], manualRemove:[] };
-      info.approvedDict = uniqueNormalizedTags(approvedTags);
-      resultStats.tagInstances += info.approvedDict.length;
-      setHiddenRowProp(row, '_tagInfo', info);
-      setHiddenRowProp(row, '_tags', composeFinalTags(info));
+      const nextInfo = { ...info, approvedDict: uniqueNormalizedTags(approvedTags) };
+      resultStats.tagInstances += nextInfo.approvedDict.length;
       const rawCodes = extractCodesFromText(tagSourceText(row, side));
-      setHiddenRowProp(row, '_tagDisplayMap', buildTagDisplayMap(row, info, row._tagDisplayMap, rawCodes, side, approvedDisplays));
-      setHiddenRowProp(row, '_approvedDictResolution', Object.freeze({
+      const nextTags = composeFinalTags(nextInfo);
+      const nextDisplayMap = buildTagDisplayMap(row, nextInfo, row._tagDisplayMap, rawCodes, side, approvedDisplays);
+      const nextSidecar = Object.freeze({
         schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
         snapshot_binding: approvedDictionaryRuntime.snapshotBinding,
         annotations: Object.freeze(rowAnnotations.slice())
-      }));
+      });
+      pendingTagged.push({ row, nextInfo, nextTags, nextDisplayMap, nextSidecar });
+    });
+
+    // §9: a row with zero eligible terms still gets a sidecar recording
+    // "processed under this Snapshot binding, nothing eligible was found" -
+    // this is runtime provenance, never a formal resolution, and never
+    // touches _tagInfo/_tags/_tagDisplayMap (those are already correct -
+    // approvedDict:[] - from the baseline pass).
+    const pendingEmpty = [];
+    Object.entries(rowsBySide).forEach(([side, rows]) => {
+      rows.forEach((row, rowIndex) => {
+        if (!row || typeof row !== 'object') return;
+        if (rowTermIndices.has(`${side}:${rowIndex}`)) return;
+        pendingEmpty.push({ row, nextSidecar: Object.freeze({
+          schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
+          snapshot_binding: approvedDictionaryRuntime.snapshotBinding,
+          annotations: Object.freeze([])
+        }) });
+      });
+    });
+
+    // §19/§45: discard the entire pending result if the session-local
+    // Snapshot pin changed while this (possibly long-running, chunked)
+    // resolution was in flight. No partial/mixed-snapshot commit.
+    if (approvedDictionaryRuntime.revision !== revisionAtStart) {
+      traceTagState.approvedDictWarningCode = 'APPROVED_DICT_SESSION_CHANGED';
+      return resultStats;
+    }
+
+    traceTagState.approvedDictWarningCode = null;
+    pendingTagged.forEach(({ row, nextInfo, nextTags, nextDisplayMap, nextSidecar }) => {
+      setHiddenRowProp(row, '_tagInfo', nextInfo);
+      setHiddenRowProp(row, '_tags', nextTags);
+      setHiddenRowProp(row, '_tagDisplayMap', nextDisplayMap);
+      setHiddenRowProp(row, '_approvedDictResolution', nextSidecar);
+    });
+    pendingEmpty.forEach(({ row, nextSidecar }) => {
+      setHiddenRowProp(row, '_approvedDictResolution', nextSidecar);
     });
     return resultStats;
   }
@@ -4633,6 +4717,19 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     return out;
   }
 
+  // P2-A4 Checkpoint 7-R1 (§7): removes keys the row's PREVIOUS
+  // _tagInfo.approvedDict contributed from a prior _tagDisplayMap before
+  // it is reused as this pass's priorMap. Without this, buildTagDisplayMap's
+  // first-win rule would let a stale display from an old Snapshot pin
+  // silently block the current Snapshot's resolved_canonical display for
+  // the same normalized tag key after a Snapshot switch + re-annotate.
+  function stripApprovedDictDisplayKeys(displayMap, previousApprovedDictKeys) {
+    if (!displayMap || typeof displayMap !== 'object' || !Array.isArray(previousApprovedDictKeys) || !previousApprovedDictKeys.length) return displayMap;
+    const out = { ...displayMap };
+    previousApprovedDictKeys.forEach(key => { delete out[key]; });
+    return out;
+  }
+
   function buildTagDisplayMap(row, info, priorMap = null, rawCodes = null, schemaName = 'sys', approvedDictDisplays = null) {
     const map = priorMap && typeof priorMap === 'object' ? { ...priorMap } : {};
     const add = value => {
@@ -4708,7 +4805,12 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       manualAdd: manual.manualAdd,
       manualRemove: manual.manualRemove
     };
-    const displayMap = buildTagDisplayMap(row, info, row?._tagDisplayMap, rawCodes, schemaName);
+    // §7: strip stale approvedDict-only display keys (from the row's
+    // approvedDict as of BEFORE this annotate pass) before reusing the
+    // prior display map, so a Snapshot switch's new resolved_canonical
+    // display is never blocked by the previous Snapshot's entry.
+    const priorDisplayMap = stripApprovedDictDisplayKeys(row?._tagDisplayMap, existing?.approvedDict);
+    const displayMap = buildTagDisplayMap(row, info, priorDisplayMap, rawCodes, schemaName);
     return { rowId, info, tags: composeFinalTags(info), displayMap };
   }
 
