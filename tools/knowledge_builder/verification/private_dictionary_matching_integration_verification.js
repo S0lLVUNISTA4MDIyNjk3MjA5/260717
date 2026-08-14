@@ -893,7 +893,7 @@ async function main() {
   // ==========================================================================
 
   function fabricatedBinding() {
-    return { snapshot_id: 'dsnap-' + 'a'.repeat(32), snapshot_version: 1, wrapper_integrity_sha256: 'b'.repeat(64), dictionary_payload_sha256: 'c'.repeat(64), dictionary_id: 'pdict-x', dictionary_version: '1', scope: 'PROJECT' };
+    return { snapshot_id: 'dsnap-' + 'a'.repeat(32), snapshot_version: 1, wrapper_integrity_sha256: 'b'.repeat(64), dictionary_payload_sha256: 'c'.repeat(64), dictionary_id: 'pdict-' + 'd'.repeat(32), dictionary_version: '1', scope: 'PROJECT' };
   }
   // A hand-written stand-in resolver that answers the terms:[] pin-validation
   // call normally (so setApprovedDictionarySnapshotForMatching() succeeds and
@@ -1572,6 +1572,217 @@ async function main() {
     assert(isFrozen === true, 'R3-H final sidecar annotation is frozen');
     const allPrimitive = run(sandbox, `Object.entries(mergedResult.sysList[0]._approvedDictResolution.annotations[0]).every(([k,v]) => v === null || typeof v === 'string')`);
     assert(allPrimitive === true, 'R3-H all 8 sidecar annotation fields are primitive string or null');
+  }
+
+  // ==========================================================================
+  // P2-A4 Checkpoint 7-R4 hardening tests (R4-A .. R4-I): the Snapshot pin
+  // path (setApprovedDictionarySnapshotForMatching()) now validates the
+  // terms:[] Resolver result as a full formal Resolution Batch, and the
+  // batch binding itself is validated against the exact Checkpoint 6/3
+  // field-format contract (not just copied/frozen).
+  // ==========================================================================
+
+  const VALID_PIN_BINDING_SOURCE = `{ snapshot_id: 'dsnap-' + 'a'.repeat(32), snapshot_version: 1, wrapper_integrity_sha256: 'b'.repeat(64), dictionary_payload_sha256: 'c'.repeat(64), dictionary_id: 'pdict-' + 'd'.repeat(32), dictionary_version: '1', scope: 'PROJECT' }`;
+
+  // --------------------------------------------------------------------------
+  // R4-A. A batch binding field is an object (not a primitive) - the pin
+  // must fail closed with no object reference stored.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        const binding = Object.assign(${VALID_PIN_BINDING_SOURCE}, { snapshot_id: {} });
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: binding, annotations: [] };
+      } };
+    `);
+    const status = await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    assert(status.active === false, 'R4-A object-valued snapshot_id field rejects the pin (active=false)');
+    assert(status.lastErrorCode === 'APPROVED_DICT_RESOLUTION_FAILED', 'R4-A lastErrorCode is APPROVED_DICT_RESOLUTION_FAILED');
+    assert(status.snapshotBinding === null, 'R4-A no object reference is stored as snapshotBinding after rejection');
+  }
+
+  // --------------------------------------------------------------------------
+  // R4-B. A batch binding field is a hostile Proxy/getter that throws with a
+  // secret marker - no native throw, no secret leakage.
+  // --------------------------------------------------------------------------
+  {
+    const secretMarker = 'R4B_HOSTILE_BINDING_SECRET';
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        const binding = ${VALID_PIN_BINDING_SOURCE};
+        Object.defineProperty(binding, 'snapshot_id', { get() { throw new Error(${JSON.stringify(secretMarker)}); } });
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: binding, annotations: [] };
+      } };
+    `);
+    let status, threw = false;
+    try { status = await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})'); }
+    catch (_e) { threw = true; }
+    assert(!threw, 'R4-B no native throw escapes setApprovedDictionarySnapshotForMatching() on a hostile binding field getter');
+    if (!threw) {
+      assert(status.active === false, 'R4-B active=false after a hostile binding field getter throws');
+      assert(!JSON.stringify(status).includes(secretMarker), 'R4-B no secret leakage into status');
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // R4-C. scope = 'SESSION' (not PROJECT) is rejected.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        const binding = Object.assign(${VALID_PIN_BINDING_SOURCE}, { scope: 'SESSION' });
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: binding, annotations: [] };
+      } };
+    `);
+    const status = await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    assert(status.active === false, "R4-C scope='SESSION' rejects the pin");
+    assert(status.lastErrorCode === 'APPROVED_DICT_RESOLUTION_FAILED', 'R4-C lastErrorCode is APPROVED_DICT_RESOLUTION_FAILED');
+  }
+
+  // --------------------------------------------------------------------------
+  // R4-D. Each ID/hash/version field individually violates the Checkpoint
+  // 6/3 contract format - each rejects the pin.
+  // --------------------------------------------------------------------------
+  {
+    const malformedCases = [
+      ['snapshot_id', 'not-a-valid-id'],
+      ['snapshot_id', 'dsnap-' + 'A'.repeat(32)],
+      ['snapshot_version', 0],
+      ['snapshot_version', '1'],
+      ['snapshot_version', 1.5],
+      ['wrapper_integrity_sha256', 'z'.repeat(64)],
+      ['wrapper_integrity_sha256', 'b'.repeat(63)],
+      ['dictionary_payload_sha256', 'short'],
+      ['dictionary_id', 'pdict-badformat'],
+      ['dictionary_version', '01'],
+      ['dictionary_version', -1],
+      ['dictionary_version', 1]
+    ];
+    for (const [field, badValue] of malformedCases) {
+      const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+      sandbox.__field = field;
+      sandbox.__badValue = badValue;
+      run(sandbox, `
+        globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+          const binding = ${VALID_PIN_BINDING_SOURCE};
+          binding[globalThis.__field] = globalThis.__badValue;
+          return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: binding, annotations: [] };
+        } };
+      `);
+      const status = await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+      assert(status.active === false, `R4-D malformed ${field}=${JSON.stringify(badValue)} rejects the pin`);
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // R4-E. schema_version is wrong ('EVIL') even though the binding itself is
+  // valid - the pin must still fail.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        const binding = ${VALID_PIN_BINDING_SOURCE};
+        return { schema_version: 'EVIL', snapshot_binding: binding, annotations: [] };
+      } };
+    `);
+    const status = await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    assert(status.active === false, "R4-E schema_version='EVIL' rejects the pin even with a valid binding");
+  }
+
+  // --------------------------------------------------------------------------
+  // R4-F. annotations = null (not an array) - the pin must fail.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        const binding = ${VALID_PIN_BINDING_SOURCE};
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: binding, annotations: null };
+      } };
+    `);
+    const status = await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    assert(status.active === false, 'R4-F annotations=null rejects the pin');
+  }
+
+  // --------------------------------------------------------------------------
+  // R4-G. terms:[] was sent, but annotations.length === 1 (should be 0) -
+  // the pin must fail.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    run(sandbox, `
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        const binding = ${VALID_PIN_BINDING_SOURCE};
+        return { schema_version: 'private-dictionary-resolution-batch/0.1', snapshot_binding: binding, annotations: [{ original_term:'x', resolved_canonical:null, resolution_type:'UNKNOWN_TERM', dictionary_entry_id:null, dictionary_snapshot_id:binding.snapshot_id, wrapper_integrity_sha256:binding.wrapper_integrity_sha256, scope:null, status:null }] };
+      } };
+    `);
+    const status = await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    assert(status.active === false, 'R4-G annotations.length===1 for a terms:[] pin request rejects the pin');
+  }
+
+  // --------------------------------------------------------------------------
+  // R4-H. The pin result is a stateful Proxy - schema_version/
+  // snapshot_binding/annotations are each read exactly once; a differing
+  // second-read value/throw never fires.
+  // --------------------------------------------------------------------------
+  {
+    const sandbox = loadMatchingToolSandbox({ withRealResolverDeps: false });
+    run(sandbox, `
+      globalThis.__r4hReadCounts = { schema_version: 0, snapshot_binding: 0, annotations: 0 };
+      globalThis.PrivateDictionaryResolverCore = { resolveDictionaryTerms: async (input) => {
+        const validBinding = ${VALID_PIN_BINDING_SOURCE};
+        const target = {};
+        return new Proxy(target, {
+          get(t, prop, receiver) {
+            if (prop === 'schema_version') {
+              globalThis.__r4hReadCounts.schema_version++;
+              if (globalThis.__r4hReadCounts.schema_version > 1) throw new Error('R4H_SECOND_READ_schema_version');
+              return 'private-dictionary-resolution-batch/0.1';
+            }
+            if (prop === 'snapshot_binding') {
+              globalThis.__r4hReadCounts.snapshot_binding++;
+              if (globalThis.__r4hReadCounts.snapshot_binding > 1) throw new Error('R4H_SECOND_READ_snapshot_binding');
+              return validBinding;
+            }
+            if (prop === 'annotations') {
+              globalThis.__r4hReadCounts.annotations++;
+              return globalThis.__r4hReadCounts.annotations === 1 ? [] : [{ evil: true }];
+            }
+            return Reflect.get(t, prop, receiver);
+          }
+        });
+      } };
+    `);
+    const status = await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching({})');
+    const counts = run(sandbox, 'JSON.stringify(globalThis.__r4hReadCounts)');
+    assert(counts === JSON.stringify({ schema_version: 1, snapshot_binding: 1, annotations: 1 }), 'R4-H schema_version/snapshot_binding/annotations are each read exactly once from the pin result');
+    assert(status.active === true, 'R4-H the single (first) observation of each field is used correctly - pin succeeds');
+  }
+
+  // --------------------------------------------------------------------------
+  // R4-I. A normal, real Resolver terms:[] pin result succeeds, with a
+  // frozen, fully contract-valid captured snapshotBinding.
+  // --------------------------------------------------------------------------
+  {
+    const entry = makeEntry({ canonical_term: 'Pin Batch Validation Term', aliases: [] });
+    const wrapper = await buildWrapper([entry]);
+    const sandbox = loadMatchingToolSandbox();
+    sandbox.__wrapper = wrapper;
+    const status = await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching(globalThis.__wrapper)');
+    assert(status.active === true, 'R4-I a normal real-Resolver pin succeeds (active=true)');
+    assert(Object.isFrozen(status.snapshotBinding), 'R4-I captured snapshotBinding is frozen');
+    const b = status.snapshotBinding;
+    assert(typeof b.snapshot_id === 'string' && /^dsnap-[0-9a-f]{32}$/.test(b.snapshot_id), 'R4-I snapshot_id is contract-valid');
+    assert(typeof b.snapshot_version === 'number' && Number.isSafeInteger(b.snapshot_version) && b.snapshot_version >= 1, 'R4-I snapshot_version is contract-valid');
+    assert(typeof b.wrapper_integrity_sha256 === 'string' && /^[0-9a-f]{64}$/.test(b.wrapper_integrity_sha256), 'R4-I wrapper_integrity_sha256 is contract-valid');
+    assert(typeof b.dictionary_payload_sha256 === 'string' && /^[0-9a-f]{64}$/.test(b.dictionary_payload_sha256), 'R4-I dictionary_payload_sha256 is contract-valid');
+    assert(typeof b.dictionary_id === 'string' && /^pdict-[0-9a-f]{32}$/.test(b.dictionary_id), 'R4-I dictionary_id is contract-valid');
+    assert(typeof b.dictionary_version === 'string' && /^(0|[1-9][0-9]{0,15})$/.test(b.dictionary_version), 'R4-I dictionary_version is contract-valid');
+    assert(b.scope === 'PROJECT', 'R4-I scope is PROJECT');
   }
 
   console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);

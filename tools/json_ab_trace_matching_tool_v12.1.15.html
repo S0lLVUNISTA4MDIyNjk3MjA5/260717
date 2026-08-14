@@ -3471,17 +3471,46 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     return APPROVED_DICT_BINDING_FIELDS.every(field => a[field] === b[field]);
   }
 
-  // P2-A4 Checkpoint 7-R3 (§2): reads each of the 7 batch-binding contract
-  // fields from the raw (possibly hostile/Proxy-backed) Resolver result
-  // EXACTLY ONCE into local primitives, and returns a brand-new frozen
-  // plain object built purely from them - or null if the raw value itself
-  // is not an object. Callers must never hold or re-read the raw binding
-  // reference after calling this; all downstream comparisons/storage use
-  // only the returned captured copy.
+  // P2-A4 Checkpoint 7-R4 (§1): the 7 batch-binding contract fields' exact
+  // primitive formats, reused verbatim (never re-derived) from their
+  // Source of Truth: SNAPSHOT_ID_RE/HEX64_RE/checkSnapshotVersion in
+  // private_dictionary_snapshot_core.js, DICTIONARY_ID_RE/VERSION_RE in
+  // private_dictionary_learning_core.js, and ALLOWED_SCOPE ('PROJECT')
+  // fixed by private_dictionary_snapshot_core.js's own P2-A4 0.1 scope
+  // restriction.
+  const APPROVED_DICT_SNAPSHOT_ID_PATTERN = /^dsnap-[0-9a-f]{32}$/;
+  const APPROVED_DICT_DICTIONARY_ID_PATTERN = /^pdict-[0-9a-f]{32}$/;
+  const APPROVED_DICT_HEX64_PATTERN = /^[0-9a-f]{64}$/;
+  const APPROVED_DICT_DICTIONARY_VERSION_PATTERN = /^(0|[1-9][0-9]{0,15})$/;
+  const APPROVED_DICT_BINDING_SCOPE = 'PROJECT';
+
+  // P2-A4 Checkpoint 7-R3/R4 (§2/§1): reads each of the 7 batch-binding
+  // contract fields from the raw (possibly hostile/Proxy-backed) Resolver
+  // result EXACTLY ONCE into local primitives, THEN validates each against
+  // its exact Checkpoint 6/3 format contract using only those
+  // already-captured primitives (never re-touching the raw object). Any
+  // field that is not the expected primitive type/format - including
+  // object/array/function/symbol/Proxy values, or a null on a field the
+  // contract never allows to be null - fails the whole capture (returns
+  // null). Only on full success does this return a brand-new frozen plain
+  // object built purely from the captured, contract-valid values; the raw
+  // binding reference is never stored or re-read afterward. This is a
+  // dependency output format guard, not a reimplementation of Snapshot/
+  // dictionary semantics - the actual ID/hash/version contracts are
+  // Source-of-Truth-owned by Checkpoint 3/P2-A1 and merely referenced here.
   function captureApprovedDictBatchBinding(rawBinding) {
     if (!rawBinding || typeof rawBinding !== 'object') return null;
     const captured = {};
     APPROVED_DICT_BINDING_FIELDS.forEach(field => { captured[field] = rawBinding[field]; });
+
+    if (typeof captured.snapshot_id !== 'string' || !APPROVED_DICT_SNAPSHOT_ID_PATTERN.test(captured.snapshot_id)) return null;
+    if (typeof captured.snapshot_version !== 'number' || !Number.isSafeInteger(captured.snapshot_version) || captured.snapshot_version < 1) return null;
+    if (typeof captured.wrapper_integrity_sha256 !== 'string' || !APPROVED_DICT_HEX64_PATTERN.test(captured.wrapper_integrity_sha256)) return null;
+    if (typeof captured.dictionary_payload_sha256 !== 'string' || !APPROVED_DICT_HEX64_PATTERN.test(captured.dictionary_payload_sha256)) return null;
+    if (typeof captured.dictionary_id !== 'string' || !APPROVED_DICT_DICTIONARY_ID_PATTERN.test(captured.dictionary_id)) return null;
+    if (typeof captured.dictionary_version !== 'string' || !APPROVED_DICT_DICTIONARY_VERSION_PATTERN.test(captured.dictionary_version)) return null;
+    if (captured.scope !== APPROVED_DICT_BINDING_SCOPE) return null;
+
     return Object.freeze({ ...captured });
   }
 
@@ -3560,12 +3589,38 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         // Loader-backed validation (terms:[]) - this tool never calls
         // PrivateDictionarySnapshotCore directly.
         const result = await core.resolveDictionaryTerms({ schema_version: APPROVED_DICT_RESOLUTION_INPUT_SCHEMA_VERSION, snapshot_wrapper: snapshotWrapper, terms: [] });
-        // P2-A4 Checkpoint 7-R3 (§2): result.snapshot_binding is read
-        // exactly once and captured into a fresh frozen copy - the raw
-        // (possibly hostile) binding reference is never stored long-term.
-        const rawBinding = result.snapshot_binding;
-        const capturedBinding = captureApprovedDictBatchBinding(rawBinding);
-        if (!capturedBinding) { const e = new Error('malformed batch binding'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e; }
+        if (!result || typeof result !== 'object') {
+          const e = new Error('malformed pin result'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e;
+        }
+        // P2-A4 Checkpoint 7-R4 (§2/§3): the terms:[] pin-validation result
+        // is validated as a full formal Resolution Batch, not merely its
+        // binding. schema_version/snapshot_binding/annotations are each
+        // read from the raw result EXACTLY ONCE - never re-accessed again -
+        // guarding against a stateful/hostile Proxy result.
+        let rawSchemaVersion, rawSnapshotBinding, rawAnnotations;
+        try {
+          rawSchemaVersion = result.schema_version;
+          rawSnapshotBinding = result.snapshot_binding;
+          rawAnnotations = result.annotations;
+        } catch (err) {
+          const e = new Error('pin result observation failed'); e.code = approvedDictSanitizeErrorCode(err); throw e;
+        }
+        if (rawSchemaVersion !== APPROVED_DICT_RESOLUTION_BATCH_SCHEMA_VERSION
+          || !Array.isArray(rawAnnotations)
+          || rawAnnotations.length !== 0) {
+          const e = new Error('malformed pin batch'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e;
+        }
+        // §1: the binding is captured into a fresh frozen copy AND
+        // validated against the Checkpoint 6/3 field-format contract - the
+        // raw (possibly hostile) binding reference is never stored
+        // long-term.
+        let capturedBinding;
+        try {
+          capturedBinding = captureApprovedDictBatchBinding(rawSnapshotBinding);
+        } catch (err) {
+          const e = new Error('pin batch binding observation failed'); e.code = approvedDictSanitizeErrorCode(err); throw e;
+        }
+        if (!capturedBinding) { const e = new Error('malformed pin batch binding'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e; }
         approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:true, snapshotWrapper, snapshotBinding: capturedBinding, lastErrorCode:null };
       } catch (err) {
         approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:false, snapshotWrapper:null, snapshotBinding:null, lastErrorCode: approvedDictSanitizeErrorCode(err) };
