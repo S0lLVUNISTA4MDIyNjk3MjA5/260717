@@ -2022,3 +2022,176 @@ matching実行（既存logic、変更なし）
   済み）。document frequency算入・high-frequency pruningも`dict`と対称に`dict ∪ approvedDict`の
   和集合として扱う（S13.1項目7・8）。「正式辞書由来だからより高いスコアを与える」という設計は
   0.1では採用せず、将来的に必要になった場合は別version/別sliceで再検討する。
+
+---
+
+## S24. Checkpoint 8: P2-A3 Review State → Promotion Input Adapter
+
+S6.5.1で示した「未設計」だった接続点（旧#13/#14, S23参照）をP2-A4 Checkpoint 8で解決する。
+対象は下記の一本のboundaryのみ:
+
+```text
+P2-A2 Evaluation + P2-A3 Review State
+        |
+        v
+tools/knowledge_builder/core/private_dictionary_review_promotion_adapter_core.js
+  buildPromotionInputFromReview(input)
+        |
+        v
+private-dictionary-promotion-input/0.1  (S6.5.2契約と完全一致)
+```
+
+Promotion / Snapshot / Resolver / Matching integrationは一切変更しない。本Checkpointの
+Adapterは「PromotionがPromotion Input 0.1として受理できる形へreview stateを翻訳し、
+review↔evaluation bindingを検証するboundary」であり、Promotion自身が持つ意味判断
+（winner選択・conflict解決・materialization・Snapshot整合性）を一切再実装しない。
+
+### S24.1 なぜ新規coreか
+
+`private_dictionary_promotion_core.js`はS6.5.1で明記した通り`tools/knowledge_builder/ui/*`
+へproductionとして依存しない。P2-A3のReview State（`review_state.js`）はID-keyed mapを
+内部表現として使うUIランタイム状態であり、Promotion Inputの`candidate_decisions`等が要求する
+「sorted array」形式とは異なる。この変換・bindingの検証を担う層が存在しなかった
+（S23旧#13/#14）。新規pure core `private_dictionary_review_promotion_adapter_core.js`が
+この変換のみを担当する。
+
+### S24.2 Adapter Input契約（design-first、0.1として固定）
+
+Adapter InputはP2-A3 UI runtime stateと同型だが、Adapter core自身は`tools/knowledge_builder/ui/*`
+を一切require/importしない（review_state.jsのモジュール参照ではなく、その出力shapeを
+仕様として踏襲するのみ）。
+
+```text
+{
+  evaluation,              // P2-A2 Evaluation object（opaque single-read reference。
+                           //   Promotion Input `evaluation` へそのまま伝播。フィールドの
+                           //   再生成・再検証はAdapterのbinding検査に必要な最小限のみ）
+  review_state: {
+    review_schema_version,        // 'private-dictionary-candidate-review/0.1'
+    extraction_schema_version,    // == evaluation.schema_version
+    source_fingerprints,          // [{source_document_id, document_fingerprint}]
+    candidate_decisions,          // { [candidate_id]: {decision, reason_code, note, decided_at} }
+    alias_decisions,              // { [alias_candidate_id]: {...} }
+    conflict_resolutions,         // { [conflict_id]: {resolution, selected_candidate_id, reason_code, note, decided_at} }
+    reviewer_notes                // { session_note }
+  },
+  base_snapshot,           // null または opaque Snapshot Wrapper reference（Adapterは
+                           //   フィールドを一切読まない。Promotion呼び出し時に
+                           //   PrivateDictionarySnapshotCore.loadDictionarySnapshotWrapper()
+                           //   へそのまま渡る前提。null-or-not以外の判定をAdapterで行わない）
+  target_dictionary_id,    // caller-controlled string（Promotion契約のDICTIONARY_ID_RE検証）
+  target_version,          // caller-controlled string（Promotion契約のVERSION_RE検証）
+  source_commit            // caller-controlled string（Promotion契約のHEX40_RE検証）
+}
+```
+
+`source_review_artifact_identity`はAdapter Inputに**含めない**（S24.4参照。callerが
+自由入力する設計を明示的に禁止するP2-A4 Checkpoint 8指示§8/§9のため）。`base_snapshot`の
+latest探索・project config探索・時刻/random由来のID生成はAdapter内で一切行わない
+（caller明示入力のみ）。
+
+### S24.3 Adapter Output契約
+
+`private-dictionary-promotion-input/0.1`（Promotion Input 0.1、S6.5.2）と完全一致する
+fresh・frozen objectを返す。Adapter専用の中間formatは作らない。top-level keyは
+`INPUT_ROOT_KEYS`（Promotion core側の定数、S6.5.2）と同一の10 fieldのみ。
+
+### S24.4 Review Artifact Identity（Checkpoint 8の中心設計判断）
+
+S6.5.2は`source_review_artifact_identity.sha256`を「元P2-A3 private Review Workbookの
+identity」と定義しているが、Adapter pure coreはWorkbook（.xlsx）を一切parseしない
+（Checkpoint 8指示§6）。調査の結果、P2-A3側にはWorkbookバイト列のsha256を計算する
+pure coreレベルのAPIが存在しない（`browser_ingest.js`の`sha256Hex()`はWebCrypto依存の
+browser-onlyヘルパーであり、かつ用途は入力ドキュメントのingestであってreview artifact
+identityではない）。「既存identity verification APIを再利用する」という指示§9の前提条件
+（そのAPIが存在すること）が成立しないため、指示§6が明示的に許可する「最小のcore-facing
+capture境界を設計する」を適用する。
+
+**確定した設計**: Adapterは`source_review_artifact_identity.sha256`を**caller入力として
+受理しない**。Adapter自身が、実際に受け取ったreview_state（S24.2の構造化capture後の値、
+`reason_code`/`note`/`decided_at`/`reviewer_notes`を含む全項目）から、既存の共有hash
+primitive `KnowledgeIdHashUtils.hashParts()`（Promotion/Snapshot/Resolverが自身の
+identity計算に使うのと同じ関数。§1.3のnormalization/hash契約を独自に再実装しない原則を
+踏襲）を使って**決定論的に算出する**。namespace文字列は
+`'private-dictionary-review-promotion-adapter-artifact-v1'`固定とし、Promotion自身が
+算出する`review_decision_fingerprint`（namespace
+`'private-dictionary-promotion-review-decision-v1'`、`reason_code`/`note`/`decided_at`/
+`reviewer_notes`を含まない意思決定のみの射影）とは意図的に異なるnamespace・異なる射影
+内容にする（両者を同一視・redundant化しない）。
+
+この設計により、指示§9の禁止事項「review artifact A + source_review_artifact_identity of B」
+は構造的に発生し得ない: identityは常に、Adapterが実際に変換したreview_stateの内容から
+その場で計算される値であり、callerが無関係な値を混入させる余地がない。
+
+### S24.5 Evaluation binding（Adapter独自の全集合検証）
+
+Promotion core自身も`checkIdentityConsistency()`でreview/evaluation bindingを独立検証する
+（S6.5.3）が、これはPromotion Inputの`candidate_decisions`配列（既にAdapterが構築済み）と
+`evaluation`の突合であり、Adapterが「P2-A3 review stateのID-keyed mapとP2-A2 evaluationの
+対応」を配列化する**前**の整合性は検証しない。Adapterは配列を組み立てる前に、独自に
+次を検証する（一致しない場合`REVIEW_PROMOTION_ADAPTER_EVALUATION_BINDING_MISMATCH`で
+fail-closed、片方向のみの検証は行わない）:
+
+- `review_state.review_schema_version === 'private-dictionary-candidate-review/0.1'`
+- `review_state.extraction_schema_version === evaluation.schema_version`
+- `review_state.source_fingerprints`と`evaluation.source_fingerprints`の完全set一致
+  （`{source_document_id, document_fingerprint}`の組で比較）
+- `Object.keys(review_state.candidate_decisions)`と`evaluation.candidates[].candidate_id`の
+  完全set一致（reviewに余分/不足いずれもreject）
+- `Object.keys(review_state.alias_decisions)`と`evaluation.alias_candidates[].alias_candidate_id`
+  の完全set一致
+- `Object.keys(review_state.conflict_resolutions)`と`evaluation.conflicts[].conflict_id`の
+  完全set一致
+
+この検証のために、Adapterは`evaluation`から`schema_version`/`source_fingerprints`/
+`candidates[].candidate_id`/`alias_candidates[].alias_candidate_id`/`conflicts[].conflict_id`
+のみを安全構造読み取り（hostile-input対応のsafe descriptor read、既存4 core共通のR1-1
+パターンを本coreでも独立実装 — このパターン自体は「Promotion意味論」ではなく本セッション
+全coreに共通する汎用hostile-input防御であり、S21のNo-goal対象外）する。P2-A2 evaluationの
+完全なschema検証（残りのfield）はPromotion自身が実施するため、Adapterはこの最小集合以外を
+一切読まない。
+
+### S24.6 Decision projection規則
+
+`evaluation.candidates`を`candidate_id`昇順sort（Promotion既存の`ordinalCompare`と同じ
+文字列比較、S6.5.9 `canonicalCandidateDecisions()`と同一sort rule）した順に、
+`review_state.candidate_decisions[candidate_id].decision`を`DECISION_VALUES`
+（`UNREVIEWED/ACCEPT/REJECT/UNCERTAIN`、Promotion契約と同一のenum定数をAdapter内に
+literalとして固定）で検証したうえで`{candidate_id, decision}`へ射影する。alias/conflictも
+同型（`alias_candidate_id`昇順、`conflict_id`昇順）。`conflict_resolutions`は
+`resolution ∈ RESOLUTION_VALUES`、`SELECT_CANONICAL`の場合のみ`selected_candidate_id`が
+非null文字列（かつ`conflicting_candidate_ids`に含まれる値であることまでは検証しない —
+それはPromotion自身の`PROMOTION_SELECTED_CANDIDATE_INVALID`/materialization責務であり、
+S24.5と同じ理由でAdapterは形式のみを見る）、それ以外は`null`固定という構造規則のみを
+検証する。`reason_code`/`note`/`decided_at`はPromotion Inputへ一切コピーしない
+（S6.5.2の既存contract通り）。UNREVIEWED/UNCERTAINの自動変換、conflictの
+`selected_candidate_id`推測はいずれも行わない。
+
+### S24.7 Trust boundary / Error contract
+
+既存4 core（Promotion/Snapshot/Resolver/Matching integration R1-R4）と同じsanitized
+`{code, path}`のみを外部へ返す。message/stack/cause/raw値は一切含めない。全ての
+構造読み取り（root入力・review_state・evaluationのbinding用最小集合）は呼び出し開始時点で
+同期的に完了し（§25 atomic capture patternの踏襲）、以降の非同期処理は
+identity計算の`KnowledgeIdHashUtils.hashParts()`呼び出し1箇所のみであり、その入力は
+既にcaptureされたcanonical JSON文字列のみである（caller inputの再読み取りは発生しない）。
+
+Error code allowlist（8種、design-firstで固定）:
+
+| code | 意味 |
+|---|---|
+| `REVIEW_PROMOTION_ADAPTER_ROOT_INVALID` | Adapter Input root自体が不正な形状 |
+| `REVIEW_PROMOTION_ADAPTER_REVIEW_INVALID` | `review_state`が構造的に不正（map形状・decision/resolution enum・selected_candidate_id極性を含む） |
+| `REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID` | `evaluation`がbinding検証に必要な最小形状すら満たさない |
+| `REVIEW_PROMOTION_ADAPTER_EVALUATION_BINDING_MISMATCH` | S24.5の6項目のいずれかが不一致 |
+| `REVIEW_PROMOTION_ADAPTER_TARGET_INVALID` | `target_dictionary_id`/`target_version`/`source_commit`の形式不正 |
+| `REVIEW_PROMOTION_ADAPTER_BASE_SNAPSHOT_INVALID` | `base_snapshot`が`null`でも安全な参照でもない |
+| `REVIEW_PROMOTION_ADAPTER_HASH_FAILED` | identity計算（`canonicalJson`/`hashParts`）の失敗 |
+| `REVIEW_PROMOTION_ADAPTER_DEPENDENCY_FAILED` | `KnowledgeIdHashUtils`依存解決の失敗 |
+
+### S24.8 Non-goals（本Checkpoint）
+
+Promotionの実行・Snapshot生成・Snapshot Activation・Matching配線は行わない。Workbook
+parse（SheetJS/FileReader/Blob/browser UI）はAdapter pure coreに一切持ち込まない。
+HUMAN-01/02/03（日本語UI文言改善）はUI integration checkpointへ委譲し、本Checkpointには
+含めない。
