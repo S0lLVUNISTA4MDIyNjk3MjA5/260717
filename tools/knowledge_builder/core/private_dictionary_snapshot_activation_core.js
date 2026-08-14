@@ -221,27 +221,71 @@
     return validated;
   }
 
-  // ---- §25.7 chain consistency (history is optional; skipped when null) ----
+  // ---- §25.7/§R1 chain consistency (history is optional; skipped when
+  // null). Split into two responsibilities per the R1 remediation:
+  //
+  //   captureHistory()      - structural capture ONLY. Reads the
+  //                            caller-owned `history` array and every item's
+  //                            fields EXACTLY ONCE, synchronously, via the
+  //                            same safe descriptor-read primitives used
+  //                            everywhere else in this module, and returns a
+  //                            fresh, deeply-frozen, alias-free
+  //                            representation. Hostile-input defense and
+  //                            format validation (SNAPSHOT_ID_RE/safe
+  //                            integer/chain-ref format) live here, because
+  //                            they require touching the raw, potentially
+  //                            hostile caller object - this is the ONLY
+  //                            place that ever does so, and it always runs
+  //                            before this module's one `await` (see
+  //                            transitionSnapshotActivation() below).
+  //
+  //   validateHistoryChain() - semantic-only. Reads EXCLUSIVELY the already
+  //                            -captured representation returned by
+  //                            captureHistory() (plain, frozen, same-realm
+  //                            data this module already owns) - never the
+  //                            caller's raw `history` reference again, not
+  //                            even indirectly. It performs no additional
+  //                            raw reads, so it may safely run after the
+  //                            Snapshot Loader's `await` without reopening
+  //                            any TOCTOU window.
+  //
+  // A caller that mutates its own `history` array/items immediately after
+  // calling transitionSnapshotActivation() (before or during the Loader's
+  // await) can therefore never affect the chain-consistency outcome - only
+  // the state captured before that first await is ever consulted.
 
-  function validateHistoryChain(historyRaw, candidate) {
-    if (historyRaw === null) return;
+  function captureHistory(historyRaw) {
+    if (historyRaw === null) return null;
     const arr = captureOwnedArray(historyRaw, '$.history', 'ACTIVATION_HISTORY_INVALID');
     const HISTORY_ITEM_KEYS = ['dictionary_snapshot_id', 'snapshot_version', 'supersedes', 'rollback_target'];
-    const nodes = arr.map((item, i) => {
-      const path = `$.history[${i}]`;
-      const captured = captureOwnedObject(item, path, HISTORY_ITEM_KEYS, 'ACTIVATION_HISTORY_INVALID');
+    return Object.freeze(arr.map((item, i) => {
+      const itemPath = `$.history[${i}]`;
+      const captured = captureOwnedObject(item, itemPath, HISTORY_ITEM_KEYS, 'ACTIVATION_HISTORY_INVALID');
       if (typeof captured.dictionary_snapshot_id !== 'string' || !SNAPSHOT_ID_RE.test(captured.dictionary_snapshot_id)) {
-        throwActivationError('ACTIVATION_HISTORY_INVALID', `${path}.dictionary_snapshot_id`);
+        throwActivationError('ACTIVATION_HISTORY_INVALID', `${itemPath}.dictionary_snapshot_id`);
       }
       if (!Number.isSafeInteger(captured.snapshot_version) || captured.snapshot_version < 1) {
-        throwActivationError('ACTIVATION_HISTORY_INVALID', `${path}.snapshot_version`);
+        throwActivationError('ACTIVATION_HISTORY_INVALID', `${itemPath}.snapshot_version`);
       }
-      if (!isChainRefFormat(captured.supersedes)) throwActivationError('ACTIVATION_HISTORY_INVALID', `${path}.supersedes`);
-      if (!isChainRefFormat(captured.rollback_target)) throwActivationError('ACTIVATION_HISTORY_INVALID', `${path}.rollback_target`);
-      return captured;
-    });
+      if (!isChainRefFormat(captured.supersedes)) throwActivationError('ACTIVATION_HISTORY_INVALID', `${itemPath}.supersedes`);
+      if (!isChainRefFormat(captured.rollback_target)) throwActivationError('ACTIVATION_HISTORY_INVALID', `${itemPath}.rollback_target`);
+      // Fresh, frozen, alias-free copy - never the `captured` object
+      // returned by captureOwnedObject() itself (that one is only a
+      // shallow local; freezing our OWN new object here guarantees no
+      // caller-owned reference of any kind survives into the returned
+      // representation).
+      return Object.freeze({
+        dictionary_snapshot_id: captured.dictionary_snapshot_id,
+        snapshot_version: captured.snapshot_version,
+        supersedes: captured.supersedes,
+        rollback_target: captured.rollback_target
+      });
+    }));
+  }
 
-    const combined = nodes.concat([candidate]);
+  function validateHistoryChain(capturedHistory, candidate) {
+    if (capturedHistory === null) return;
+    const combined = capturedHistory.concat([candidate]);
     const byId = new Map();
     for (const node of combined) {
       if (byId.has(node.dictionary_snapshot_id)) throwActivationError('ACTIVATION_HISTORY_INVALID', '$.history');
@@ -336,7 +380,19 @@
     }
     if (!isNonEmptyBoundedString(root.updated_by, MAX_UPDATED_BY_LEN)) throwActivationError('ACTIVATION_ROOT_INVALID', '$.updated_by');
     if (!isValidCanonicalUtcTimestamp(root.updated_at)) throwActivationError('ACTIVATION_ROOT_INVALID', '$.updated_at');
-    if (root.history !== null && !isSafePlainArray(root.history)) throwActivationError('ACTIVATION_HISTORY_INVALID', '$.history');
+
+    // §R1 MAJOR-01 remediation: `history` is fully structurally captured
+    // HERE - synchronously, before the function's one `await` below - via
+    // captureHistory(). Every reachable value (the array itself, each item,
+    // each item's four fields) is read from the caller-owned reference
+    // exactly once, in this call's synchronous prefix. From this line
+    // onward `root.history` is never read again anywhere in this function -
+    // only `historyCaptured` (an independent, frozen, alias-free
+    // representation) is used, including after the Loader's await. A caller
+    // that mutates its own `history` array/items immediately after calling
+    // this function (or while the Loader's promise is still pending) can
+    // therefore never affect the chain-consistency outcome.
+    const historyCaptured = captureHistory(root.history);
 
     const validated = await loadValidatedSnapshot(root.snapshot_wrapper, 'ACTIVATION_SNAPSHOT_INVALID', '$.snapshot_wrapper');
 
@@ -344,7 +400,7 @@
       throwActivationError('ACTIVATION_BINDING_MISMATCH', '$.snapshot_wrapper');
     }
 
-    validateHistoryChain(root.history, {
+    validateHistoryChain(historyCaptured, {
       dictionary_snapshot_id: validated.snapshot_id,
       snapshot_version: validated.snapshot_version,
       supersedes: validated.supersedes,

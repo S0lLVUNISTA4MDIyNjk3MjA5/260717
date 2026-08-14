@@ -2540,3 +2540,55 @@ Project Snapshot Pin → matching session `setSnapshot()`のruntime配線は行�
 （S25.4）は行わない。storage adapter実装（S25.9）は行わない。HUMAN-01/02/03の
 UI適用は行わない（指示§33）。Checkpoint 7 matching tool HTML・P2-A3 UI/coreの変更は
 行わない。
+
+### S25.13 Checkpoint 9-R1 追補: history atomic capture（MAJOR-01是正）
+
+Checkpoint 9初期実装は`transitionSnapshotActivation()`のroot入力
+（`current_record`/`snapshot_wrapper`/`new_status`/`updated_by`/`updated_at`/`history`）を
+`captureOwnedObject()`で同期的にcaptureしていたが、これは`history`という**参照**を
+captureしたに過ぎなかった。`history`配列自体・各要素・各要素のfield
+（`dictionary_snapshot_id`/`snapshot_version`/`supersedes`/`rollback_target`）の実際の
+読み取りは、`validateHistoryChain()`内部の`captureOwnedArray()`/`captureOwnedObject()`
+呼び出しまで遅延しており、この呼び出しは`await loadValidatedSnapshot(...)`（実Snapshot
+Loader呼び出し）の**後**に発生していた。これは独立レビューでMAJOR-01として指摘された。
+
+**問題**: callerが`transitionSnapshotActivation(input)`呼び出し直後（Loaderのawaitが
+pendingの間）に`input.history[0].snapshot_version`等を書き換えると、その書き換え後の
+値でchain検証が行われてしまい、S25.8が要求する「call開始時点でのatomic capture・
+caller mutation isolation・await後の再read禁止」に違反していた。
+
+**是正内容**: `history`のstructural capture（hostile-input防御・format validation・
+fresh representation生成）と、chain semantic validation（monotonicity・existence・
+cycle detection）を明確に2つの関数へ分離した。
+
+- `captureHistory(historyRaw)`: `transitionSnapshotActivation()`の同期phase内、
+  `await loadValidatedSnapshot(...)`より**前**に呼び出す。`history === null`ならそのまま
+  `null`を返す。非nullの場合、配列自体・各要素・各要素の4 fieldを、既存の安全
+  descriptor読み取りprimitive（`readOwnDataProperty()`等、S25.8と同一のR1-1
+  chokepoint）経由で**最大1回**読み取り、fresh・deeply-frozen・alias-freeな
+  representationを返す。format検証（`SNAPSHOT_ID_RE`/safe integer/chain-ref format）も
+  ここで行う（caller-owned生参照に触れる箇所はこの関数のみ）。
+- `validateHistoryChain(capturedHistory, candidate)`: `captureHistory()`が返した
+  representationのみを読む。caller所有の生`history`参照を一切読まない（間接的にも）。
+  monotonicity・supersedes/rollback_target存在確認・循環検出は変更なし（S25.7の
+  規則は据え置き）。`await`後に呼び出しても、既にcaptureされたデータしか参照しない
+  ためTOCTOU窓を再度開かない。
+
+`transitionSnapshotActivation()`本体では、`root.history`から`historyCaptured =
+captureHistory(root.history)`を、`current_record`検証・`new_status`/transition
+graph検証・`updated_by`/`updated_at`検証と同じ同期phase内（`await
+loadValidatedSnapshot(...)`より前）で呼び出すよう変更した。以降このfunctionは
+`root.history`を二度と読まず、`historyCaptured`のみを使用する（`await`を跨いでも
+不変）。
+
+**変更しないもの**: transition graph（`(no record)→ACTIVE`/`ACTIVE→SUPERSEDED`/
+`ACTIVE→ROLLED_BACK`/`SUPERSEDED→ROLLED_BACK`、terminal status semantics）、
+monotonicity/supersedes存在確認/rollback_target存在確認/cycle detectionの規則、
+Project Pin schema、Snapshot Activation Record schema、`updated_at`/`updated_by`
+契約、Snapshot Loader binding（S25.5、`snapshot_wrapper`自体は引き続きLoader自身の
+atomic captureに委譲し、本coreで二重cloneしない）、no-latest semantics、privacy、
+error sanitization方針（新規error codeなし、既存`ACTIVATION_HISTORY_INVALID`を
+そのまま使用）は、いずれも一切変更しない。`captureHistory()`/`validateHistoryChain()`
+はいずれも公開APIへ追加しない（引き続き`buildSnapshotActivationRecord`/
+`transitionSnapshotActivation`/`buildProjectSnapshotPin`の3関数のみが公開API、
+指示§7の「巨大なutility API群は公開しない」方針を維持）。

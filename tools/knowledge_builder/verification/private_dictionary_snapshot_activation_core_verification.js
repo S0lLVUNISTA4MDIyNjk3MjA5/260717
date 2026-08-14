@@ -455,6 +455,24 @@ async function main() {
     const output = await p;
     assert(output.activation_status === 'SUPERSEDED', 'AD post-call mutation of new_status never affects the already-captured result');
     assert(output.updated_by === 'op-AD2', 'AD post-call mutation of updated_by never affects the already-captured result');
+
+    // §R1: extended to cover history mutation immediately after the call
+    // (MAJOR-01 remediation). A valid history/candidate chain is built so
+    // that, WITHOUT the R1 fix, mutating history[0] after the call to values
+    // that break monotonicity/existence would flip a previously-successful
+    // call into a rejection - proving the fix by observable behavior, not
+    // merely by code inspection.
+    const otherIdAD = 'dsnap-' + 'e'.repeat(32);
+    const wrapperAD2 = await freshWrapper({ snapshot_version: 2, supersedes: otherIdAD });
+    const activeAD2 = await Activation.buildSnapshotActivationRecord({ snapshot_wrapper: wrapperAD2, activation_status: 'ACTIVE', updated_by: 'op-AD3', updated_at: UPDATED_AT_1 });
+    const historyAD2 = [{ dictionary_snapshot_id: otherIdAD, snapshot_version: 1, supersedes: null, rollback_target: null }];
+    const inputAD2 = { current_record: activeAD2, snapshot_wrapper: wrapperAD2, new_status: 'SUPERSEDED', updated_by: 'op-AD4', updated_at: UPDATED_AT_2, history: historyAD2 };
+    const pAD2 = Activation.transitionSnapshotActivation(inputAD2);
+    inputAD2.history[0].snapshot_version = 999999; // would break monotonicity if re-read
+    inputAD2.history[0].supersedes = 'dsnap-' + 'f'.repeat(32); // would break existence if re-read
+    inputAD2.history.push({ dictionary_snapshot_id: 'dsnap-' + 'a'.repeat(32), snapshot_version: 1, supersedes: null, rollback_target: null });
+    const outputAD2 = await pAD2;
+    assert(outputAD2.activation_status === 'SUPERSEDED', 'AD post-call mutation of history[0].snapshot_version/supersedes and history.push() never affects an already-captured, already-valid transition');
   }
 
   // ==========================================================================
@@ -552,6 +570,191 @@ async function main() {
     const src = stripCommentsForStaticScan(fs.readFileSync(CORE_PATH, 'utf8'));
     const forbidden = ['private_dictionary_promotion_core', 'private_dictionary_promotion_snapshot_composition_core', 'private_dictionary_resolver_core', 'private_dictionary_review_promotion_adapter_core', 'private_dictionary_learning_core', 'private_dictionary_rule_extraction_core', 'id_hash_utils'];
     for (const token of forbidden) assert(!src.includes(token), `AQ no dependency on unrelated existing core ("${token}" absent - single dependency is Snapshot core only)`);
+  }
+
+  // ==========================================================================
+  // R1-A. history[0].snapshot_version mutation immediately after the call
+  // never affects the (already-captured, already-valid) transition outcome.
+  // ==========================================================================
+  {
+    const otherId = 'dsnap-' + '1'.repeat(32);
+    const wrapper = await freshWrapper({ snapshot_version: 2, supersedes: otherId });
+    const active = await Activation.buildSnapshotActivationRecord({ snapshot_wrapper: wrapper, activation_status: 'ACTIVE', updated_by: 'op-R1A', updated_at: UPDATED_AT_1 });
+    const history = [{ dictionary_snapshot_id: otherId, snapshot_version: 1, supersedes: null, rollback_target: null }];
+    const input = { current_record: active, snapshot_wrapper: wrapper, new_status: 'SUPERSEDED', updated_by: 'op-R1A2', updated_at: UPDATED_AT_2, history };
+    const p = Activation.transitionSnapshotActivation(input);
+    input.history[0].snapshot_version = 999999; // would break monotonicity if re-read after the call
+    const output = await p;
+    assert(output.activation_status === 'SUPERSEDED', 'R1-A post-call mutation of history[0].snapshot_version never affects the captured chain-validation outcome');
+  }
+
+  // ==========================================================================
+  // R1-B. history[0].supersedes mutation immediately after the call never
+  // affects the outcome.
+  // ==========================================================================
+  {
+    const otherId = 'dsnap-' + '2'.repeat(32);
+    const wrapper = await freshWrapper({ snapshot_version: 2, supersedes: otherId });
+    const active = await Activation.buildSnapshotActivationRecord({ snapshot_wrapper: wrapper, activation_status: 'ACTIVE', updated_by: 'op-R1B', updated_at: UPDATED_AT_1 });
+    const history = [{ dictionary_snapshot_id: otherId, snapshot_version: 1, supersedes: null, rollback_target: null }];
+    const input = { current_record: active, snapshot_wrapper: wrapper, new_status: 'SUPERSEDED', updated_by: 'op-R1B2', updated_at: UPDATED_AT_2, history };
+    const p = Activation.transitionSnapshotActivation(input);
+    input.history[0].supersedes = 'dsnap-' + '3'.repeat(32); // would break existence if re-read after the call
+    const output = await p;
+    assert(output.activation_status === 'SUPERSEDED', 'R1-B post-call mutation of history[0].supersedes never affects the captured chain-validation outcome');
+  }
+
+  // ==========================================================================
+  // R1-C. history[0].rollback_target mutation immediately after the call
+  // never affects the outcome.
+  // ==========================================================================
+  {
+    const otherId = 'dsnap-' + '4'.repeat(32);
+    const wrapper = await freshWrapper({ snapshot_version: 2, supersedes: otherId, rollback_target: otherId });
+    const active = await Activation.buildSnapshotActivationRecord({ snapshot_wrapper: wrapper, activation_status: 'ACTIVE', updated_by: 'op-R1C', updated_at: UPDATED_AT_1 });
+    const history = [{ dictionary_snapshot_id: otherId, snapshot_version: 1, supersedes: null, rollback_target: null }];
+    const input = { current_record: active, snapshot_wrapper: wrapper, new_status: 'SUPERSEDED', updated_by: 'op-R1C2', updated_at: UPDATED_AT_2, history };
+    const p = Activation.transitionSnapshotActivation(input);
+    input.history[0].rollback_target = 'dsnap-' + '5'.repeat(32); // would break rollback_target existence if re-read after the call (candidate's own rollback_target still resolves via history[0], now mutated to a bogus, unresolvable id)
+    const output = await p;
+    assert(output.activation_status === 'SUPERSEDED', 'R1-C post-call mutation of history[0].rollback_target never affects the captured chain-validation outcome');
+  }
+
+  // ==========================================================================
+  // R1-D. history.push() immediately after the call never affects the
+  // captured length/content.
+  // ==========================================================================
+  {
+    const wrapper = await freshWrapper({});
+    const active = await Activation.buildSnapshotActivationRecord({ snapshot_wrapper: wrapper, activation_status: 'ACTIVE', updated_by: 'op-R1D', updated_at: UPDATED_AT_1 });
+    const history = [];
+    const input = { current_record: active, snapshot_wrapper: wrapper, new_status: 'SUPERSEDED', updated_by: 'op-R1D2', updated_at: UPDATED_AT_2, history };
+    const p = Activation.transitionSnapshotActivation(input);
+    // Pushing a DUPLICATE of the candidate's own dictionary_snapshot_id
+    // would trigger ACTIVATION_HISTORY_INVALID (duplicate id) if the array
+    // were re-read after the call.
+    input.history.push({ dictionary_snapshot_id: wrapper.snapshot_id, snapshot_version: 1, supersedes: null, rollback_target: null });
+    const output = await p;
+    assert(output.activation_status === 'SUPERSEDED', 'R1-D post-call history.push() (including a duplicate-id item) never affects the captured chain-validation outcome');
+  }
+
+  // ==========================================================================
+  // R1-E. history splice/delete immediately after the call never affects
+  // the outcome.
+  // ==========================================================================
+  {
+    const otherId = 'dsnap-' + '6'.repeat(32);
+    const wrapper = await freshWrapper({ snapshot_version: 2, supersedes: otherId });
+    const active = await Activation.buildSnapshotActivationRecord({ snapshot_wrapper: wrapper, activation_status: 'ACTIVE', updated_by: 'op-R1E', updated_at: UPDATED_AT_1 });
+    const history = [{ dictionary_snapshot_id: otherId, snapshot_version: 1, supersedes: null, rollback_target: null }];
+    const input = { current_record: active, snapshot_wrapper: wrapper, new_status: 'SUPERSEDED', updated_by: 'op-R1E2', updated_at: UPDATED_AT_2, history };
+    const p = Activation.transitionSnapshotActivation(input);
+    // Deleting the entry that `supersedes` depends on would trigger
+    // ACTIVATION_HISTORY_INVALID (missing supersedes target) if re-read.
+    input.history.splice(0, 1);
+    const output = await p;
+    assert(output.activation_status === 'SUPERSEDED', 'R1-E post-call history.splice() (removing the supersedes target) never affects the captured chain-validation outcome');
+  }
+
+  // ==========================================================================
+  // R1-F. A stateful descriptor getter on a history element is never read
+  // twice for the same property.
+  // ==========================================================================
+  {
+    const wrapper = await freshWrapper({});
+    const active = await Activation.buildSnapshotActivationRecord({ snapshot_wrapper: wrapper, activation_status: 'ACTIVE', updated_by: 'op-R1F', updated_at: UPDATED_AT_1 });
+    let readCount = 0;
+    const realItem = { dictionary_snapshot_id: 'dsnap-' + '7'.repeat(32), snapshot_version: 1, supersedes: null, rollback_target: null };
+    const hostileItem = new Proxy(realItem, {
+      getOwnPropertyDescriptor(target, prop) {
+        if (prop === 'snapshot_version') readCount++;
+        return Object.getOwnPropertyDescriptor(target, prop);
+      },
+      ownKeys(target) { return Reflect.ownKeys(target); }
+    });
+    const output = await Activation.transitionSnapshotActivation({
+      current_record: active, snapshot_wrapper: wrapper, new_status: 'SUPERSEDED', updated_by: 'op-R1F2', updated_at: UPDATED_AT_2, history: [hostileItem]
+    });
+    assert(readCount === 1, 'R1-F history element snapshot_version descriptor is read exactly once from a stateful Proxy trap');
+    assert(output.activation_status === 'SUPERSEDED', 'R1-F the single observed history element is captured and validated correctly');
+  }
+
+  // ==========================================================================
+  // R1-G. A hostile Proxy on the history array or a history item fails
+  // closed with a sanitized code, no native Error/secret leakage.
+  // ==========================================================================
+  {
+    const secretMarker = 'R1G_HISTORY_ARRAY_SECRET';
+    const wrapper = await freshWrapper({});
+    const active = await Activation.buildSnapshotActivationRecord({ snapshot_wrapper: wrapper, activation_status: 'ACTIVE', updated_by: 'op-R1G', updated_at: UPDATED_AT_1 });
+    const realHistory = [{ dictionary_snapshot_id: 'dsnap-' + '8'.repeat(32), snapshot_version: 1, supersedes: null, rollback_target: null }];
+    const hostileHistory = new Proxy(realHistory, {
+      getOwnPropertyDescriptor(target, prop) {
+        if (prop === '0') throw new Error(secretMarker);
+        return Object.getOwnPropertyDescriptor(target, prop);
+      },
+      ownKeys(target) { return Reflect.ownKeys(target); }
+    });
+    const err = await assertRejectsWithCode(() => Activation.transitionSnapshotActivation({
+      current_record: active, snapshot_wrapper: wrapper, new_status: 'SUPERSEDED', updated_by: 'op-R1G2', updated_at: UPDATED_AT_2, history: hostileHistory
+    }), 'ACTIVATION_HISTORY_INVALID', 'R1-G a hostile Proxy on the history array fails closed with a sanitized code');
+    assert(!JSON.stringify(err).includes(secretMarker), 'R1-G no secret leakage from the hostile history array Proxy');
+
+    const secretMarker2 = 'R1G_HISTORY_ITEM_SECRET';
+    const hostileItem = new Proxy({}, {
+      getOwnPropertyDescriptor(target, prop) { throw new Error(secretMarker2); }
+    });
+    const err2 = await assertRejectsWithCode(() => Activation.transitionSnapshotActivation({
+      current_record: active, snapshot_wrapper: wrapper, new_status: 'SUPERSEDED', updated_by: 'op-R1G3', updated_at: UPDATED_AT_2, history: [{ dictionary_snapshot_id: 'dsnap-' + '9'.repeat(32), snapshot_version: 1, supersedes: null, rollback_target: null }, hostileItem]
+    }), 'ACTIVATION_HISTORY_INVALID', 'R1-G a hostile Proxy history item fails closed with a sanitized code');
+    assert(!JSON.stringify(err2).includes(secretMarker2), 'R1-G no secret leakage from the hostile history item Proxy');
+  }
+
+  // ==========================================================================
+  // R1-H. Nested alias isolation: replacing a history element by index
+  // (not just mutating its fields) immediately after the call never affects
+  // the outcome - proves the captured representation does not alias the
+  // caller's array slots either. captureHistory() is intentionally not
+  // exported as a separate public API (§7: no new public surface) - alias
+  // isolation is proven behaviorally here, the same way R1-A..E prove it.
+  // ==========================================================================
+  {
+    const otherId = 'dsnap-' + 'a'.repeat(32);
+    const wrapper = await freshWrapper({ snapshot_version: 2, supersedes: otherId });
+    const active = await Activation.buildSnapshotActivationRecord({ snapshot_wrapper: wrapper, activation_status: 'ACTIVE', updated_by: 'op-R1H', updated_at: UPDATED_AT_1 });
+    const history = [{ dictionary_snapshot_id: otherId, snapshot_version: 1, supersedes: null, rollback_target: null }];
+    const input = { current_record: active, snapshot_wrapper: wrapper, new_status: 'SUPERSEDED', updated_by: 'op-R1H2', updated_at: UPDATED_AT_2, history };
+    const p = Activation.transitionSnapshotActivation(input);
+    // Replace the whole element via index assignment (not a field mutation)
+    // with an entirely different, invalid object - would break the
+    // supersedes target lookup if the captured representation aliased this
+    // array slot.
+    input.history[0] = { dictionary_snapshot_id: 'dsnap-' + 'b'.repeat(32), snapshot_version: 1, supersedes: null, rollback_target: null };
+    const output = await p;
+    assert(output.activation_status === 'SUPERSEDED', 'R1-H post-call whole-element replacement (index assignment) never affects the captured chain-validation outcome - no aliasing of array slots');
+  }
+
+  // ==========================================================================
+  // R1-I. Synchronous capture proof: mutating history AFTER deliberately
+  // giving the real Snapshot Loader's own internal awaits time to progress
+  // (a real setTimeout delay, not a stand-in dependency) still never
+  // affects the outcome - proving history was captured before the Loader
+  // call even began, not merely "before our own await resolves". The real,
+  // unmodified Snapshot Loader is used throughout; no core API is changed
+  // to accommodate this test.
+  // ==========================================================================
+  {
+    const otherId = 'dsnap-' + 'c'.repeat(32);
+    const wrapper = await freshWrapper({ snapshot_version: 2, supersedes: otherId });
+    const active = await Activation.buildSnapshotActivationRecord({ snapshot_wrapper: wrapper, activation_status: 'ACTIVE', updated_by: 'op-R1I', updated_at: UPDATED_AT_1 });
+    const history = [{ dictionary_snapshot_id: otherId, snapshot_version: 1, supersedes: null, rollback_target: null }];
+    const input = { current_record: active, snapshot_wrapper: wrapper, new_status: 'SUPERSEDED', updated_by: 'op-R1I2', updated_at: UPDATED_AT_2, history };
+    const p = Activation.transitionSnapshotActivation(input);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    input.history[0].snapshot_version = 999999;
+    input.history[0].supersedes = 'dsnap-' + 'd'.repeat(32);
+    const output = await p;
+    assert(output.activation_status === 'SUPERSEDED', 'R1-I history was fully captured before the real Snapshot Loader call began - a mutation performed after giving the Loader real wall-clock time to run still has no effect');
   }
 
   console.log(`\n${failed === 0 ? 'ALL PASS' : `${failed} FAILURE(S)`}`);
