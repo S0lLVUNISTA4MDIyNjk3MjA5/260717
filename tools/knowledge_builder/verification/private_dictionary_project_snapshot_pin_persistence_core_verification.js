@@ -4,9 +4,11 @@
  * Snapshot Pin Persistence Artifact / storage-neutral codec pure core).
  *
  * Traceability: each block is labeled with a verification-matrix item
- * letter (A-AS), grouped into the categories from design doc S27:
- * Serialization (A-J), Loading (K-U), Tamper (V-AD), Cross-binding (AE-AG),
- * Trust boundary (AH-AL), Interop (AM-AO), Static (AP-AS).
+ * letter (A-AS plus the Checkpoint 11-R1 R1-A..R1-F set), grouped into the
+ * categories from design doc S27/S27.14: Serialization (A-J, R1-F),
+ * Loading (K-U), Tamper (V-AD), Cross-binding (AE-AG), Trust boundary
+ * (AH-AL, AH and R1-A..R1-E cover the S27.14 project_id identity gate),
+ * Interop (AM-AO), Static (AP-AS).
  *
  * The REAL, unmodified Checkpoint 3/9 dependency cores
  * (private_dictionary_snapshot_core.js / private_dictionary_snapshot_
@@ -199,7 +201,7 @@ async function main() {
   const pinA = await buildPin('proj-alpha', wrapperA);
 
   // A. valid pin + wrapper -> serialize returns a string
-  const serializedA = await Persistence.serializeProjectSnapshotPin({ project_pin: pinA, snapshot_wrapper: wrapperA });
+  const serializedA = await Persistence.serializeProjectSnapshotPin({ project_pin: pinA, snapshot_wrapper: wrapperA, expected_project_id: pinA.project_id });
   assert(typeof serializedA === 'string' && serializedA.length > 0, 'A valid Pin + wrapper serializes to a non-empty string');
 
   // B. serialized text parses as the documented envelope shape
@@ -213,14 +215,14 @@ async function main() {
   // C. round-trip: serialize then load with the same wrapper returns a Pin
   // deep-equal to the original real Pin.
   {
-    const loaded = await Persistence.loadProjectSnapshotPin({ serialized: serializedA, snapshot_wrapper: wrapperA });
+    const loaded = await Persistence.loadProjectSnapshotPin({ serialized: serializedA, snapshot_wrapper: wrapperA, expected_project_id: pinA.project_id });
     assert(JSON.stringify(loaded) === JSON.stringify(pinA), 'C round-trip serialize->load reproduces the original Pin exactly (field-for-field)');
   }
 
   // D. determinism: two independent serialize calls on equal-content pins
   // produce byte-identical output.
   {
-    const serializedAgain = await Persistence.serializeProjectSnapshotPin({ project_pin: pinA, snapshot_wrapper: wrapperA });
+    const serializedAgain = await Persistence.serializeProjectSnapshotPin({ project_pin: pinA, snapshot_wrapper: wrapperA, expected_project_id: pinA.project_id });
     assert(serializedAgain === serializedA, 'D serialize(A) === serialize(A) byte-for-byte on repeated calls');
   }
 
@@ -241,7 +243,7 @@ async function main() {
       project_id: pinA.project_id,
       schema_version: pinA.schema_version
     };
-    const serializedReordered = await Persistence.serializeProjectSnapshotPin({ project_pin: reordered, snapshot_wrapper: wrapperA });
+    const serializedReordered = await Persistence.serializeProjectSnapshotPin({ project_pin: reordered, snapshot_wrapper: wrapperA, expected_project_id: pinA.project_id });
     assert(serializedReordered === serializedA, 'E differently-ordered but logically-equal Pin input serializes to the same canonical output');
   }
 
@@ -255,26 +257,27 @@ async function main() {
   // Activation core's own buildProjectSnapshotPin) and is rejected once it
   // reaches the real Loader inside rebindAndCompare() - SNAPSHOT_INVALID,
   // not ROOT_INVALID.
-  await assertRejectsWithCode(() => Persistence.serializeProjectSnapshotPin({ project_pin: pinA }), 'PROJECT_PIN_PERSISTENCE_SNAPSHOT_INVALID', 'G serialize rejects a root missing snapshot_wrapper (surfaces via the real Loader as SNAPSHOT_INVALID)');
-  await assertRejectsWithCode(() => Persistence.serializeProjectSnapshotPin({ project_pin: pinA, snapshot_wrapper: wrapperA, extra: 1 }), 'PROJECT_PIN_PERSISTENCE_ROOT_INVALID', 'G serialize rejects a root with an unexpected extra key');
+  await assertRejectsWithCode(() => Persistence.serializeProjectSnapshotPin({ project_pin: pinA, expected_project_id: pinA.project_id }), 'PROJECT_PIN_PERSISTENCE_SNAPSHOT_INVALID', 'G serialize rejects a root missing snapshot_wrapper (surfaces via the real Loader as SNAPSHOT_INVALID)');
+  await assertRejectsWithCode(() => Persistence.serializeProjectSnapshotPin({ project_pin: pinA, snapshot_wrapper: wrapperA, expected_project_id: pinA.project_id, extra: 1 }), 'PROJECT_PIN_PERSISTENCE_ROOT_INVALID', 'G serialize rejects a root with an unexpected extra key');
+  await assertRejectsWithCode(() => Persistence.serializeProjectSnapshotPin({ project_pin: pinA, snapshot_wrapper: wrapperA }), 'PROJECT_PIN_PERSISTENCE_ROOT_INVALID', 'G serialize rejects a root missing expected_project_id');
 
   // H. serialize rejects a malformed project_pin (wrong schema_version)
   await assertRejectsWithCode(() => Persistence.serializeProjectSnapshotPin({
-    project_pin: Object.assign({}, pinA, { schema_version: 'private-dictionary-project-snapshot-pin/9.9' }), snapshot_wrapper: wrapperA
+    project_pin: Object.assign({}, pinA, { schema_version: 'private-dictionary-project-snapshot-pin/9.9' }), snapshot_wrapper: wrapperA, expected_project_id: pinA.project_id
   }), 'PROJECT_PIN_PERSISTENCE_PIN_INVALID', 'H serialize rejects a Pin with the wrong schema_version');
 
   // I. serialize rejects a project_pin whose content does not match the
   // wrapper it is paired with (never writes an artifact for an
   // invalid/tampered Pin, S27.7).
   await assertRejectsWithCode(() => Persistence.serializeProjectSnapshotPin({
-    project_pin: tamperedBinding(pinA, 'snapshot_version', pinA.snapshot_binding.snapshot_version + 1), snapshot_wrapper: wrapperA
+    project_pin: tamperedBinding(pinA, 'snapshot_version', pinA.snapshot_binding.snapshot_version + 1), snapshot_wrapper: wrapperA, expected_project_id: pinA.project_id
   }), 'PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH', 'I serialize rejects a Pin whose content does not match the real Snapshot it is paired with');
 
   // J. serialize propagates a malformed/invalid snapshot_wrapper as a
   // sanitized SNAPSHOT_INVALID (never leaking the Snapshot core's own
   // internal error code or a native Error).
   await assertRejectsWithCode(() => Persistence.serializeProjectSnapshotPin({
-    project_pin: pinA, snapshot_wrapper: { not: 'a wrapper' }
+    project_pin: pinA, snapshot_wrapper: { not: 'a wrapper' }, expected_project_id: pinA.project_id
   }), 'PROJECT_PIN_PERSISTENCE_SNAPSHOT_INVALID', 'J serialize rejects a malformed snapshot_wrapper via the real Loader, sanitized');
 
   // ==========================================================================
@@ -282,7 +285,7 @@ async function main() {
   // ==========================================================================
 
   // K. valid artifact + matching wrapper -> load succeeds
-  const loadedK = await Persistence.loadProjectSnapshotPin({ serialized: serializedA, snapshot_wrapper: wrapperA });
+  const loadedK = await Persistence.loadProjectSnapshotPin({ serialized: serializedA, snapshot_wrapper: wrapperA, expected_project_id: pinA.project_id });
   assert(loadedK && loadedK.schema_version === 'private-dictionary-project-snapshot-pin/0.1', 'K valid artifact + matching wrapper loads successfully');
 
   // L. load result is deep-frozen
@@ -400,7 +403,7 @@ async function main() {
       return IdHashUtils.canonicalJson(artifact);
     })();
     await assertRejectsWithCode(
-      () => Persistence.loadProjectSnapshotPin({ serialized: tamperedArtifact, snapshot_wrapper: wrapperA }),
+      () => Persistence.loadProjectSnapshotPin({ serialized: tamperedArtifact, snapshot_wrapper: wrapperA, expected_project_id: pinA.project_id }),
       'PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH',
       `${letters[idx]} load rejects a stored artifact with a tampered ${field} (BINDING_MISMATCH against the re-generated Pin)`
     );
@@ -415,7 +418,7 @@ async function main() {
     const artifact = JSON.parse(serializedA);
     artifact.project_pin.snapshot_binding.scope = 'DOMAIN';
     const bad = IdHashUtils.canonicalJson(artifact);
-    await assertRejectsWithCode(() => Persistence.loadProjectSnapshotPin({ serialized: bad, snapshot_wrapper: wrapperA }), 'PROJECT_PIN_PERSISTENCE_PIN_INVALID', 'AB load rejects an out-of-enum scope value at the format stage (PIN_INVALID, not BINDING_MISMATCH)');
+    await assertRejectsWithCode(() => Persistence.loadProjectSnapshotPin({ serialized: bad, snapshot_wrapper: wrapperA, expected_project_id: pinA.project_id }), 'PROJECT_PIN_PERSISTENCE_PIN_INVALID', 'AB load rejects an out-of-enum scope value at the format stage (PIN_INVALID, not BINDING_MISMATCH)');
   }
 
   // AC. missing a required snapshot_binding field -> PIN_INVALID
@@ -423,7 +426,7 @@ async function main() {
     const artifact = JSON.parse(serializedA);
     delete artifact.project_pin.snapshot_binding.dictionary_version;
     const bad = IdHashUtils.canonicalJson(artifact);
-    await assertRejectsWithCode(() => Persistence.loadProjectSnapshotPin({ serialized: bad, snapshot_wrapper: wrapperA }), 'PROJECT_PIN_PERSISTENCE_PIN_INVALID', 'AC load rejects a stored artifact missing a required snapshot_binding field');
+    await assertRejectsWithCode(() => Persistence.loadProjectSnapshotPin({ serialized: bad, snapshot_wrapper: wrapperA, expected_project_id: pinA.project_id }), 'PROJECT_PIN_PERSISTENCE_PIN_INVALID', 'AC load rejects a stored artifact missing a required snapshot_binding field');
   }
 
   // AD. an unexpected extra field anywhere in project_pin/snapshot_binding
@@ -432,7 +435,7 @@ async function main() {
     const artifact = JSON.parse(serializedA);
     artifact.project_pin.extra_field = 'unexpected';
     const bad = IdHashUtils.canonicalJson(artifact);
-    await assertRejectsWithCode(() => Persistence.loadProjectSnapshotPin({ serialized: bad, snapshot_wrapper: wrapperA }), 'PROJECT_PIN_PERSISTENCE_PIN_INVALID', 'AD load rejects an unexpected extra field in project_pin (exact key-set enforcement)');
+    await assertRejectsWithCode(() => Persistence.loadProjectSnapshotPin({ serialized: bad, snapshot_wrapper: wrapperA, expected_project_id: pinA.project_id }), 'PROJECT_PIN_PERSISTENCE_PIN_INVALID', 'AD load rejects an unexpected extra field in project_pin (exact key-set enforcement)');
   }
 
   // ==========================================================================
@@ -443,7 +446,7 @@ async function main() {
   // dictionary_id -> always rejected regardless of B's own properties.
   {
     const wrapperB = await buildWrapper([makeEntry()]);
-    await assertRejectsWithCode(() => Persistence.loadProjectSnapshotPin({ serialized: serializedA, snapshot_wrapper: wrapperB }), 'PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH', 'AE stored Pin A + a different Snapshot B (different dictionary_id) is always rejected');
+    await assertRejectsWithCode(() => Persistence.loadProjectSnapshotPin({ serialized: serializedA, snapshot_wrapper: wrapperB, expected_project_id: pinA.project_id }), 'PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH', 'AE stored Pin A + a different Snapshot B (different dictionary_id) is always rejected');
   }
 
   // AF. stored Pin for Snapshot A + a NEWER Snapshot sharing the SAME
@@ -453,9 +456,9 @@ async function main() {
     const dictionaryId = makeId('pdict');
     const wrapperV1 = await buildWrapper([makeEntry({ canonical_term: 'Cross-Bind V1' })], { dictionary_id: dictionaryId });
     const pinV1 = await buildPin('proj-crossbind', wrapperV1);
-    const serializedV1 = await Persistence.serializeProjectSnapshotPin({ project_pin: pinV1, snapshot_wrapper: wrapperV1 });
+    const serializedV1 = await Persistence.serializeProjectSnapshotPin({ project_pin: pinV1, snapshot_wrapper: wrapperV1, expected_project_id: pinV1.project_id });
     const wrapperV2 = await buildWrapper([makeEntry({ canonical_term: 'Cross-Bind V2' })], { dictionary_id: dictionaryId, snapshot_version: 2, supersedes: wrapperV1.snapshot_id });
-    await assertRejectsWithCode(() => Persistence.loadProjectSnapshotPin({ serialized: serializedV1, snapshot_wrapper: wrapperV2 }), 'PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH', 'AF stored Pin for Snapshot v1 + a newer Snapshot v2 of the SAME dictionary is still rejected (no latest-version search)');
+    await assertRejectsWithCode(() => Persistence.loadProjectSnapshotPin({ serialized: serializedV1, snapshot_wrapper: wrapperV2, expected_project_id: pinV1.project_id }), 'PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH', 'AF stored Pin for Snapshot v1 + a newer Snapshot v2 of the SAME dictionary is still rejected (no latest-version search)');
   }
 
   // AG. no latest/newest selection across a set of candidates, in either
@@ -465,12 +468,12 @@ async function main() {
     const dictionaryId = makeId('pdict');
     const wOld = await buildWrapper([makeEntry()], { dictionary_id: dictionaryId, snapshot_version: 1 });
     const pinOld = await buildPin('proj-order', wOld);
-    const serializedOld = await Persistence.serializeProjectSnapshotPin({ project_pin: pinOld, snapshot_wrapper: wOld });
+    const serializedOld = await Persistence.serializeProjectSnapshotPin({ project_pin: pinOld, snapshot_wrapper: wOld, expected_project_id: pinOld.project_id });
     const wNew = await buildWrapper([makeEntry()], { dictionary_id: dictionaryId, snapshot_version: 2, supersedes: wOld.snapshot_id });
     const candidatesInOrder = [wNew, wOld];
     const results = [];
     for (const candidate of candidatesInOrder) {
-      try { await Persistence.loadProjectSnapshotPin({ serialized: serializedOld, snapshot_wrapper: candidate }); results.push('accepted'); }
+      try { await Persistence.loadProjectSnapshotPin({ serialized: serializedOld, snapshot_wrapper: candidate, expected_project_id: pinOld.project_id }); results.push('accepted'); }
       catch (e) { results.push('rejected:' + e.code); }
     }
     assert(results[0] === 'rejected:PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH' && results[1] === 'accepted', 'AG presenting a newer candidate first never causes it to be silently preferred - only the exact pinned Snapshot ever succeeds, in either order');
@@ -480,19 +483,98 @@ async function main() {
   // Trust boundary: AH-AL
   // ==========================================================================
 
-  // AH. project_id is caller-opaque data with no independent Source of
-  // Truth (S25.3): tampering ONLY the stored project_id (leaving the real
-  // binding intact) succeeds and loads with the NEW project_id - this is
-  // documented, expected behavior (mirrors the equivalent Checkpoint 10
-  // finding for the same reason), not a gap - `buildProjectSnapshotPin()`
-  // always echoes back whatever project_id it is asked to build with.
+  // AH. §27.7-R1 (Checkpoint 11-R1 MAJOR-01 remediation): project_id has no
+  // independent Source of Truth INSIDE a Pin itself (S25.3 -
+  // buildProjectSnapshotPin() always echoes back whatever project_id it is
+  // asked to build with), so the Source of Truth for project identity is
+  // now the caller's own `expected_project_id` argument, checked BEFORE
+  // Snapshot rebinding. Tampering ONLY the stored project_id (leaving the
+  // real Snapshot binding intact) is now rejected as long as the caller
+  // keeps asserting the ORIGINAL expectation - it is no longer silently
+  // accepted the way it was pre-R1.
   {
     const artifact = JSON.parse(serializedA);
     artifact.project_pin.project_id = 'proj-alpha-RENAMED';
     const renamed = IdHashUtils.canonicalJson(artifact);
-    const loaded = await Persistence.loadProjectSnapshotPin({ serialized: renamed, snapshot_wrapper: wrapperA });
-    assert(loaded.project_id === 'proj-alpha-RENAMED', 'AH tampering only project_id (an opaque, caller-asserted field) succeeds and loads with the new value - expected trust-boundary behavior, not a defect');
+    const err = await assertRejectsWithCode(
+      () => Persistence.loadProjectSnapshotPin({ serialized: renamed, snapshot_wrapper: wrapperA, expected_project_id: pinA.project_id }),
+      'PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH',
+      'AH (R1) tampering only project_id in a stored artifact is rejected when the caller keeps asserting the original expected_project_id'
+    );
+    assert(err.path === '$.expected_project_id', 'AH (R1) the project-identity rejection reports the $.expected_project_id path');
   }
+
+  // R1-A. the exact same tampered artifact loads successfully ONLY if the
+  // caller explicitly updates their OWN expected_project_id to the new
+  // value - at which point the caller, not the artifact, is asserting the
+  // new identity (an explicit caller decision, not tamper-acceptance).
+  {
+    const artifact = JSON.parse(serializedA);
+    artifact.project_pin.project_id = 'proj-alpha-RENAMED-R1A';
+    const renamed = IdHashUtils.canonicalJson(artifact);
+    const loaded = await Persistence.loadProjectSnapshotPin({ serialized: renamed, snapshot_wrapper: wrapperA, expected_project_id: 'proj-alpha-RENAMED-R1A' });
+    assert(loaded.project_id === 'proj-alpha-RENAMED-R1A', 'R1-A a renamed stored project_id loads successfully only when the caller explicitly declares that new value as their own expectation');
+  }
+
+  // R1-B. expected_project_id mismatch on an otherwise UNTAMPERED, fully
+  // valid artifact is still rejected - proving the gate is an independent
+  // caller-identity check, not merely a tamper detector.
+  await assertRejectsWithCode(
+    () => Persistence.loadProjectSnapshotPin({ serialized: serializedA, snapshot_wrapper: wrapperA, expected_project_id: 'proj-completely-different' }),
+    'PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH',
+    'R1-B an expected_project_id that does not match an untampered, valid artifact is still rejected'
+  );
+
+  // R1-C. project_id mismatch is detected WITHOUT ever reaching the
+  // Snapshot Loader: pairing the mismatched artifact with a wrapper the
+  // real Loader would reject (malformed) still produces the SAME
+  // BINDING_MISMATCH (identity gate), never a Loader-side SNAPSHOT_INVALID
+  // - proving the identity check runs, and rejects, before Snapshot
+  // rebinding is ever attempted.
+  {
+    const artifact = JSON.parse(serializedA);
+    artifact.project_pin.project_id = 'proj-alpha-RENAMED-R1C';
+    const renamed = IdHashUtils.canonicalJson(artifact);
+    await assertRejectsWithCode(
+      () => Persistence.loadProjectSnapshotPin({ serialized: renamed, snapshot_wrapper: { not: 'a wrapper' }, expected_project_id: pinA.project_id }),
+      'PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH',
+      'R1-C a project_id mismatch is rejected before the Snapshot Loader is ever consulted (paired with a malformed wrapper, still BINDING_MISMATCH, never SNAPSHOT_INVALID)'
+    );
+  }
+
+  // R1-D. a CORRECT Snapshot binding can never compensate for a wrong
+  // project identity: an otherwise byte-identical, fully valid artifact for
+  // the correct real Snapshot is still rejected when expected_project_id
+  // does not match.
+  await assertRejectsWithCode(
+    () => Persistence.loadProjectSnapshotPin({ serialized: serializedA, snapshot_wrapper: wrapperA, expected_project_id: 'proj-wrong-identity-only' }),
+    'PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH',
+    'R1-D a fully correct Snapshot binding never compensates for a wrong project identity'
+  );
+
+  // R1-E. missing expected_project_id on load is rejected (ROOT_INVALID,
+  // caller's own argument is malformed) - the field is mandatory, not an
+  // opt-in check.
+  await assertRejectsWithCode(
+    () => Persistence.loadProjectSnapshotPin({ serialized: serializedA, snapshot_wrapper: wrapperA }),
+    'PROJECT_PIN_PERSISTENCE_ROOT_INVALID',
+    'R1-E load rejects a missing expected_project_id (mandatory argument)'
+  );
+  await assertRejectsWithCode(
+    () => Persistence.loadProjectSnapshotPin({ serialized: serializedA, snapshot_wrapper: wrapperA, expected_project_id: '' }),
+    'PROJECT_PIN_PERSISTENCE_ROOT_INVALID',
+    'R1-E load rejects an empty-string expected_project_id'
+  );
+
+  // R1-F. serialize() enforces the same gate: a Pin whose project_id does
+  // not match the caller's expected_project_id is never written to an
+  // artifact, even when the Pin is otherwise perfectly valid for the real
+  // Snapshot.
+  await assertRejectsWithCode(
+    () => Persistence.serializeProjectSnapshotPin({ project_pin: pinA, snapshot_wrapper: wrapperA, expected_project_id: 'proj-not-what-serialize-was-told' }),
+    'PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH',
+    'R1-F serialize rejects a Pin whose project_id does not match the caller expected_project_id'
+  );
 
   // AI. mutation isolation: mutating the caller-owned project_pin object
   // (including its nested snapshot_binding) AFTER calling
@@ -502,7 +584,7 @@ async function main() {
   // was fully captured in the synchronous prefix before the first `await`.
   {
     const mutablePin = JSON.parse(JSON.stringify(pinA));
-    const p = Persistence.serializeProjectSnapshotPin({ project_pin: mutablePin, snapshot_wrapper: wrapperA });
+    const p = Persistence.serializeProjectSnapshotPin({ project_pin: mutablePin, snapshot_wrapper: wrapperA, expected_project_id: pinA.project_id });
     await new Promise(resolve => setTimeout(resolve, 20));
     mutablePin.project_id = 'MUTATED-AFTER-CALL';
     mutablePin.snapshot_binding.snapshot_version = 999999;
@@ -518,7 +600,7 @@ async function main() {
       ownKeys() { throw new Error('hostile ownKeys'); },
       getOwnPropertyDescriptor() { return { enumerable: true, configurable: true, value: 1 }; }
     });
-    await assertRejectsWithCode(() => Persistence.serializeProjectSnapshotPin({ project_pin: hostilePin, snapshot_wrapper: wrapperA }), 'PROJECT_PIN_PERSISTENCE_PIN_INVALID', 'AJ a hostile Proxy project_pin (throwing ownKeys trap) fails closed with a sanitized PIN_INVALID code');
+    await assertRejectsWithCode(() => Persistence.serializeProjectSnapshotPin({ project_pin: hostilePin, snapshot_wrapper: wrapperA, expected_project_id: pinA.project_id }), 'PROJECT_PIN_PERSISTENCE_PIN_INVALID', 'AJ a hostile Proxy project_pin (throwing ownKeys trap) fails closed with a sanitized PIN_INVALID code');
   }
 
   // AK. size-limit boundary: an artifact just within the 64 KiB limit still
@@ -550,8 +632,8 @@ async function main() {
     const entryAM = makeEntry({ canonical_term: 'Interop Real Chain', aliases: ['IRC'] });
     const wrapperAM = await buildWrapper([entryAM]);
     const pinAM = await buildPin('proj-interop-' + randHex(4), wrapperAM);
-    const serializedAM = await Persistence.serializeProjectSnapshotPin({ project_pin: pinAM, snapshot_wrapper: wrapperAM });
-    const loadedAM = await Persistence.loadProjectSnapshotPin({ serialized: serializedAM, snapshot_wrapper: wrapperAM });
+    const serializedAM = await Persistence.serializeProjectSnapshotPin({ project_pin: pinAM, snapshot_wrapper: wrapperAM, expected_project_id: pinAM.project_id });
+    const loadedAM = await Persistence.loadProjectSnapshotPin({ serialized: serializedAM, snapshot_wrapper: wrapperAM, expected_project_id: pinAM.project_id });
     assert(JSON.stringify(loadedAM) === JSON.stringify(pinAM), 'AM full real-dependency chain (Builder->Loader->buildProjectSnapshotPin->serialize->load) round-trips exactly');
   }
 
@@ -563,8 +645,9 @@ async function main() {
     const entryAN = makeEntry({ canonical_term: 'Primary Compressor', aliases: ['PC Unit'] });
     const wrapperAN = await buildWrapper([entryAN]);
     const pinAN = await buildPin('proj-interop-setprojectpin', wrapperAN);
-    const serializedAN = await Persistence.serializeProjectSnapshotPin({ project_pin: pinAN, snapshot_wrapper: wrapperAN });
-    const loadedAN = await Persistence.loadProjectSnapshotPin({ serialized: serializedAN, snapshot_wrapper: wrapperAN });
+    const serializedAN = await Persistence.serializeProjectSnapshotPin({ project_pin: pinAN, snapshot_wrapper: wrapperAN, expected_project_id: pinAN.project_id });
+    const loadedAN = await Persistence.loadProjectSnapshotPin({ serialized: serializedAN, snapshot_wrapper: wrapperAN, expected_project_id: pinAN.project_id });
+    assert(loadedAN.project_id === pinAN.project_id, 'AN the Pin loaded via Checkpoint 11 carries the exact project_id the caller expected, before it is ever handed to Checkpoint 10');
 
     const sandbox = loadMatchingToolSandbox();
     sandbox.__pin = loadedAN;
@@ -590,8 +673,8 @@ async function main() {
     const entryAO = makeEntry();
     const wrapperAO1 = await buildWrapper([entryAO]);
     const pinAO = await buildPin('proj-interop-mismatch', wrapperAO1);
-    const serializedAO = await Persistence.serializeProjectSnapshotPin({ project_pin: pinAO, snapshot_wrapper: wrapperAO1 });
-    const loadedAO = await Persistence.loadProjectSnapshotPin({ serialized: serializedAO, snapshot_wrapper: wrapperAO1 });
+    const serializedAO = await Persistence.serializeProjectSnapshotPin({ project_pin: pinAO, snapshot_wrapper: wrapperAO1, expected_project_id: pinAO.project_id });
+    const loadedAO = await Persistence.loadProjectSnapshotPin({ serialized: serializedAO, snapshot_wrapper: wrapperAO1, expected_project_id: pinAO.project_id });
     const wrapperAO2 = await buildWrapper([makeEntry()]);
 
     const sandbox = loadMatchingToolSandbox();

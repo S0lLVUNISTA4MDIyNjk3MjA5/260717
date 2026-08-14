@@ -326,8 +326,19 @@
   ]);
   const PIN_KEYS = Object.freeze(['schema_version', 'project_id', 'snapshot_binding']);
   const ARTIFACT_KEYS = Object.freeze(['artifact_schema_version', 'project_pin']);
-  const SERIALIZE_INPUT_KEYS = Object.freeze(['project_pin', 'snapshot_wrapper']);
-  const LOAD_INPUT_KEYS = Object.freeze(['serialized', 'snapshot_wrapper']);
+  // §27.7-R1: `expected_project_id` is a MANDATORY caller-supplied input on
+  // both functions (Checkpoint 11-R1 MAJOR-01 remediation). `project_id` is
+  // opaque, caller-asserted data with no independent Source of Truth inside
+  // a Project Snapshot Pin itself (buildProjectSnapshotPin() always echoes
+  // back whatever project_id it is asked to build with) - so a stored
+  // artifact's project_id can never be tamper-checked against the Snapshot
+  // Loader alone. `expected_project_id` moves that Source of Truth to the
+  // CALLER (project configuration / caller-side identity), exactly as an
+  // external reviewer required: the caller states which project it expects
+  // to load/serialize for, and this core enforces that the Pin's own
+  // project_id matches it - before ever touching the Snapshot Loader.
+  const SERIALIZE_INPUT_KEYS = Object.freeze(['project_pin', 'snapshot_wrapper', 'expected_project_id']);
+  const LOAD_INPUT_KEYS = Object.freeze(['serialized', 'snapshot_wrapper', 'expected_project_id']);
 
   function captureBinding(value, path, errCode) {
     const b = captureOwnedObject(value, path, BINDING_KEYS, errCode);
@@ -385,6 +396,26 @@
     return new TextEncoder().encode(text).length;
   }
 
+  // ---- §27.7-R1: project identity gate. Runs BEFORE any Snapshot
+  // rebinding (before the first `await` inside rebindAndCompare()) - a
+  // project_id mismatch is rejected without ever consulting the Snapshot
+  // Loader, and a correct Snapshot binding can never compensate for a wrong
+  // project identity. `expected_project_id` itself is format-validated as a
+  // ROOT_INVALID concern (it is this call's own argument, not artifact
+  // content); the identity comparison against the captured/stored Pin is a
+  // BINDING_MISMATCH - reusing the existing 6-code error contract (project
+  // identity and Snapshot identity are both "this artifact does not
+  // identify what the caller expects" failures). ----
+
+  function checkExpectedProjectId(root, pin) {
+    if (!isNonEmptyBoundedString(root.expected_project_id, MAX_PROJECT_ID_LEN)) {
+      throwPersistenceError('PROJECT_PIN_PERSISTENCE_ROOT_INVALID', '$.expected_project_id');
+    }
+    if (pin.project_id !== root.expected_project_id) {
+      throwPersistenceError('PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH', '$.expected_project_id');
+    }
+  }
+
   // ---- §27.7 Source-of-Truth re-binding: run the REAL, unmodified
   // `buildProjectSnapshotPin()` fresh from `project_id` + `snapshot_wrapper`
   // and compare the result field-by-field against a captured/stored Pin.
@@ -419,10 +450,15 @@
   // is used. `snapshot_wrapper` is passed through untouched to
   // `buildProjectSnapshotPin()`, which delegates its own atomic capture to
   // the real Snapshot Loader (no double-clone, S25.5/S27.11).
+  // `expected_project_id` (§27.7-R1) is checked immediately after capture,
+  // before the Snapshot rebinding `await` - an artifact is never written
+  // for a Pin whose project_id does not match the caller's own declared
+  // expectation.
   async function serializeProjectSnapshotPin(input) {
     if (!isSafePlainObject(input)) throwPersistenceError('PROJECT_PIN_PERSISTENCE_ROOT_INVALID', '$');
     const root = captureOwnedObject(input, '$', SERIALIZE_INPUT_KEYS, 'PROJECT_PIN_PERSISTENCE_ROOT_INVALID');
     const capturedPin = capturePin(root.project_pin, '$.project_pin', 'PROJECT_PIN_PERSISTENCE_PIN_INVALID');
+    checkExpectedProjectId(root, capturedPin);
 
     const regeneratedPin = await rebindAndCompare(capturedPin, root.snapshot_wrapper);
 
@@ -478,6 +514,11 @@
       throwPersistenceError('PROJECT_PIN_PERSISTENCE_SERIALIZED_INVALID', '$.artifact_schema_version');
     }
     const storedPin = capturePin(artifactRoot.project_pin, '$.project_pin', 'PROJECT_PIN_PERSISTENCE_PIN_INVALID');
+    // §27.7-R1: project identity gate, checked BEFORE Snapshot rebinding -
+    // a stored artifact whose project_id was tampered to a different
+    // project is rejected without ever reaching the Snapshot Loader, and a
+    // structurally-valid Snapshot binding can never compensate for it.
+    checkExpectedProjectId(root, storedPin);
 
     return rebindAndCompare(storedPin, root.snapshot_wrapper);
   }

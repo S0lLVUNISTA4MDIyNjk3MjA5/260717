@@ -3016,3 +3016,62 @@ localStorage/sessionStorage/IndexedDB/FileReader/Blob/`URL.createObjectURL`/
 filesystem/network/GitHub API/database実装は行わない。Checkpoint 10 matching
 tool HTMLの変更は行わない（interoperability検証はverification側でHTMLを
 読み込んで実施）。HUMAN-01/02/03のUI適用は行わない。
+
+### S27.14 Checkpoint 11-R1 追補: project_id tamper遮断（MAJOR-01是正）
+
+独立レビューで、`project_id`単体の改ざんを検出できない設計になっている点を
+MAJOR-01として指摘された。原因: `project_id`はPin内で唯一、Snapshot自身が
+証明できないopaque caller-supplied identifierであり（S25.3）、
+`buildProjectSnapshotPin()`はcaller供給`project_id`をそのままformal Pinへ
+反映するため、保存artifact内の`project_id`をA→Bへ書き換えても、Bを使って
+Source of Truthが再生成され、S27.7のexact equality比較が「成功」してしまう
+（Snapshot binding側の7 fieldは実Loaderという独立したSource of Truthを持つが、
+project_idにはそれが存在しないため、同じ再生成・比較ロジックでは
+tamper detectionにならない）。
+
+是正: `project_id`のSource of TruthをPersistence Artifact自身ではなく
+**caller側（呼び出し時点でのproject configuration/呼び出しコンテキスト）**
+に置く。両公開関数に必須引数`expected_project_id`を追加した:
+
+```js
+async function serializeProjectSnapshotPin({ project_pin, snapshot_wrapper, expected_project_id })
+async function loadProjectSnapshotPin({ serialized, snapshot_wrapper, expected_project_id })
+```
+
+- `expected_project_id`は他の入力と同じcaptureOwnedObject経路（root key必須、
+  欠落時は`undefined`captureされ、後続のformat検証で必ず`PROJECT_PIN_
+  PERSISTENCE_ROOT_INVALID`としてfail-closedする既存の"欠落key→undefined、
+  format検証が唯一のreject箇所"という規律を継続）で受け取る。
+- capture済みPin（serialize）/保存Pin（load）の`project_id`と
+  `expected_project_id`のexact equalityを、**S27.7 Snapshot rebinding
+  （`buildProjectSnapshotPin()`呼び出し・実Loaderへの`await`）より前**に
+  検証する。不一致は`PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH`
+  （path: `$.expected_project_id`）でfail-closedし、Snapshot Loaderへは
+  一切到達しない。既存の7-field binding equality比較（S27.7）は変更せず、
+  project identity検証は独立した先行ゲートとして追加した。
+- 新しいerror codeは追加していない（既存6種のまま）。project identity
+  不一致とSnapshot identity不一致は、いずれも「このartifactはcallerが
+  期待するidentityを指していない」という同種の失敗として
+  `PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH`に統合した。
+- 効果: 保存artifact内の`project_id`をA→Bへ書き換えても、caller側が
+  `expected_project_id: "A"`を指定し続ける限り必ずreject される。
+  Bとしてloadを成功させるには、caller自身が`expected_project_id: "B"`を
+  明示的に渡す必要がある - この場合はcaller自身が「B用としてload/serialize
+  したい」と明示的に宣言したことになり、それはtamperではなくcallerの
+  正当な入力である（project_idはこの層では引き続きcaller-assertedな
+  opaque identifierのままであり、それ自体を暗号学的に証明する仕組みは
+  本Checkpointの対象外）。
+- Snapshot binding側のtamper detection（S27.7、7 fields）・cross-Snapshot
+  mismatch（S27.10）・atomic capture（S27.11）・privacy（S27.9）・
+  Activation非依存（S27.10）・storage技術の非実装（S27.1/S27.13）は
+  いずれも無変更。
+
+verification側は、旧AH（「project_id改ざんはexpected behaviorとしてload
+成功する」）を「`expected_project_id`不一致時は改ざんをrejectする」検証へ
+置き換え、以下のR1項目を追加した: stored project_id改ざん→reject /
+`expected_project_id`一致→load成功 / `expected_project_id`不一致→
+sanitized failure / project_id不一致時はSnapshot Loaderまで進まない
+（実Loaderに到達する前にreject、副作用なし）/ Snapshot bindingが正しくても
+project identity不一致ならreject / Checkpoint 10 `setProjectPin()`へ渡す
+loaded Pinの`project_id`がcaller期待値と一致することの確認 /
+`expected_project_id`欠落時のROOT_INVALID。
