@@ -418,3 +418,74 @@ A-N/CC/DD/EEは必ず実Checkpoint 3/4 coreを利用し、stand-in testだけで
 Checkpoint 6では上記A-AOをすべて実測・実装する。O/P/Q/R/S/W/X/Y/Zはvm sandboxによるdependency
 stand-in、A-M/AJ/AK/ALは必ず実Checkpoint 3/P2-A1 coreを利用し、stand-in testだけでsuccessを
 証明しない（Checkpoint 5-R2 §34相当の原則）。
+
+## S16. approvedDict Matching Integration検証項目（Checkpoint 7で新設）
+
+`tools/knowledge_builder/verification/private_dictionary_matching_integration_verification.js`が
+実装するA-Z/AA-AZの52項目。全項目、matching tool本体
+（`tools/json_ab_trace_matching_tool_v12.1.15.html`）の実production functionをNode `vm` sandboxへ
+そのままロード（copy/rewriteなし）して直接検査し、Checkpoint 3-6の実productionコア
+（`private_dictionary_snapshot_core.js`/`private_dictionary_learning_core.js`/
+`id_hash_utils.js`/`private_dictionary_resolver_core.js`）へ`require()`で接続する
+（stand-inを実装のふりとして合格させない、Checkpoint 5-R2 §34相当の原則をここでも踏襲）。
+
+| 項目 | 内容 |
+|---|---|
+| A | Snapshot未pin時: `_tagInfo.approvedDict`が空、`approvedDictionaryMatchingStatus().active===false` |
+| B | EXACT_CANONICAL: canonical termがそのまま`approvedDict`へ追加され、sidecarに記録される |
+| C | APPROVED_ALIAS: 解決後のcanonical tagが追加され、alias表示文字列自体は`approvedDict`に一切含まれない |
+| D | UNKNOWN_TERM: `approvedDict`へ追加されず、baseline（explicit/dict/code）は影響を受けない |
+| E | DICTIONARY_CONFLICT: `approvedDict`へ追加されず、baseline matchingは継続する |
+| F | Mixed row: 1行内の複数field由来termがEXACT/ALIAS/UNKNOWNへ独立解決され、sidecarが全term-level annotationを保持する |
+| G | Scalar whole value: canonical termを含む部分文字列は一致・tag付けされない（substring禁止） |
+| H | Delimiter区切り値: comma等で連結したwhole valueは分割されず、per-token解決も行われない |
+| I | Array要素: 各要素が独立termとして解決され、それぞれ個別にtag化される |
+| J | Object値: `JSON.stringify`等によるterm化を一切行わず、approvedDict resolution対象外 |
+| K | Numeric scalar: `String(value)`によるwhole termとして解決される |
+| L | Overlength値（256文字超）: truncateせずskipする |
+| M | 空白のみの値: skipする |
+| N | `tagSourceFields(schemaName)`外のfieldにあるcanonical termはpickupされない |
+| O | `composeFinalTags()`優先順位: `manualAdd > explicit > approvedDict`（maxTags到達でdict/codeが落ちる） |
+| P | `manualRemove`が`approvedDict`由来tagも`_tags`から除去する |
+| Q | `explicit`と`approvedDict`の両方に属するtagは両sourceとして認識される |
+| R | approvedDict-only高頻度tagが枝刈り対象として識別・除外される |
+| S | dict+approvedDict混在の高頻度tagも同様に枝刈りされる |
+| T | 同一tagがexplicitと共起する行は枝刈り対象から除外される |
+| U | 同一行でdictとapprovedDict両方に存在するtagは`documentFrequency`で1回のみ計上される（Set union） |
+| V | alias hitの表示名はResolverの`resolved_canonical`（canonical winner表示）であり、alias提供entry自身の表示名ではない |
+| W | Snapshot適用＋annotate前後で`matchLogic.synonymMap`がbit-equivalentのまま（正式辞書書き込みなし） |
+| X | approvedDict由来の共有tagも`getScore('tag') * dice`のまま採点され、専用bonusが存在しない |
+| Y | approvedDict関連のどのcode pathもreview decision/ACCEPT stateを設定しない |
+| Z | 元のTraceRecordの業務fieldが一切書き換わらない |
+| AA | approvedDict tagはJSON A・JSON B双方の行に適用される |
+| AB | 複数行に跨る重複termがそれぞれ独立解決され、行対応関係が保持される |
+| AC | ちょうど50000 termが単一chunkに収まり、50001 termは2 chunk（先頭ちょうど50000件）に分割される |
+| AD | chunkがsession pinと異なるbindingを返した場合、apply全体がfailする（`APPROVED_DICT_BINDING_MISMATCH`） |
+| AE | malformed（null）Resolver結果: baseline fallback・approvedDictタグなし・汎用warning codeを設定・native leakageなし |
+| AF | Resolver rejection: apply全体がfailし、部分的approvedDict適用が0件のまま・native/secret leakageなし |
+| AG | resolution途中のsession revision変化: pending結果を破棄しcommitしない、warning codeが`APPROVED_DICT_SESSION_CHANGED` |
+| AH | invalid Snapshot wrapper: `active=false`、以降のbaseline matchingは`approvedDict=[]`のまま継続 |
+| AI | `clearApprovedDictionarySnapshotForMatching()`後、次回runで`approvedDict=[]`・sidecarも非stale |
+| AJ | 「最新snapshot自動探索」「project_config読込」等のlatest-lookup tokenが存在しない |
+| AK | P2-A3 Workbook importパスへの依存token（`xlsx.review`/`ReviewWorkbook`/`parseWorkbook`）が存在しない |
+| AL | matching HTMLが`dictionary_payload.entries`をcanonical/alias探索目的で走査しない |
+| AM | production sourceが`PrivateDictionaryResolverCore.resolveDictionaryTerms()`を実際に呼び出している |
+| AN | 4つの依存script tagが存在し、`id_hash_utils → learning → snapshot → resolver`の順序が厳守されている |
+| AO | Checkpoint 6 Resolver coreが公開APIのまま無改変で存在する |
+| AP | `_tagInfo`のfallback/default shape literalすべてが`approvedDict:[]`を含む |
+| AQ | 手動tag編集後もrecompose時に既存approvedDict tagが失われない |
+| AR | `annotationRowsForDisplay()`がapprovedDict-only高頻度行を`hasHigh`フィルタで正しく識別する |
+| AS | `tagSourcesFor()`が`approvedDict`を独立したsource文字列として返す |
+| AT | `dictTags`と`approvedDictTags`が別fieldとして追跡され、互いに合算されない |
+| AU | unknown/conflict term件数がB-F fixtureから正しく集計される |
+| AV | `_approvedDictResolution.snapshot_binding`がResolver返却のsession bindingと完全一致する |
+| AW | sidecar annotationがCheckpoint 6 Resolution Annotation契約以外のfield（`normalized_key`等）を追加しない |
+| AX | `getScore('approvedDict')`/`method:'approvedDict'`等の専用formal-dictionary score/method tokenが存在しない |
+| AY | `applyApprovedDictionaryTags()`/`setApprovedDictionarySnapshotForMatching()`/`clearApprovedDictionarySnapshotForMatching()`/`approvedDictionaryMatchingStatus()`がreview decision/ACCEPT APIを一切参照しない（静的解析） |
+| AZ | 上記関数群が`localStorage`/`sessionStorage`/IndexedDBへ一切触れない（Snapshot永続化なし、session-local pinのみ） |
+
+Checkpoint 7では上記A-AZをすべて実測・実装する。加えて既存5 regression suite
+（Resolver 189/P2-A1 710/Snapshot 191/Promotion 151/Composition 170）を再実行し、PASS/FAIL件数が
+Checkpoint 6時点の値から一切変化しないことを確認する。保護対象ファイル
+（P2-A1〜P2-A4既存core・既存verification・既存matching以外のtool群）のdiffが0であることも
+git diffレベルで確認する。

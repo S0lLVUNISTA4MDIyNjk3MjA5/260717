@@ -1486,7 +1486,7 @@ Checkpointで行う**（Checkpoint 1-R2は設計のみで、この変更を含�
 はしない」という原則と、「拡張点は`_tagInfo`の新sibling sourceであり、P2-A1契約改訂を要しない」
 という接続方式の2点のみ。
 
-### S13.1 `_tagInfo.approvedDict` 生成・合成規則（R3-3で新設）
+### S13.1 `_tagInfo.approvedDict` 生成・合成規則（R3-3で新設、R5/Checkpoint 7で実装反映）
 
 **Checkpoint 6との責務分離（明記）**: Dictionary Resolver（S4.2、
 `private_dictionary_resolver_core.js`）と、本S13.1が定義する`_tagInfo.approvedDict`の
@@ -1617,6 +1617,53 @@ approvedDictを識別可能になる**（既存機構がsource文字列の集合
 **正式辞書を`matchLogic.synonymMap`へ書き込まない、既存tag score計算式
 （`getScore('tag') * dice`、L5486）を変更しない、という2点は、上記10項目のいずれによっても
 変更されない。**
+
+**R5（Checkpoint 7）追記: 実装で確定した「比較主体」の訂正。** 上記1-3はR3-3/R4-3時点で
+「matching toolが`effective_vocabulary`のcanonical/alias displayと直接比較する」という書き方で
+固定されたが、Checkpoint 6でDictionary Resolver pure core（S4.2、
+`private_dictionary_resolver_core.js`の`resolveDictionaryTerms()`）が実装されたことにより、
+Checkpoint 7の実装はこの直接比較を**行わない**。実際の経路は次の通りである:
+
+```text
+row[field]の生の値                    <- 上記1のtokenization規則（scalar/array/objectの
+        |                                扱い、delimiter split禁止、部分文字列不一致）は
+        |                                そのまま維持。ここが変わったわけではない。
+        v
+term一覧（whole-value単位）
+        |
+        v
+PrivateDictionaryResolverCore.resolveDictionaryTerms()   <- Checkpoint 6のResolver pure core
+        |                                                    （唯一のcanonical/alias解決経路）
+        v
+Resolution Annotation（per-term、resolution_type +
+resolved_canonical を含む）
+        |
+        v
+resolution_type === EXACT_CANONICAL または APPROVED_ALIAS の場合のみ、
+annotation.resolved_canonical を normalizeTagValue() へ通した値を
+_tagInfo.approvedDict へ追加する（UNKNOWN_TERM/DICTIONARY_CONFLICTは追加しない）
+```
+
+matching tool自身は`effective_vocabulary.allowed_tags`/`effective_vocabulary.aliases`を
+**一度も直接スキャンしない**（`dictionary_payload.entries`の走査、canonical/alias文字列の
+自前比較、conflict判定の再実装はいずれも行わない — これはSource of Truth境界として
+Checkpoint 7の静的検証テストでも確認済みである）。上記2「正規化規則」・3
+「substring/fuzzy/AI推定の禁止」は、比較の実行主体がResolver側に移った後も、
+**Resolver内部の正規化・厳密一致判定として**そのまま踏襲されている
+（Resolverは`normalizeForMatch()`相当の正規化＋whole-value完全一致のみを行い、
+substring/delimiter分割/fuzzy/AI推定のいずれも行わない設計のまま）。すなわち1-3が
+定めた「何を一致とみなすか」という規則自体は不変であり、変わったのは「誰がその比較を
+実行するか」（matching tool自身→Resolver pure core）のみである。
+
+上記4-10（source priority、manualRemove適用、maxTagsPerRow共有、high-frequency pruning、
+documentFrequency算入、`_tagDisplayMap`表示解決、stats/evidence識別）は実装のまま10項目
+すべてが確定通りにCheckpoint 7で実装された。9の表示解決は、`effective_vocabulary.allowed_tags`/
+`aliases`を直接走査する代わりに、Resolverが返すResolution Annotationの`resolved_canonical`を
+そのままtag表示名として採用する形で実現されており、9が定めた「先勝ちで未設定のみ設定」規則も
+維持されている。10で「後続実装Checkpointの対象」とされていた`currentTagCoverageStats()`/
+`tagMatchSummaryHtml()`への`approvedDict`独立集計も、Checkpoint 7で実装された
+（`approvedDictTags`をstatsへ追加、`tagMatchSummaryHtml()`が`approvedDictionaryStatusHtml()`を
+併記）。
 
 ---
 
@@ -1955,3 +2002,23 @@ matching実行（既存logic、変更なし）
     実際の配線・スコア係数はCheckpoint 6でも未実装のまま、旧#1と同一）。
 19. Excel export列設計・unknown term queueの永続化・HUMAN-01/02/03（旧#2/#3、current-state-analysis
     HUMAN項目と同一、未解決のまま）。
+
+**Checkpoint 7で解決した項目**:
+
+- 項目18（Checkpoint 6で追加）: `_tagInfo.approvedDict`のmatching tool統合（実際の配線）は、
+  Checkpoint 7で**解決した**。`tools/json_ab_trace_matching_tool_v12.1.15.html`へ
+  `private_dictionary_resolver_core.js`等4つのCheckpoint 3-6 pure coreをscriptとして追加し、
+  TraceRecord → `tagSourceFields(schemaName)` → whole-value term抽出（S13.1項目1の規則を
+  そのまま維持） → `PrivateDictionaryResolverCore.resolveDictionaryTerms()` → Resolution
+  Annotation → `resolved_canonical`を`normalizeTagValue()`へ通した値 → `_tagInfo.approvedDict`
+  → `composeFinalTags()`/`buildTagIndex()`/`evaluateTagMatch()`という経路を実装した
+  （実装詳細はS13.1のR5追記を参照）。既存comparison review平面（accept/reject決定）には
+  一切接続せず、dictionary一致がcomparisonを自動acceptすることはない。
+- 項目1（旧#2、R2-1で範囲確定、Checkpoint 6時点でも未確定のまま残存）: `_tagInfo.approvedDict`が
+  既存tag-score（Dice係数）へどの重みで寄与するかは、Checkpoint 7で**「専用の重み付けを設けない」
+  という方針として解決した**。`approvedDict`は`dict`と同じ`_tags`配列（source非依存）へ合流し、
+  `evaluateTagMatch()`のスコア式`getScore('tag') * dice`（L5803）はCheckpoint 7で一切変更していない
+  （静的検証テストで`getScore('approvedDict')`等の専用score/method tokenが存在しないことを確認
+  済み）。document frequency算入・high-frequency pruningも`dict`と対称に`dict ∪ approvedDict`の
+  和集合として扱う（S13.1項目7・8）。「正式辞書由来だからより高いスコアを与える」という設計は
+  0.1では採用せず、将来的に必要になった場合は別version/別sliceで再検討する。
