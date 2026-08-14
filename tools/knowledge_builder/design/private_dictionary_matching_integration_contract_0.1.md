@@ -2258,3 +2258,285 @@ shape（S24.3）・sort規則・error sanitization方針（S24.7、code一覧は
 追加なし — 新しいfailureは既存の`REVIEW_PROMOTION_ADAPTER_EVALUATION_INVALID`/
 `REVIEW_PROMOTION_ADAPTER_BASE_SNAPSHOT_INVALID`を再利用し、専用codeを新設しない）は
 一切変更しない。
+
+---
+
+## S25. Checkpoint 9: Snapshot Activation Record / Explicit Project Snapshot Pin
+
+旧#8（S5.4、R2-4で新設）・旧#10（S23）・旧#15（S23 Checkpoint 6追記）で繰り返し
+「未設計」として持ち越されていた事項を、P2-A4 Checkpoint 9で解決する。対象は
+新規pure core 1本（`tools/knowledge_builder/core/private_dictionary_snapshot_activation_core.js`）
+のみで、既存core（Snapshot/Promotion/Composition/Resolver/Adapter/Learning/Rule
+Extraction）・Checkpoint 7 matching tool HTML・P2-A3 UI/coreはいずれも変更しない。
+
+### S25.1 なぜ2つのartifactに分離するか（S5.4の原則を継承）
+
+S5.4が既に確定した「immutable Snapshot wrapperと可変運用状態を同居させない」という
+原則を、Checkpoint 9ではさらに一歩進め、**「可変運用状態」自体を2つの別責務へ分離する**。
+
+```text
+Immutable Snapshot（S5、変更禁止）
+       │
+       ├── Snapshot Activation Record   … 辞書運用上のlifecycle状態（監査・表示専用）
+       │
+       └── Project Snapshot Pin         … matchingが読むexplicit selection（再現性の根拠）
+```
+
+理由: S5.4は当初「ACTIVEなsnapshotを表す1つのレコード」だけを想定していたが、
+S14/NG-6が確定した「matchingは常にproject configurationが指す厳密なsnapshot identityを
+pinする（探索しない）」という要件と、S5.4の「Activation Recordは監査・表示専用であり
+matching selectorにしてはいけない」という要件は、**責務としては同じ`activation_status`
+概念に見えても実際には別の質問に答えている**:
+
+- Activation Record「このSnapshotは辞書運用上、今ACTIVE/SUPERSEDED/ROLLED_BACKの
+  どれか」 → 複数snapshotが並行してACTIVE以外の状態を持ちうる、辞書メンテナ向けの
+  監査ログ的record。
+- Project Snapshot Pin「このPROJECTが次回matching sessionで使う、厳密に1つの
+  snapshot identity」 → matching engineの入力そのもの。ACTIVE Activation Recordを
+  検索して自動選択することは、S14/NG-6が禁止する「暗黙のlatest探索」の再導入になる。
+
+両者を1つのartifactに統合すると、「ACTIVEと表示されているものが自動的にmatchingへ
+反映される」という暗黙連動を実装しやすくなってしまい、S14の原則を壊す誘惑を生む。
+2つの別artifact・別schema・別public APIとして分離することで、この誘惑を構造的に
+排除する（S25.4で恒久検査として固定）。
+
+### S25.2 Snapshot Activation Record 0.1（S5.4を正式化）
+
+schema: `private-dictionary-snapshot-activation/0.1`
+
+| field | 型・format | 備考 |
+|---|---|---|
+| `activation_record_schema_version` | 完全一致文字列 `"private-dictionary-snapshot-activation/0.1"` | |
+| `dictionary_snapshot_id` | `^dsnap-[0-9a-f]{32}$` | 対象SnapshotのSource of Truthは必ず実際の`PrivateDictionarySnapshotCore.loadDictionarySnapshotWrapper()`成功結果から読む。caller自由入力は許可しない（S25.5） |
+| `wrapper_integrity_sha256` | `^[0-9a-f]{64}$` | 同上。S5.1の同名fieldと同じ値（改ざん検知hashそのもの） |
+| `activation_status` | `"ACTIVE"` \| `"SUPERSEDED"` \| `"ROLLED_BACK"` | S5.4のenumをそのまま採用 |
+| `updated_by` | non-empty string、1〜200文字 | human operator識別子。private termではない。emailやOS username等のPII形式を強制しない、また自動取得もしない（caller必須supply） |
+| `updated_at` | `YYYY-MM-DDTHH:mm:ss.sssZ`（S5.5 `provenance.generated_at`と同一format・同一validation方式）、canonical UTC timestamp | **R1追加**: S5.4簡易案にはtimestampがなかったが、監査可能性のため追加する。`Date.now()`/`new Date()`からの自動生成は禁止 — caller supplied必須（Snapshot core `provenance.generated_at`と同じ思想） |
+
+**identity追加要否の検討（§8指示への回答）**: `dictionary_snapshot_id` + `wrapper_integrity_sha256`
+の2つで、対象Snapshotの完全なcontent-addressable識別として十分である。
+`wrapper_integrity_sha256`は既にS5.2でwrapper全fieldの改ざん検知hashとして定義済みであり、
+Activation Record自身に**新しいcontent hashを追加する必要はない**（§24方針を継承:
+新hash種類を不用意に増やさない）。Activation Record自体のcontent hash（例:
+「このrecord自身のidentity」）も0.1では導入しない — recordは
+`(dictionary_snapshot_id, activation_status, updated_at)`の組で十分に一意に追跡でき、
+`KnowledgeIdHashUtils`を持ち込む新しい理由がないため（S25.7）。
+
+**含めないfield（S27 privacyの帰結、および責務分離の帰結）**: `canonical_term`/
+`alias_term`/`reason note`/`workbook filename`/`dictionary_id`/`dictionary_version`/
+`scope`。dictionary_id/version/scopeはProject Snapshot Pin側の責務であり、Activation
+Recordは「Snapshotという単位そのもの」をsnapshot_id + hashのみで指す（S5.4の元設計を
+維持）。
+
+### S25.3 Project Snapshot Pin 0.1（新設）
+
+schema: `private-dictionary-project-snapshot-pin/0.1`
+
+```json
+{
+  "schema_version": "private-dictionary-project-snapshot-pin/0.1",
+  "project_id": "<caller supplied opaque non-empty identifier>",
+  "snapshot_binding": {
+    "snapshot_id": "dsnap-<hex32>",
+    "snapshot_version": 1,
+    "wrapper_integrity_sha256": "<hex64>",
+    "dictionary_payload_sha256": "<hex64>",
+    "dictionary_id": "pdict-<hex32>",
+    "dictionary_version": "<decimal string>",
+    "scope": "PROJECT"
+  }
+}
+```
+
+`snapshot_binding`の7 fieldは、Checkpoint 7 matching tool HTML
+（`captureApprovedDictBatchBinding()`、`tools/json_ab_trace_matching_tool_v12.1.15.html`
+L3481-3512）およびResolver core（`resolveDictionaryTerms()`内の`snap`構築、
+`private_dictionary_resolver_core.js` L419-437）が既に確立した同一7-field形状・同一format
+規則（`dsnap-<hex32>`/`pdict-<hex32>`/hex64×2/safe integer≥1/decimal string/`"PROJECT"`
+固定）を踏襲する。**Checkpoint 7 matching tool HTMLを本coreのproduction dependencyには
+しない**（指示§11: matching HTMLをpure coreから`require`/読み込みしてはいけない）ため、
+format validator自体は本core内に独立実装する。これは既存の「各coreが同じ汎用
+hostile-input防御パターンを独立して持つ」規律（Resolver/Promotion/Composition/Adapter
+がそれぞれ独自にR1-1構造読み取りprimitiveを持つのと同じ理由）の延長であり、
+「Promotion/Resolver意味論の再実装」ではない — 対象はあくまで7 fieldの**形式**
+（正規表現・型）のみで、dictionary resolution/promotion判定ロジックは一切含まない。
+drift防止のため、7 fieldの意味的Source of TruthはこのCheckpoint 7 HTML/Resolverが
+確立した契約であることを本節に明記し、値そのものは必ずSnapshot Loaderの検証済み結果
+から導出する（caller直接入力を許可しない、S25.5）。
+
+`dictionary_id`/`dictionary_version`は`validated.dictionary_payload.dictionary_id`/
+`validated.dictionary_payload.version`から読む（P2-A1 `validatePrivateDictionary()`が
+既に`^pdict-[0-9a-f]{32}$`/`^(0|[1-9][0-9]{0,15})$`を保証済みだが、本coreでも
+defense-in-depthとして同じformatを再チェックする — P2-A1のschema検証ロジック自体を
+再実装するわけではなく、既に信頼できる文字列に対する単純な形式再確認である）。
+
+**Project Pinには`dictionary_payload`を一切保持しない**（指示§9・§12）。
+
+### S25.4 責務分離の恒久固定（ACTIVE ≠ matching selected）
+
+次を本coreの構造として固定する（指示§14の恒久検査）:
+
+- `buildSnapshotActivationRecord()`/`transitionSnapshotActivation()`は、Project Snapshot
+  Pinを一切参照・生成・変更しない。
+- `buildProjectSnapshotPin()`は、Snapshot Activation Recordを一切参照・生成・変更しない。
+- 3つの公開APIはいずれも、他方のartifactをinput/outputに含まない。両者を結びつける
+  操作（「このsnapshotをACTIVEにしたら自動でPROJECT Pinも切り替える」等）は本
+  Checkpointのpure core内には実装しない。将来必要になった場合は、明示的な上位
+  orchestration層（このpure core自体ではない）として別途設計する（S25.9）。
+
+### S25.5 Snapshot Wrapper binding（Source of Truthの一本化）
+
+3つの公開APIはいずれも`snapshot_wrapper`という生の（caller-owned、potentially hostile）
+参照を受け取るが、**caller supplied 7-fieldや`dictionary_snapshot_id`/
+`wrapper_integrity_sha256`を個別input fieldとして直接受理しない**。必ず
+`PrivateDictionarySnapshotCore.loadDictionarySnapshotWrapper(snapshot_wrapper)`
+（Checkpoint 3、無改変）を呼び出し、その成功結果（deep-frozen validated snapshot
+handle、13 field）からのみ`dictionary_snapshot_id`（`validated.snapshot_id`）・
+`wrapper_integrity_sha256`・`snapshot_version`・`dictionary_payload_sha256`・
+`dictionary_id`（`validated.dictionary_payload.dictionary_id`）・`dictionary_version`
+（`validated.dictionary_payload.version`）・`scope`を導出する。Loaderが失敗した場合
+（構造不正・hash不一致・scope不一致等、理由を問わず）、本coreは`ACTIVATION_SNAPSHOT_INVALID`
+/`PROJECT_PIN_SNAPSHOT_INVALID`という自coreの分離されたerror codeへ変換する
+（Snapshot coreの内部SNAPSHOT_*コードや native Error/messageを一切外部へ漏らさない
+— Resolver/Promotion/Compositionが自coreのLoader呼び出し失敗を各々`RESOLVER_SNAPSHOT_LOAD_FAILED`
+/`PROMOTION_BASE_SNAPSHOT_INVALID`等へ変換するのと同じ規律）。
+
+`snapshot_wrapper`自体の深いstructural captureは本coreでは行わない（Loader自身が
+Checkpoint 3のR1-1パターンで独立してatomic captureを行うため、二重にcloneする必要が
+ない）。本coreが独自にatomic captureを行うのは、Loaderへ渡さない他のcaller-owned入力
+（`current_record`・`history`配列）のみである（S25.8）。
+
+### S25.6 Activation Transition（S16再確認、design-firstで固定）
+
+指示§18は最低限「no record→ACTIVE」「ACTIVE→SUPERSEDED」「SUPERSEDED→ROLLED_BACK」の
+3遷移を求めた。S16のrollback設計（「immutable Snapshotは書き換えない。rollbackは
+`rollback_target`を持つ新Snapshotの発行として表現する」）を踏まえ、Activation Record
+のtransitionは**単一snapshot_idのレコード自身のstatus遷移のみ**を扱い、複数snapshotに
+またがる暗黙連動（「XがROLLED_BACKになったら自動でYがACTIVEになる」等）は行わない
+（S25.4と同じ理由）。
+
+確定した遷移graph（0.1、closed set）:
+
+```text
+(no record) --build--> ACTIVE
+ACTIVE      --transition--> SUPERSEDED
+ACTIVE      --transition--> ROLLED_BACK
+SUPERSEDED  --transition--> ROLLED_BACK
+```
+
+`SUPERSEDED`/`ROLLED_BACK`は本0.1ではterminal（そこからの再遷移は許可しない）。
+「一度SUPERSEDEDになったsnapshotを再度ACTIVEに戻す」操作（＝rollback先として再選択
+する）は、**同じrecordを書き換えるのではなく、同じ`dictionary_snapshot_id`に対して
+新しいActivation Record（新しい`buildSnapshotActivationRecord()`呼び出し、
+activation_status=ACTIVE）を発行する**ことで表現する（immutable Snapshotが
+再発行ではなく新規発行で表現されるのと対称的な設計 — 既存recordを書き換えて
+「なかったこと」にしない、監査trail優先）。
+
+`ACTIVE→ROLLED_BACK`を指示の最低3遷移に追加した理由: 誤ったSnapshotをACTIVE化した
+直後に是正する運用（「SUPERSEDEDを経由させず直接ROLLED_BACKにする」）は現実的な
+運用シナリオであり、これを禁止すると「一度SUPERSEDEDにしてからROLLED_BACKにする」
+という不自然な2段階操作を運用側に強制することになる。`SUPERSEDED→ROLLED_BACK`は
+指示通り維持する（後から遡って「あのsnapshotは実はrollback chainの一部だった」と
+audit的に印を付け直す場合に用いる）。
+
+**単純なenum書換えにしない**（指示§18）: `transitionSnapshotActivation()`は
+(a) 現在の`current_record`を構造的に検証し、(b) 新たに渡された`snapshot_wrapper`を
+実Loaderで再検証し、(c) 検証済みsnapshotのidentity（`snapshot_id`+
+`wrapper_integrity_sha256`）が`current_record`のそれと**完全一致することを要求**し
+（一致しない場合`ACTIVATION_BINDING_MISMATCH`でfail-closed — 「別snapshotへ
+すり替えてstatusだけ変える」ことを構造的に禁止する）、(d) 遷移graph上の合法な
+edgeであることを検証し、(e) それら全てが通った場合のみ新しいrecordを生成する。
+「どのrecordがどのSnapshotを指すか」は常にidentity一致検証によって明確である。
+
+### S25.7 Snapshot chain consistency（S23旧#11、Checkpoint 9でどこまで閉じるか）
+
+`transitionSnapshotActivation()`は任意（optional、`null`可）の`history`引数を受け付ける。
+`history`は呼び出し側が持つ、**既に検証済みのlightweight snapshot chain summary**の配列
+（`{dictionary_snapshot_id, snapshot_version, supersedes, rollback_target}`、各要素は
+S5.5と同一format規則で本coreが構造検証する）であり、pure coreがrepository/storageから
+探索することはない（指示§19の禁止事項通り）。
+
+`history`が渡された場合、遷移対象のsnapshot（今回のLoader検証結果自身の`snapshot_id`/
+`snapshot_version`/`supersedes`/`rollback_target`を「candidate」として`history`へ合成
+した集合）に対し、次を検証する（いずれか違反時`ACTIVATION_HISTORY_INVALID`）:
+
+1. `dictionary_snapshot_id`の重複がないこと。
+2. 各要素の`supersedes`が非nullの場合、集合内に存在する別要素を指し、かつその
+   参照先の`snapshot_version`が自身の`snapshot_version`より真に小さいこと
+   （monotonicity — S23旧#11「snapshot_version monotonicity」「supersedes existence」を
+   同時に閉じる）。
+3. 各要素の`rollback_target`が非nullの場合、集合内に存在する別要素を指すこと
+   （rollback target consistency）。
+4. `supersedes`辺で構成される有向グラフに循環がないこと（DFS + 再帰stackによる
+   cycle detection、S23旧#11「cycle detection」を閉じる）。
+
+`history`が`null`の場合はこれらのchain検証をスキップする（従来通り、単一recordの
+status遷移とidentity一致のみを検証）。これにより、S23旧#11は「chain全体の検証は
+callerが明示的に提供した場合にのみ、pure coreとして厳密に閉じられる」という形で
+Checkpoint 9として解決する。`history`を伴わない呼び出しでは、chain全体の整合性は
+引き続き上位（呼び出し側）の責務のまま未解決）。`supersedes`/`rollback_target`の
+自己参照禁止自体は、Loaderが呼ぶSnapshot core自身の`checkChainRef()`で既に閉じている
+（`supersedes !== snapshot_id`、`rollback_target !== snapshot_id`、S5.5）ため、本coreで
+重複実装しない。
+
+### S25.8 Atomic capture / trust boundary
+
+Checkpoint 8-R1までに確立したatomic capture水準を維持する。`input`root、
+`current_record`、`history`配列とその各要素は、呼び出し開始時点で同期的に
+（`await`前に）一度だけ安全なdescriptor読み取り経由で読み、以降再読しない。
+`snapshot_wrapper`はS25.5の通りLoaderへ生参照のまま渡す（Loader自身がR1-1
+パターンで独立atomic captureを行うため）。hostile Proxy（`getOwnPropertyDescriptor`
+trap）・accessor property・symbol key・`__proto__`/`prototype`/`constructor`・sparse
+array・custom prototype・循環構造は、既存4+1 core（Snapshot/Resolver/Promotion/
+Composition/Adapter）と同じ独立コピーのR1-1系chokepoint関数でfail-closedする。
+出力（Activation Record / Project Snapshot Pin）はいずれもfresh・deep-frozen objectで
+あり、caller-owned inputへのaliasを一切持たない。
+
+### S25.9 Persistence boundary（指示§17）
+
+本coreはformal state artifact（Activation Record / Project Snapshot Pin）の
+validation/build/transitionのみを扱う。`localStorage`/`sessionStorage`/`IndexedDB`/
+filesystem/network/ダウンロードは一切実装しない。実際の永続化先（project設定ファイル、
+DB、ブラウザstorage等）は後続Checkpointで別のstorage adapter層として分離する。この
+分離により、`formal state`（本core）と`storage technology`（未実装）を独立に保つ
+（S14が既に「project configurationの具体的格納場所は未設計のまま」としていたのと
+同じ切り分け）。
+
+### S25.10 Privacy（S17を継承）
+
+Activation Record / Project Snapshot Pinのいずれにも、`canonical_term`/`alias_term`/
+`original_term`/`source excerpt`/`reviewer note`/`reason note`/`workbook filename`/
+`sheet`/`page text`/`evidence text`を含めない。許容するのはopaque ID・hash・version・
+scope・lifecycle status・operator識別子・caller supplied timestampのみ（指示§27）。
+`project_id`はcaller supplied opaque識別子であり、そこにprivate termを混入させない
+運用上の責務はcaller側にある（pure coreは文字列の中身の意味を検査できないため、
+構造的強制はできない — これは本coreの限界として明記する）。
+
+### S25.11 Error contract
+
+専用namespace（9種、design-firstで固定。指示§26の例示から、実際に使用しない
+`PROJECT_PIN_BINDING_MISMATCH`/`PROJECT_PIN_HISTORY_INVALID`は採用しない —
+Project Pinには「既存pinとの比較」も「history」概念もないため）:
+
+| code | 意味 |
+|---|---|
+| `ACTIVATION_ROOT_INVALID` | Activation Record系入力（`buildSnapshotActivationRecord`/`transitionSnapshotActivation`のinput root、`current_record`の形状、`updated_by`/`updated_at`のformat等）が不正 |
+| `ACTIVATION_SNAPSHOT_INVALID` | `snapshot_wrapper`が実Loaderで検証失敗 |
+| `ACTIVATION_STATUS_INVALID` | `activation_status`/`new_status`が許可されたenum値でない、または`buildSnapshotActivationRecord`に`ACTIVE`以外が渡された |
+| `ACTIVATION_TRANSITION_INVALID` | `(current_record.activation_status, new_status)`がS25.6の遷移graph上の合法なedgeでない |
+| `ACTIVATION_BINDING_MISMATCH` | 再検証した`snapshot_wrapper`のidentityが`current_record`のそれと不一致 |
+| `ACTIVATION_HISTORY_INVALID` | `history`の形状不正、重複、非monotonic、rollback_target不整合、循環のいずれか |
+| `ACTIVATION_DEPENDENCY_FAILED` | `PrivateDictionarySnapshotCore`依存解決の失敗（Activation/Pin両系で共有） |
+| `PROJECT_PIN_INVALID` | Project Pin系input root形状、または`project_id`のformat不正 |
+| `PROJECT_PIN_SNAPSHOT_INVALID` | `snapshot_wrapper`が実Loaderで検証失敗（Pin側） |
+
+外部へ返すのは常に`{code, path}`のみ。native Error/message/stack/cause/private
+dictionary term/filename/secret markerは一切含めない。
+
+### S25.12 Non-goals（本Checkpoint）
+
+Project Snapshot Pin → matching session `setSnapshot()`のruntime配線は行わない
+（後続Checkpoint、指示§16）。Activation RecordとProject Pinを結ぶ上位orchestration
+（S25.4）は行わない。storage adapter実装（S25.9）は行わない。HUMAN-01/02/03の
+UI適用は行わない（指示§33）。Checkpoint 7 matching tool HTML・P2-A3 UI/coreの変更は
+行わない。
