@@ -66,6 +66,12 @@
   <script src="./trace_comparison_review_projection_core.js"></script>
   <!-- B-4b Checkpoint 3: レビュー済みprojectionの正式エクスポート接続（pure export core） -->
   <script src="./trace_comparison_review_export_core.js"></script>
+  <!-- P2-A4 Checkpoint 7: Dictionary Resolver browser依存（Checkpoint 3-6の既存production fileをそのまま使用。
+       コピー・bundle複製・inline転記は行わない。依存順は厳密に固定: id_hash_utils -> learning -> snapshot -> resolver。 -->
+  <script src="./knowledge_builder/core/id_hash_utils.js"></script>
+  <script src="./knowledge_builder/core/private_dictionary_learning_core.js"></script>
+  <script src="./knowledge_builder/core/private_dictionary_snapshot_core.js"></script>
+  <script src="./knowledge_builder/core/private_dictionary_resolver_core.js"></script>
   <style>
     :root {
       --primary: #2563eb;
@@ -312,6 +318,7 @@
   .annotation-tag.manual { background:#fef3c7; border-color:#f59e0b; }
   .annotation-tag.explicit { background:#dcfce7; border-color:#4ade80; }
   .annotation-tag.dict { background:#dbeafe; border-color:#60a5fa; }
+  .annotation-tag.approvedDict { background:#e0f2fe; border-color:#0ea5e9; }
   .annotation-tag.code { background:#ede9fe; border-color:#a78bfa; }
   .annotation-tag.high { box-shadow:inset 0 0 0 1px #ef4444; }
   .annotation-tag.removed { background:#f1f5f9; color:#94a3b8; text-decoration:line-through; border-style:dashed; }
@@ -3389,11 +3396,284 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     annotationMs:0,
     highFrequencyTags:new Set(),
     visibleLimit:500,
-    stats:{ aRows:0, bRows:0, aTagged:0, bTagged:0, codeTags:0, dictTags:0, explicitTags:0, manualTags:0, aEffectiveTagged:0, bEffectiveTagged:0, highFrequencyExcludedRatio:0 },
-    matchStats:{ collect:false, aRows:0, totalCandidates:0, codeCandidates:0, tagCandidates:0, fuzzyCandidates:0, fuzzySkipped:0, candidateReductionRate:0 }
+    stats:{ aRows:0, bRows:0, aTagged:0, bTagged:0, codeTags:0, dictTags:0, explicitTags:0, manualTags:0, approvedDictTags:0, aEffectiveTagged:0, bEffectiveTagged:0, highFrequencyExcludedRatio:0 },
+    matchStats:{ collect:false, aRows:0, totalCandidates:0, codeCandidates:0, tagCandidates:0, fuzzyCandidates:0, fuzzySkipped:0, candidateReductionRate:0 },
+    // P2-A4 Checkpoint 7: approvedDict resolution-unit stats, kept separate
+    // from the ad hoc dict/code/explicit/manual counters above (never
+    // mixed into the same field).
+    approvedDictResolutionStats:{ exact:0, alias:0, unknown:0, conflict:0, skippedValues:0 },
+    approvedDictWarningCode:null
   };
   const tagOverrides = { sys:new Map(), plm:new Map() };
 
+  /* ═══════════════════════════════════════════
+     P2-A4 Checkpoint 7: approvedDict Matching Integration
+     (Resolver Sidecar -> Existing Tag Pipeline)
+
+     Source of Truth for formal dictionary term resolution is exclusively
+     PrivateDictionaryResolverCore.resolveDictionaryTerms() (Checkpoint 6,
+     unmodified production file, loaded as a plain browser script above).
+     This matching tool never re-scans dictionary_payload, never
+     re-derives effective_vocabulary, and never re-implements
+     canonical/alias winner or conflict semantics - it only (1) extracts
+     whole-value terms from the same tagSourceFields(schemaName) boundary
+     already used for ad hoc dict/code tagging, (2) calls the Resolver in
+     <=50000-term chunks, and (3) converts the returned Resolution
+     Annotation batch into _tagInfo.approvedDict tags. Snapshot Activation
+     Record / project configuration / latest-Snapshot selection are NOT
+     implemented here - only an explicit, session-local, in-memory
+     Snapshot pin (never persisted to localStorage/sessionStorage/
+     IndexedDB, never auto-selected).
+     ═══════════════════════════════════════════ */
+
+  const APPROVED_DICT_RESOLUTION_INPUT_SCHEMA_VERSION = 'private-dictionary-resolution-input/0.1';
+  const APPROVED_DICT_RESOLUTION_BATCH_SCHEMA_VERSION = 'private-dictionary-resolution-batch/0.1';
+  const APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION = 'private-dictionary-row-resolution-sidecar/0.1';
+  const APPROVED_DICT_MAX_RESOLUTION_TERMS = 50000;
+  const APPROVED_DICT_MAX_TERM_LENGTH = 256;
+  const APPROVED_DICT_BINDING_FIELDS = ['snapshot_id', 'snapshot_version', 'wrapper_integrity_sha256', 'dictionary_payload_sha256', 'dictionary_id', 'dictionary_version', 'scope'];
+
+  let approvedDictionaryRuntime = { revision:0, active:false, snapshotWrapper:null, snapshotBinding:null, lastErrorCode:null };
+
+  function approvedDictResolverCore() {
+    const core = globalThis.PrivateDictionaryResolverCore;
+    if (!core || typeof core.resolveDictionaryTerms !== 'function') return null;
+    return core;
+  }
+
+  // Never copies message/stack/cause/raw term into UI-visible state - only a
+  // known, sanitized code string ever leaves this function.
+  function approvedDictSanitizeErrorCode(err) {
+    if (err && typeof err === 'object' && typeof err.code === 'string' && err.code) return err.code;
+    return 'APPROVED_DICT_RESOLUTION_FAILED';
+  }
+
+  function approvedDictBindingsEqual(a, b) {
+    if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+    return APPROVED_DICT_BINDING_FIELDS.every(field => a[field] === b[field]);
+  }
+
+  function clearApprovedDictRowSidecars(rows) {
+    (rows || []).forEach(row => {
+      if (row && typeof row === 'object') setHiddenRowProp(row, '_approvedDictResolution', undefined);
+    });
+  }
+
+  async function setApprovedDictionarySnapshotForMatching(snapshotWrapper) {
+    const core = approvedDictResolverCore();
+    if (!core) {
+      approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:false, snapshotWrapper:null, snapshotBinding:null, lastErrorCode:'APPROVED_DICT_RESOLVER_UNAVAILABLE' };
+    } else {
+      try {
+        // §10: Snapshot pin validation goes through the Resolver's own
+        // Loader-backed validation (terms:[]) - this tool never calls
+        // PrivateDictionarySnapshotCore directly.
+        const result = await core.resolveDictionaryTerms({ schema_version: APPROVED_DICT_RESOLUTION_INPUT_SCHEMA_VERSION, snapshot_wrapper: snapshotWrapper, terms: [] });
+        approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:true, snapshotWrapper, snapshotBinding: result.snapshot_binding, lastErrorCode:null };
+      } catch (err) {
+        approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:false, snapshotWrapper:null, snapshotBinding:null, lastErrorCode: approvedDictSanitizeErrorCode(err) };
+      }
+    }
+    markTraceTagsDirty('正式辞書Snapshotの設定が変更されました');
+    tagIndexCache = null;
+    if (mergedResult?.sysList && mergedResult?.plmList) markTraceMatrixStale('正式辞書Snapshotの設定が変更されました。再照合してください。');
+    return approvedDictionaryMatchingStatus();
+  }
+
+  function clearApprovedDictionarySnapshotForMatching() {
+    approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:false, snapshotWrapper:null, snapshotBinding:null, lastErrorCode:null };
+    clearApprovedDictRowSidecars(mergedResult?.sysList || []);
+    clearApprovedDictRowSidecars(mergedResult?.plmList || []);
+    markTraceTagsDirty('正式辞書Snapshotが解除されました');
+    tagIndexCache = null;
+    if (mergedResult?.sysList && mergedResult?.plmList) markTraceMatrixStale('正式辞書Snapshotが解除されました。再照合してください。');
+    return approvedDictionaryMatchingStatus();
+  }
+
+  function approvedDictionaryMatchingStatus() {
+    // Never returns the raw Snapshot wrapper or any other internal state -
+    // only the already-sanitized snapshot_binding metadata / status codes.
+    return Object.freeze({
+      active: approvedDictionaryRuntime.active,
+      snapshotBinding: approvedDictionaryRuntime.snapshotBinding,
+      lastErrorCode: approvedDictionaryRuntime.lastErrorCode,
+      revision: approvedDictionaryRuntime.revision
+    });
+  }
+
+  if (!globalThis.PrivateDictionaryMatchingSession) {
+    globalThis.PrivateDictionaryMatchingSession = Object.freeze({
+      setSnapshot: setApprovedDictionarySnapshotForMatching,
+      clearSnapshot: clearApprovedDictionarySnapshotForMatching,
+      getStatus: approvedDictionaryMatchingStatus
+    });
+  }
+
+  // ---- §13 whole-value term extraction. Source-of-truth field boundary is
+  // exactly tagSourceFields(schemaName) - never availableJsonKeys()/全field/
+  // hidden field. No delimiter split, no truncation (overlength values are
+  // skipped, never cut to fit, so whole-value exact semantics are never
+  // silently broken). ----
+
+  function approvedDictionaryTermsForRow(row, schemaName) {
+    const terms = [];
+    let skipped = 0;
+    const considerScalar = value => {
+      if (value == null || typeof value === 'object') return;
+      const term = String(value);
+      if (!term.trim() || term.length > APPROVED_DICT_MAX_TERM_LENGTH) { skipped++; return; }
+      terms.push(term);
+    };
+    tagSourceFields(schemaName).forEach(field => {
+      const value = row?.[field];
+      if (value == null) return;
+      if (Array.isArray(value)) {
+        value.forEach(element => {
+          if (element == null) return;
+          if (typeof element === 'object') { skipped++; return; }
+          considerScalar(element);
+        });
+      } else if (typeof value !== 'object') {
+        considerScalar(value);
+      }
+      // object (non-array) field values are entirely out of scope - never
+      // JSON.stringify()'d into a term.
+    });
+    return { terms, skipped };
+  }
+
+  // §16: at most 50000 terms per Resolver call. An empty term list still
+  // produces exactly one (empty) chunk, so the §18 no-term validation call
+  // (confirming the pinned Snapshot is still valid/binding-consistent even
+  // when zero eligible terms exist) always happens.
+  function approvedDictionaryChunkTerms(termEntries, maxChunk = APPROVED_DICT_MAX_RESOLUTION_TERMS) {
+    if (!termEntries.length) return [[]];
+    const chunks = [];
+    for (let i = 0; i < termEntries.length; i += maxChunk) chunks.push(termEntries.slice(i, i + maxChunk));
+    return chunks;
+  }
+
+  // §17: resolves ALL term entries in <=50000-term chunks, validating each
+  // chunk's shape and Snapshot binding against the session-pinned binding
+  // before accepting it. Throws a sanitized {code} object on ANY failure -
+  // never returns/commits a partial result (term order == annotation order,
+  // 1:1, duplicates resolved independently - no dedupe).
+  async function resolveApprovedDictionaryTermEntries(termEntries, expectedBinding) {
+    const core = approvedDictResolverCore();
+    if (!core) { const e = new Error('resolver unavailable'); e.code = 'APPROVED_DICT_RESOLVER_UNAVAILABLE'; throw e; }
+    const resolved = [];
+    for (const chunk of approvedDictionaryChunkTerms(termEntries)) {
+      let result;
+      try {
+        result = await core.resolveDictionaryTerms({
+          schema_version: APPROVED_DICT_RESOLUTION_INPUT_SCHEMA_VERSION,
+          snapshot_wrapper: approvedDictionaryRuntime.snapshotWrapper,
+          terms: chunk.map(entry => entry.term)
+        });
+      } catch (err) {
+        const e = new Error('resolver call failed'); e.code = approvedDictSanitizeErrorCode(err); throw e;
+      }
+      if (!result || typeof result !== 'object'
+        || result.schema_version !== APPROVED_DICT_RESOLUTION_BATCH_SCHEMA_VERSION
+        || !Array.isArray(result.annotations)
+        || result.annotations.length !== chunk.length) {
+        const e = new Error('malformed resolver result'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e;
+      }
+      if (!approvedDictBindingsEqual(result.snapshot_binding, expectedBinding)) {
+        const e = new Error('binding mismatch'); e.code = 'APPROVED_DICT_BINDING_MISMATCH'; throw e;
+      }
+      for (let i = 0; i < chunk.length; i++) resolved.push({ ...chunk[i], annotation: result.annotations[i] });
+    }
+    return resolved;
+  }
+
+  // §19/§20/§21/§22: top-level orchestrator. Runs baseline-tagged rows
+  // (explicit/dict/code/manualAdd/manualRemove already committed by
+  // annotateTraceTags()) through the pinned approved Dictionary Snapshot,
+  // and atomically commits _tagInfo.approvedDict + _tags + _tagDisplayMap +
+  // the read-only _approvedDictResolution sidecar for every row - or
+  // commits nothing at all on any failure/session change (fail-closed, no
+  // partial application). UNKNOWN_TERM/DICTIONARY_CONFLICT annotations are
+  // never turned into tags but ARE kept in the row sidecar as-is (never
+  // re-decided by this tool).
+  async function applyApprovedDictionaryTags(sysRows, plmRows) {
+    clearApprovedDictRowSidecars(sysRows);
+    clearApprovedDictRowSidecars(plmRows);
+    const resultStats = { exact:0, alias:0, unknown:0, conflict:0, skippedValues:0, tagInstances:0 };
+    if (!approvedDictionaryRuntime.active) {
+      traceTagState.approvedDictWarningCode = approvedDictionaryRuntime.lastErrorCode;
+      return resultStats;
+    }
+
+    const revisionAtStart = approvedDictionaryRuntime.revision;
+    const rowsBySide = { sys: sysRows || [], plm: plmRows || [] };
+    const termEntries = [];
+    const rowTermIndices = new Map(); // "side:rowIndex" -> indices into termEntries
+    Object.entries(rowsBySide).forEach(([side, rows]) => {
+      rows.forEach((row, rowIndex) => {
+        if (!row || typeof row !== 'object') return;
+        const { terms, skipped } = approvedDictionaryTermsForRow(row, side);
+        resultStats.skippedValues += skipped;
+        if (!terms.length) return;
+        const indices = terms.map(term => { termEntries.push({ side, rowIndex, term }); return termEntries.length - 1; });
+        rowTermIndices.set(`${side}:${rowIndex}`, indices);
+      });
+    });
+
+    let resolvedEntries;
+    try {
+      resolvedEntries = await resolveApprovedDictionaryTermEntries(termEntries, approvedDictionaryRuntime.snapshotBinding);
+    } catch (err) {
+      traceTagState.approvedDictWarningCode = approvedDictSanitizeErrorCode(err);
+      return resultStats;
+    }
+
+    // §19/§45: discard the entire pending result if the session-local
+    // Snapshot pin changed while this (possibly long-running, chunked)
+    // resolution was in flight. No partial/mixed-snapshot commit.
+    if (approvedDictionaryRuntime.revision !== revisionAtStart) {
+      traceTagState.approvedDictWarningCode = 'APPROVED_DICT_SESSION_CHANGED';
+      return resultStats;
+    }
+
+    traceTagState.approvedDictWarningCode = null;
+    rowTermIndices.forEach((indices, key) => {
+      const sepIndex = key.indexOf(':');
+      const side = key.slice(0, sepIndex);
+      const rowIndex = Number(key.slice(sepIndex + 1));
+      const row = rowsBySide[side]?.[rowIndex];
+      if (!row) return;
+      const rowAnnotations = indices.map(i => resolvedEntries[i].annotation);
+      const approvedTags = [];
+      const approvedDisplays = {};
+      rowAnnotations.forEach(a => {
+        if (a.resolution_type === 'EXACT_CANONICAL' || a.resolution_type === 'APPROVED_ALIAS') {
+          resultStats[a.resolution_type === 'EXACT_CANONICAL' ? 'exact' : 'alias']++;
+          // §20: always the Resolver's resolved_canonical - never
+          // dictionary_entry_id, never original_term, never alias display.
+          const tag = normalizeTagValue(a.resolved_canonical);
+          if (tag) { approvedTags.push(tag); approvedDisplays[tag] = normalizeTagDisplayValue(a.resolved_canonical); }
+        } else if (a.resolution_type === 'UNKNOWN_TERM') {
+          resultStats.unknown++;
+        } else if (a.resolution_type === 'DICTIONARY_CONFLICT') {
+          resultStats.conflict++;
+        }
+      });
+      const info = row._tagInfo && typeof row._tagInfo === 'object' ? row._tagInfo : { explicit:[], approvedDict:[], dict:[], code:[], manualAdd:[], manualRemove:[] };
+      info.approvedDict = uniqueNormalizedTags(approvedTags);
+      resultStats.tagInstances += info.approvedDict.length;
+      setHiddenRowProp(row, '_tagInfo', info);
+      setHiddenRowProp(row, '_tags', composeFinalTags(info));
+      const rawCodes = extractCodesFromText(tagSourceText(row, side));
+      setHiddenRowProp(row, '_tagDisplayMap', buildTagDisplayMap(row, info, row._tagDisplayMap, rawCodes, side, approvedDisplays));
+      setHiddenRowProp(row, '_approvedDictResolution', Object.freeze({
+        schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
+        snapshot_binding: approvedDictionaryRuntime.snapshotBinding,
+        annotations: Object.freeze(rowAnnotations.slice())
+      }));
+    });
+    return resultStats;
+  }
 
   function resetFieldAnalysisCache() {
     fieldAnalysisCache = { sys:{ keys:null, stats:new Map(), chosen:new Map() }, plm:{ keys:null, stats:new Map(), chosen:new Map() } };
@@ -4338,6 +4618,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     const ordered = [
       ...uniqueNormalizedTags(info?.manualAdd || []),
       ...uniqueNormalizedTags(info?.explicit || []),
+      ...uniqueNormalizedTags(info?.approvedDict || []),
       ...uniqueNormalizedTags(info?.dict || []),
       ...uniqueNormalizedTags(info?.code || [])
     ];
@@ -4352,7 +4633,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     return out;
   }
 
-  function buildTagDisplayMap(row, info, priorMap = null, rawCodes = null, schemaName = 'sys') {
+  function buildTagDisplayMap(row, info, priorMap = null, rawCodes = null, schemaName = 'sys', approvedDictDisplays = null) {
     const map = priorMap && typeof priorMap === 'object' ? { ...priorMap } : {};
     const add = value => {
       const display = normalizeTagDisplayValue(value);
@@ -4360,6 +4641,16 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       if (key && display && !map[key]) map[key] = display;
     };
     explicitRawTagsFromRow(row).forEach(add);
+    // P2-A4 Checkpoint 7 (§26): approvedDict display Source of Truth is
+    // exclusively Resolver annotation.resolved_canonical (never a
+    // re-scanned effective_vocabulary - that would make this tool a second
+    // Resolver). Positioned right after explicit so the existing
+    // first-win priority (explicit > approvedDict > ad hoc dict > code >
+    // manual) is preserved.
+    (info?.approvedDict || []).forEach(tag => {
+      const display = approvedDictDisplays && approvedDictDisplays[tag];
+      if (display) add(display);
+    });
     Object.keys(matchLogic.synonymMap || {}).forEach(base => {
       const key = normalizeTagValue(base);
       if ((info?.dict || []).includes(key)) add(base);
@@ -4406,6 +4697,10 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     const ownIdentifiers = identifierTagsForRow(row, schemaName, idx);
     const info = {
       explicit: explicitTagsFromRow(row),
+      // P2-A4 Checkpoint 7: baseline placeholder only - populated by the
+      // separate applyApprovedDictionaryTags() pass (Resolver Source of
+      // Truth), never by this synchronous per-row baseline builder.
+      approvedDict: [],
       dict: synonymBaseTagsForText(text),
       // 行の安定IDだけでなく、ID/コード系フィールドの全値を自行識別子としてタグ照合から除外する。
       // 通常のcodeキーペア照合には影響させない。
@@ -4424,8 +4719,9 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       list.forEach(row => {
         if (!row || typeof row !== 'object') return;
         setHiddenRowProp(row, '_tags', []);
-        setHiddenRowProp(row, '_tagInfo', { explicit:[], dict:[], code:[], manualAdd:[], manualRemove:[] });
+        setHiddenRowProp(row, '_tagInfo', { explicit:[], approvedDict:[], dict:[], code:[], manualAdd:[], manualRemove:[] });
         setHiddenRowProp(row, '_tagDisplayMap', {});
+        setHiddenRowProp(row, '_approvedDictResolution', undefined);
       });
       return { rows:list.length, tagged:0, explicit:0, dict:0, code:0, manual:0 };
     }
@@ -4462,7 +4758,9 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     const rows = Array.isArray(plmRows) ? plmRows : [];
     const df = new Map();
     rows.forEach(row => {
-      const tags = new Set(uniqueNormalizedTags(row?._tagInfo?.dict || []));
+      // P2-A4 Checkpoint 7 (§31): dictionary-source-only high frequency now
+      // means dict OR approvedDict (union), never approvedDict alone.
+      const tags = new Set([...uniqueNormalizedTags(row?._tagInfo?.dict || []), ...uniqueNormalizedTags(row?._tagInfo?.approvedDict || [])]);
       tags.forEach(tag => df.set(tag, (df.get(tag) || 0) + 1));
     });
     const ratio = normalizeTagSettings().highFrequencyRatio;
@@ -4476,11 +4774,23 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     const a = await annotateTraceTags(sysRows || [], 'sys', job, 0, total);
     const b = await annotateTraceTags(plmRows || [], 'plm', job, sysRows?.length || 0, total);
     assertMatchingNotCancelled(job);
+    // P2-A4 Checkpoint 7: approvedDict resolution runs AFTER baseline
+    // explicit/dict/code/manual tagging has committed to every row, and
+    // BEFORE high-frequency computation (which must see the union of
+    // dict/approvedDict). Atomic - either all rows get approvedDict tags,
+    // or none do (see applyApprovedDictionaryTags()).
+    const approvedDictStats = await applyApprovedDictionaryTags(sysRows || [], plmRows || []);
     traceTagState.highFrequencyTags = computeHighFrequencyDictionaryTags(plmRows || []);
     traceTagState.stats = {
       aRows:a.rows, bRows:b.rows, aTagged:a.tagged, bTagged:b.tagged,
       codeTags:a.code+b.code, dictTags:a.dict+b.dict, explicitTags:a.explicit+b.explicit, manualTags:a.manual+b.manual,
+      approvedDictTags: approvedDictStats.tagInstances,
       aEffectiveTagged:0, bEffectiveTagged:0, highFrequencyExcludedRatio:0
+    };
+    traceTagState.approvedDictResolutionStats = {
+      exact: approvedDictStats.exact, alias: approvedDictStats.alias,
+      unknown: approvedDictStats.unknown, conflict: approvedDictStats.conflict,
+      skippedValues: approvedDictStats.skippedValues
     };
     traceTagState.annotationMs = perfNow() - start;
     traceTagState.generatedAt = new Date().toISOString();
@@ -4506,7 +4816,8 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     (rows || []).forEach(row => {
       if (!row || typeof row !== 'object') return;
       setHiddenRowProp(row, '_tags', []);
-      setHiddenRowProp(row, '_tagInfo', { explicit:[], dict:[], code:[], manualAdd:[], manualRemove:[] });
+      setHiddenRowProp(row, '_tagInfo', { explicit:[], approvedDict:[], dict:[], code:[], manualAdd:[], manualRemove:[] });
+      setHiddenRowProp(row, '_approvedDictResolution', undefined);
     });
   }
 
@@ -5400,7 +5711,11 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   function tagIsDictOnlyHighFrequency(row, tag, index) {
     if (!index?.ignoredForPruning?.has(tag)) return false;
     const sources = tagSourceSetForRow(row, tag);
-    return sources.has('dict') && !sources.has('explicit') && !sources.has('manual') && !sources.has('code');
+    // P2-A4 Checkpoint 7 (§29): dictionary-source-only high frequency now
+    // means (dict OR approvedDict), never approvedDict alone and never
+    // excluding it - a tag shared with explicit/manual/code is still never
+    // pruned.
+    return (sources.has('dict') || sources.has('approvedDict')) && !sources.has('explicit') && !sources.has('manual') && !sources.has('code');
   }
 
   function effectiveNonCodeTagSet(row, index) {
@@ -5430,8 +5745,10 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     const sourceByTagRow = new Map();
     const documentFrequency = new Map();
     rows.forEach(row => {
-      new Set(uniqueNormalizedTags(row?._tagInfo?.dict || [])).forEach(tag =>
-        documentFrequency.set(tag, (documentFrequency.get(tag) || 0) + 1));
+      // P2-A4 Checkpoint 7 (§30): union(dict, approvedDict) per row via
+      // Set, so a tag present in both counts once per row.
+      const tags = new Set([...uniqueNormalizedTags(row?._tagInfo?.dict || []), ...uniqueNormalizedTags(row?._tagInfo?.approvedDict || [])]);
+      tags.forEach(tag => documentFrequency.set(tag, (documentFrequency.get(tag) || 0) + 1));
     });
     const threshold = Math.max(1, Math.ceil(rows.length * settings.highFrequencyRatio));
     const ignoredForPruning = new Set([...documentFrequency.entries()].filter(([, count]) => count >= threshold).map(([tag]) => tag));
@@ -5441,7 +5758,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         const sources = tagSourceSetForRow(row, tag);
         if (!sourceByTagRow.has(tag)) sourceByTagRow.set(tag, new Map());
         sourceByTagRow.get(tag).set(rowIndex, sources);
-        const dictOnlyHigh = ignoredForPruning.has(tag) && sources.has('dict') && !sources.has('explicit') && !sources.has('manual') && !sources.has('code');
+        const dictOnlyHigh = ignoredForPruning.has(tag) && (sources.has('dict') || sources.has('approvedDict')) && !sources.has('explicit') && !sources.has('manual') && !sources.has('code');
         if (dictOnlyHigh) return;
         if (!rowsByTag.has(tag)) rowsByTag.set(tag, []);
         rowsByTag.get(tag).push(rowIndex);
@@ -5501,10 +5818,18 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     const aEffective = a.filter(row => effectiveNonCodeTagSet(row, index).size > 0).length;
     const bEffective = b.filter(row => effectiveNonCodeTagSet(row, index).size > 0).length;
     let dictTotal = 0, highTotal = 0;
-    [...a, ...b].forEach(row => uniqueNormalizedTags(row?._tagInfo?.dict || []).forEach(tag => {
-      dictTotal++;
-      if (index.ignoredForPruning.has(tag)) highTotal++;
-    }));
+    // P2-A4 Checkpoint 7 (§35): dictionary-derived tag occurrence is
+    // union(dict, approvedDict); a tag present in both is counted once per
+    // row via Set. With no Snapshot pinned, row._tagInfo.approvedDict is
+    // always [], so this is bit-for-bit identical to the fixed-start
+    // behavior.
+    [...a, ...b].forEach(row => {
+      const tags = new Set([...uniqueNormalizedTags(row?._tagInfo?.dict || []), ...uniqueNormalizedTags(row?._tagInfo?.approvedDict || [])]);
+      tags.forEach(tag => {
+        dictTotal++;
+        if (index.ignoredForPruning.has(tag)) highTotal++;
+      });
+    });
     return {
       aEffectiveTagged:aEffective, bEffectiveTagged:bEffective,
       aEffectiveRate:a.length ? aEffective/a.length : 0,
@@ -5513,13 +5838,29 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     };
   }
 
+  // P2-A4 Checkpoint 7 (§36): formal dictionary status line. Never displays
+  // raw private term content (unknown/conflict term lists) - only counts,
+  // snapshot_id/version, and a safe status code.
+  function approvedDictionaryStatusHtml() {
+    const status = approvedDictionaryMatchingStatus();
+    if (!status.active) {
+      const code = status.lastErrorCode;
+      return `<li>正式辞書(approvedDict): <strong>${code ? '無効/フォールバック' : '未設定'}</strong>${code ? ` (${escapeHtml(code)})` : ''}</li>`;
+    }
+    const b = status.snapshotBinding || {};
+    const rs = traceTagState.approvedDictResolutionStats || { exact:0, alias:0, unknown:0, conflict:0 };
+    const warn = traceTagState.approvedDictWarningCode ? ` / <strong>警告: ${escapeHtml(traceTagState.approvedDictWarningCode)}</strong>` : '';
+    return `<li>正式辞書(approvedDict): <strong>有効</strong> / snapshot <strong>${escapeHtml(b.snapshot_id || '')}</strong> v<strong>${escapeHtml(String(b.snapshot_version ?? ''))}</strong> / タグ数 <strong>${traceTagState.stats?.approvedDictTags || 0}</strong> / exact <strong>${rs.exact||0}</strong> / alias <strong>${rs.alias||0}</strong> / unknown <strong>${rs.unknown||0}</strong> / conflict <strong>${rs.conflict||0}</strong>${warn}</li>`;
+  }
+
   function tagMatchSummaryHtml() {
     const s = normalizeTagSettings();
     const st = traceTagState.stats || {};
     const ms = traceTagState.matchStats || {};
     const pct = v => `${Math.round((Number(v)||0)*1000)/10}%`;
     return `<li>タグ照合: <strong>${s.useForMatching ? 'ON' : 'OFF'}</strong> / 辞書タグ供給元: <strong>${escapeHtml(dictionaryTagSourceSummary())}</strong> / 低頻度有効タグカバー A <strong>${st.aEffectiveTagged||0}/${st.aRows||0}</strong>・B <strong>${st.bEffectiveTagged||0}/${st.bRows||0}</strong> / 高頻度除外率 <strong>${pct(st.highFrequencyExcludedRatio)}</strong></li>` +
-      `<li>タグ候補 <strong>${ms.tagCandidates||0}</strong> / code候補 <strong>${ms.codeCandidates||0}</strong> / fuzzy候補 <strong>${ms.fuzzyCandidates||0}</strong> / fuzzy省略 <strong>${ms.fuzzySkipped||0}</strong> / 候補削減率 <strong>${pct(ms.candidateReductionRate)}</strong></li>`;
+      `<li>タグ候補 <strong>${ms.tagCandidates||0}</strong> / code候補 <strong>${ms.codeCandidates||0}</strong> / fuzzy候補 <strong>${ms.fuzzyCandidates||0}</strong> / fuzzy省略 <strong>${ms.fuzzySkipped||0}</strong> / 候補削減率 <strong>${pct(ms.candidateReductionRate)}</strong></li>` +
+      approvedDictionaryStatusHtml();
   }
 
   function buildCandidateIndex(plmList) {
@@ -5901,7 +6242,8 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         traceTagState.highFrequencyTags = new Set();
         traceTagState.dirty = false;
         traceTagState.generatedAt = null;
-        traceTagState.stats = { aRows:mergedResult?.sysList?.length||0, bRows:mergedResult?.plmList?.length||0, aTagged:0, bTagged:0, codeTags:0, dictTags:0, explicitTags:0, manualTags:0, aEffectiveTagged:0, bEffectiveTagged:0, highFrequencyExcludedRatio:0 };
+        traceTagState.stats = { aRows:mergedResult?.sysList?.length||0, bRows:mergedResult?.plmList?.length||0, aTagged:0, bTagged:0, codeTags:0, dictTags:0, explicitTags:0, manualTags:0, approvedDictTags:0, aEffectiveTagged:0, bEffectiveTagged:0, highFrequencyExcludedRatio:0 };
+        traceTagState.approvedDictResolutionStats = { exact:0, alias:0, unknown:0, conflict:0, skippedValues:0 };
         renderAnnotationTable({ reset:true });
       } else if (needsReannotation || !traceTagState.generatedAt) {
         markTraceTagsDirty('タグ設定が変更されました');
@@ -5920,10 +6262,12 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     const out = [];
     const pushRows = (rows, schemaName) => (rows || []).forEach((row, idx) => {
       const tags = uniqueNormalizedTags(row?._tags || []);
-      const info = row?._tagInfo || { explicit:[], dict:[], code:[], manualAdd:[], manualRemove:[] };
+      const info = row?._tagInfo || { explicit:[], approvedDict:[], dict:[], code:[], manualAdd:[], manualRemove:[] };
       const id = annotationRowId(row, schemaName, idx);
       const name = annotationDisplayName(row, schemaName, idx);
-      const hasHigh = uniqueNormalizedTags(info.dict || []).some(t => traceTagState.highFrequencyTags.has(t));
+      // P2-A4 Checkpoint 7 (§32): high-frequency judgement is the union of
+      // dict and approvedDict.
+      const hasHigh = [...uniqueNormalizedTags(info.dict || []), ...uniqueNormalizedTags(info.approvedDict || [])].some(t => traceTagState.highFrequencyTags.has(t));
       const hasManual = (info.manualAdd || []).length > 0 || (info.manualRemove || []).length > 0;
       const hay = normalizeForMatch([id, name, ...tags, ...(info.manualRemove || [])].join(' '));
       if (q && !hay.includes(q)) return;
@@ -5941,6 +6285,9 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     const sources = [];
     if ((info.manualAdd || []).includes(tag)) sources.push('manual');
     if ((info.explicit || []).includes(tag)) sources.push('explicit');
+    // P2-A4 Checkpoint 7 (§28): approvedDict is an independent source,
+    // distinguishable from ad hoc dict in annotation/evidence.
+    if ((info.approvedDict || []).includes(tag)) sources.push('approvedDict');
     if ((info.dict || []).includes(tag)) sources.push('dict');
     if ((info.code || []).includes(tag)) sources.push('code');
     return sources;
@@ -5949,7 +6296,9 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   function annotationTagHtml(item, tag) {
     const sources = tagSourcesFor(item.info, tag);
     const primary = sources[0] || 'dict';
-    const high = sources.includes('dict') && traceTagState.highFrequencyTags.has(tag);
+    // P2-A4 Checkpoint 7 (§33): high-frequency display corresponds to a
+    // dict- OR approvedDict-derived tag (union), matching tagIsDictOnlyHighFrequency().
+    const high = (sources.includes('dict') || sources.includes('approvedDict')) && traceTagState.highFrequencyTags.has(tag);
     const display = tagDisplayForRow(item.row, tag);
     const title = `${display} (${tag}) / ${sources.join(', ') || 'unknown'}${high ? ' / 高頻度' : ''}`;
     return `<span class="annotation-tag ${primary}${high ? ' high' : ''}" title="${escapeHtml(title)}">${escapeHtml(display)}<button type="button" data-ann-action="remove" data-side="${item.schemaName}" data-index="${item.idx}" data-tag="${escapeHtml(tag)}" aria-label="タグを除外">×</button></span>`;
@@ -5999,7 +6348,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     const rows = schemaName === 'sys' ? mergedResult?.sysList : mergedResult?.plmList;
     const row = rows?.[idx];
     if (!row) return;
-    const info = row._tagInfo || { explicit:[], dict:[], code:[], manualAdd:[], manualRemove:[] };
+    const info = row._tagInfo || { explicit:[], approvedDict:[], dict:[], code:[], manualAdd:[], manualRemove:[] };
     info.manualAdd = uniqueNormalizedTags(info.manualAdd || []);
     info.manualRemove = uniqueNormalizedTags(info.manualRemove || []);
     setHiddenRowProp(row, '_tagInfo', info);
@@ -6017,7 +6366,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     return (rows || []).map(row => ({
       ...row,
       _tags: [...(row?._tags || [])],
-      _tagInfo: JSON.parse(JSON.stringify(row?._tagInfo || { explicit:[], dict:[], code:[], manualAdd:[], manualRemove:[] })),
+      _tagInfo: JSON.parse(JSON.stringify(row?._tagInfo || { explicit:[], approvedDict:[], dict:[], code:[], manualAdd:[], manualRemove:[] })),
       _tagDisplayMap: JSON.parse(JSON.stringify(row?._tagDisplayMap || {}))
     }));
   }
@@ -6050,7 +6399,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     const rows = schemaName === 'sys' ? mergedResult?.sysList : mergedResult?.plmList;
     const row = rows?.[idx];
     if (!row) return;
-    const info = row._tagInfo || { explicit:[], dict:[], code:[], manualAdd:[], manualRemove:[] };
+    const info = row._tagInfo || { explicit:[], approvedDict:[], dict:[], code:[], manualAdd:[], manualRemove:[] };
     if (action === 'add') {
       const raw = prompt('追加するタグを入力してください。複数の場合はカンマ区切りです。');
       if (raw == null) return;
@@ -6066,7 +6415,10 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       info.manualAdd = uniqueNormalizedTags([...(info.manualAdd || []), ...add]);
     } else if (action === 'remove') {
       const tag = normalizeTagValue(btn.dataset.tag || '');
-      if ((info.manualAdd || []).includes(tag) && ![...(info.explicit || []), ...(info.dict || []), ...(info.code || [])].includes(tag)) {
+      // P2-A4 Checkpoint 7: an approvedDict-sourced tag counts as a
+      // baseline source here too, so removing it correctly blacklists it
+      // via manualRemove instead of merely un-adding a manualAdd entry.
+      if ((info.manualAdd || []).includes(tag) && ![...(info.explicit || []), ...(info.approvedDict || []), ...(info.dict || []), ...(info.code || [])].includes(tag)) {
         info.manualAdd = uniqueNormalizedTags(info.manualAdd || []).filter(t => t !== tag);
       } else {
         info.manualAdd = uniqueNormalizedTags(info.manualAdd || []).filter(t => t !== tag);
