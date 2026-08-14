@@ -2821,3 +2821,198 @@ error code一覧（新規codeは追加せず、既存`APPROVED_DICT_PROJECT_PIN_
 再利用）・`clearSnapshot()`契約・Activation Record非依存の原則・no-latest原則・
 persistence境界・`setSnapshot()`の公開契約は、いずれも一切変更しない。R1は
 commit-instant race guardの追加のみに限定される。
+
+---
+
+## S27. Checkpoint 11: Project Snapshot Pin Persistence Artifact / Storage-Neutral Codec
+
+S25で確定した`private-dictionary-project-snapshot-pin/0.1`を、プロセス終了後も
+安全に持ち越せるstorage-neutral artifact boundaryとして固定する。対象は新規
+pure core 1本（`tools/knowledge_builder/core/private_dictionary_project_snapshot_pin_persistence_core.js`）
+のみ。既存core・Checkpoint 10 matching tool HTMLはいずれも変更しない。
+
+### S27.1 責務分離
+
+```text
+formal Project Snapshot Pin semantics（Checkpoint 9、無変更）
+        ↕ 別責務
+storage technology（未実装、後続Checkpoint）
+        ↕ 別責務
+Checkpoint 11: canonical serialization / strict parsing / structural
+               validation / formal Pinへのrebinding / tamper detection
+```
+
+Checkpoint 11 pure coreが行うのはcanonical serialization・strict load・
+structural validation・formal Pinとのbinding再検証・tamper detection・
+fresh/frozen出力のみ。filesystem/localStorage/sessionStorage/IndexedDB/
+network/GitHub/database/browser download/OS path/自動起動時loadは一切
+実装しない（S26.9と同じ境界をPersistence artifactにも適用）。
+
+### S27.2 Persistence Artifact 0.1 schema
+
+schema: `private-dictionary-project-snapshot-pin-persistence/0.1`
+
+```json
+{
+  "artifact_schema_version": "private-dictionary-project-snapshot-pin-persistence/0.1",
+  "project_pin": {
+    "schema_version": "private-dictionary-project-snapshot-pin/0.1",
+    "project_id": "<caller supplied opaque non-empty identifier, ≤200文字>",
+    "snapshot_binding": {
+      "snapshot_id": "dsnap-<hex32>",
+      "snapshot_version": 1,
+      "wrapper_integrity_sha256": "<hex64>",
+      "dictionary_payload_sha256": "<hex64>",
+      "dictionary_id": "pdict-<hex32>",
+      "dictionary_version": "<decimal string>",
+      "scope": "PROJECT"
+    }
+  }
+}
+```
+
+Project Snapshot Pin（S25.3）をそのままthin envelopeへ包むのみで、独自形式への
+変形・追加metadataは一切持たない。`dictionary_payload`・`effective_vocabulary`・
+`entries`等のSnapshot本文、およびSnapshot Wrapperそのものは絶対に含めない
+（S27.9）。
+
+### S27.3 Public API
+
+```js
+async function serializeProjectSnapshotPin({ project_pin, snapshot_wrapper })
+// -> string（canonical JSON、決定論的）
+
+async function loadProjectSnapshotPin({ serialized, snapshot_wrapper })
+// -> private-dictionary-project-snapshot-pin/0.1 formal Pin（fresh・frozen）
+```
+
+公開APIはこの2関数のみ。中間・専用のPersistence専用object型はruntimeへ渡さない
+（S27.8）。
+
+### S27.4 Canonicalization（決定論的serialization）
+
+新規canonical JSON実装は行わない。既存`KnowledgeIdHashUtils.canonicalJson()`
+（`tools/quantity_sidecar_binding_core.js`のkey-sort再帰実装、Promotion/Snapshot/
+Adapter/Activation各coreが自身のidentity計算に既に使っている共通primitive）を
+そのまま再利用する。これにより、同一Pinのserializeは常にbyte-for-byte同一
+出力になり、property insertion順序が異なる論理的に等価な入力からも同一output
+が得られる（`canonicalJson`が`Object.keys().sort()`で再帰的にkeyをordinal順
+整列するため）。
+
+### S27.5 Strict parsing / duplicate-key policy
+
+`JSON.parse()`は`{"a":1,"a":2}`のようなduplicate keyを黙って後勝ちで受理して
+しまうため、load境界のstrict/reproducible性を担保できない。指示§18の選択肢A
+（duplicate keyを検出できるstrict parser）を採用する。
+
+本artifactのgrammarは小さく（最大3階層のplain object、array・巨大な自由形式
+文字列を含まない）、汎用JSON5/コメント/trailing comma対応の大規模parserは
+不要なため、**標準JSON grammarのみを受理する専用recursive-descent parser**
+（`strictJsonParseForPersistenceArtifact()`）をこのcore内に独立実装する。
+
+- objectの各key出現をobjectごとに独立した`Set`で追跡し、同一object内で
+  同じkeyが2回出現した時点でreject（`PROJECT_PIN_PERSISTENCE_SERIALIZED_INVALID`）。
+  ネストしたobject間（例: `project_pin`と`snapshot_binding`）では互いに
+  独立してkey追跡するため、異なる階層で同名keyが出現しても誤検出しない。
+- 受理するのは標準JSON grammar（object/string/number/true/false/null。
+  array parsingもgrammar完全性のため実装するが、本artifactの正常な内容には
+  一切出現しない）のみ。comment・trailing comma・`NaN`/`Infinity`/`undefined`/
+  BigInt・単一引用符文字列はいずれも構文エラーとしてreject。
+- object key書き込みは`__proto__`/`prototype`/`constructor`を明示的に
+  rejectしてから行う（prototype pollution防止、既存4+ coreと同じ規律）。
+
+### S27.6 Size limit
+
+64 KiB（65536 byte、UTF-8）をserialized入力の上限とする。正常なformal Pin
+（project_id最大200文字 + 7-field binding）は数百byte程度に収まるため、
+十分な余裕を確保しつつDoS的な巨大入力を`PROJECT_PIN_PERSISTENCE_SERIALIZED_INVALID`
+でfail-closedする。チェックはparse着手前（文字列長・UTF-8 byte数の計測のみ）
+に行う。
+
+### S27.7 Formal Pin rebinding（Source of Truthの一本化）
+
+serialize/loadいずれも、caller供給Pinをそのまま信用しない。両方とも:
+
+1. caller供給`project_pin`（serialize）または保存artifact内`project_pin`
+   （load）をformat検証のうえcapture。
+2. `PrivateDictionarySnapshotActivationCore.buildProjectSnapshotPin({
+   project_id: capturedPin.project_id, snapshot_wrapper })`
+   （Checkpoint 9、無改変）を呼び出し、実Snapshot Loader経由でformal Pinを
+   **再生成**する。
+3. captureしたPinと再生成Pinを、`schema_version`/`project_id`/7-field
+   binding全項目についてexact equality比較する。1 fieldでも不一致なら
+   `PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH`でfail-closed。
+
+serializeは「invalid/tamperedなPinを正式なPersistence Artifactとして書き出さない」
+ことを、loadは「保存後に改ざんされたartifactを正式なPinとして受理しない」こと
+を、同じ再生成・比較ロジックで担保する。Snapshot/dictionary意味論はこのcore
+内で一切再実装しない — 実Loaderが常にSource of Truthである。
+
+load成功時に返す値は、この再生成ステップで得られた`regeneratedPin`
+（Activation core自身が既にfresh・frozen・alias-freeに構築した値）をそのまま
+返す。Persistence core独自の複製・再構築は行わない（S27.8）。
+
+### S27.8 Fresh / frozen / no runtime auto-bind
+
+load結果はActivation coreの`buildProjectSnapshotPin()`が返す値そのもの
+（既にfresh・deep-frozen・alias-free、S25.3の保証をそのまま継承）。
+Persistence core独自の中間表現をruntimeへ渡すことはしない。
+
+`loadProjectSnapshotPin()`の成功だけで、Checkpoint 10
+`PrivateDictionaryMatchingSession.setProjectPin()`を自動的に呼び出すことは
+しない。runtime bindingは常にcaller（呼び出し側）が明示的に行う
+（本coreはpureで、matching runtimeへの依存を一切持たない）。
+
+### S27.9 Privacy / No Snapshot payload
+
+Persistence Artifactへ含めてよいのは、artifact schema version・
+project_id・snapshot identity（ID/hash/version/scope）のみ。
+`dictionary_payload`・`effective_vocabulary`・`entries`・`canonical_term`・
+`alias_term`・`original_term`・review note・evidence・source excerpt・
+workbook filenameは一切含めない。Snapshot Wrapper自体もPersistence Artifact
+へ埋め込まない（Project Pin persistenceとSnapshot artifact persistenceは
+別責務のまま）。
+
+### S27.10 Activation非依存 / Cross-Snapshot mismatch
+
+Activation Record（`activation_status`/ACTIVE/SUPERSEDED/ROLLED_BACK）は
+serialize/loadいずれの条件にもしない（S25.1/S25.4/S26の原則を継承）。
+保存されたPin Aに対し、callerが異なるSnapshot Bを渡してloadした場合、
+BがAより新しいversionであっても、Bのdictionary_idが一致していても、Activation
+状態がACTIVEであっても、S27.7のexact equality比較により必ずreject する
+（latest/newest/max-version探索は一切行わない）。
+
+### S27.11 Atomic capture / mutation isolation
+
+`project_pin`（serialize）は最初の`await`（`buildProjectSnapshotPin()`呼び出し）
+より前に、既存4+ coreと同じ独立実装のR1-1 chokepoint関数群
+（`captureOwnedObject`等、single-read・hostile Proxy対応）で完全captureする。
+以降caller供給`project_pin`を再readしない。`snapshot_wrapper`はCheckpoint 9
+`buildProjectSnapshotPin()`/実Snapshot Loader自身のatomic captureに委譲し、
+本coreで二重cloneしない（S25.5/S26.6と同じ方針）。`serialized`
+（load入力）は文字列primitiveであり、JS文字列は不変のため、一度読み取れば
+以降のmutationを気にする必要がない。
+
+### S27.12 Error contract
+
+専用namespace（6種、design-firstで固定）:
+
+| code | 意味 |
+|---|---|
+| `PROJECT_PIN_PERSISTENCE_ROOT_INVALID` | serialize/load呼び出しのinput root形状が不正 |
+| `PROJECT_PIN_PERSISTENCE_SERIALIZED_INVALID` | `serialized`が文字列でない、malformed JSON、duplicate key、oversized |
+| `PROJECT_PIN_PERSISTENCE_PIN_INVALID` | Pin/snapshot_bindingの構造・format不正（key不足・余剰・primitive format違反） |
+| `PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH` | captured/storedPinと実Loader再生成Pinの不一致 |
+| `PROJECT_PIN_PERSISTENCE_SNAPSHOT_INVALID` | `buildProjectSnapshotPin()`/実Snapshot Loaderの検証失敗 |
+| `PROJECT_PIN_PERSISTENCE_DEPENDENCY_FAILED` | `PrivateDictionarySnapshotActivationCore`依存解決の失敗 |
+
+外部へ返すのは常に`{code, path}`のみ。native Error/message/stack/cause/
+serialized private data/filename/filesystem path/dictionary termは一切
+含めない。
+
+### S27.13 Non-goals（本Checkpoint）
+
+localStorage/sessionStorage/IndexedDB/FileReader/Blob/`URL.createObjectURL`/
+filesystem/network/GitHub API/database実装は行わない。Checkpoint 10 matching
+tool HTMLの変更は行わない（interoperability検証はverification側でHTMLを
+読み込んで実施）。HUMAN-01/02/03のUI適用は行わない。
