@@ -3706,9 +3706,31 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     return approvedDictCaptureStructuralValue(rawWrapper, '$', 0, { count: 0 }, []);
   }
 
-  async function setApprovedDictionarySnapshotForMatching(snapshotWrapper) {
+  // P2-A4 Checkpoint 10-R1 (MAJOR-01 remediation): the actual bind logic,
+  // factored out of the public setSnapshot() entry point so a caller
+  // (specifically setApprovedDictionaryProjectPinForMatching()) can supply
+  // an `expectedRevision` operation token. When `expectedRevision` is
+  // `undefined` (the public setSnapshot() path, unchanged), every
+  // completion unconditionally commits - identical to the pre-R1 behavior,
+  // preserving setSnapshot()'s existing contract exactly. When
+  // `expectedRevision` IS supplied, the function re-checks
+  // `approvedDictionaryRuntime.revision` a SECOND time - synchronously,
+  // immediately before EITHER commit branch (success or failure), with no
+  // further await in between the check and the commit - and, if the
+  // session has already been committed by a different (newer) operation in
+  // the meantime, aborts WITHOUT writing to `approvedDictionaryRuntime` at
+  // all (returns `{ stale: true }`). This closes the race the pre-R1
+  // implementation left open: checking staleness only once, before
+  // delegating into this function, could not detect a competing operation
+  // that committed WHILE this function's own Resolver call was in flight -
+  // only a check performed at the actual commit instant can.
+  async function bindApprovedDictionarySnapshotForMatching(snapshotWrapper, expectedRevision) {
+    function isStale() {
+      return expectedRevision !== undefined && approvedDictionaryRuntime.revision !== expectedRevision;
+    }
     const core = approvedDictResolverCore();
     if (!core) {
+      if (isStale()) return { stale: true };
       approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:false, snapshotWrapper:null, snapshotBinding:null, lastErrorCode:'APPROVED_DICT_RESOLVER_UNAVAILABLE' };
     } else {
       try {
@@ -3763,15 +3785,29 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
           const e = new Error('pin batch binding observation failed'); e.code = approvedDictSanitizeErrorCode(err); throw e;
         }
         if (!capturedBinding) { const e = new Error('malformed pin batch binding'); e.code = 'APPROVED_DICT_RESOLUTION_FAILED'; throw e; }
+        // §Checkpoint10-R1: the ONLY point in this function where a
+        // staleness check is meaningful for the success path - synchronous,
+        // immediately before the commit, no await after this line and
+        // before the assignment below.
+        if (isStale()) return { stale: true };
         approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:true, snapshotWrapper: capturedWrapper, snapshotBinding: capturedBinding, lastErrorCode:null };
       } catch (err) {
+        if (isStale()) return { stale: true };
         approvedDictionaryRuntime = { revision: approvedDictionaryRuntime.revision + 1, active:false, snapshotWrapper:null, snapshotBinding:null, lastErrorCode: approvedDictSanitizeErrorCode(err) };
       }
     }
     markTraceTagsDirty('正式辞書Snapshotの設定が変更されました');
     tagIndexCache = null;
     if (mergedResult?.sysList && mergedResult?.plmList) markTraceMatrixStale('正式辞書Snapshotの設定が変更されました。再照合してください。');
-    return approvedDictionaryMatchingStatus();
+    return { stale: false, status: approvedDictionaryMatchingStatus() };
+  }
+
+  // Public, Checkpoint 7 contract - unchanged signature/behavior/error
+  // codes. Always commits unconditionally on completion (expectedRevision
+  // is `undefined`), exactly as before Checkpoint 10-R1.
+  async function setApprovedDictionarySnapshotForMatching(snapshotWrapper) {
+    const result = await bindApprovedDictionarySnapshotForMatching(snapshotWrapper, undefined);
+    return result.status;
   }
 
   function clearApprovedDictionarySnapshotForMatching() {
@@ -3909,22 +3945,36 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       throw approvedDictProjectPinError('APPROVED_DICT_PROJECT_PIN_MISMATCH');
     }
 
-    // §S26.8 race guard: if another operation has already committed a
-    // newer session state while this operation's own async pre-bind
-    // validation was in flight, abort BEFORE this (now-stale) operation's
-    // own delegated commit - never let a slower, earlier-started operation
-    // overwrite a newer one. Mirrors the existing revisionAtStart pattern
-    // used for long-running matching resolution (see markTraceTagsDirty
-    // callers below).
+    // §S26.8/Checkpoint 10-R1 race guard, part 1 (fast-fail): if another
+    // operation has already committed a newer session state while this
+    // operation's own async pre-bind validation was in flight, abort now
+    // rather than paying for a doomed Resolver round-trip. This alone is
+    // NOT sufficient to close the race (see part 2 below) - a competing
+    // operation can still commit WHILE the delegated bind call's own
+    // Resolver await is in flight, after this check has already passed.
     if (approvedDictionaryRuntime.revision !== revisionAtStart) {
       throw approvedDictProjectPinError('APPROVED_DICT_PROJECT_PIN_BIND_FAILED');
     }
 
-    // §S26.5: pre-bind gate passed - delegate to the EXISTING, unmodified
-    // -contract setSnapshot path (which performs the real Resolver-backed
-    // empty-batch Loader validation, per Checkpoint 7 §10, and captures its
-    // own alias-free copy of the wrapper per §S26.6).
-    const bindStatus = await setApprovedDictionarySnapshotForMatching(rawSnapshotWrapper);
+    // §S26.5/Checkpoint 10-R1 race guard, part 2 (authoritative): delegate
+    // to the internal bind helper - the SAME logic as the EXISTING,
+    // unmodified-contract setSnapshot path (real Resolver-backed
+    // empty-batch Loader validation, Checkpoint 7 §10; alias-free wrapper
+    // capture, §S26.6) - but pass `revisionAtStart` as an operation token.
+    // The helper re-checks this token synchronously, immediately before its
+    // own commit (success or failure), with no further await in between -
+    // the ONLY point that can actually observe a competing commit that
+    // landed while THIS call's Resolver await was pending. If stale, it
+    // returns without writing to session state at all, so a slower,
+    // earlier-started operation can never overwrite a newer one - this is
+    // the fix for the R1 finding (checking staleness only before
+    // delegating could not detect a competitor that commits during the
+    // delegated call's own await).
+    const bindResult = await bindApprovedDictionarySnapshotForMatching(rawSnapshotWrapper, revisionAtStart);
+    if (bindResult.stale) {
+      throw approvedDictProjectPinError('APPROVED_DICT_PROJECT_PIN_BIND_FAILED');
+    }
+    const bindStatus = bindResult.status;
     if (!bindStatus.active) {
       throw approvedDictProjectPinError('APPROVED_DICT_PROJECT_PIN_BIND_FAILED');
     }

@@ -2772,3 +2772,52 @@ Activation管理UI・file picker・自動起動時loadも実装しない。Proje
 `<script src>`へ追加する。既存`private_dictionary_snapshot_core.js`（Activation
 coreの唯一の依存）より後、Resolver core等の既存Checkpoint 3-6 scriptと同じ並びで
 追加し、既存load orderを破壊しない。
+
+### S26.11 Checkpoint 10-R1 追補: commit-instant race guard（MAJOR-01是正）
+
+Checkpoint 10初期実装のS26.8 race guardは、`setApprovedDictionaryProjectPinForMatching()`
+が`revisionAtStart`を関数開始時に同期captureし、**既存`setSnapshot()`委譲の直前で
+一度だけ**再確認していた。しかし委譲先の既存`setApprovedDictionarySnapshotForMatching()`
+自身は、その内部Resolver呼び出し（`terms:[]`のempty-batch検証）の`await`完了後、
+staleness確認なしに無条件で`approvedDictionaryRuntime`へcommitしていた。このため、
+
+1. operation Aが委譲直前のrevision確認を通過する
+2. operation Aの委譲先（`setSnapshot`相当）内部でResolver呼び出しの`await`が
+   pendingになっている間に、operation Bが独立にpre-bind〜bindまで完了し、先に
+   commitする（revisionが進む）
+3. operation Aの遅延していたResolver呼び出しが後から完了し、staleness再確認
+   なしにそのままcommitしてしまい、Bの新しいcommitmentを上書きする
+
+という競合が理論上・実際に成立し得た（独立レビューでMAJOR-01として指摘）。
+S26.8が要求する「非同期operation completion orderによるstale commitを防ぐ」が、
+委譲先関数自身の内部awaitをまたぐrace windowに対しては閉じられていなかった。
+
+**是正内容**: 既存`setApprovedDictionarySnapshotForMatching(snapshotWrapper)`の
+実装本体を、新設した内部helper`bindApprovedDictionarySnapshotForMatching(snapshotWrapper,
+expectedRevision)`へ切り出した。
+
+- `expectedRevision`が`undefined`の場合（`setSnapshot()`自身からの呼び出し、常に
+  この形）、完了時に**無条件でcommitする** — Checkpoint 10-R1以前と完全に同一の
+  挙動であり、`setSnapshot()`の公開契約（引数shape・返り値shape・error code・
+  Resolver-backed検証経路）は一切変更しない。
+- `expectedRevision`が明示的に渡された場合（`setApprovedDictionaryProjectPinForMatching()`
+  からの呼び出しのみ）、成功・失敗いずれのcommit分岐の**直前**
+  （`approvedDictionaryRuntime`への代入の直前、間に`await`を挟まない同期地点）で
+  `approvedDictionaryRuntime.revision !== expectedRevision`を再確認する。不一致
+  なら`approvedDictionaryRuntime`へ一切書き込まず`{ stale: true }`を返す。この
+  再確認は「委譲先関数自身のResolver `await`が完了した直後」に行われるため、
+  S26.8が閉じられなかったrace windowを正しく検出できる。
+
+`setApprovedDictionaryProjectPinForMatching()`は、委譲直前の高速fail（既存の
+`revisionAtStart`比較、無駄なResolver往復を避けるための早期チェック、維持）に
+加えて、`bindApprovedDictionarySnapshotForMatching(rawSnapshotWrapper,
+revisionAtStart)`という形で同じtokenを委譲先へ渡すよう変更した。委譲結果が
+`{ stale: true }`の場合は`APPROVED_DICT_PROJECT_PIN_BIND_FAILED`でfail-closedし、
+`approvedDictionaryRuntime`には一切触れない（＝他operationの新しいcommitmentを
+上書きしない）。
+
+**変更しないもの**: transition graph・pre-bind formal Pin gate・post-bind gate・
+error code一覧（新規codeは追加せず、既存`APPROVED_DICT_PROJECT_PIN_BIND_FAILED`を
+再利用）・`clearSnapshot()`契約・Activation Record非依存の原則・no-latest原則・
+persistence境界・`setSnapshot()`の公開契約は、いずれも一切変更しない。R1は
+commit-instant race guardの追加のみに限定される。

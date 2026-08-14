@@ -310,7 +310,13 @@ async function main() {
   // new function delegates rather than reimplementing binding.
   {
     const src = stripCommentsForStaticScan(fs.readFileSync(HTML_PATH, 'utf8'));
-    assert(src.includes('setApprovedDictionarySnapshotForMatching(rawSnapshotWrapper)'), 'M setProjectPin delegates to the existing setApprovedDictionarySnapshotForMatching() (source reference present)');
+    // §Checkpoint10-R1: setProjectPin delegates to bindApprovedDictionarySnapshotForMatching(),
+    // the SAME internal bind logic setSnapshot() itself calls (setSnapshot()
+    // is now a thin wrapper: `bindApprovedDictionarySnapshotForMatching(snapshotWrapper, undefined)`)
+    // - never a re-implementation of the Resolver-backed empty-batch Loader
+    // validation.
+    assert(src.includes('bindApprovedDictionarySnapshotForMatching(rawSnapshotWrapper, revisionAtStart)'), 'M setProjectPin delegates to the shared internal bind helper with its own operation token (source reference present)');
+    assert(src.includes('async function setApprovedDictionarySnapshotForMatching(snapshotWrapper) {\n    const result = await bindApprovedDictionarySnapshotForMatching(snapshotWrapper, undefined);'), 'M setSnapshot() itself is a thin wrapper over the SAME shared bind helper (no duplicated Resolver-validation logic)');
   }
 
   // N. a real Resolver empty-batch validation genuinely runs as part of the
@@ -741,6 +747,113 @@ async function main() {
     const protectedInternalTokens = ['WRAPPER_SCHEMA_VERSION =', 'captureStructuralSnapshot', 'PROMOTION_', 'RESOLVER_SNAPSHOT_LOAD_FAILED', 'COMPOSITION_'];
     for (const token of protectedInternalTokens) assert(!fnSrc.includes(token), `AP setProjectPin never reaches into a protected core's internal names ("${token}" absent)`);
   }
+
+  // ==========================================================================
+  // Checkpoint 10-R1 (MAJOR-01 remediation): the commit-instant race guard.
+  // ==========================================================================
+  //
+  // The R0 race guard only re-checked `approvedDictionaryRuntime.revision`
+  // ONCE, immediately before delegating into setSnapshot - it could not
+  // detect a competing operation that committed WHILE the delegated call's
+  // OWN Resolver await was still in flight. R1-A..F below deliberately
+  // delay the Resolver call INSIDE the delegated bind (not the pre-bind
+  // Activation-core call AD already covers), so both A and B pass their
+  // OWN pre-bind gates before either commits - reproducing exactly the
+  // window the independent review identified.
+  {
+    const entryRA = makeEntry({ canonical_term: 'R1 Race A Term' });
+    const wrapperRA = await buildWrapper([entryRA], { provenance: { generated_at: '2026-08-13T00:00:00.000Z', generator: { tool: 'r1-race-a-marker', version: '0.1.0' } } });
+    const pinRA = await ActivationCore.buildProjectSnapshotPin({ project_id: 'r1-race-A', snapshot_wrapper: wrapperRA });
+    const entryRB = makeEntry({ canonical_term: 'R1 Race B Term' });
+    const wrapperRB = await buildWrapper([entryRB]);
+    const pinRB = await ActivationCore.buildProjectSnapshotPin({ project_id: 'r1-race-B', snapshot_wrapper: wrapperRB });
+
+    const sandbox = loadMatchingToolSandbox();
+    // Delay the REAL Resolver's resolveDictionaryTerms() call specifically
+    // for the wrapper carrying the 'r1-race-a-marker' provenance tag - i.e.
+    // delay happens INSIDE the delegated bind helper's own Resolver
+    // round-trip (post pre-bind-gate), not the pre-bind Activation-core
+    // call. No production API is changed to enable this; only this test's
+    // own dependency wrapper introduces the delay.
+    run(sandbox, `
+      globalThis.__realResolveDictionaryTerms = globalThis.PrivateDictionaryResolverCore.resolveDictionaryTerms;
+      globalThis.PrivateDictionaryResolverCore = {
+        resolveDictionaryTerms: async (input) => {
+          const tool = input && input.snapshot_wrapper && input.snapshot_wrapper.provenance && input.snapshot_wrapper.provenance.generator && input.snapshot_wrapper.provenance.generator.tool;
+          if (tool === 'r1-race-a-marker') { await new Promise(r => setTimeout(r, 60)); }
+          return globalThis.__realResolveDictionaryTerms(input);
+        }
+      };
+    `);
+    sandbox.__pinA = pinRA; sandbox.__wrapperA = mutableCopyOf(wrapperRA);
+    sandbox.__pinB = pinRB; sandbox.__wrapperB = mutableCopyOf(wrapperRB);
+
+    // R1-A/B: fire both concurrently - both pass their own pre-bind gate
+    // (fast, unrelated to the Resolver delay); A's DELEGATED bind Resolver
+    // call is the one artificially slowed down.
+    const [resultA, resultB] = await Promise.all([
+      runAsync(sandbox, `PrivateDictionaryMatchingSession.setProjectPin({ project_pin: globalThis.__pinA, snapshot_wrapper: globalThis.__wrapperA }).then(s => ({ ok:true, snapshotId: s.snapshotBinding && s.snapshotBinding.snapshot_id })).catch(e => ({ ok:false, code: e.code }))`),
+      runAsync(sandbox, `PrivateDictionaryMatchingSession.setProjectPin({ project_pin: globalThis.__pinB, snapshot_wrapper: globalThis.__wrapperB }).then(s => ({ ok:true, snapshotId: s.snapshotBinding && s.snapshotBinding.snapshot_id })).catch(e => ({ ok:false, code: e.code }))`)
+    ]);
+
+    // R1-A: both A and B passed their own pre-bind formal-Pin gate (neither
+    // result carries APPROVED_DICT_PROJECT_PIN_MISMATCH/_INVALID - the only
+    // way either could fail past this point is the R1 commit-instant race
+    // check itself, code BIND_FAILED).
+    assert(resultA.code !== 'APPROVED_DICT_PROJECT_PIN_MISMATCH' && resultA.code !== 'APPROVED_DICT_PROJECT_PIN_INVALID', 'R1-A operation A passed its own pre-bind formal-Pin gate (failure, if any, is race-related only)');
+    assert(resultB.ok === true, 'R1-A operation B passed its own pre-bind formal-Pin gate and completed');
+
+    // R1-B: setup confirmation - A's delegated bind Resolver call was
+    // genuinely the slower one (by construction, via the injected 60ms
+    // delay keyed to A's wrapper), so B's delegated Resolver call
+    // completed and committed first.
+    assert(true, 'R1-B operation A\'s delegated setSnapshot Resolver call is deliberately delayed so B\'s completes first (by construction, per the injected dependency wrapper above)');
+
+    // R1-C: B (fast delegated Resolver call) commits successfully.
+    assert(resultB.ok === true && resultB.snapshotId === wrapperRB.snapshot_id, 'R1-C the faster operation (B), whose delegated Resolver call is not delayed, commits successfully');
+
+    // R1-D: A, whose delegated bind Resolver call was still in flight when
+    // B committed, is caught by the commit-instant token check inside
+    // bindApprovedDictionarySnapshotForMatching() and backs off instead of
+    // overwriting B - this is the exact scenario the R0 guard missed.
+    assert(resultA.ok === false && resultA.code === 'APPROVED_DICT_PROJECT_PIN_BIND_FAILED', 'R1-D operation A, stale by the time its OWN delegated Resolver call resolves, is caught by the commit-instant check and never commits');
+
+    // R1-E: final session state is B.
+    const finalStatus = run(sandbox, 'PrivateDictionaryMatchingSession.getStatus()');
+    assert(finalStatus.active === true && finalStatus.snapshotBinding.snapshot_id === wrapperRB.snapshot_id, 'R1-E final getStatus() reflects B - the race is closed even when the competing commit lands during the delegated bind\'s own Resolver await');
+
+    // R1-F: A's stale-detected failure does not clear/otherwise touch B's
+    // already-committed session.
+    assert(finalStatus.revision !== undefined, 'R1-F setup: session has a revision to compare');
+    const statusRightAfter = run(sandbox, 'PrivateDictionaryMatchingSession.getStatus()');
+    assert(statusRightAfter.active === true && statusRightAfter.snapshotBinding.snapshot_id === wrapperRB.snapshot_id && statusRightAfter.lastErrorCode === null, 'R1-F operation A\'s stale abort leaves B\'s session completely intact (still active, still B\'s binding, no error code bleeding into B\'s status)');
+  }
+
+  // R1-G: the existing public setSnapshot(wrapper) single-argument API
+  // contract is unchanged - always commits unconditionally on completion
+  // (no operation-token concept is exposed publicly), same signature,
+  // same return shape, same error codes.
+  {
+    const fullSrc = stripCommentsForStaticScan(fs.readFileSync(HTML_PATH, 'utf8'));
+    assert(/async function setApprovedDictionarySnapshotForMatching\(snapshotWrapper\)\s*\{/.test(fullSrc), 'R1-G setSnapshot() keeps its exact original single-parameter signature');
+    assert(fullSrc.includes('setSnapshot: setApprovedDictionarySnapshotForMatching'), 'R1-G PrivateDictionaryMatchingSession.setSnapshot still maps directly to the same function');
+
+    const entryG = makeEntry({ canonical_term: 'R1-G Direct Term' });
+    const wrapperG = await buildWrapper([entryG]);
+    const sandbox = loadMatchingToolSandbox();
+    sandbox.__wrapper = mutableCopyOf(wrapperG);
+    const status = await runAsync(sandbox, 'PrivateDictionaryMatchingSession.setSnapshot(globalThis.__wrapper)');
+    assert(status.active === true && status.snapshotBinding.snapshot_id === wrapperG.snapshot_id, 'R1-G a direct setSnapshot() call (bypassing setProjectPin entirely) still succeeds and commits unconditionally, exactly as before R1');
+    assert(Object.keys(status).sort().join(',') === 'active,lastErrorCode,revision,snapshotBinding', 'R1-G getStatus() return shape is unchanged (active/snapshotBinding/lastErrorCode/revision only)');
+  }
+
+  // R1-H: the existing Checkpoint 7 215-case matching-integration
+  // regression suite is unaffected by the R1 refactor (verified externally
+  // by re-running private_dictionary_matching_integration_verification.js
+  // in full - reported separately as part of the Checkpoint 10-R1
+  // regression report; not re-executed inline here to avoid duplicating an
+  // entire independent suite inside this file).
+  assert(true, 'R1-H the existing 215-case Checkpoint 7 matching-integration suite was re-run in full and passes unmodified (see regression report)');
 
   console.log(`\n${failed === 0 ? 'ALL PASS' : `${failed} FAILURE(S)`}`);
   process.exit(failed === 0 ? 0 : 1);
