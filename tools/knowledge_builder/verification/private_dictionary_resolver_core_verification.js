@@ -745,6 +745,191 @@ async function main() {
   }
 
   // ==========================================================================
+  // R2-A. Loader returns sync null (Checkpoint 6-R2)
+  // ==========================================================================
+  {
+    const hostileSnapshotCore = { loadDictionarySnapshotWrapper() { return null; } };
+    const sandbox = loadResolverCoreInSandbox(sandboxRequireStub(hostileSnapshotCore, realCrossRealmLearningCore(), realCrossRealmIdHashUtils()));
+    const entry = makeEntry({ canonical_term: 'R2A Term', aliases: [] });
+    const payload = makeDictionaryPayload([entry]);
+    const wrapper = await buildRealWrapper(payload, {});
+    const input = makeResolutionInput(wrapper, ['R2A Term']);
+    const realmInput = toSandboxValue(sandbox, input);
+    let caught = null;
+    try { await sandbox.module.exports.resolveDictionaryTerms(realmInput); } catch (err) { caught = err; }
+    assert(!!caught && caught.code === 'RESOLVER_SNAPSHOT_LOAD_FAILED', 'R2-A Loader returning sync null is sanitized to RESOLVER_SNAPSHOT_LOAD_FAILED');
+    assertSanitizedErrorCrossRealm(caught, 'R2-A sync null Loader return: thrown error is the sanitized {code,path} shape');
+  }
+
+  // ==========================================================================
+  // R2-B. Loader returns sync plain object (schema-invalid)
+  // ==========================================================================
+  {
+    const hostileSnapshotCore = { loadDictionarySnapshotWrapper() { return { not: 'a valid validated snapshot' }; } };
+    const sandbox = loadResolverCoreInSandbox(sandboxRequireStub(hostileSnapshotCore, realCrossRealmLearningCore(), realCrossRealmIdHashUtils()));
+    const entry = makeEntry({ canonical_term: 'R2B Term', aliases: [] });
+    const payload = makeDictionaryPayload([entry]);
+    const wrapper = await buildRealWrapper(payload, {});
+    const input = makeResolutionInput(wrapper, ['R2B Term']);
+    const realmInput = toSandboxValue(sandbox, input);
+    let caught = null;
+    try { await sandbox.module.exports.resolveDictionaryTerms(realmInput); } catch (err) { caught = err; }
+    assert(!!caught && caught.code === 'RESOLVER_SNAPSHOT_LOAD_FAILED', 'R2-B Loader returning a sync schema-invalid plain object is sanitized to RESOLVER_SNAPSHOT_LOAD_FAILED');
+    assertSanitizedErrorCrossRealm(caught, 'R2-B sync plain object Loader return: thrown error is the sanitized {code,path} shape');
+  }
+
+  // ==========================================================================
+  // R2-C. Loader returns a resolving custom thenable
+  // ==========================================================================
+  {
+    const hostileSnapshotCore = { loadDictionarySnapshotWrapper() { return { then(resolve) { resolve(null); } }; } };
+    const sandbox = loadResolverCoreInSandbox(sandboxRequireStub(hostileSnapshotCore, realCrossRealmLearningCore(), realCrossRealmIdHashUtils()));
+    const entry = makeEntry({ canonical_term: 'R2C Term', aliases: [] });
+    const payload = makeDictionaryPayload([entry]);
+    const wrapper = await buildRealWrapper(payload, {});
+    const input = makeResolutionInput(wrapper, ['R2C Term']);
+    const realmInput = toSandboxValue(sandbox, input);
+    let caught = null;
+    try { await sandbox.module.exports.resolveDictionaryTerms(realmInput); } catch (err) { caught = err; }
+    assert(!!caught && caught.code === 'RESOLVER_SNAPSHOT_LOAD_FAILED', 'R2-C Loader returning a resolving custom thenable is sanitized to RESOLVER_SNAPSHOT_LOAD_FAILED (no direct .catch assumption)');
+    assertSanitizedErrorCrossRealm(caught, 'R2-C resolving custom thenable Loader return: thrown error is the sanitized {code,path} shape');
+  }
+
+  // ==========================================================================
+  // R2-D. Loader returns a rejecting custom thenable + unhandledRejection
+  // audit
+  // ==========================================================================
+  {
+    const secretMarker = 'SECRET_R2D_REJECTING_THENABLE';
+    const hostileSnapshotCore = { loadDictionarySnapshotWrapper() { return { then(resolve, reject) { reject(new Error(secretMarker)); } }; } };
+    const sandbox = loadResolverCoreInSandbox(sandboxRequireStub(hostileSnapshotCore, realCrossRealmLearningCore(), realCrossRealmIdHashUtils()));
+    const entry = makeEntry({ canonical_term: 'R2D Term', aliases: [] });
+    const payload = makeDictionaryPayload([entry]);
+    const wrapper = await buildRealWrapper(payload, {});
+    const input = makeResolutionInput(wrapper, ['R2D Term']);
+    const realmInput = toSandboxValue(sandbox, input);
+
+    let unhandledCount = 0;
+    const onUnhandled = () => { unhandledCount++; };
+    process.on('unhandledRejection', onUnhandled);
+    let caught = null;
+    try {
+      try { await sandbox.module.exports.resolveDictionaryTerms(realmInput); } catch (err) { caught = err; }
+      await new Promise(resolve => setImmediate(resolve));
+      await new Promise(resolve => setImmediate(resolve));
+      await new Promise(resolve => setTimeout(resolve, 10));
+    } finally {
+      process.removeListener('unhandledRejection', onUnhandled);
+    }
+    assert(!!caught && caught.code === 'RESOLVER_SNAPSHOT_LOAD_FAILED', 'R2-D Loader returning a rejecting custom thenable is sanitized to RESOLVER_SNAPSHOT_LOAD_FAILED');
+    assert(!JSON.stringify(caught).includes(secretMarker), 'R2-D rejecting custom thenable: no native Error/secret leakage');
+    assert(unhandledCount === 0, 'R2-D rejecting custom thenable Loader return is fully consumed - zero unhandledRejection events observed');
+  }
+
+  // ==========================================================================
+  // R2-E. Hostile Loader then getter + unhandledRejection audit
+  // ==========================================================================
+  {
+    const secretMarker = 'SECRET_R2E_HOSTILE_THEN_GETTER';
+    const hostileResult = {};
+    Object.defineProperty(hostileResult, 'then', { get() { throw new Error(secretMarker); } });
+    const hostileSnapshotCore = { loadDictionarySnapshotWrapper() { return hostileResult; } };
+    const sandbox = loadResolverCoreInSandbox(sandboxRequireStub(hostileSnapshotCore, realCrossRealmLearningCore(), realCrossRealmIdHashUtils()));
+    const entry = makeEntry({ canonical_term: 'R2E Term', aliases: [] });
+    const payload = makeDictionaryPayload([entry]);
+    const wrapper = await buildRealWrapper(payload, {});
+    const input = makeResolutionInput(wrapper, ['R2E Term']);
+    const realmInput = toSandboxValue(sandbox, input);
+
+    let unhandledCount = 0;
+    const onUnhandled = () => { unhandledCount++; };
+    process.on('unhandledRejection', onUnhandled);
+    let caught = null;
+    try {
+      try { await sandbox.module.exports.resolveDictionaryTerms(realmInput); } catch (err) { caught = err; }
+      await new Promise(resolve => setImmediate(resolve));
+      await new Promise(resolve => setImmediate(resolve));
+      await new Promise(resolve => setTimeout(resolve, 10));
+    } finally {
+      process.removeListener('unhandledRejection', onUnhandled);
+    }
+    assert(!!caught && caught.code === 'RESOLVER_SNAPSHOT_LOAD_FAILED', 'R2-E hostile Loader-result then getter is sanitized to RESOLVER_SNAPSHOT_LOAD_FAILED');
+    assert(!JSON.stringify(caught).includes(secretMarker), 'R2-E hostile then getter: no native Error/secret leakage');
+    assert(unhandledCount === 0, 'R2-E hostile then getter Loader return is fully consumed - zero unhandledRejection events observed');
+  }
+
+  // ==========================================================================
+  // R2-F. Hostile Loader catch getter - raw result .catch is never read
+  // ==========================================================================
+  {
+    const secretMarker = 'SECRET_R2F_HOSTILE_CATCH_GETTER';
+    let catchGetterCallCount = 0;
+    const hostileResult = {};
+    Object.defineProperty(hostileResult, 'catch', { get() { catchGetterCallCount++; throw new Error(secretMarker); } });
+    const hostileSnapshotCore = { loadDictionarySnapshotWrapper() { return hostileResult; } };
+    const sandbox = loadResolverCoreInSandbox(sandboxRequireStub(hostileSnapshotCore, realCrossRealmLearningCore(), realCrossRealmIdHashUtils()));
+    const entry = makeEntry({ canonical_term: 'R2F Term', aliases: [] });
+    const payload = makeDictionaryPayload([entry]);
+    const wrapper = await buildRealWrapper(payload, {});
+    const input = makeResolutionInput(wrapper, ['R2F Term']);
+    const realmInput = toSandboxValue(sandbox, input);
+    let caught = null;
+    try { await sandbox.module.exports.resolveDictionaryTerms(realmInput); } catch (err) { caught = err; }
+    assert(catchGetterCallCount === 0, "R2-F Resolver production never reads the raw Loader return's own .catch property");
+    assert(!!caught && caught.code === 'RESOLVER_SNAPSHOT_LOAD_FAILED', 'R2-F hostile Loader-result catch getter (never triggered) still resolves to RESOLVER_SNAPSHOT_LOAD_FAILED (no .then either, treated as a malformed fulfilled value)');
+    assert(!JSON.stringify(caught).includes(secretMarker), 'R2-F hostile catch getter: no native Error/secret leakage');
+  }
+
+  // ==========================================================================
+  // R2-G. Real Loader normal path (still works after the observation
+  // rewrite)
+  // ==========================================================================
+  {
+    const entry = makeEntry({ canonical_term: 'R2G Real Loader Term', aliases: ['R2G Alias'] });
+    const payload = makeDictionaryPayload([entry]);
+    const wrapper = await buildRealWrapper(payload, {});
+    const result = await Resolver.resolveDictionaryTerms(makeResolutionInput(wrapper, ['R2G Real Loader Term', 'R2G Alias']));
+    assert(result.annotations[0].resolution_type === 'EXACT_CANONICAL', 'R2-G real Checkpoint 3 Loader normal path: EXACT_CANONICAL still resolves correctly');
+    assert(result.annotations[1].resolution_type === 'APPROVED_ALIAS', 'R2-G real Checkpoint 3 Loader normal path: APPROVED_ALIAS still resolves correctly');
+  }
+
+  // ==========================================================================
+  // R2-H. First-await ordering (Loader function call still issued before
+  // Resolver's own first await, with the Promise.resolve() observation
+  // rewrite in place)
+  // ==========================================================================
+  {
+    let loaderCalled = false;
+    const hostileSnapshotCore = {
+      loadDictionarySnapshotWrapper() {
+        loaderCalled = true;
+        return null; // malformed sync return - still must be called before any await
+      }
+    };
+    const sandbox = loadResolverCoreInSandbox(sandboxRequireStub(hostileSnapshotCore, realCrossRealmLearningCore(), realCrossRealmIdHashUtils()));
+    const entry = makeEntry({ canonical_term: 'R2H Ordering Term', aliases: [] });
+    const payload = makeDictionaryPayload([entry]);
+    const wrapper = await buildRealWrapper(payload, {});
+    const input = makeResolutionInput(wrapper, ['R2H Ordering Term']);
+    const realmInput = toSandboxValue(sandbox, input);
+    const promise = sandbox.module.exports.resolveDictionaryTerms(realmInput);
+    assert(loaderCalled === true, "R2-H Snapshot Loader function call is issued synchronously, before Resolver's own first await, even with the Promise.resolve() observation rewrite");
+    let caught = null;
+    try { await promise; } catch (err) { caught = err; }
+    assert(!!caught && caught.code === 'RESOLVER_SNAPSHOT_LOAD_FAILED', 'R2-H end-to-end still resolves to RESOLVER_SNAPSHOT_LOAD_FAILED after confirming ordering');
+  }
+
+  // ==========================================================================
+  // Static guard: raw Loader return is never directly `.catch()`-ed
+  // ==========================================================================
+  {
+    const codeOnly = stripCommentsForStaticScan(fs.readFileSync(RESOLVER_CORE_PATH, 'utf8'));
+    assert(!codeOnly.includes('rawLoadResult.catch('), 'Static guard: production source never calls .catch() directly on the raw Loader return');
+    assert(codeOnly.includes('observedLoadPromise.catch('), 'Static guard: .catch() is only ever called on the Promise.resolve()-observed Loader result');
+    assert(codeOnly.includes('Promise.resolve(rawLoadResult)'), 'Static guard: the raw Loader return is converted via Promise.resolve() before any Promise-only operation is performed on it');
+  }
+
+  // ==========================================================================
   // X. Snapshot dependency failure
   // ==========================================================================
   {

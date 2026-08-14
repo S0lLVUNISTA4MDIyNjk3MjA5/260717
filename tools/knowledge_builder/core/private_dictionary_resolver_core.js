@@ -367,19 +367,37 @@
     // defensive `await` (needed to safely consume a hostile
     // Promise/thenable normalize() return, R1-1) can never delay or
     // reorder the Loader's own atomic capture.
-    let loadPromise;
+    let rawLoadResult;
     try {
-      loadPromise = SnapshotCore.loadDictionarySnapshotWrapper(snapshot.snapshotWrapperRaw);
+      rawLoadResult = SnapshotCore.loadDictionarySnapshotWrapper(snapshot.snapshotWrapperRaw);
     } catch (err) {
       throw makeResolverError('RESOLVER_SNAPSHOT_LOAD_FAILED', '$.snapshot_wrapper');
     }
-    // Attached immediately (synchronously, same tick) so that, however long
-    // normalization processing takes below, a rejection of loadPromise can
-    // never surface as a Node.js unhandledRejection - this does not affect
-    // `await loadPromise` below, which still resolves/rejects independently
-    // for this function's own control flow (a Promise may have multiple,
-    // independent reaction handlers).
-    loadPromise.catch(() => {});
+    // R2-1 (§S6.6 Checkpoint 6-R2): `rawLoadResult` is a raw, untrusted
+    // dependency return - it may be a genuine Promise, `null`, a plain
+    // object, a custom thenable, or a hostile object with a `then`/`catch`
+    // accessor that throws. It is NEVER read via a direct `.catch(...)`
+    // (or any other) property access here; `Promise.resolve(...)` is the
+    // ONE mechanism used to safely turn it into a real Promise - a
+    // non-thenable value (including `null`/a plain object) becomes an
+    // already-fulfilled Promise, a genuine Promise passes through as-is, a
+    // well-behaved thenable is assimilated, and a hostile `then` getter
+    // that throws causes `[[Resolve]]` to REJECT the resulting Promise
+    // with that thrown value (per the ECMAScript Promise Resolve Functions
+    // algorithm) rather than synchronously propagating it - so this
+    // conversion itself cannot leak a native Error. The resulting
+    // `observedLoadPromise` is then, and ONLY then, given a `.catch(() =>
+    // {})` reaction (on the SAFE, Resolver-owned Promise object - never on
+    // `rawLoadResult` itself) so a later rejection can never surface as an
+    // unhandledRejection, regardless of how long normalization processing
+    // below takes.
+    let observedLoadPromise;
+    try {
+      observedLoadPromise = Promise.resolve(rawLoadResult);
+      observedLoadPromise.catch(() => {});
+    } catch (err) {
+      throw makeResolverError('RESOLVER_SNAPSHOT_LOAD_FAILED', '$.snapshot_wrapper');
+    }
 
     const normErrors = [];
     const normalizedKeys = await captureNormalizedTerms(snapshot.terms, normErrors);
@@ -387,7 +405,7 @@
 
     let validatedSnapshot;
     try {
-      validatedSnapshot = await loadPromise;
+      validatedSnapshot = await observedLoadPromise;
     } catch (err) {
       throw makeResolverError('RESOLVER_SNAPSHOT_LOAD_FAILED', '$.snapshot_wrapper');
     }
