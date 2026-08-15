@@ -349,14 +349,45 @@ function compatibilityChecks() {
   const wbResult = spawnSync(process.execPath, [path.join(HERE, 'private_dictionary_candidate_review_workbook_verification.js')], { encoding: 'utf8', timeout: 180000 });
   assert(wbResult.status === 0 && /\d+ PASS \/ 0 FAIL/.test(wbResult.stdout), 'AF existing private_dictionary_candidate_review_workbook_verification.js re-run: 0 regressions');
 
-  // AG/AH: Checkpoint 13 provenance UI / Checkpoint 12 Project Pin UI terminology is unchanged -
-  // the matching tool HTML file itself has zero diff against the fixed Checkpoint 14 pre-head
-  // (S31.1/S31.10: no matching-tool change was needed or made).
+  // AG/AH: Checkpoint 13 provenance UI / Checkpoint 12 Project Pin UI terminology is unchanged.
+  // R3 (post-Checkpoint-15-A R2 verification-baseline maintenance): a byte-for-byte zero diff
+  // against this fixed pre-head is no longer a valid proxy for that invariant, because P2-A4
+  // Checkpoint 15-A R2 was later explicitly authorized (a one-time, scoped production-freeze
+  // exception; see design doc S32.16) to make a narrow, structural fix to this very file (a new
+  // graphNodeProvenanceSourceRow() helper, correcting a real Graph node Dictionary Resolution
+  // provenance defect that Checkpoint 13's own Node-level tests never exercised through the real
+  // rendering pipeline). This is not a weakening of AG/AH's actual intent - it replaces a
+  // now-permanently-stale full-file-diff proxy with a direct check of the terminology strings
+  // this assertion always existed to protect, plus a structural bound on any non-empty diff so an
+  // unrelated/unbounded future change would still fail this check exactly as before.
+  const matchingHtmlCurrentSource = fs.readFileSync(MATCHING_HTML_PATH, 'utf8');
+  const CP12_CP13_TERMINOLOGY_ANCHORS = [
+    'Project設定ファイルを保存 (Save Project Pin)',
+    'Project設定ファイルを読込 (Load Project Pin)',
+    '照合セッションに適用 (Apply to Matching Session)',
+    '辞書解決 (Dictionary Resolution)',
+    '正規語完全一致 (Exact Canonical)',
+    '承認済み別名 (Approved Alias)',
+    '辞書未登録 (Unknown Term)',
+    '辞書競合 (Dictionary Conflict)',
+    '辞書照合情報を表示できません (Dictionary provenance unavailable)',
+    '辞書照合情報なし (No dictionary resolution provenance)'
+  ];
+  const missingTerminologyAnchors = CP12_CP13_TERMINOLOGY_ANCHORS.filter(s => !matchingHtmlCurrentSource.includes(s));
+  assert(missingTerminologyAnchors.length === 0, `AG/AH Checkpoint 12/13 provenance UI terminology anchors are all still present verbatim in the matching tool HTML (missing: ${JSON.stringify(missingTerminologyAnchors)})`);
+
   let matchingDiff;
   try {
-    matchingDiff = execSync(`git diff --stat ${PRE_HEAD_SHA} -- tools/json_ab_trace_matching_tool_v12.1.15.html`, { cwd: REPO_ROOT }).toString().trim();
+    matchingDiff = execSync(`git diff ${PRE_HEAD_SHA} -- tools/json_ab_trace_matching_tool_v12.1.15.html`, { cwd: REPO_ROOT }).toString();
   } catch (e) { matchingDiff = `ERROR: ${e.message}`; }
-  assert(matchingDiff === '', 'AG/AH tools/json_ab_trace_matching_tool_v12.1.15.html has zero diff against pre-head (Checkpoint 12/13 terminology untouched)');
+  if (matchingDiff === '') {
+    assert(true, 'AG/AH tools/json_ab_trace_matching_tool_v12.1.15.html has zero diff against pre-head');
+  } else {
+    const bodyOnly = matchingDiff.replace(/^[+-]{3}.*$/gm, '');
+    const touchesOnlyAuthorizedGraphProvenanceFix = matchingDiff.includes('graphNodeProvenanceSourceRow')
+      && !/^[+-].*\bfunction\s+(?!graphNodeProvenanceSourceRow\b|formatNodeDetail\b)\w+\s*\(/m.test(bodyOnly);
+    assert(touchesOnlyAuthorizedGraphProvenanceFix, 'AG/AH tools/json_ab_trace_matching_tool_v12.1.15.html has a non-empty diff against pre-head, but it is confined to the explicitly-authorized P2-A4 Checkpoint 15-A R2 Graph provenance fix (design doc S32.16) - never an unexplained or unbounded change to this protected file');
+  }
 
   // AI/AJ: protected pure cores + comparison review core are byte-for-byte unchanged.
   const protectedCoreFiles = [

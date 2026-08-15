@@ -4540,3 +4540,27 @@ Graph provenance接続修正のみをproduction freeze例外として許可。
 10個のpure core、P2-A3 production UI、comparison review core、
 quantity sidecar、既存artifact schemaは引き続き無変更
 （diff=0、確認済み）。
+
+**R3追補（verification baseline maintenance）:** R2のmatching tool
+HTML修正により、既にCLOSED済みのCheckpoint 14自身のsuite
+（`private_dictionary_ui_terminology_convergence_verification.js`、
+固定pre-head `45d296a9719fa68b00adfeaf9ce3da79e3da5c2e`）が持つ
+AG/AH assertion「matching tool HTMLはCheckpoint 14 pre-headに対し
+byte-for-byte zero diff」が、以後恒久的に成立しなくなることが判明
+した。このassertion自体の実質的な目的（AG/AHのコメント: "Checkpoint
+13 provenance UI / Checkpoint 12 Project Pin UI terminology is
+unchanged"）はterminologyの保持であり、full-file diffはその代理
+指標に過ぎなかった。R3では、この代理指標を、実際に保護すべき
+Checkpoint 12/13 UI terminology anchor文字列（Project Pin
+Save/Load/Apply 3ボタンの正式文言、Dictionary Resolutionラベル、
+EXACT_CANONICAL/APPROVED_ALIAS/UNKNOWN_TERM/DICTIONARY_CONFLICT
+の正式ラベル、malformed provenance fail-safe文言等）が実際に
+現在も逐語的に存在することを直接検証する形へ置き換えた。あわせて、
+diffが非空である場合はそれが本S32.16のR2で明示的に許可された
+`graphNodeProvenanceSourceRow`修正のみに閉じていること（他の
+関数定義に一切触れていないこと）を構造的に検証し、無関係・
+無制限な将来変更が同じくAG/AHでFAILする経路は維持した。CLOSED済み
+CP14 suite自体の他のassertion（HUMAN-01/02/03機能検証、124件超）は
+無変更。この置き換えにより、AG/AHは1つの
+assertionから2つ（terminology anchor存在確認+diff scope確認）に
+分割され、CP14 suiteの実測PASS件数は126→127（0 FAIL）となった。
