@@ -3392,3 +3392,303 @@ session revision/stateが不変であることの確認 / Snapshot変更後の�
 Applyボタンがdisabledであることの確認 / 診断hookから直接呼び出しても
 rejectされることの確認 / 現在のProject ID・Snapshotがloaded Pinと一致する
 場合は従来どおりApply成功することの確認（回帰）。
+
+## S30. Checkpoint 13: Approved Dictionary Resolution Provenance Projection
+
+Checkpoint 7で照合時に生成済みの`row._approvedDictResolution`（non-enumerable
+row sidecar、無変更）を唯一のSource of Truthとして、照合結果一覧/Detail・
+Knowledge Graph・Excel exportへDictionary Resolution provenanceを表示・
+出力する。本Checkpointは表示専用projectionであり、Dictionary Resolverの
+再実行・matching scoreの変更・comparisonの再生成はいずれも行わない。
+
+### S30.1 Provenance Source of Truth
+
+`row._approvedDictResolution`（`applyApprovedDictionaryTags()`が
+`setHiddenRowProp()`で設定済み、Checkpoint 7/7-R1〜R4、無変更）のみ。
+
+```
+{
+  schema_version: 'private-dictionary-row-resolution-sidecar/0.1',
+  snapshot_binding: { snapshot_id, snapshot_version, wrapper_integrity_sha256,
+                       dictionary_payload_sha256, dictionary_id,
+                       dictionary_version, scope },   // APPROVED_DICT_BINDING_FIELDS、無変更
+  annotations: [ { original_term, resolved_canonical, resolution_type,
+                    dictionary_entry_id, dictionary_snapshot_id,
+                    wrapper_integrity_sha256, scope, status }, ... ]
+                    // APPROVED_DICT_ANNOTATION_FIELDS（8 field）、無変更
+}
+```
+
+annotationに「どのJSON fieldから抽出したか（source field）」は
+Checkpoint 7の正式contractに存在しない（`approvedDictionaryTermsForRow()`は
+term文字列のみをResolverへ渡し、由来fieldを`termEntries`/annotationいずれ
+にも保持しない）。指示§8は「検討してください」であり必須ではないため、
+存在しないfieldを新規生成しない原則（§6/指示§8末尾）により、Checkpoint 13
+のprojection/Excelには「source field」列を含めない。
+
+### S30.2 Projection helper（唯一の解釈点）
+
+`projectApprovedDictionaryResolutionProvenance(row)`（matching HTML内、
+private関数）を新設し、Detail/Graph/Excelの全てがこの関数の返り値のみを
+読む。sidecar構造の解釈はこの関数1箇所に集約する（duplicate semantic
+interpretation count = 0）。
+
+返り値（fresh・deep-frozen・raw row/sidecarとのalias無し、§34）:
+
+```js
+{
+  available: boolean,       // sidecar自体が有効なformal shapeで存在するか
+  snapshotBinding: { ... } | null,
+  counts: { annotationCount, exactCount, aliasCount, unknownCount, conflictCount },
+  annotations: [ { original_term, resolved_canonical, resolution_type,
+                    dictionary_entry_id, dictionary_snapshot_id,
+                    wrapper_integrity_sha256, scope, status }, ... ]
+                    // 8-field contractそのまま、source order維持（§35）
+}
+```
+
+実装は、既存`APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION`/
+`APPROVED_DICT_BINDING_FIELDS`/`APPROVED_DICT_ANNOTATION_FIELDS`/
+`APPROVED_DICT_RESOLUTION_TYPES`（いずれもCheckpoint 7の既存定数、無変更）
+を再利用し、独自のfield一覧を新規定義しない。読み取りは全て
+try/catch + 1-shot読み取りでhostile getter/malformed shapeに対しfail-safe
+とし（§25/§26）、異常時は`available:false`の同一unavailable objectへ
+fallbackする（native Error/message/stackは一切伝播しない）。
+
+### S30.3 No Resolver rerun / no matching recomputation
+
+projection helperはPrivateDictionaryResolverCore/PrivateDictionarySnapshot
+ActivationCoreを一切呼ばない。dictionary_payload/effective_vocabulary探索・
+canonical再計算・alias再判定・conflict再判定・fuzzy補完は行わない。
+matching score（`confidence`/`matchMethod`等）・comparison review state
+（レビュー判定/レビューコメント）・`_tagInfo`/`_tags`/`_tagDisplayMap`は
+一切参照・変更しない。
+
+### S30.4 Zero-annotation / missing-sidecar semantics
+
+- sidecar自体が存在しない（`row._approvedDictResolution`が未設定）:
+  `available:false`。「辞書照合情報なし (No dictionary resolution
+  provenance)」として表示（§11）。comparison/errorにはしない。
+- sidecarは存在するが`annotations.length === 0`かつ`snapshot_binding`が
+  存在する: `available:true, counts.annotationCount:0`。「Snapshotは使用
+  されたが対象語なし」として、`available:false`と明確に区別する（§12）。
+
+### S30.5 Resolution type表示
+
+内部enum（`EXACT_CANONICAL`/`APPROVED_ALIAS`/`UNKNOWN_TERM`/
+`DICTIONARY_CONFLICT`）は無変更。表示ラベルのみ日本語first + English併記
+（§9固定）:
+
+| enum | 表示 |
+|---|---|
+| EXACT_CANONICAL | 正規語完全一致 (Exact Canonical) |
+| APPROVED_ALIAS | 承認済み別名 (Approved Alias) |
+| UNKNOWN_TERM | 辞書未登録 (Unknown Term) |
+| DICTIONARY_CONFLICT | 辞書競合 (Dictionary Conflict) |
+
+### S30.6 A/B mapping（既存identityのみ使用）
+
+既存「照合結果一覧」は`buildDetailRows`/`buildDetailRowsPlm`という名前で
+ファイル内に複数回定義される（V11→V12→Phase 7の段階的上書きアーキテ
+クチャ - 後方の`関数名 = function(...){...}`再代入が実際に呼ばれる版で
+あり、最初のtextual定義は死コード）。実際に呼ばれる版
+（`buildDetailRows = function(sysList, plmList){...}`/
+`buildDetailRowsPlm = function(sysList, plmList){...}`）は
+`relationRowsByA(aId)`/`relationRowsByB(bId)`と`currentActiveFromRows(all)`
+が返すtrace-matrix-review由来の`current`配列（`A_ID`/`B_ID`フィールドを
+持つ、`matchPlmParts()`の浅いcloneや`buildReverseIndex()`の`hits`とは
+別物）を用いて描画される。そのため以下の既存・無変更のlookup機構を使う:
+
+- JSON A基準（`buildDetailRows`）: sys row（`item`）はループ変数として
+  そのまま参照可能 - 追加lookup不要（`'辞書解決A'`）。matched B側は
+  `current`の各行が持つ`B_ID`から、既存`rowSourceMaps()`
+  （`currentSourceMaps(mergedResult.sysList, mergedResult.plmList)`の
+  ラッパー、既存・無変更）が返す`{a,b}` Mapのうち`b`で元`plmList`row
+  を引く（`rowSourceMaps().b.get(r['B_ID'])?.row`、fuzzy lookupではなく
+  既存canonical identityによる厳密lookup、§36）。
+- JSON B基準（`buildDetailRowsPlm`）: plm row（`item`）はループ変数として
+  そのまま参照可能 - 追加lookup不要（`'辞書解決B'`）。matched A側は
+  `current`の各行が持つ`A_ID`から、同じ`rowSourceMaps()`の`a`で元
+  `sysList`row を引く（`rowSourceMaps().a.get(r['A_ID'])?.row`）。
+- Knowledge Graph: `buildGraphElements`/`buildGraphElementsPlm`が
+  ノードの`detail`フィールドへ`item`/`srcB`（元row参照）をそのまま格納
+  済み（既存、無変更）。`data.detail._approvedDictResolution`を直接読める
+  ため追加lookupは不要。group/overview-groupノード（`data.type ===
+  'group'`または`'overview-group'`、集約row）はprovenance表示対象外
+  とする（実rowではなく集約構造のため）。
+
+配列index単独をidentityとして扱うことは行わない。表示labelやcanonical
+termでのlookupも行わない（§36）。
+
+### S30.7 Detail表現
+
+既存「照合結果一覧」table（`renderDetailTableFull()`、`detailRows`）へ、
+`buildDetailRows`/`buildDetailRowsPlm`が返す各row objectへ新規key
+`'辞書解決A'`/`'辞書解決B'`を追加する形で実装する（既存の
+`detailShowSourceColsToggle`/`detailShowReviewColsToggle`と同型の第3の
+toggle`detailShowDictResolutionColsToggle`で既定非表示、`
+isDetailColumnHiddenByDefault()`へ分岐追加）。
+
+- JSON A基準row: `'辞書解決A'` = sys row 1件のcompact summary。
+  `'辞書解決B'` = matched B row群それぞれのcompact summaryを`'\n'`で
+  連結（既存の複数値列 `'照合JSON B表示名一覧'`等と同じ表示規約）。
+- JSON B基準row: `'辞書解決B'` = plm row 1件のcompact summary。
+  `'辞書解決A'` = A hits群それぞれのcompact summaryを`'\n'`で連結。
+
+compact summary文字列の形式（例）:
+`正規語2 / 別名1 / 未登録1 / 競合0`（`counts`からの単純集計、§16）。
+sidecarなし: `辞書照合情報なし`。annotations=0だがsidecar有り:
+`Snapshot使用・対象語なし`。
+
+Detail table側のセルは既存tooltipパターン
+（`title="${escapeHtml(val)}"`、`renderDetailTableFull()`の全列共通
+処理）によりcompact summary文字列自体をtitleとしても提示するが、これは
+表示中のcompact summary文字列の再掲であり、annotation単位の詳細
+（original_term/resolved_canonical等）を追加提示するものではない -
+Detail table自体には新規モーダル/別パネルは追加しない
+（HUMAN-02/03全面改修はCheckpoint 14）。annotation単位の詳細は
+Knowledge Graph node detail panel（S30.8、`original_term → 
+resolved_canonical [type]`を1行ずつ）と、Excel専用sheet「辞書照合根拠」
+（S30.9B、annotationごとに1 row）の2箇所で確認できる設計とし、Detail
+table自身はrow-level集計のcompact summaryのみを担う。
+
+### S30.8 Graph表現
+
+`renderNodeDetailPanel()`/`formatNodeDetail(data)`（既存、node tap時に
+呼ばれる）へ、`data.type`が`'requirement'`または`'part'`のときのみ、
+`data.detail`（元row参照）から`projectApprovedDictionaryResolutionProvenance()`
+を呼び、以下を追記する:
+
+- 辞書解決サマリー（compact summary、§S30.7と同一文字列）
+- Snapshot version（`snapshotBinding.snapshot_version`、存在する場合のみ）
+- annotation詳細（`original_term → resolved_canonical (resolution type表示)`
+  を1行ずつ、`annotations`のsource順のまま）
+
+node identity/edge identity/edge score/edge existenceはいずれも変更しない
+（§17）。provenanceを理由にnodeをmergeしない、新edgeを生成しない、
+Graph用にResolverを再実行しない。badge等の視覚的追加は行わず、既存の
+テキストベースdetail panel（`detailArea.textContent`）へ追記するのみ。
+
+### S30.9 Excel表現
+
+`exportDetailWorkbook()`（既存「照合結果一覧Excel出力」、無改変の
+呼び出し構造を維持）に対し:
+
+A. compact summary columns: S30.7で`detailRows`（=`buildDetailRows`/
+   `buildDetailRowsPlm`の返り値）へ追加済みの`'辞書解決A'`/`'辞書解決B'`
+   列が、既存のexport処理（`_`prefix列を除去するのみで他は素通し）に
+   よってそのまま既存sheet「照合結果一覧」へ出力される - Excel専用の
+   追加コードは不要。
+
+B. 専用sheet「辞書照合根拠 (Dictionary Resolution Provenance)」を新設。
+   annotationごとに1 rowを基本とする（§21）。row identity単位で一意に
+   出す（§22推奨方針を採用 - comparisonごとの重複出力はしない。理由:
+   Dictionary resolutionはrow-level factであり、comparison-level
+   evidenceではないため、§23の区別と整合する）。`mergedResult.sysList`/
+   `mergedResult.plmList`を直接1回ずつ走査し、それぞれのrowの
+   `_approvedDictResolution`をprojectionしてannotation単位で展開する
+   （comparisonの数に依存しない）。
+
+   列（既存identityのみ使用、推測生成なし、§21）:
+   `side`（'JSON A' / 'JSON B'）、`row_id`（`sysRowId(item,idx)`または
+   `plmUniqueKey(plm,idx)` - 既存canonical row identity、常に非null）、
+   `trace_id`（`item.trace_id`/`plm.trace_id`、無ければ空欄 - 推測生成
+   しない）、`original_term`、`resolution_type`（表示ラベル併記）、
+   `resolved_canonical`、`snapshot_id`、`snapshot_version`、
+   `dictionary_id`、`dictionary_version`、`scope`。
+
+   comparison_idは含めない（row-level sheetとcomparison-level sheet
+   「照合結果一覧」は別概念であり、§23により意図的に混同しない。
+   comparison文脈が必要な場合は既存`matcher_a_id`/`matcher_b_id`
+   （＝本sheetの`row_id`と同一値）で照合結果一覧側と付き合わせられる
+   ため、別途mapping sheetは新設しない）。
+
+annotations=0のrow・sidecarなしrowもexport成功する（row自体は出力せず
+skip - annotation-level sheetのため、0件のrowは自然に現れない。row-level
+のavailable/zero区別はcompact summary column側（A項目）で確認する設計と
+する）。
+
+private dictionary payload全体（`effective_vocabulary`/`entries`/
+review note/private workbook内容）は一切含めない（§28/§29/AG/AH）。
+
+### S30.10 row-level vs comparison-level semantics
+
+Dictionary resolution provenance（1 row × 1 Snapshot bindingの下で
+確定したannotation集合）はrow-level factであり、同一rowが複数の
+comparison（`traceMatrixRows`の複数エントリ）に参加してもprovenance
+自体は不変・単一である。Excel provenance sheetはrow identity単位で
+1回だけ出力し、comparison参加回数に応じて重複させない（§30.9B）。
+一方、Detail table（`buildDetailRows`/`buildDetailRowsPlm`）はcomparison
+単位（1 A行×matched B行群）で描画されるため、そこでのcompact summary
+表示は「そのcomparisonが参照するA/B row(群)のprovenance」であり、
+row-level factをcomparison文脈へ射影した表示に過ぎない（意味の混同では
+ない - S30.7の複数値連結がまさにこの射影）。
+
+### S30.11 Snapshot identity表示
+
+既定表示: `snapshot_id`/`snapshot_version`/`dictionary_id`/
+`dictionary_version`/`scope`。hashは既定では出さず、Graph detail panelの
+annotation詳細やExcel provenance sheetでのみ`wrapper_integrity_sha256`を
+必要に応じて確認可能とする（`dictionary_payload_sha256`はsidecarの
+`snapshot_binding`に含まれるためsheetへ列として出力可能- Detail
+compact summaryへは出さない）。表示のためのhash再計算は一切行わない
+（sidecarに格納済みの値をそのまま使う）。
+
+### S30.12 Privacy
+
+sidecarの外側にあるdictionary payload全体・review note・private workbook
+内容は一切表示/exportしない。表示可能なのはそのrowのannotationに含まれる
+`original_term`/`resolved_canonical`等、8-field contractの範囲のみ（§28）。
+Excel exportはユーザー明示操作（既存「照合結果一覧Excel出力」ボタン）
+時のみ - 自動/バックグラウンドexportは追加しない（§29）。
+
+### S30.13 Malformed sidecar fallback
+
+`projectApprovedDictionaryResolutionProvenance()`はhostile
+getter/malformed annotation/getter throwいずれに対してもtry/catchで
+`available:false`のunavailable objectへfallbackし、native Error.message
+等を一切伝播しない。Detail render/Graph render/Excel exportいずれも、
+1件の異常sidecarが全体のrenderingをクラッシュさせない（try/catchは
+projection helper内で完結させ、呼び出し側は常に安全な戻り値のみを
+受け取る設計とする）。
+
+### S30.14 Reproducibility
+
+projection結果はrow._approvedDictResolutionの内容のみに依存し、現在の
+`approvedDictionaryRuntime`（session live state）を一切参照しない
+（§37/AJ/AK）。同一`mergedResult`（同一row参照群）から呼び出す限り、
+projection結果は常に同一値を返す（§38）。Snapshot switch後も、既存
+comparison resultのprovenance表示は元rowのsidecarのまま変わらない。
+
+### S30.15 Verification matrix概要
+
+Projection（A-K）/No recomputation（L-O）/Detail（P-T）/Graph（U-Z）/
+Excel（AA-AI）/Staleness・reproducibility（AJ-AL）/Hostile（AM-AO）/
+Existing semantics（AP-AT）の45項目区分を
+`private_dictionary_resolution_provenance_projection_verification.js`
+（新規）へ実装する。real dependency path
+（実Snapshot→実setSnapshot/setProjectPin→実Checkpoint 7 matching
+resolution→実`_approvedDictResolution`→Checkpoint 13 projection→
+Detail/Graph/Excel）を最低1本、EXACT_CANONICAL/APPROVED_ALIASを実
+Resolver outputから生成して通す。
+
+### S30.16 P2-A4 Exit Criteria更新（Checkpoint 13 CLOSED後）
+
+**CLOSED（追加）:**
+- provenance display/export（本Checkpoint）
+
+**Remaining MUST-CLOSE:**
+- HUMAN-01/02/03 UI convergence（P2-A3既存UI全体の文言・表示規約統一、
+  Checkpoint 14）
+- integrated E2E acceptance / clean regression（全Checkpoint通しの
+  E2E受入）
+- privacy/regression closure（最終的な横断privacy監査）
+
+**FUTURE SLICE（無変更）:**
+- persistent unknown/conflict maintenance queue
+- STANDARD/DOMAIN/SESSION full layers
+
+既存S29.15/S29.16の分類（Checkpoint 12時点）と矛盾しない - 「provenance
+display/export」はCheckpoint 12時点でRemaining MUST-CLOSEに数えられて
+おらず、Checkpoint 13で新たにCLOSEDへ追加されるのみで、他項目の分類は
+変更しない。

@@ -834,6 +834,7 @@
       <span class="legend-match"><i></i>照合情報</span>
       <label style="margin-left:16px; font-size:12px; font-weight:600; color:var(--muted); cursor:pointer;"><input type="checkbox" id="detailShowSourceColsToggle" style="vertical-align:middle;" /> 元データの詳細列も表示（重複列・生フィールドを含む全列）</label>
       <label style="margin-left:16px; font-size:12px; font-weight:600; color:var(--muted); cursor:pointer;"><input type="checkbox" id="detailShowReviewColsToggle" style="vertical-align:middle;" /> レビュー関連の列も表示（内訳・コメント等）</label>
+      <label style="margin-left:16px; font-size:12px; font-weight:600; color:var(--muted); cursor:pointer;"><input type="checkbox" id="detailShowDictResolutionColsToggle" style="vertical-align:middle;" /> 辞書照合根拠の列も表示（Dictionary Resolution Provenance）</label>
     </div>
 
     <!-- フィルタパネル -->
@@ -4340,6 +4341,166 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     load: (file) => loadProjectSnapshotPinFile(file),
     apply: () => applyLoadedProjectSnapshotPinToMatchingSession(),
     render: () => renderProjectPinFileStatus()
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     P2-A4 Checkpoint 13 (design doc S30): Approved Dictionary Resolution
+     Provenance projection. Read-only display/export projection over the
+     EXISTING Checkpoint 7 row sidecar (row._approvedDictResolution,
+     APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION/APPROVED_DICT_BINDING_FIELDS/
+     APPROVED_DICT_ANNOTATION_FIELDS/APPROVED_DICT_RESOLUTION_TYPES, all
+     unmodified) - never re-runs the Resolver, never recomputes matching/
+     comparison, never changes tag/score/review semantics.
+     projectApprovedDictionaryResolutionProvenance() is the SOLE place any
+     UI/export code interprets sidecar shape; Detail/Graph/Excel all read
+     only the frozen projection object this helper returns (S30.2).
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  const APPROVED_DICT_RESOLUTION_TYPE_LABELS = Object.freeze({
+    EXACT_CANONICAL: '正規語完全一致 (Exact Canonical)',
+    APPROVED_ALIAS: '承認済み別名 (Approved Alias)',
+    UNKNOWN_TERM: '辞書未登録 (Unknown Term)',
+    DICTIONARY_CONFLICT: '辞書競合 (Dictionary Conflict)'
+  });
+  function approvedDictResolutionTypeLabel(type) {
+    return APPROVED_DICT_RESOLUTION_TYPE_LABELS[type] || '不明 (Unknown)';
+  }
+
+  // §S30.13/§26: every raw sidecar field read goes through this - a
+  // throwing getter can never propagate past this point (fail-safe, never
+  // a native Error/message/stack leak).
+  function safeReadApprovedDictSidecarField(container, key) {
+    try { return container[key]; } catch (_err) { return undefined; }
+  }
+
+  const APPROVED_DICT_PROVENANCE_UNAVAILABLE = Object.freeze({
+    available: false,
+    snapshotBinding: null,
+    counts: Object.freeze({ annotationCount: 0, exactCount: 0, aliasCount: 0, unknownCount: 0, conflictCount: 0 }),
+    annotations: Object.freeze([])
+  });
+
+  // §S30.1/§S30.2: the SOLE projection helper. row._approvedDictResolution
+  // is the SOLE Source of Truth - never dictionary_payload/
+  // effective_vocabulary/canonical re-lookup, never a fresh Resolver call
+  // (S30.3). Returns a fresh, deep-frozen, alias-free display object -
+  // never the raw sidecar/row reference (S30.2/§34). Annotation order is
+  // preserved exactly as captured by Checkpoint 7 (§35) - never re-sorted.
+  function projectApprovedDictionaryResolutionProvenance(row) {
+    try {
+      if (!row || typeof row !== 'object') return APPROVED_DICT_PROVENANCE_UNAVAILABLE;
+      const sidecar = safeReadApprovedDictSidecarField(row, '_approvedDictResolution');
+      if (!sidecar || typeof sidecar !== 'object') return APPROVED_DICT_PROVENANCE_UNAVAILABLE;
+      if (safeReadApprovedDictSidecarField(sidecar, 'schema_version') !== APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION) return APPROVED_DICT_PROVENANCE_UNAVAILABLE;
+
+      const rawBinding = safeReadApprovedDictSidecarField(sidecar, 'snapshot_binding');
+      let snapshotBinding = null;
+      if (rawBinding && typeof rawBinding === 'object') {
+        const captured = {};
+        let bindingOk = true;
+        for (const field of APPROVED_DICT_BINDING_FIELDS) {
+          const v = safeReadApprovedDictSidecarField(rawBinding, field);
+          if (v !== null && typeof v !== 'string' && typeof v !== 'number') { bindingOk = false; break; }
+          captured[field] = v;
+        }
+        if (bindingOk) snapshotBinding = Object.freeze(captured);
+      }
+
+      const rawAnnotations = safeReadApprovedDictSidecarField(sidecar, 'annotations');
+      const annotations = [];
+      const counts = { annotationCount: 0, exactCount: 0, aliasCount: 0, unknownCount: 0, conflictCount: 0 };
+      if (Array.isArray(rawAnnotations)) {
+        for (let i = 0; i < rawAnnotations.length; i++) {
+          const raw = safeReadApprovedDictSidecarField(rawAnnotations, i);
+          if (!raw || typeof raw !== 'object') continue; // §26: skip malformed entries, never crash the whole projection
+          const item = {};
+          let ok = true;
+          for (const field of APPROVED_DICT_ANNOTATION_FIELDS) {
+            const v = safeReadApprovedDictSidecarField(raw, field);
+            if (v !== null && typeof v !== 'string') { ok = false; break; }
+            item[field] = v;
+          }
+          if (!ok || !APPROVED_DICT_RESOLUTION_TYPES.has(item.resolution_type)) continue;
+          annotations.push(Object.freeze(item));
+          counts.annotationCount++;
+          if (item.resolution_type === 'EXACT_CANONICAL') counts.exactCount++;
+          else if (item.resolution_type === 'APPROVED_ALIAS') counts.aliasCount++;
+          else if (item.resolution_type === 'UNKNOWN_TERM') counts.unknownCount++;
+          else if (item.resolution_type === 'DICTIONARY_CONFLICT') counts.conflictCount++;
+        }
+      }
+
+      return Object.freeze({
+        available: true,
+        snapshotBinding,
+        counts: Object.freeze(counts),
+        annotations: Object.freeze(annotations)
+      });
+    } catch (_err) {
+      return APPROVED_DICT_PROVENANCE_UNAVAILABLE;
+    }
+  }
+
+  // §S30.7/§16: compact one-line summary shared by Detail/Graph. Pure
+  // formatting over an already-projected object - never re-reads the raw
+  // sidecar/row.
+  function approvedDictProvenanceCompactSummary(projection) {
+    if (!projection || !projection.available) return '辞書照合情報なし (No dictionary resolution provenance)';
+    const c = projection.counts;
+    if (c.annotationCount === 0) return 'Snapshot使用・対象語なし (Snapshot used, no eligible terms)';
+    return `正規語${c.exactCount} / 別名${c.aliasCount} / 未登録${c.unknownCount} / 競合${c.conflictCount}`;
+  }
+
+  // §S30.7: aggregates multiple rows' projections into one compact summary
+  // line (used when a single Detail row represents several matched
+  // counterpart rows) - pure aggregation over already-projected objects,
+  // never a second sidecar interpretation.
+  function approvedDictProvenanceAggregateSummary(rows) {
+    if (!rows || !rows.length) return '辞書照合情報なし (No dictionary resolution provenance)';
+    return rows.map(row => approvedDictProvenanceCompactSummary(projectApprovedDictionaryResolutionProvenance(row))).join('\n');
+  }
+
+  // §S30.9B: annotation-level rows for the dedicated Excel provenance
+  // sheet, row-identity-unique (never duplicated per comparison, S30.9B/
+  // S30.10). Iterates mergedResult.sysList/plmList directly - never
+  // traceMatrixRows - so output never depends on how many comparisons a
+  // row participates in.
+  function buildApprovedDictResolutionProvenanceSheetRows(sysList, plmList) {
+    const out = [];
+    const appendSide = (rows, side, idFn) => {
+      (rows || []).forEach((row, idx) => {
+        if (!row || typeof row !== 'object') return;
+        const projection = projectApprovedDictionaryResolutionProvenance(row);
+        if (!projection.available || !projection.annotations.length) return;
+        const rowId = idFn(row, idx);
+        const traceId = normalizeText(row?.trace_id) || '';
+        const binding = projection.snapshotBinding || {};
+        projection.annotations.forEach(a => {
+          out.push({
+            'side': side,
+            'row_id': rowId,
+            'trace_id': traceId,
+            'original_term': a.original_term,
+            'resolution_type': `${a.resolution_type} / ${approvedDictResolutionTypeLabel(a.resolution_type)}`,
+            'resolved_canonical': a.resolved_canonical,
+            'snapshot_id': binding.snapshot_id ?? '',
+            'snapshot_version': binding.snapshot_version ?? '',
+            'dictionary_id': binding.dictionary_id ?? '',
+            'dictionary_version': binding.dictionary_version ?? '',
+            'scope': binding.scope ?? ''
+          });
+        });
+      });
+    };
+    appendSide(sysList, 'JSON A', (row, idx) => sysRowId(row, idx));
+    appendSide(plmList, 'JSON B', (row, idx) => plmUniqueKey(row, idx));
+    return out;
+  }
+
+  globalThis.__approvedDictProvenanceDiagnostics = Object.freeze({
+    project: (row) => projectApprovedDictionaryResolutionProvenance(row),
+    compactSummary: (row) => approvedDictProvenanceCompactSummary(projectApprovedDictionaryResolutionProvenance(row)),
+    buildProvenanceSheetRows: (sysList, plmList) => buildApprovedDictResolutionProvenanceSheetRows(sysList, plmList)
   });
 
   // ---- §13 whole-value term extraction. Source-of-truth field boundary is
@@ -9684,12 +9845,19 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     '自動照合件数', '有効照合件数', '人手確定件数', '要確認件数', '除外件数',
     '除外JSON B一覧', '除外JSON A一覧', 'レビュー判定内訳', 'レビューコメント', '共有タグ', '判定理由'
   ]);
+  // P2-A4 Checkpoint 13 (S30.7): Dictionary Resolution provenance compact-
+  // summary columns, hidden by default via the same toggle pattern as the
+  // two Sets above (third independent toggle - never conflated with source/
+  // review column visibility).
+  let detailShowDictResolutionColumns = false;
+  const DETAIL_DICT_RESOLUTION_COLUMNS = new Set(['辞書解決A', '辞書解決B']);
   function isDetailColumnHiddenByDefault(header) {
     if (!detailShowSourceColumns) {
       if (/^[AB]:/.test(header)) return true;
       if (DETAIL_DUPLICATE_COLUMNS.has(header)) return true;
     }
     if (!detailShowReviewColumns && DETAIL_REVIEW_COLUMNS.has(header)) return true;
+    if (!detailShowDictResolutionColumns && DETAIL_DICT_RESOLUTION_COLUMNS.has(header)) return true;
     return false;
   }
   const detailShowSourceColsToggle = $('detailShowSourceColsToggle');
@@ -9703,6 +9871,13 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   if (detailShowReviewColsToggle) {
     detailShowReviewColsToggle.addEventListener('change', () => {
       detailShowReviewColumns = detailShowReviewColsToggle.checked;
+      renderDetailTableFull();
+    });
+  }
+  const detailShowDictResolutionColsToggle = $('detailShowDictResolutionColsToggle');
+  if (detailShowDictResolutionColsToggle) {
+    detailShowDictResolutionColsToggle.addEventListener('change', () => {
+      detailShowDictResolutionColumns = detailShowDictResolutionColsToggle.checked;
       renderDetailTableFull();
     });
   }
@@ -10310,6 +10485,24 @@ ${h.name}`, type:'requirement', detail:srcA };
     const tags = Array.isArray(src.tags) ? src.tags : [];
     if (tags.length) lines.push(`タグ: ${tags.join(', ')}`);
     if (src.review_status) lines.push(`確認状態: ${src.review_status}`);
+    // P2-A4 Checkpoint 13 (S30.8): Dictionary Resolution provenance, read
+    // only from the existing row sidecar via the single projection helper -
+    // never a Graph-side Resolver re-run. data.detail IS the original
+    // sysList/plmList row reference (buildGraphElements[Plm](), unchanged),
+    // so no id lookup is needed here.
+    if (data.type === 'requirement' || data.type === 'part') {
+      const provenance = projectApprovedDictionaryResolutionProvenance(data.detail);
+      lines.push('');
+      lines.push(`辞書解決 (Dictionary Resolution): ${approvedDictProvenanceCompactSummary(provenance)}`);
+      if (provenance.available && provenance.snapshotBinding) {
+        lines.push(`  Snapshot: ${provenance.snapshotBinding.snapshot_id} v${provenance.snapshotBinding.snapshot_version}`);
+      }
+      if (provenance.available && provenance.annotations.length) {
+        provenance.annotations.forEach(a => {
+          lines.push(`  ${a.original_term} → ${a.resolved_canonical || '(なし)'} [${approvedDictResolutionTypeLabel(a.resolution_type)}]`);
+        });
+      }
+    }
     return lines.join('\n') || JSON.stringify(data, null, 2);
   }
   function formatEdgeDetail(data) {
@@ -11705,7 +11898,9 @@ ${h.name}`, type:'requirement', detail:srcA };
         'レビュー判定内訳':all.filter(r => isHumanDecision(traceReviewFor(r._reviewKey))).map(r => `${r['B_ID']}: ${r['レビュー判定']}`).join('\n'),
         'レビューコメント':all.filter(r => normalizeText(r['レビューコメント'])).map(r => `${r['B_ID']}: ${r['レビューコメント']}`).join('\n'),
         '共有タグ':current.map(r => relationPresentation(r)?.evidence.sharedTags.join(', ') || '').filter(Boolean).join('\n'),
-        '判定理由':current.map(r => relationPresentation(r)?.decision.reasonText || '').filter(Boolean).join('\n')
+        '判定理由':current.map(r => relationPresentation(r)?.decision.reasonText || '').filter(Boolean).join('\n'),
+        '辞書解決A': approvedDictProvenanceCompactSummary(projectApprovedDictionaryResolutionProvenance(item)),
+        '辞書解決B': approvedDictProvenanceAggregateSummary(current.map(r => rowSourceMaps().b.get(r['B_ID'])?.row).filter(Boolean))
       };
     });
   };
@@ -11739,7 +11934,9 @@ ${h.name}`, type:'requirement', detail:srcA };
         'レビュー判定内訳':all.filter(r => isHumanDecision(traceReviewFor(r._reviewKey))).map(r => `${r['A_ID']}: ${r['レビュー判定']}`).join('\n'),
         'レビューコメント':all.filter(r => normalizeText(r['レビューコメント'])).map(r => `${r['A_ID']}: ${r['レビューコメント']}`).join('\n'),
         '共有タグ':current.map(r => relationPresentation(r)?.evidence.sharedTags.join(', ') || '').filter(Boolean).join('\n'),
-        '判定理由':current.map(r => relationPresentation(r)?.decision.reasonText || '').filter(Boolean).join('\n')
+        '判定理由':current.map(r => relationPresentation(r)?.decision.reasonText || '').filter(Boolean).join('\n'),
+        '辞書解決B': approvedDictProvenanceCompactSummary(projectApprovedDictionaryResolutionProvenance(item)),
+        '辞書解決A': approvedDictProvenanceAggregateSummary(current.map(r => rowSourceMaps().a.get(r['A_ID'])?.row).filter(Boolean))
       };
     });
   };
@@ -12973,6 +13170,13 @@ ${h.name}`, type:'requirement', detail:srcA };
       const indices = detailRows?.length && detailFiltered instanceof Set ? [...detailFiltered].sort((a,b)=>a-b) : source.map((_,i)=>i);
       const rows = indices.map(i=>{const r={...(source[i]||{})};Object.keys(r).filter(k=>k.startsWith('_')).forEach(k=>delete r[k]);return r;}).filter(r=>Object.keys(r).length);
       const wb=XLSX.utils.book_new(); addJsonSheet(wb,'照合結果一覧',rows);
+      // P2-A4 Checkpoint 13 (S30.9B): dedicated Dictionary Resolution
+      // Provenance sheet, row-identity-unique (never duplicated per
+      // comparison) - built directly from mergedResult.sysList/plmList,
+      // never from `rows`/traceMatrixRows, so it never depends on how many
+      // comparisons a row participates in.
+      const provenanceRows = buildApprovedDictResolutionProvenanceSheetRows(mergedResult.sysList||[], mergedResult.plmList||[]);
+      if (provenanceRows.length) addJsonSheet(wb,'辞書照合根拠',provenanceRows);
       await appendTwoDimensionalMatrixSheet(wb,currentSettings(),job);
       await writeWorkbook(wb,`${safeFileName(graphNameOrDefault())}_照合結果一覧_${linkBasis==='plm'?'JSON B基準':'JSON A基準'}_V12_1_15.xlsx`,job);
       finishMatchingJob(job,'Excel保存完了'); statusEl.textContent='照合結果一覧と２元マトリクスをExcelへ保存しました。';
