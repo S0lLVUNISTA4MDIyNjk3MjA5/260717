@@ -4159,3 +4159,282 @@ Checkpoint 14完了時、人間レビュー担当者が以下を実機（実Chro
    上書き、辞書への自動登録はしない）と一致しているか。
 
 いずれも「はい」であれば受入合格とする。
+
+## S32 Checkpoint 15: Final Integration Closure / Clean Regression / Privacy / Human Acceptance Gate
+
+Checkpoint 15はP2-A4全体のfinal MUST-CLOSE checkpointである。新規
+production機能は一切追加しない（S32.2 Production Freeze）。本
+Checkpointが追加する成果物は、検証・設計クロージャ・human受入
+manualのみである（S32.9 Expected changed files）。
+
+### S32.1 Final Exit Criteria（10項目、すべてMUST-CLOSE）
+
+1. Checkpoint 1-14がすべてCLOSED（Checkpoint 14固定head:
+   `41a38c156097d4f449dae140da0469b22f947ec9`）。
+2. Golden integrated E2E（S32.3）がPASS。
+3. 既存P2-A4 suite family全体（S32.8）が0 FAILで再実行済み。
+4. Clean clone reproducibility（S32.5）がPASS。
+5. Privacy closure（S32.6）がPASS。
+6. Browser closure（S32.7）がPASSまたはExplicit Environmental
+   Incompleteとして記録され、Human acceptance（S32.10）で扱われる。
+7. Windows x64 Human acceptance（`private_dictionary_p2a4_human_
+   acceptance_windows_x64.md`）の実施結果がPASS（本Checkpointの
+   Developer完了時点では**PENDING**、独立reviewerの最終判定を待つ）。
+8. 未解決のBLOCKING/MAJOR findingが存在しない。
+9. governance isolation維持（S32.11: 旧branch/PR #15無変更、
+   tag/Release/新規PR無し）。
+10. 最終fixed SHAが `git rev-parse HEAD` /
+    `git ls-remote origin refs/heads/claude/private-dictionary-
+    matching-integration-p2a4-continuation` の実出力で確定・記録
+    されている。
+
+### S32.2 Production Freeze
+
+本Checkpointでは以下のみ許可する: 最終検証コード、closure設計
+（本section）、human受入manual、clean reproducibility tooling、
+test harnessのみの変更。既存productionコード（10個のpure core、
+matching tool HTML、P2-A3 production UI、comparison review core、
+quantity sidecar、既存schema/artifact format）は一切変更しない
+（S32.12の保護ファイル一覧を参照）。本Checkpoint中にproduction
+defectが発見された場合は日和見的に修正せず、
+`CHECKPOINT 15 HOLD`として報告し、別途R1指示を待つ（S32.13）。
+
+### S32.3 Golden integrated E2E設計
+
+`tools/knowledge_builder/verification/private_dictionary_p2a4_final_
+integration_verification.js`が実装する、P2-A4全lifecycleを実際の
+production関数のみで結ぶ単一のE2Eチェーン:
+
+```
+P2-A2 Evaluation
+  -> P2-A3 Review State（実 candidate ACCEPT/REJECT、alias ACCEPT/
+     REJECT、conflict SELECT_CANONICAL を含む）
+  -> PrivateDictionaryReviewPromotionAdapterCore
+     .buildPromotionInputFromReview()                    (Checkpoint 8)
+  -> PrivateDictionaryPromotionSnapshotCompositionCore
+     .promoteReviewedCandidatesAndBuildSnapshot()         (Checkpoint 5;
+     内部で実 Promotion core + 実 Snapshot core を呼び出す)
+  -> PrivateDictionarySnapshotActivationCore
+     .buildProjectSnapshotPin()                           (Checkpoint 9)
+  -> PrivateDictionaryProjectSnapshotPinPersistenceCore
+     .serializeProjectSnapshotPin() / .loadProjectSnapshotPin()
+                                                            (Checkpoint 11)
+  -> PrivateDictionaryMatchingSession.setProjectPin()      (Checkpoint 10,
+     matching tool HTML内、明示的Apply)
+  -> annotateAllTraceTags() による実TraceRecord A/B matching
+     + row._approvedDictResolution sidecar                (Checkpoint 7)
+  -> buildDetailRows() / buildApprovedDictResolutionProvenanceSheetRows()
+     / __approvedDictProvenanceDiagnostics.project()       (Checkpoint 13)
+```
+
+fixtureはEXACT_CANONICAL、APPROVED_ALIAS、UNKNOWN_TERM、
+DICTIONARY_CONFLICT、dictionary対象語0件の行、no-sidecarの
+baseline行、JSON A/B双方を含む（すべてverification-only、production
+には一切埋め込まない）。Review semanticsは実candidate ACCEPT、実
+alias ACCEPT、実rejected candidate、実rejected alias、実conflict
+resolution（SELECT_CANONICAL）を含み、UNREVIEWED/UNCERTAINを
+promotableな値に変換する経路は存在しない。
+
+**重要な設計上の発見（DICTIONARY_CONFLICTの生成経路）:** 実
+Promotion core（`private_dictionary_promotion_core.js`）は
+`detectDictionaryLookupConflicts()`（P2-A1 lookup-conflict機構の
+再利用）により、内部でalias衝突を含む辞書のpromoteを常に拒否する
+（`PROMOTION_DICTIONARY_CONFLICT`）。したがって実P2-A4 Promotionは
+それ自身が内部矛盾を持つSnapshotを生成することは決してない
+（golden E2E内でこの拒否自体を実際に発火させて確認済み）。
+DICTIONARY_CONFLICTという解決type自体は、Promotionを経由しない
+（= このcheckpoint契約より前に作成された、または移行された）
+Snapshotに対してResolverが安全に振る舞うための防御的分類である。
+golden E2Eはこの実態を反映し、conflict-freeな実Promotionチェーンで
+本体のSnapshot/Pinを構築する一方、DICTIONARY_CONFLICT自体は
+Checkpoint 3/6の実`buildDictionarySnapshotWrapper()`
+（Compositionが内部で呼ぶ関数と同一）で意図的に矛盾したSnapshotを
+構築し、Checkpoint 7/13の既存suiteと同一のpatternで実Resolverに
+解決させて検証する。これはstand-inではなく、Checkpoint 7/13で
+既にreview済みの手法をそのまま踏襲したものである。
+
+Score/review invariants（bonus=0、専用coefficientなし、dictionary
+単独でのAUTO ACCEPT禁止、既存comparison review stateの非改変）は
+golden E2E自身の実結果（`evaluateTagMatch()`/`getScore('tag')`）で
+直接測定し、Checkpoint 7自身の網羅的suiteは無改変のままS32.8で
+再実行する。
+
+Snapshot-switch reproducibility（旧結果のsidecar/Detail/Excel
+provenanceが、セッションが別Snapshotへ切り替わった後も不変である
+こと）とProject Pin reload reproducibility（同一Snapshot+同一
+expected_project_idでは field-for-field 同一、異なるSnapshotまたは
+異なるexpected_project_idでは`PROJECT_PIN_PERSISTENCE_BINDING_
+MISMATCH`で拒否）も、golden E2E自身の実データで直接検証する。
+
+### S32.4 Privacy closure canary pass
+
+静的scanのみでは不十分という指示（S32原則）に基づき、golden E2Eが
+生成する実artifact（Project Pinの`serializeProjectSnapshotPin()`
+出力、Excel provenance sheet、実際に投げられるerror object）に
+対して、実際のprivate-content canary文字列（reviewer note・
+canonical term・alias文字列）が含まれないことを直接検証する
+（`private_dictionary_p2a4_final_integration_verification.js`
+Section 5、O/P/Q）。matching tool runtime層の`setProjectPin()`は
+実`Error`インスタンスで失敗を報告するが、`.message`は常に固定の
+一般文言（"project pin operation failed"）であり、caller供給の
+Pin内容やfilesystem pathを含まないことを確認済み。pure core層
+（Adapter/Promotion/Composition/Snapshot/Resolver/Activation/
+Persistence）はすべて`{code[, path]}`のみの凍結objectで失敗を
+報告し、native Error instanceを一切使わないことも確認済み。
+
+### S32.5 Clean reproducibility
+
+現在の開発workspaceのみに依存しない証拠として、fixed candidate
+SHAを新規clean temp directoryへ`git clone`→`git checkout <SHA>`
+→`git status --porcelain`が空であることを確認→当該clone内で
+`private_dictionary_p2a4_final_integration_verification.js`を
+実行し、working session側と同一のPASS件数を得ることをCheckpoint
+15完了報告に含める（S32.14の報告書式）。
+
+### S32.6 Privacy closure（横断監査）
+
+Private Review artifact、Shareable Summary、Promotion Input、
+Snapshot Wrapper、Project Pin、Pin Persistence artifact、matching
+runtime、provenance Detail、provenance Excel、error/status UIの
+既存allowlistがSource of Truthであることを、既存suite群
+（S32.8で無改変のまま再実行）とgolden E2E自身のcanary検証
+（S32.4）の組み合わせで確認する。Persistence artifactは形式的
+identityのみを含み、entries/alias term/canonical term/evidence/
+reviewer notes/source workbook dataを一切含まない
+（S32.4で実測）。Provenance exportはその行自身の形式的resolution
+annotationsのみを含み、完全な辞書payloadや他の行/entryの内容を
+含まない（S32.4で実測）。
+
+### S32.7 Browser closure
+
+P2-A3 Candidate Review UIは既存の実Chromium/Playwright pattern
+（`private_dictionary_candidate_review_ui_verification.js`の
+browser half）で完結済み。matching toolのGraph/Excel機能は
+CDN依存（cytoscape/xlsx）のため、これまでの検証ではEnvironmental
+Incompleteとして報告されていたが、本Checkpointで
+Playwright `page.route()`によるtest-harness側のnetwork
+intercept（productionのHTML/`<script src>`は一切変更せず、
+リポジトリ既存の`tools/release/vendor/`配下のcytoscape 3.26.0 /
+xlsx / tiny-segmenterのローカルcopyを実Chromiumへ配信）技術を
+確立し、実Chromium上でGraph/Excelを含むmatching tool全体を
+検証可能にした（S32のbrowser closure verification、別ファイル）。
+いずれの項目も実Chromiumで完結できない場合は本Checkpointを
+一方的にPASS宣言せず、CODE DEFECTまたはENVIRONMENTAL INCOMPLETE
+のいずれかを明示的に報告する。
+
+### S32.8 Full regression（既存suite family、無改変のまま再実行）
+
+`private_dictionary_p2a4_final_integration_verification.js`
+Section 6が、以下を無改変のsubprocessとして実行し、各suite自身の
+`process.exit(failures===0?0:1)`契約を正のpass/fail gateとして
+採用する（summary line記法がsuiteごとに異なるため、件数表示は
+可能な場合のみ付随情報として抽出する）:
+
+P2-A2 rule extraction / P2-A3 Candidate Review UI / P2-A3 Candidate
+Review Workbook / Checkpoint 5 Composition core / Checkpoint 4
+Promotion core / Checkpoint 3/6 Snapshot core / Checkpoint 6
+Resolver core / Checkpoint 8 Adapter core / Checkpoint 9 Activation
+core / Checkpoint 7 Matching Integration / Checkpoint 10 Matching
+Runtime Bind / Checkpoint 11 Pin Persistence / Checkpoint 12 Browser
+File Adapter / Checkpoint 13 Provenance Projection / Checkpoint 14
+UI Terminology Convergence / comparison review core
+（`trace_comparison_review_state_core_verification.js`）/ quantity
+sidecar binding（`quantity_sidecar_binding_verification.js`）。
+
+既知baseline件数（直近確認値）: Checkpoint 14: 126/0、Checkpoint
+13: 112/0、Checkpoint 12: 53/0、Checkpoint 11: 72/0、P2-A3 UI:
+212/0、P2-A3 Workbook: 521/0。件数を機械的に照合できるsuiteは
+その値がbaseline以上であることを追加assertする。P2-A1系（rule
+extraction）は実測値をそのまま報告する（過去のcounting手法の
+不一致により、特定のbaseline数値へ強制しない）。
+
+### S32.9 Expected changed files
+
+- `tools/knowledge_builder/design/private_dictionary_matching_
+  integration_contract_0.1.md`（本section追加、M）
+- `tools/knowledge_builder/verification/private_dictionary_p2a4_
+  final_integration_verification.js`（新規、A）
+- `tools/knowledge_builder/design/private_dictionary_p2a4_human_
+  acceptance_windows_x64.md`（新規、A）
+- browser closure verification script（新規、A）
+
+production code変更は0件。
+
+### S32.10 Human acceptance boundary（絶対に自動PASS化しない）
+
+Developer完了時点で宣言可能な最大の状態は
+**「P2-A4 Checkpoint 15-A / DEVELOPER VERIFICATION COMPLETE /
+HUMAN ACCEPTANCE PENDING」**のみであり、「P2-A4 CLOSED」
+「Release Ready」「Production Ready」「Public Release Ready」は
+いずれも本Checkpointの完了報告として使用してはならない。Windows
+x64上での実人間による受入（
+`private_dictionary_p2a4_human_acceptance_windows_x64.md`）が
+実施され、その結果を独立reviewerがレビューした後にのみ、P2-A4
+CLOSEDの最終判定が下される。Human acceptance結果がPASSであっても、
+開発担当はmerge/tag/Release等のgovernance/release actionを一切
+行わない（release/governance actionはP2-A4 closureとは独立した
+別の意思決定である）。
+
+### S32.11 Governance
+
+対象branchは`claude/private-dictionary-matching-integration-p2a4-
+continuation`のみ。旧branch
+`claude/private-dictionary-matching-integration-p2a4`（fixed SHA
+`5b76039202128142873317467a345ef3aed91733`）へは一切push しない。
+PR #15はstrictly read-only（edit/comment/review/close/retarget/
+merge禁止）。新規PR/tag/GitHub Release/public release/main or
+integration branchの変更は一切行わない。P2-A4 closureが達成
+されたとしても、本Checkpoint自身がmerge/tagを行うことはない。
+
+### S32.12 Protected files（production freeze対象）
+
+10個のpure core（`private_dictionary_learning_core.js` /
+`private_dictionary_snapshot_core.js` /
+`private_dictionary_promotion_core.js` /
+`private_dictionary_promotion_snapshot_composition_core.js` /
+`private_dictionary_resolver_core.js` /
+`private_dictionary_review_promotion_adapter_core.js` /
+`private_dictionary_snapshot_activation_core.js` /
+`private_dictionary_project_snapshot_pin_persistence_core.js` /
+`private_dictionary_rule_extraction_core.js` / `id_hash_utils.js`）、
+matching tool HTML（`tools/json_ab_trace_matching_tool_v12.1.15.
+html`）、comparison review core 4ファイル、P2-A3 production UI/
+Workbook I/Oファイル群（`index.html` / `review_state.js` /
+`workbook_contract.js` / `workbook_cells.js` /
+`workbook_validation.js` / `private_review_export.js` /
+`private_review_import.js` / `shareable_summary_export.js`）は、
+本Checkpointの固定pre-head（`41a38c156097d4f449dae140da0469b
+22f947ec9`）に対して`git diff --stat`でzero diffであることを
+`private_dictionary_p2a4_final_integration_verification.js`
+Section 6が実際に確認する。production fileの変更が必要になった
+場合は本Checkpointを継続せず、`CHECKPOINT 15 HOLD`として報告する。
+
+### S32.13 Failure handling
+
+production defect / regression failure / privacy leak / E2E
+semantic mismatch / browser functional defect / artifact
+incompatibilityのいずれかが発見された場合、Checkpoint 15-A
+completeとは宣言せず、`P2-A4 Checkpoint 15 / HOLD`として
+finding severity（BLOCKING/MAJOR/MINOR）・再現手順・影響
+checkpoint・影響contract・修正scope案を報告し、一方的にscopeを
+拡張しない。
+
+### S32.14 Coverage manifest（hostile-input closure）
+
+既存checkpointで既に閉じたhostile-input class（Proxy/hostile
+getter、stateful/accessor descriptor、mutation-after-call、
+TOCTOU/race guard、malformed artifact、duplicate JSON key、wrong
+Snapshot、wrong project_id、stale session operation）を、new final
+suiteへ個々にコピーする代わりに、「Exit Criterion -> owning
+checkpoint -> owning verification suite -> 最終結果」の
+traceability tableとして`private_dictionary_p2a4_final_
+integration_verification.js`が出力する。各行の最終結果は、その
+既存suiteを実際に再実行した結果（S32.8）に裏付けられる。
+
+### S32.15 Future Slice（P2-A4完了の対象外、無変更）
+
+persistent unknown/conflict maintenance queue、STANDARD runtime
+layer、DOMAIN runtime layer、SESSION dictionary layer拡張、
+automatic active/latest Snapshot選択、AI synonym/fuzzy resolution、
+dictionary auto-promotion、public release workflow。これらは
+Checkpoint 15のHOLD理由にはならない。
