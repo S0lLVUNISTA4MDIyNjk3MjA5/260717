@@ -77,6 +77,10 @@
   <script src="./knowledge_builder/core/private_dictionary_snapshot_core.js"></script>
   <script src="./knowledge_builder/core/private_dictionary_resolver_core.js"></script>
   <script src="./knowledge_builder/core/private_dictionary_snapshot_activation_core.js"></script>
+  <!-- P2-A4 Checkpoint 12: Project Snapshot Pin storage-neutral persistence
+       codec（Checkpoint 11、無変更）をbrowser File Adapterから使用するために
+       追加。既存5本の並びを崩さないため末尾へ追加する。 -->
+  <script src="./knowledge_builder/core/private_dictionary_project_snapshot_pin_persistence_core.js"></script>
   <style>
     :root {
       --primary: #2563eb;
@@ -489,6 +493,29 @@
           <button id="importTraceProfileBtn" class="secondary" type="button">📥 プロファイルJSON読込</button>
           <input type="file" id="traceProfileImportFile" accept=".json,application/json" style="display:none;" />
         </div>
+      </div>
+
+      <!-- P2-A4 Checkpoint 12: Private Dictionary Project Snapshot Pin
+           browser File Adapter（S29）。File選択だけでは照合セッションへ
+           bindしない - 「照合セッションに適用」を明示クリックした場合のみ
+           Checkpoint 10 setProjectPin()へ進む。Snapshot自動探索・Activation
+           Record参照・latest/newest選択・localStorage等の自動永続化は
+           いずれも行わない。 -->
+      <div class="profile-card" id="projectPinFilePanel" style="margin-bottom:12px;">
+        <div class="profile-grid">
+          <div>
+            <label style="margin-top:0;">Private Dictionary Project設定 (Project Snapshot Pin)</label>
+            <input type="text" id="projectPinFileExpectedProjectIdInput" placeholder="Project ID（例: proj-alpha）" />
+          </div>
+          <div class="profile-hint">現在の照合セッションに設定済みのSnapshotのみを対象とします（自動探索なし）。読込は検証のみで、適用は別ボタンで明示的に行います。</div>
+        </div>
+        <div class="btn-row" style="margin-top:10px;">
+          <button id="projectPinFileSaveBtn" class="secondary" type="button">💾 Project設定ファイルを保存 (Save Project Pin)</button>
+          <button id="projectPinFileLoadBtn" class="secondary" type="button">📂 Project設定ファイルを読込 (Load Project Pin)</button>
+          <input type="file" id="projectPinFileLoadInput" accept=".json,application/json" style="display:none;" />
+          <button id="projectPinFileApplyBtn" class="secondary" type="button" disabled>✅ 照合セッションに適用 (Apply to Matching Session)</button>
+        </div>
+        <div id="projectPinFileStatus" class="field-hint" role="status">未読込 (Not loaded)</div>
       </div>
 
       <div class="workflow-grid">
@@ -4000,6 +4027,297 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       getStatus: approvedDictionaryMatchingStatus
     });
   }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     P2-A4 Checkpoint 12 (design doc S29): Project Snapshot Pin browser File
+     Adapter. Three separated responsibilities (S29.1):
+       A. File I/O            - Blob/URL.createObjectURL/<a download>/File.text()
+       B. Persistence validation - delegates to Checkpoint 11
+                                   PrivateDictionaryProjectSnapshotPinPersistenceCore
+                                   (serializeProjectSnapshotPin/loadProjectSnapshotPin),
+                                   unmodified. Semantics are never reimplemented here.
+       C. Runtime bind          - delegates to PrivateDictionaryMatchingSession.
+                                   setProjectPin() (Checkpoint 10, unmodified),
+                                   ONLY from the explicit Apply action below -
+                                   never automatically from a successful file load.
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  function projectPinPersistenceCore() {
+    const core = globalThis.PrivateDictionaryProjectSnapshotPinPersistenceCore;
+    if (!core || typeof core.serializeProjectSnapshotPin !== 'function' || typeof core.loadProjectSnapshotPin !== 'function') return null;
+    return core;
+  }
+
+  const PROJECT_PIN_FILE_MAX_BYTES = 65536; // S29.8: mirrors Checkpoint 11's own 64 KiB limit - a UI-side fast gate only, never a substitute for the core's own check below.
+  const PROJECT_PIN_FILE_DEFAULT_NAME = 'private_dictionary_project_snapshot_pin.json';
+
+  // §29.11: sanitized allowlist error->display mapping. Unknown codes fall
+  // back to a generic message; native Error.message/stack are never read.
+  const PROJECT_PIN_FILE_ERROR_DISPLAY = new Map([
+    ['PROJECT_PIN_PERSISTENCE_ROOT_INVALID', 'ファイル形式が正しくありません'],
+    ['PROJECT_PIN_PERSISTENCE_SERIALIZED_INVALID', 'ファイル形式が正しくありません'],
+    ['PROJECT_PIN_PERSISTENCE_PIN_INVALID', 'ファイル形式が正しくありません'],
+    ['PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH', 'このProject用の設定ファイルではないか、現在のSnapshotと一致しません'],
+    ['PROJECT_PIN_PERSISTENCE_SNAPSHOT_INVALID', '現在のSnapshotと一致しません'],
+    ['PROJECT_PIN_PERSISTENCE_DEPENDENCY_FAILED', '辞書設定を処理できませんでした'],
+    ['APPROVED_DICT_PROJECT_PIN_INVALID', '辞書設定を適用できませんでした'],
+    ['APPROVED_DICT_PROJECT_PIN_MISMATCH', 'このProject用の設定ファイルではないか、現在のSnapshotと一致しません'],
+    ['APPROVED_DICT_PROJECT_PIN_BIND_FAILED', '辞書設定を適用できませんでした'],
+    ['APPROVED_DICT_PROJECT_PIN_POST_BIND_MISMATCH', '辞書設定を適用できませんでした'],
+    ['PROJECT_PIN_FILE_NO_PROJECT_CONTEXT', 'Project IDを入力してください'],
+    ['PROJECT_PIN_FILE_NO_SNAPSHOT_CONTEXT', '現在アクティブなSnapshotがありません'],
+    ['PROJECT_PIN_FILE_NOT_VALIDATED', '検証済みのPinファイルがありません']
+  ]);
+  const PROJECT_PIN_FILE_GENERIC_ERROR_DISPLAY = '辞書設定を処理できませんでした';
+  const PROJECT_PIN_FILE_KNOWN_CODES = new Set(PROJECT_PIN_FILE_ERROR_DISPLAY.keys());
+
+  function projectPinFileDisplayMessage(code) {
+    return PROJECT_PIN_FILE_ERROR_DISPLAY.get(code) || PROJECT_PIN_FILE_GENERIC_ERROR_DISPLAY;
+  }
+  // Own independent copy of the sanitize-error-code chokepoint (never a
+  // native Error, never message/stack/cause), matching
+  // approvedDictSanitizeErrorCode()'s own discipline above.
+  function projectPinFileSanitizeCode(err) {
+    try {
+      const code = err && typeof err === 'object' ? err.code : undefined;
+      if (typeof code === 'string' && PROJECT_PIN_FILE_KNOWN_CODES.has(code)) return code;
+    } catch (_readErr) { /* hostile getter threw - fall through */ }
+    return 'PROJECT_PIN_FILE_UNKNOWN_ERROR';
+  }
+
+  // §29.9: minimal UI state. `generation` is the S29.5 async-race token.
+  let projectPinFileUiState = Object.freeze({
+    generation: 0,
+    status: 'NOT_LOADED', // 'NOT_LOADED' | 'VALIDATED' | 'INVALID' | 'APPLIED'
+    validatedProjectPin: null,
+    sourceFileName: null,
+    loadedSnapshotBinding: null,
+    loadedExpectedProjectId: null,
+    lastErrorCode: null
+  });
+
+  function projectPinFileBumpGeneration() {
+    projectPinFileUiState = Object.freeze(Object.assign({}, projectPinFileUiState, { generation: projectPinFileUiState.generation + 1 }));
+  }
+
+  // §29.2/§29.3: expected_project_id is supplied ONLY from this explicit
+  // text input - never read back from a loaded file's own content (S27.14/
+  // Checkpoint 11-R1 trust boundary). Changing it invalidates any in-flight
+  // load operation (S29.5).
+  function currentProjectPinFileExpectedProjectId() {
+    const el = $('projectPinFileExpectedProjectIdInput');
+    const v = el && typeof el.value === 'string' ? el.value.trim() : '';
+    return v.length > 0 ? v : null;
+  }
+
+  // §29.2/§29.3: the sole Snapshot Wrapper source for Save/Load/Apply is the
+  // CURRENTLY active matching session's own captured wrapper - never a
+  // file-based/latest/Activation-Record lookup (S29.2's rationale, S29.13).
+  function currentProjectPinFileSnapshotWrapper() {
+    return approvedDictionaryRuntime.active ? approvedDictionaryRuntime.snapshotWrapper : null;
+  }
+
+  function projectPinFileSuggestedName(expectedProjectId) {
+    if (typeof expectedProjectId !== 'string' || !expectedProjectId) return PROJECT_PIN_FILE_DEFAULT_NAME;
+    const sanitized = expectedProjectId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80);
+    return sanitized ? `private_dictionary_project_pin_${sanitized}.json` : PROJECT_PIN_FILE_DEFAULT_NAME;
+  }
+
+  // ---- A/B: Save. Source of Truth for both the formal Pin (Checkpoint 9,
+  // via the already-existing approvedDictProjectPinActivationCore()) and the
+  // serialized artifact (Checkpoint 11) - never a UI-local JSON.stringify/
+  // schema reconstruction/hash recomputation (§7). ----
+  async function saveProjectSnapshotPinFile() {
+    const expectedProjectId = currentProjectPinFileExpectedProjectId();
+    if (!expectedProjectId) return { ok: false, code: 'PROJECT_PIN_FILE_NO_PROJECT_CONTEXT' };
+    const snapshotWrapper = currentProjectPinFileSnapshotWrapper();
+    if (!snapshotWrapper) return { ok: false, code: 'PROJECT_PIN_FILE_NO_SNAPSHOT_CONTEXT' };
+
+    const activationCore = approvedDictProjectPinActivationCore();
+    if (!activationCore) return { ok: false, code: 'PROJECT_PIN_PERSISTENCE_DEPENDENCY_FAILED' };
+    let pin;
+    try {
+      pin = await activationCore.buildProjectSnapshotPin({ project_id: expectedProjectId, snapshot_wrapper: snapshotWrapper });
+    } catch (err) {
+      return { ok: false, code: projectPinFileSanitizeCode(err) };
+    }
+
+    const persistenceCore = projectPinPersistenceCore();
+    if (!persistenceCore) return { ok: false, code: 'PROJECT_PIN_PERSISTENCE_DEPENDENCY_FAILED' };
+    let serialized;
+    try {
+      serialized = await persistenceCore.serializeProjectSnapshotPin({ project_pin: pin, snapshot_wrapper: snapshotWrapper, expected_project_id: expectedProjectId });
+    } catch (err) {
+      return { ok: false, code: projectPinFileSanitizeCode(err) };
+    }
+
+    downloadText(projectPinFileSuggestedName(expectedProjectId), serialized, 'application/json');
+    return { ok: true };
+  }
+
+  // ---- B: Load. Strict validation is delegated entirely to Checkpoint 11 -
+  // the UI never calls JSON.parse on the file content itself (§8). Race
+  // protection (S29.5): captures `myGeneration`/context at the start; any
+  // context change (new file selection, Project ID change, or the matching
+  // session's own `revision` changing) detected at completion means the
+  // result is discarded WITHOUT touching `projectPinFileUiState` at all -
+  // neither a success nor a failure display update. ----
+  async function loadProjectSnapshotPinFile(file) {
+    projectPinFileBumpGeneration();
+    const myGeneration = projectPinFileUiState.generation;
+    const expectedProjectIdAtStart = currentProjectPinFileExpectedProjectId();
+    const snapshotWrapperAtStart = currentProjectPinFileSnapshotWrapper();
+    const sessionRevisionAtStart = approvedDictionaryRuntime.revision;
+    const fileName = (file && typeof file.name === 'string') ? file.name : null;
+
+    function isStale() {
+      return projectPinFileUiState.generation !== myGeneration
+        || currentProjectPinFileExpectedProjectId() !== expectedProjectIdAtStart
+        || approvedDictionaryRuntime.revision !== sessionRevisionAtStart;
+    }
+    function commit(next) {
+      if (isStale()) return; // §29.5: a newer operation/context change wins - silently discard.
+      projectPinFileUiState = Object.freeze(Object.assign({ generation: myGeneration }, next));
+    }
+
+    if (!expectedProjectIdAtStart) { commit({ status: 'INVALID', validatedProjectPin: null, sourceFileName: fileName, loadedSnapshotBinding: null, loadedExpectedProjectId: null, lastErrorCode: 'PROJECT_PIN_FILE_NO_PROJECT_CONTEXT' }); return; }
+    if (!snapshotWrapperAtStart) { commit({ status: 'INVALID', validatedProjectPin: null, sourceFileName: fileName, loadedSnapshotBinding: null, loadedExpectedProjectId: null, lastErrorCode: 'PROJECT_PIN_FILE_NO_SNAPSHOT_CONTEXT' }); return; }
+    if (!file || typeof file.size !== 'number' || file.size > PROJECT_PIN_FILE_MAX_BYTES) {
+      commit({ status: 'INVALID', validatedProjectPin: null, sourceFileName: fileName, loadedSnapshotBinding: null, loadedExpectedProjectId: null, lastErrorCode: 'PROJECT_PIN_PERSISTENCE_SERIALIZED_INVALID' });
+      return;
+    }
+
+    let text;
+    try {
+      text = await file.text();
+    } catch (_err) {
+      commit({ status: 'INVALID', validatedProjectPin: null, sourceFileName: fileName, loadedSnapshotBinding: null, loadedExpectedProjectId: null, lastErrorCode: 'PROJECT_PIN_PERSISTENCE_SERIALIZED_INVALID' });
+      return;
+    }
+
+    const persistenceCore = projectPinPersistenceCore();
+    if (!persistenceCore) { commit({ status: 'INVALID', validatedProjectPin: null, sourceFileName: fileName, loadedSnapshotBinding: null, loadedExpectedProjectId: null, lastErrorCode: 'PROJECT_PIN_PERSISTENCE_DEPENDENCY_FAILED' }); return; }
+
+    let validated;
+    try {
+      validated = await persistenceCore.loadProjectSnapshotPin({ serialized: text, snapshot_wrapper: snapshotWrapperAtStart, expected_project_id: expectedProjectIdAtStart });
+    } catch (err) {
+      commit({ status: 'INVALID', validatedProjectPin: null, sourceFileName: fileName, loadedSnapshotBinding: null, loadedExpectedProjectId: null, lastErrorCode: projectPinFileSanitizeCode(err) });
+      return;
+    }
+
+    commit({ status: 'VALIDATED', validatedProjectPin: validated, sourceFileName: fileName, loadedSnapshotBinding: validated.snapshot_binding, loadedExpectedProjectId: expectedProjectIdAtStart, lastErrorCode: null });
+  }
+
+  // §29.6: derived staleness - a loaded Pin whose captured context no longer
+  // matches the CURRENT Project ID / Snapshot binding. Reuses
+  // approvedDictBindingsEqual() (Checkpoint 10, unmodified) rather than a
+  // new comparator.
+  function isProjectPinFileLoadedPinStale() {
+    const s = projectPinFileUiState;
+    if (s.status !== 'VALIDATED' || !s.validatedProjectPin) return false;
+    if (s.loadedExpectedProjectId !== currentProjectPinFileExpectedProjectId()) return true;
+    if (!approvedDictionaryRuntime.active) return true;
+    if (!approvedDictBindingsEqual(s.loadedSnapshotBinding, approvedDictionaryRuntime.snapshotBinding)) return true;
+    return false;
+  }
+
+  // ---- C: explicit Apply. NEVER called automatically from a successful
+  // load (§29.4/§15) - only from the button handler below. Delegates
+  // entirely to Checkpoint 10's own setProjectPin() (pre-bind gate/
+  // post-bind gate/commit-instant race guard, all unmodified, §29.7) - the
+  // loaded Pin is never committed to the session directly. ----
+  async function applyLoadedProjectSnapshotPinToMatchingSession() {
+    const snap = projectPinFileUiState;
+    if (snap.status !== 'VALIDATED' || !snap.validatedProjectPin) {
+      return { ok: false, code: 'PROJECT_PIN_FILE_NOT_VALIDATED' };
+    }
+    const applyGeneration = snap.generation;
+    const snapshotWrapper = currentProjectPinFileSnapshotWrapper(); // re-fetched NOW, not cached from load time (§29.4)
+    if (!snapshotWrapper) {
+      return { ok: false, code: 'PROJECT_PIN_FILE_NO_SNAPSHOT_CONTEXT' };
+    }
+
+    let status;
+    try {
+      status = await globalThis.PrivateDictionaryMatchingSession.setProjectPin({ project_pin: snap.validatedProjectPin, snapshot_wrapper: snapshotWrapper });
+    } catch (err) {
+      const code = projectPinFileSanitizeCode(err);
+      if (projectPinFileUiState.generation !== applyGeneration) return { ok: false, code, stale: true }; // §29.5/§31: a newer file load has already superseded this Pin - don't clobber its UI state.
+      projectPinFileUiState = Object.freeze(Object.assign({}, projectPinFileUiState, { status: 'INVALID', lastErrorCode: code }));
+      return { ok: false, code };
+    }
+    if (projectPinFileUiState.generation !== applyGeneration) return { ok: true, status, stale: true };
+    projectPinFileUiState = Object.freeze(Object.assign({}, projectPinFileUiState, { status: 'APPLIED' }));
+    return { ok: true, status };
+  }
+
+  // ---- UI rendering (§29.12: 未読込 / Pinファイル検証済み / Session適用済み,
+  // clearly distinguished; never conflates "file loaded" with "applied"). ----
+  function renderProjectPinFileStatus() {
+    const statusEl2 = $('projectPinFileStatus');
+    const applyBtn = $('projectPinFileApplyBtn');
+    if (!statusEl2) return;
+    const s = projectPinFileUiState;
+    let text;
+    if (s.status === 'NOT_LOADED') {
+      text = '未読込 (Not loaded)';
+    } else if (s.status === 'INVALID') {
+      text = `${projectPinFileDisplayMessage(s.lastErrorCode)}${s.sourceFileName ? ' (' + s.sourceFileName + ')' : ''}`;
+    } else if (s.status === 'VALIDATED') {
+      text = isProjectPinFileLoadedPinStale()
+        ? `Pinファイル検証済み・現在の設定と一致しません (Validated but stale)${s.sourceFileName ? ' (' + s.sourceFileName + ')' : ''}`
+        : `Pinファイル検証済み (Validated)${s.sourceFileName ? ' (' + s.sourceFileName + ')' : ''}`;
+    } else if (s.status === 'APPLIED') {
+      text = `Session適用済み (Applied)${s.sourceFileName ? ' (' + s.sourceFileName + ')' : ''}`;
+    } else {
+      text = '未読込 (Not loaded)';
+    }
+    statusEl2.textContent = text;
+    if (applyBtn) applyBtn.disabled = !(s.status === 'VALIDATED' && !isProjectPinFileLoadedPinStale());
+  }
+
+  $('projectPinFileSaveBtn')?.addEventListener('click', async () => {
+    const result = await saveProjectSnapshotPinFile();
+    if (!result.ok) {
+      const el = $('projectPinFileStatus');
+      if (el) el.textContent = projectPinFileDisplayMessage(result.code);
+    }
+  });
+  $('projectPinFileLoadBtn')?.addEventListener('click', () => $('projectPinFileLoadInput')?.click());
+  $('projectPinFileLoadInput')?.addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    await loadProjectSnapshotPinFile(file);
+    renderProjectPinFileStatus();
+  });
+  $('projectPinFileExpectedProjectIdInput')?.addEventListener('input', () => {
+    projectPinFileBumpGeneration(); // §29.5: Project ID change invalidates any in-flight load and re-evaluates staleness display.
+    renderProjectPinFileStatus();
+  });
+  $('projectPinFileApplyBtn')?.addEventListener('click', async () => {
+    const result = await applyLoadedProjectSnapshotPinToMatchingSession();
+    if (!result.stale) renderProjectPinFileStatus(); // a stale Apply result must never overwrite a newer load's display (§31/§X).
+    if (!result.ok && !result.stale) {
+      const el = $('projectPinFileStatus');
+      if (el) el.textContent = projectPinFileDisplayMessage(result.code);
+    }
+  });
+  renderProjectPinFileStatus();
+
+  // Node/vm-sandbox verification hook only - never used by production code
+  // paths above (which call the functions directly). Mirrors the read-only
+  // diagnostic pattern of window.__quantityBindingDiagnostics elsewhere in
+  // this file.
+  globalThis.__projectPinFileAdapterDiagnostics = Object.freeze({
+    state: () => projectPinFileUiState,
+    isStale: () => isProjectPinFileLoadedPinStale(),
+    save: () => saveProjectSnapshotPinFile(),
+    load: (file) => loadProjectSnapshotPinFile(file),
+    apply: () => applyLoadedProjectSnapshotPinToMatchingSession(),
+    render: () => renderProjectPinFileStatus()
+  });
 
   // ---- §13 whole-value term extraction. Source-of-truth field boundary is
   // exactly tagSourceFields(schemaName) - never availableJsonKeys()/全field/

@@ -725,12 +725,26 @@ async function main() {
     assert(source.includes('buildProjectSnapshotPin'), 'AR core source does call the real buildProjectSnapshotPin() as its sole Activation-core dependency');
   }
 
-  // AS. the Checkpoint 10 matching tool HTML (protected this round) has no
-  // coupling to the new persistence core - proving Checkpoint 11 added zero
-  // lines to that file.
+  // AS. one-directional independence: the Checkpoint 11 CORE SOURCE ITSELF
+  // never references the matching tool HTML or matching-runtime-specific
+  // tokens - the pure core has no dependency on Checkpoint 10 matching
+  // runtime, regardless of which direction any browser wiring goes.
+  //
+  // (History: at Checkpoint 11 time, the matching tool HTML was protected/
+  // unmodified and this assertion instead checked that the HTML had zero
+  // reference to this core's filename - true only because Checkpoint 12's
+  // browser File Adapter, design doc S29, did not exist yet. Checkpoint 12
+  // deliberately wires the matching tool HTML TO this core - the opposite,
+  // intended direction of coupling for a browser adapter consuming a pure
+  // core's public API - so that old zero-coupling assertion is no longer
+  // meaningful and has been superseded here by the invariant that actually
+  // still matters and always will: this core must never depend back on
+  // matching runtime.)
   {
-    const htmlSource = fs.readFileSync(HTML_PATH, 'utf8');
-    assert(!htmlSource.includes('private_dictionary_project_snapshot_pin_persistence_core'), 'AS the protected Checkpoint 10 matching tool HTML has no reference to the new Checkpoint 11 core file');
+    const coreSource = stripCommentsForStaticScan(fs.readFileSync(CORE_PATH, 'utf8'));
+    const forbiddenTokens = ['json_ab_trace_matching_tool', 'PrivateDictionaryMatchingSession', 'approvedDictionaryRuntime', 'setProjectPin', 'setSnapshot'];
+    const found = forbiddenTokens.filter(tok => coreSource.includes(tok));
+    assert(found.length === 0, `AS the Checkpoint 11 core's own EXECUTABLE source (doc comments excluded) never references the matching tool HTML or matching-runtime tokens (found: ${JSON.stringify(found)}) - dependency flows one way only (HTML -> core, never core -> HTML)`);
   }
 
   console.log(`\n${failed === 0 ? 'ALL PASS' : `${failed} FAILURE(S)`}`);

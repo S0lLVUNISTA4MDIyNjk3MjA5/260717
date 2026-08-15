@@ -3075,3 +3075,277 @@ sanitized failure / project_id不一致時はSnapshot Loaderまで進まない
 project identity不一致ならreject / Checkpoint 10 `setProjectPin()`へ渡す
 loaded Pinの`project_id`がcaller期待値と一致することの確認 /
 `expected_project_id`欠落時のROOT_INVALID。
+
+## S29. Checkpoint 12: Project Snapshot Pin Browser File Adapter / Explicit Save-Load Flow
+
+Checkpoint 11のstorage-neutral persistence codec（S27、無変更）を、ブラウザ上で
+明示的にfile保存・file読込するUser Flowへ接続する。対象はmatching tool HTML
+（`tools/json_ab_trace_matching_tool_v12.1.15.html`）への追加のみ。Checkpoint 11
+pure core・Checkpoint 10 runtime API（`setSnapshot`/`setProjectPin`/
+`clearSnapshot`/`getStatus`の契約）はいずれも無変更。
+
+### S29.1 責務分離（3層）
+
+```text
+A. File I/O                 (Blob / URL.createObjectURL / <a download> /
+                              File.text() - 本HTML内、既存downloadText()を再利用)
+        ↕ 別責務
+B. Persistence validation    (Checkpoint 11 serializeProjectSnapshotPin() /
+                              loadProjectSnapshotPin() - 無改変、意味論の
+                              再実装なし)
+        ↕ 別責務
+C. Runtime bind               (Checkpoint 10 PrivateDictionaryMatchingSession.
+                              setProjectPin() - 無改変。明示Apply操作からのみ
+                              呼ばれる)
+```
+
+File選択（Load）だけではCへは一切進まない。B（validated Pin）で止まり、
+Cへ進むのはユーザーの明示Apply操作のみ（S29.4）。
+
+### S29.2 Save flow
+
+Source of Truthは常にCheckpoint 11 `serializeProjectSnapshotPin()`。UI側では
+独自JSON.stringifyでのartifact生成・Pin schema再構築・Snapshot binding再計算・
+hash再計算のいずれも行わない。
+
+```text
+[UI] Project ID入力（expected_project_id、テキスト入力、fileから読み取らない）
+        +
+[Runtime] 現在アクティブな照合セッションのSnapshot Wrapper
+        （approvedDictionaryRuntime.snapshotWrapper - ユーザーが以前
+          setSnapshot/setProjectPinで明示的に設定した「現在の」Snapshot。
+          "latest"/ACTIVE検索ではなく、単に現在の照合セッションの状態を
+          そのままsaveする、という意味の明示ソース）
+        ↓
+[Checkpoint 9] buildProjectSnapshotPin({project_id: expected_project_id,
+                                          snapshot_wrapper}) （無改変、
+                既存approvedDictProjectPinActivationCore()を再利用）
+        ↓ formal Pin
+[Checkpoint 11] serializeProjectSnapshotPin({project_pin, snapshot_wrapper,
+                                               expected_project_id}) （無改変）
+        ↓ canonical serialized string
+[UI] downloadText()（本HTML既存ヘルパー、Blob/URL.createObjectURL/<a download>）
+```
+
+現在の照合セッションが非activeの場合（`approvedDictionaryRuntime.active ===
+false`）、Save操作自体を不可とする（Snapshot源がないため）。この設計判断は、
+Checkpoint 12がSnapshot file adapterを新設しない（scope外）という制約下での
+唯一の現実的なSnapshot Wrapper供給源が「現在アクティブな照合セッション自身」
+であることに基づく - これはlatest/ACTIVE検索ではなく、ユーザー自身が既に
+明示的に選択済みの状態を再利用するだけである。
+
+### S29.3 Load flow
+
+```text
+[UI] ユーザーが1個のfileを選択（<input type=file>）
+        ↓
+[UI] File.text()（native、UI側でJSON.parseしない）
+        ↓ serialized string
+[Checkpoint 11] loadProjectSnapshotPin({serialized, snapshot_wrapper,
+                                          expected_project_id}) （無改変）
+        ↓ validated formal Pin（fresh/frozen、Activation coreがgenerateした
+          そのままの値）
+[UI] projectPinFileUiState.validatedProjectPin へ格納
+        （Runtimeへは進まない。S29.4の明示Apply待ち）
+```
+
+`expected_project_id`はUI側のProject ID入力欄（S29.2と同一入力）から供給し、
+fileの`project_id`内容から自動設定しない（Checkpoint 11-R1、S27.14の
+trust boundaryを継続）。`snapshot_wrapper`は現在アクティブな照合セッションの
+Snapshot Wrapper（S29.2と同一ソース）。いずれもfile内容からの自動探索・
+latest探索・Activation Record探索は行わない。
+
+### S29.4 Explicit Apply flow（no auto-bind）
+
+file load成功（validated Pin保有）は、それだけではRuntimeへ一切影響しない。
+`PrivateDictionaryMatchingSession.setProjectPin()`（Checkpoint 10、無改変）は
+ユーザーが明示的に「照合セッションに適用」ボタンを押した場合のみ呼ばれる。
+
+```text
+[UI] 「照合セッションに適用」ボタンクリック
+        ↓
+validatedProjectPin（load済み）+ 現在の照合セッションのSnapshot Wrapper
+   （Apply時点で再取得 - Loadした時点のWrapperをキャッシュして使い回さない）
+        ↓
+[Checkpoint 10] PrivateDictionaryMatchingSession.setProjectPin({project_pin,
+                 snapshot_wrapper}) （無改変 - pre-bind gate/post-bind gate/
+                 commit-instant race guardをそのまま再利用）
+        ↓
+status（active/snapshotBinding） または sanitized error
+```
+
+Apply時にCheckpoint 10が改めてformal bindingを検証する（S29.7の再検証）ため、
+UI側はload済みPinを無条件にsessionへcommitしない。
+
+### S29.5 async race protection（UI層、Checkpoint 10自身のrace guardとは別）
+
+UI状態`projectPinFileUiState`は単調増加する`generation`カウンタを持つ。
+以下いずれかが発生すると`generation`をインクリメントする:
+
+- 新しいfile load操作の開始
+- Project ID（expected_project_id）入力欄の変更
+
+Load操作は開始時に`myGeneration`/`expectedProjectIdAtStart`を捕獲し、
+Checkpoint 11 `loadProjectSnapshotPin()`のawait完了後、以下のいずれかが
+真なら**結果を`projectPinFileUiState`へ一切commitしない**（成功・失敗いずれの
+表示も更新しない、サイレントに破棄）:
+
+- `projectPinFileUiState.generation !== myGeneration`（別のfile選択操作が
+  後から開始された - File A/Bのrace、§32相当）
+- 現在のProject ID入力値が`expectedProjectIdAtStart`と異なる（load中に
+  project contextが変わった、§33相当）
+- `approvedDictionaryRuntime.revision`がload開始時の値と異なる（load中に
+  現在のSnapshotが変わった、§34相当。Checkpoint 10が既に持つ
+  revisionカウンタをそのまま再利用し、独自の類似カウンタを新設しない）
+
+「最後に開始されたfile選択操作が勝つ」（latest **explicit file-selection**
+operation wins）であり、Snapshotの"latest version"選択とは無関係。
+
+Apply操作も、開始時の`projectPinFileUiState.generation`を捕獲し、
+Checkpoint 10 `setProjectPin()`のawait完了後に`generation`が変わっていれば
+（Apply中に新しいfileがloadされた）、その完了結果を`APPLIED`として
+commitしない（新しいfileのUI状態を古いApplyの結果で上書きしない）。
+ただしsession自体のcommit可否はCheckpoint 10自身のcommit-instant race guard
+（Checkpoint 10-R1、無変更）が排他的に決定する - UI層のgeneration破棄は
+「表示の使い回し」を防ぐだけで、Checkpoint 10のsession-levelの正しさには
+一切関与しない。
+
+### S29.6 stale state表示（Snapshot/Project変更時、S18/S19相当）
+
+load成功後、Apply前にSnapshotまたはProject IDが変更された場合:
+
+- `projectPinFileUiState`自体は破棄しない（保持したまま）
+- 表示上「stale」（現在の設定と一致しない）と明示する
+  （`loadedExpectedProjectId !== 現在のProject ID` または
+  `!approvedDictBindingsEqual(loadedSnapshotBinding, 現在のsnapshotBinding)`
+  - 両関数ともCheckpoint 10の既存比較ロジックを再利用）
+- Apply操作自体はUI側で無効化される（ボタンdisabled）だけでなく、たとえ
+  実行されてもCheckpoint 10 `setProjectPin()`自身のformal binding比較で
+  必ずrejectされる（S29.4の再検証、二重防御）
+
+silent rebinding（loaded Pinを新Snapshotへ黙って追随させる）は行わない。
+
+### S29.7 Apply前の再検証（Checkpoint 10への委譲）
+
+Apply操作は、load済みPinを信用してsessionへ直接commitしない。必ず
+Checkpoint 10 `setProjectPin()`を経由し、Checkpoint 10自身がformal Pin
+regeneration + exact equality比較を再度行う。Load時点からApply時点までの
+任意の時間経過・状態変化に対し、最終的な正しさの保証はCheckpoint 10の
+既存gate（pre-bind/post-bind/commit-instant race guard）が担う。
+
+### S29.8 file形式・size
+
+- 保存形式: UTF-8 JSON text（Checkpoint 11の`serializeProjectSnapshotPin()`
+  出力そのまま）。MIME: `application/json`。
+- 拡張子: `.json`を推奨するが、`accept=".json,application/json"`は
+  ブラウザ側のUI-levelな絞り込みに過ぎず、意味validationの一部ではない。
+  拡張子が異なっていてもCheckpoint 11 codecが受理すれば読み込める
+  （拡張子はsecurity boundaryではない、§12の指示どおり）。
+- filename: UX目的のmetadataであり、formal identityではない。
+  `private_dictionary_project_pin_<sanitized-project-id>.json`
+  （project_idを`[^A-Za-z0-9_-]`除去・80文字までtruncate）を推奨形式とし、
+  project_idが得られない場合は固定名`private_dictionary_project_snapshot_pin.json`
+  にfallbackする。load時、filenameからproject_id/snapshot_idを復元・信用
+  しない（`sourceFileName`はdisplay onlyでformal Pinへは一切含めない、S29.9）。
+- size: UI側で`File.size > 65536`ならfast rejectする（Checkpoint 11自身の
+  64 KiB上限、S27.6と同じ値で二重境界を作る。UI側のfast rejectは
+  Checkpoint 11自身のvalidationを省略する目的ではなく、単なる早期UXの
+  ためのfront gateであり、Checkpoint 11自身のsize/strict parse/duplicate-key
+  検証は常にそのまま呼ばれる）。
+
+### S29.9 UI保持state
+
+load成功時にUI側が保持するのは最小限:
+
+```js
+{
+  generation, status,            // 'NOT_LOADED' | 'VALIDATED' | 'INVALID' | 'APPLIED'
+  validatedProjectPin,           // Checkpoint 11 load()の戻り値そのもの（再構築しない）
+  sourceFileName,                // display only。formal Pinへは追加しない
+  loadedSnapshotBinding,         // stale判定用（S29.6）。Checkpoint 11 Pinの
+                                  // snapshot_bindingそのもの
+  loadedExpectedProjectId,       // stale判定用（S29.6）
+  lastErrorCode                  // sanitizedコードのみ
+}
+```
+
+raw serialized text（file内容そのもの）はload処理完了後、長期保持しない
+（一時変数としてのみ使用し、UI stateへは格納しない）。
+
+### S29.10 startup挙動
+
+tool起動時、`projectPinFileUiState`は`{generation:0, status:'NOT_LOADED',
+validatedProjectPin:null, ...}`で初期化する。前回file・前回project・前回
+Snapshotの自動loadは一切行わない。localStorage/sessionStorage/IndexedDBは
+使用しない（今回のpersistent mediumはuser-explicit fileのみ、S26.9/S27.1の
+方針を継続）。
+
+### S29.11 privacy / error表示
+
+Checkpoint 11/10が投げる`{code, path}`はそのままUIへ出さず、専用の
+sanitized allowlist経由でuser-facing日本語メッセージへ変換する
+（未知コードは汎用メッセージへfallback、既存`approvedDictSanitizeErrorCode()`
+と同じ規律）。UI状態へ出してよいのは`project_id`/`snapshot_id`/
+`snapshot_version`/`dictionary_id`/`dictionary_version`/`scope`/
+sanitized error categoryのみ。dictionary canonical term/alias term/
+raw artifact text/Snapshot payload/native Error.message/stack/
+filesystem pathは一切出さない。
+
+### S29.12 UI status model
+
+`未読込` → `Pinファイル検証済み`（stale表示ありうる） → `Session適用済み`
+の3状態を明確に区別する。「fileを読み込んだ」ことと「照合セッションへ
+適用済み」を混同しない表示文言とする。
+
+### S29.13 Activation非依存 / no-latest（継続）
+
+Activation Record（ACTIVE/SUPERSEDED/ROLLED_BACK）はCheckpoint 12でも
+matching selectorとして一切使わない。Snapshotの"latest"/"newest"探索も
+行わない（現在アクティブな照合セッションのSnapshotをそのまま使うのみ）。
+
+### S29.14 Comparison semantics / Unknown-Conflict非変更
+
+score式・approvedDict bonus・AUTO ACCEPT・comparison review・tag priority・
+Resolver semantics・UNKNOWN_TERM/DICTIONARY_CONFLICTのmatching継続挙動は
+一切変更しない。Checkpoint 12はconfiguration I/Oのみ。
+
+### S29.15 P2-A4 Exit Criteria棚卸し
+
+**CLOSED:**
+- P2-A1 provenance（Knowledge Data Contract 0.1 core）
+- Snapshot（Checkpoint 3〜3-R系）
+- Promotion（Checkpoint 4系）
+- Composition（Checkpoint 5系）
+- Resolver（Checkpoint 6系）
+- Matching Integration（Checkpoint 7系）
+- Review → Promotion Adapter
+- Activation / Project Pin（Checkpoint 9・9-R1）
+- Project Pin Runtime（Checkpoint 10・10-R1）
+- Project Pin Persistence Codec（Checkpoint 11・11-R1）
+
+**Checkpoint 12（本Checkpoint）:**
+- explicit browser file save/load/apply flow（Project Snapshot Pin）
+
+**Remaining（未着手、後続Checkpointへ）:**
+
+| 項目 | 分類 |
+|---|---|
+| provenance display/export（Knowledge Graph側のUI表示・エクスポート） | MUST-CLOSE |
+| HUMAN-01/02/03 UI convergence（P2-A3既存UI全体の文言・表示規約統一） | MUST-CLOSE |
+| end-to-end integrated acceptance / clean regression（全Checkpoint通しのE2E受入） | MUST-CLOSE |
+| privacy/regression closure（最終的な横断privacy監査） | MUST-CLOSE |
+| unknown/conflict maintenance queue persistence（UNKNOWN_TERM/DICTIONARY_CONFLICTの永続queue化） | FUTURE SLICE |
+| STANDARD/DOMAIN/SESSION layers（辞書layer階層の完全実装） | FUTURE SLICE |
+
+### S29.16 Scope triage根拠
+
+MUST-CLOSEとした項目は、いずれもP2-A4のスコープ内で既に部分的に実装済みの
+機能（provenance fieldはSnapshot/Pin schemaに既に存在、UI文言はCheckpoint 12
+自身が新規追加分について先行対応済み、regressionは各Checkpointで継続実施済み）
+の「仕上げ」であり、新規アーキテクチャ層の追加を伴わない。
+
+FUTURE SLICEとした2項目は、既存designで意図的に「本Checkpointの対象外
+（non-goal）」と明記され続けてきた新規機能（S25.13「latest/newest選択は
+一切行わない」という設計原則そのものと矛盾しうる永続queueや、S25で
+「STANDARD/DOMAIN/SESSION層は本Checkpointでは実装しない」と明記された
+multi-layer機構）であり、既存designとの矛盾はない。
