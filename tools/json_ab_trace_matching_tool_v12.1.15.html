@@ -4227,12 +4227,35 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   // entirely to Checkpoint 10's own setProjectPin() (pre-bind gate/
   // post-bind gate/commit-instant race guard, all unmodified, §29.7) - the
   // loaded Pin is never committed to the session directly. ----
+  //
+  // §29.7-R1 (Checkpoint 12-R1 MAJOR-01 remediation): Checkpoint 10's
+  // setProjectPin() only verifies Pin<->Snapshot consistency - it has no
+  // knowledge of what Project ID the Checkpoint 12 UI currently has
+  // selected. A stale loaded Pin whose Project ID no longer matches the
+  // CURRENT UI Project ID, with the Snapshot left unchanged, would
+  // therefore pass Checkpoint 10's own checks untouched. This pre-gate
+  // fail-closes synchronously - BEFORE the real setProjectPin() is ever
+  // called - whenever the loaded Pin's captured context no longer matches
+  // the current UI context (Project ID or Snapshot binding), mirroring
+  // isProjectPinFileLoadedPinStale() exactly so "stale" and "Apply-blocked"
+  // are always the same condition, not two independently-maintained checks.
   async function applyLoadedProjectSnapshotPinToMatchingSession() {
     const snap = projectPinFileUiState;
     if (snap.status !== 'VALIDATED' || !snap.validatedProjectPin) {
       return { ok: false, code: 'PROJECT_PIN_FILE_NOT_VALIDATED' };
     }
     const applyGeneration = snap.generation;
+
+    const currentExpectedProjectId = currentProjectPinFileExpectedProjectId();
+    if (!currentExpectedProjectId
+      || snap.loadedExpectedProjectId !== currentExpectedProjectId
+      || snap.validatedProjectPin.project_id !== currentExpectedProjectId) {
+      return { ok: false, code: 'PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH' };
+    }
+    if (!approvedDictionaryRuntime.active || !approvedDictBindingsEqual(snap.loadedSnapshotBinding, approvedDictionaryRuntime.snapshotBinding)) {
+      return { ok: false, code: 'PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH' };
+    }
+
     const snapshotWrapper = currentProjectPinFileSnapshotWrapper(); // re-fetched NOW, not cached from load time (§29.4)
     if (!snapshotWrapper) {
       return { ok: false, code: 'PROJECT_PIN_FILE_NO_SNAPSHOT_CONTEXT' };

@@ -447,7 +447,10 @@ async function main() {
     assert(stateAfter.status === 'APPLIED', 'P adapter UI state transitions to APPLIED after a successful Apply');
   }
 
-  // Q. Snapshot changed after load -> Apply reject
+  // Q/R1-D. Snapshot changed after load -> Apply reject at the §29.7-R1
+  // pre-gate, BEFORE Checkpoint 10 setProjectPin() is ever called (not
+  // merely relying on Checkpoint 10's own formal binding re-verification -
+  // Checkpoint 12's own context boundary rejects a known-stale Pin itself).
   {
     const sandbox = loadMatchingToolSandbox();
     await setActiveSnapshot(sandbox, wrapperA);
@@ -456,41 +459,99 @@ async function main() {
     await adapterLoad(sandbox, new FakeFile(text, 'pin.json'));
     const wrapperNew = await buildWrapper([makeEntry()]);
     await setActiveSnapshot(sandbox, wrapperNew); // Snapshot changes AFTER load, before Apply
+    let setProjectPinCalled = false;
+    run(sandbox, `PrivateDictionaryMatchingSession = Object.freeze(Object.assign({}, PrivateDictionaryMatchingSession, { setProjectPin: () => { globalThis.__setProjectPinCalled = true; throw new Error('must not be called'); } }));`);
+    sandbox.__setProjectPinCalled = false;
     const applyResult = await adapterApply(sandbox);
-    assert(applyResult.ok === false, 'Q Apply rejects when the active Snapshot changed after load (Checkpoint 10 re-verifies formal binding)');
+    assert(applyResult.ok === false && applyResult.code === 'PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH', 'Q/R1-D Apply rejects when the active Snapshot changed after load, via the pre-gate (BINDING_MISMATCH)');
     assert(adapterState(sandbox).status !== 'APPLIED', 'Q the adapter never marks APPLIED when Apply was actually rejected');
+    assert(run(sandbox, 'globalThis.__setProjectPinCalled') === false, 'R1-D Checkpoint 10 setProjectPin() is never called when the pre-gate rejects a Snapshot-changed stale Pin');
   }
 
-  // R. Project changed after load -> Apply reject (loaded Pin.project_id !==
-  // current expected_project_id blocks Apply at the UI gate, before even
-  // calling Checkpoint 10)
+  // R/R1-A..C/R1-E..G. Project changed after load -> Apply reject at the
+  // §29.7-R1 pre-gate (Checkpoint 12-R1 MAJOR-01 remediation). Prior to this
+  // fix, Apply did not check the current UI Project ID at all, so a Pin
+  // loaded for Project A that was later re-pointed at Project B (Snapshot
+  // unchanged) would pass Checkpoint 10's own Pin<->Snapshot check
+  // untouched, since Checkpoint 10 has no notion of "the UI's current
+  // Project ID". The pre-gate closes this by using the exact same
+  // staleness criteria as isProjectPinFileLoadedPinStale().
   {
     const sandbox = loadMatchingToolSandbox();
     await setActiveSnapshot(sandbox, wrapperA);
     setProjectIdInput(sandbox, 'proj-alpha');
     const text = await buildSavedFileText('proj-alpha', wrapperA);
     await adapterLoad(sandbox, new FakeFile(text, 'pin.json'));
+    const statusBeforeChange = sessionStatus(sandbox);
+
     setProjectIdInput(sandbox, 'proj-beta'); // Project ID changes AFTER load, before Apply
     const isStale = run(sandbox, 'globalThis.__projectPinFileAdapterDiagnostics.isStale()');
     assert(isStale === true, 'R the loaded Pin is marked stale once the current Project ID no longer matches it');
-    // Apply is still attempted directly here (bypassing the UI disabled-button
-    // gate) to prove Checkpoint 10 itself would reject it too - defense in
-    // depth, not reliance on the UI alone (§29.7).
+    // The stub DOM's addEventListener() never actually fires (it is a
+    // no-op stub, unlike a real browser), so the production 'input'
+    // listener that calls renderProjectPinFileStatus() on Project ID
+    // change never runs automatically here - invoke the same render
+    // function directly via the diagnostic hook, exactly as that listener
+    // would have.
+    run(sandbox, 'globalThis.__projectPinFileAdapterDiagnostics.render()');
+    assert(run(sandbox, `document.getElementById('projectPinFileApplyBtn').disabled`) !== false, 'R1-E the Apply button is disabled while the loaded Pin is stale (rendered via renderProjectPinFileStatus)');
+
+    // R1-A/R1-B: Apply is invoked directly here (bypassing the UI
+    // disabled-button gate entirely, e.g. via the diagnostic hook), proving
+    // the pre-gate itself - not just the button's disabled attribute -
+    // rejects a Project-ID-stale Pin.
+    let setProjectPinCalled = false;
+    run(sandbox, `PrivateDictionaryMatchingSession = Object.freeze(Object.assign({}, PrivateDictionaryMatchingSession, { setProjectPin: () => { globalThis.__setProjectPinCalled = true; throw new Error('must not be called'); } }));`);
+    sandbox.__setProjectPinCalled = false;
     const applyResult = await adapterApply(sandbox);
-    assert(applyResult.ok === true, 'R even if Apply is invoked directly, Checkpoint 10 setProjectPin() itself still succeeds using the CURRENT Project ID context (Apply always re-derives from current state, never trusts stale load-time context) - see S below for the mismatch case');
+    assert(applyResult.ok === false && applyResult.code === 'PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH', 'R1-A a Project-ID-changed direct Apply call is rejected by the pre-gate (BINDING_MISMATCH), never reaching Checkpoint 10');
+    assert(run(sandbox, 'globalThis.__setProjectPinCalled') === false, 'R1-B Checkpoint 10 setProjectPin() is never called when the pre-gate rejects a Project-ID-changed stale Pin (proven via a direct diagnostic-hook Apply call)');
+
+    // R1-C: the matching session's own state (revision/active/binding) is
+    // completely untouched by a Project ID change alone - no session write
+    // of any kind occurred.
+    const statusAfterRejectedApply = sessionStatus(sandbox);
+    assert(JSON.stringify(statusBeforeChange) === JSON.stringify(statusAfterRejectedApply), 'R1-C a Project ID change followed by a rejected Apply leaves the matching session revision/state completely unchanged');
   }
 
-  // S. Apply failure never shows a fake success
+  // R1-F/R1-G. Regression: when the current Project ID and Snapshot still
+  // exactly match the loaded Pin's captured context, Apply succeeds exactly
+  // as before this remediation (the pre-gate never blocks a genuinely
+  // non-stale Pin).
   {
     const sandbox = loadMatchingToolSandbox();
     await setActiveSnapshot(sandbox, wrapperA);
     setProjectIdInput(sandbox, 'proj-alpha');
     const text = await buildSavedFileText('proj-alpha', wrapperA);
     await adapterLoad(sandbox, new FakeFile(text, 'pin.json'));
-    const wrapperMismatch = await buildWrapper([makeEntry()]);
-    await setActiveSnapshot(sandbox, wrapperMismatch);
+    run(sandbox, 'globalThis.__projectPinFileAdapterDiagnostics.render()');
+    assert(run(sandbox, `document.getElementById('projectPinFileApplyBtn').disabled`) === false, 'R1-F the Apply button is enabled when the loaded Pin is not stale');
     const applyResult = await adapterApply(sandbox);
-    assert(applyResult.ok === false, 'S a genuine Apply failure is reported as ok:false');
+    assert(applyResult.ok === true && applyResult.status.active === true, 'R1-G Apply still succeeds normally when the current Project ID/Snapshot exactly match the loaded Pin (no false-positive rejection)');
+  }
+
+  // S. Apply failure never shows a fake success - a genuine Checkpoint-10-
+  // level failure (not caught by the §29.7-R1 pre-gate, since Project ID
+  // and Snapshot both still exactly match the loaded Pin) still correctly
+  // moves the adapter to INVALID, never a fake APPLIED. Simulated via a
+  // real Resolver failure inside Checkpoint 10's own bind step (the
+  // pre-gate has no knowledge of Resolver availability - only Checkpoint
+  // 10 can detect this).
+  {
+    const sandbox = loadMatchingToolSandbox();
+    await setActiveSnapshot(sandbox, wrapperA);
+    setProjectIdInput(sandbox, 'proj-alpha');
+    const text = await buildSavedFileText('proj-alpha', wrapperA);
+    await adapterLoad(sandbox, new FakeFile(text, 'pin.json'));
+    run(sandbox, `
+      (function() {
+        PrivateDictionaryResolverCore = Object.assign({}, PrivateDictionaryResolverCore, {
+          resolveDictionaryTerms: function() { throw { code: 'RESOLVER_INTERNAL_FAILED' }; }
+        });
+      })();
+    `);
+    const applyResult = await adapterApply(sandbox);
+    assert(applyResult.ok === false, 'S a genuine Checkpoint-10-level Apply failure (Resolver unavailable) is reported as ok:false');
     const state = adapterState(sandbox);
     assert(state.status === 'INVALID', 'S a failed Apply moves adapter status to INVALID, never leaves/fakes an APPLIED display');
   }

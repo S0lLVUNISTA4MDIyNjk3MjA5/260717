@@ -3349,3 +3349,46 @@ FUTURE SLICEとした2項目は、既存designで意図的に「本Checkpointの
 一切行わない」という設計原則そのものと矛盾しうる永続queueや、S25で
 「STANDARD/DOMAIN/SESSION層は本Checkpointでは実装しない」と明記された
 multi-layer機構）であり、既存designとの矛盾はない。
+
+### S29.17 Checkpoint 12-R1 追補: Apply pre-gateの欠落（MAJOR-01是正）
+
+独立レビューで、`applyLoadedProjectSnapshotPinToMatchingSession()`が
+Project ID変更後のstale Pinを遮断できていない点をMAJOR-01として指摘された。
+
+原因: Checkpoint 10 `setProjectPin()`はPinとSnapshotのformal binding整合性
+のみを検証し、「Checkpoint 12 UIが現在どのProject IDを選択しているか」を
+一切知らない。そのため、load後にUI側のProject ID入力だけが変更され
+Snapshotが変わらない場合、`isProjectPinFileLoadedPinStale()`はstaleと
+正しく判定してApplyボタンをdisabledにするが、Apply本体
+（`applyLoadedProjectSnapshotPinToMatchingSession()`）自体にはこの
+staleness checkが存在せず、ボタンのdisabled状態を経由せず直接呼び出された
+場合（診断hook・将来の別UI経路等）、load時のPin（古いProject ID向け）が
+現在のSnapshotとの整合性だけでCheckpoint 10を通過してしまいうる。
+
+是正: `applyLoadedProjectSnapshotPinToMatchingSession()`本体の先頭、
+Checkpoint 10 `setProjectPin()`を呼ぶより前に、`isProjectPinFileLoadedPinStale()`
+と同じ判定基準（loaded Pinの`project_id`/`loadedExpectedProjectId`が現在の
+UI Project ID入力と一致するか、`loadedSnapshotBinding`が現在の
+`approvedDictionaryRuntime.snapshotBinding`と一致するか - 既存
+`approvedDictBindingsEqual()`を再利用）による同期的なfail-closed pre-gateを
+追加した。不一致の場合、既存`PROJECT_PIN_PERSISTENCE_BINDING_MISMATCH`
+コードで即座にreject し、Checkpoint 10 `setProjectPin()`へは一切到達しない
+（新しいerror codeは追加していない）。
+
+これにより、staleと判定される条件は「UI表示の可否」と「Apply本体の可否」の
+両方で完全に同一の基準（project_id一致 + Snapshot binding一致）を共有する
+ようになり、ボタンのdisabled状態を迂回して直接呼び出しても同じ結果になる。
+Checkpoint 10自身のformal binding検証（Snapshot mismatch検出）は既存のまま
+維持しており、pre-gateはそれを置き換えるものではなく、Project ID変更という
+Checkpoint 10の関知しない軸を追加でfail-closedするものである。
+
+verification側は、旧項目R（「現在のProject IDでApply成功」という誤った
+期待）を「Project ID変更後の直接Applyはpre-gateでreject」へ修正し、以下の
+R1項目を追加した: Project A load→UI Project Bへ変更→直接Apply→
+ok:false（BINDING_MISMATCH）/ 直接Apply時もCheckpoint 10 `setProjectPin()`
+が一切呼ばれないことの確認（呼び出し検知） / Project ID変更だけでは
+session revision/stateが不変であることの確認 / Snapshot変更後の直接Apply
+もpre-gateでreject（Checkpoint 10へ到達する前に判定） / stale状態では
+Applyボタンがdisabledであることの確認 / 診断hookから直接呼び出しても
+rejectされることの確認 / 現在のProject ID・Snapshotがloaded Pinと一致する
+場合は従来どおりApply成功することの確認（回帰）。
