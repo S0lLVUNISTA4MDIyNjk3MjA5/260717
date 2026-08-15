@@ -10497,25 +10497,49 @@ ${h.name}`, type:'requirement', detail:srcA };
   // 選択ノード詳細：既定は要約表示（生JSONの丸ごと展開を避ける）。
   // 「元の生データを表示」チェック時のみ従来どおりJSON全体を表示する。
   let lastSelectedGraphElement = null;
-  // P2-A4 Checkpoint 15-A R2 (production defect remediation): a Graph node's
-  // `detail` payload is, depending on which buildGraphElements() binding is
-  // active at render time, either the raw sysList/plmList row itself
-  // (buildGraphElements() defined near line 10311; detail:item), or a
-  // wrapper object `{ source: row, presentation }` built by the Trace
-  // Comparison Review overlay's buildGraphElements() (defined later in this
-  // file; the implementation actually active for standard, non-overview
-  // Graph rendering). The dictionary resolution sidecar
-  // (_approvedDictResolution) is always attached to the real row itself,
-  // never to the wrapper, so this helper resolves a node's `detail` payload
-  // to whichever of the two IS that real row - a pure shape check over a
-  // reference this function already holds. It never looks a row up by id,
-  // label, or canonical text, never touches the Resolver, and never
-  // re-derives provenance itself (see S32 R2 addendum for the Graph node
-  // data-shape investigation this is based on).
+  // P2-A4 Checkpoint 15-A R2/R4 (production defect remediation): a Graph
+  // node's `detail` payload is, depending on which buildGraphElements()
+  // binding is active at render time, either the raw sysList/plmList row
+  // itself (buildGraphElements() defined near line 10311; detail:item), or
+  // a wrapper object built by the Trace Comparison Review overlay's
+  // buildGraphElements() (defined later in this file; the implementation
+  // actually active for standard, non-overview Graph rendering):
+  // `{ source: row, presentation }`, where `presentation` is always either
+  // null or exactly relationPresentation()'s per-side projection shape
+  // `{ id, displayName, representativeLabel }` (see buildGraphElements()'s
+  // addA()/addB() and relationPresentation() itself, both defined later in
+  // this file). R4 (Codex audit BLOCKING-01): a mere "detail.source is an
+  // object" test is NOT a safe wrapper discriminator - a raw row can
+  // legitimately carry its own object-valued `source` field (e.g.
+  // `{ trace_id, source:{ kind:'PDF', page:1 }, ... }`), which that check
+  // misclassified as the wrapper shape, returning `row.source` (losing
+  // `_approvedDictResolution`, which lives on `row` itself) instead of
+  // `row`. The wrapper is now identified structurally and exclusively:
+  // `detail` has EXACTLY the two own enumerable keys `source` and
+  // `presentation` (a real row always carries additional fields - trace_id
+  // at minimum - so this alone already rules out collision), AND
+  // `presentation` is null or matches the formal per-side shape above. The
+  // dictionary resolution sidecar (_approvedDictResolution) is always
+  // attached to the real row itself, never to the wrapper, so this helper
+  // resolves a node's `detail` payload to whichever of the two IS that real
+  // row - a pure shape check over a reference this function already holds.
+  // It never looks a row up by id, label, or canonical text, never touches
+  // the Resolver, and never re-derives provenance itself (see S32 R4
+  // addendum for the Graph node data-shape investigation this is based on).
+  function isGraphNodeWrapperPresentation(p) {
+    if (p === null) return true;
+    if (!p || typeof p !== 'object') return false;
+    const keys = Object.keys(p);
+    return keys.length === 3 && keys.indexOf('id') !== -1 && keys.indexOf('displayName') !== -1 && keys.indexOf('representativeLabel') !== -1
+      && typeof p.id === 'string' && typeof p.displayName === 'string' && typeof p.representativeLabel === 'string';
+  }
   function graphNodeProvenanceSourceRow(data) {
     const detail = data && data.detail;
-    if (detail && typeof detail === 'object' && detail.source && typeof detail.source === 'object') return detail.source;
-    return detail;
+    if (!detail || typeof detail !== 'object') return detail;
+    const keys = Object.keys(detail);
+    const isWrapperShape = keys.length === 2 && keys.indexOf('source') !== -1 && keys.indexOf('presentation') !== -1
+      && detail.source && typeof detail.source === 'object' && isGraphNodeWrapperPresentation(detail.presentation);
+    return isWrapperShape ? detail.source : detail;
   }
   function formatNodeDetail(data) {
     const lines = [];

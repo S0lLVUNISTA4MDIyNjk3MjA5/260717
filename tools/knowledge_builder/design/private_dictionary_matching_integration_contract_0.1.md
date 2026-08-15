@@ -4564,3 +4564,221 @@ CP14 suite自体の他のassertion（HUMAN-01/02/03機能検証、124件超）�
 無変更。この置き換えにより、AG/AHは1つの
 assertionから2つ（terminology anchor存在確認+diff scope確認）に
 分割され、CP14 suiteの実測PASS件数は126→127（0 FAIL）となった。
+
+### S32.17 Checkpoint 15-A R4追補: Codex Independent Audit是正
+（BLOCKING-01 + MAJOR-01/02/03）
+
+R3完了後、独立した「Codex Independent Audit」がfixed SHA
+`25c32e693e5429adf3f54710537e4a627043fcee`に対しREQUEST CHANGES
+（BLOCKING 1・MAJOR 3・MINOR 0）を発行した。以下、4件それぞれの
+是正内容を記録する。
+
+**BLOCKING-01: `graphNodeProvenanceSourceRow()`判別条件の曖昧性。**
+S32.16 R2の判別条件（`detail.source`がobjectであるかのみを見る）は、
+それ自体がobject値の`source`フィールドを持つ正当な生row（例:
+PDFアダプタ由来のrow形状`{ trace_id, source:{ kind:'PDF', page:1 },
+... }`）をwrapper shapeと誤判定し、`row.source`を返してしまう
+（本来返すべき`row`自身を失い、`row`にのみ存在する
+`_approvedDictResolution`sidecarへ到達できなくなる）欠陥を内包
+していた。是正では、実際にライブな`buildGraphElements()`の`addA()`/
+`addB()`（約12036行〜）が構築するwrapper shapeを実装から直接
+確認し直し、判別を「`detail.source`がobjectか」という単一条件から、
+以下の構造的（shape-only）条件へ全面的に置き換えた:
+
+```js
+function isGraphNodeWrapperPresentation(p) {
+  if (p === null) return true;
+  if (!p || typeof p !== 'object') return false;
+  const keys = Object.keys(p);
+  return keys.length === 3 && keys.indexOf('id') !== -1 && keys.indexOf('displayName') !== -1 && keys.indexOf('representativeLabel') !== -1
+    && typeof p.id === 'string' && typeof p.displayName === 'string' && typeof p.representativeLabel === 'string';
+}
+function graphNodeProvenanceSourceRow(data) {
+  const detail = data && data.detail;
+  if (!detail || typeof detail !== 'object') return detail;
+  const keys = Object.keys(detail);
+  const isWrapperShape = keys.length === 2 && keys.indexOf('source') !== -1 && keys.indexOf('presentation') !== -1
+    && detail.source && typeof detail.source === 'object' && isGraphNodeWrapperPresentation(detail.presentation);
+  return isWrapperShape ? detail.source : detail;
+}
+```
+
+wrapperは「`detail`が`source`・`presentation`という厳密に2個の
+own enumerable keyのみを持ち（実際に取り込まれたTraceRecord rowは
+最低でも`trace_id`を含む追加フィールドを常に持つため、この時点で
+既にrow本体との衝突は原理的に排除される）、かつ`presentation`が
+`null`または`relationPresentation()`の正式なper-side projection
+shape（`{ id, displayName, representativeLabel }`、全てstring値）
+と一致する」という、`data`が既に保持している参照に対する純粋な
+形状チェックのみで識別する。id/label/canonical termによる再lookup、
+row index、Resolver再呼び出し、現在のGraph state再探索は一切
+用いない（指示で明示的に禁止された手法をすべて回避）。
+
+3つの後方互換ケースをすべて保証する: (A) wrapper shape →
+`wrapper.source`を返す。(B) 従来の生row shape（`source`/
+`presentation`キーを持たない）→ row自身を返す。(C) 生row shape
+だが自身がobject値の`source`フィールドを**持つ**（本BLOCKING-01の
+実際の閉域ケース）→ それでもrow自身を返す（`row.source`ではない）。
+
+**永続的なNode-level回帰テスト:** 新規
+`private_dictionary_p2a4_graph_provenance_source_row_verification.js`
+（R4-A〜R4-F、16件PASS）が、実production関数を直接呼び出す形で
+以下を証明する: R4-A wrapper shape（presentation:null）→
+`wrapper.source`と参照同一性で一致。R4-B wrapper shape
+（実per-side presentation object）→ 同様に一致。R4-C 従来の生row
+shape → row自身と一致。R4-D（BLOCKING-01閉域ケース本体）
+object値`.source`を持つ生row → それでもrow自身と一致し、
+`row.source`とは一致しないことを明示的に確認。R4-E 実Checkpoint 7
+annotateAllTraceTags()で実際に`_approvedDictResolution`sidecarを
+付与された、かつ自身がobject値`.source`を持つcollision fixture rowを
+raw-shape/wrapper-shapeの両方の`detail`経由で
+`projectApprovedDictionaryResolutionProvenance(
+graphNodeProvenanceSourceRow(...))`に通し、`available:true`・
+正しい`resolution_type`（EXACT_CANONICAL）へ到達することを確認
+（純粋な形状判定に留まらず、実sidecarへ実際に到達することの証明）。
+R4-F 上記R4-A〜Eの全実行を通じて実Resolver呼び出し回数が増加しない
+ことをカウンタで確認。
+
+**実Chromium上のbrowser evidence（R4-E, browser）:**
+`private_dictionary_p2a4_matching_tool_browser_closure_verification.js`
+のJSON A/B fixtureに、自身がobject値`.source`フィールド
+（`{ kind:'PDF', page:7 }`）を持つ新規row（`REQ-4`/`PART-4`、本文は
+`Browser Golden Compressor`でwrapperA辞書に対しEXACT_CANONICAL
+resolveする）を追加した。実ライブレンダリングパイプライン（標準
+モード`buildGraphElements()`）ではrequirement/partノードの
+`detail`は常にwrapper shape（`{source: row, presentation}`）である
+ため、このrowを実際にtapすると、本rowを包んだwrapperがR4修正後の
+判別ロジックを正しく通過し、実Graph node detail panelに正しい
+「種別: 要求（JSON A）」・「辞書解決 (Dictionary Resolution):
+正規語1 / 別名0 / 未登録0 / 競合0」・実Snapshot identity
+（`dsnap-... v1`）・「正規語完全一致 (Exact Canonical)」が
+実DOM文字列として現れ、fail-safe文言へ落ちないことを確認した
+（47件PASS、0 FAIL、0 INCOMPLETE、既存R1-A〜Kのevidenceは無退行）。
+なお、生row shapeが`detail`へ直接渡される旧
+`buildGraphElements()`（約10311行）は、後続の2回の再代入（約12036
+行・約14147行、いずれも無条件のtop-level代入）により実行時には
+常に上書きされる到達不能コードであることを実装から確認済みであり、
+このunwrapped rawケースそのものを実UIから引き起こすことは現状
+できない。そのためR4-D（Node-level、直接関数呼び出し）が
+unwrapped rawケースの唯一かつ十分な証拠であり、R4-E（browser）は
+「collision-proneなrow自身の`.source`フィールドが、実際のwrapper
+経由レンダリングパイプラインを一切混乱させない」ことを実Chromium上
+で補完的に証明するものである。
+
+**MAJOR-01: 保護diff監査の脆弱性（keyword存在+行数制限ヒューリス
+ティック）是正。**
+R2/R3の`matchingDiffTouchesOnlyAuthorizedHelper`
+（`graphNodeProvenanceSourceRow`という文字列がdiffに含まれるか、
+`/^[+-].*\bfunction\s+(?!...)\w+\s*\(/m`で他の関数**定義**行が
+触れられていないか、変更行数が60行未満か、の3条件）は、既存関数の
+本体・CSS規則・HTMLラベル・定数値への無関係な1行変更であれば、
+いずれも「新しい`function NAME(`宣言行」を導入せず、
+`graphNodeProvenanceSourceRow`という文字列自体はdiff中のどこかに
+既に存在し、行数も少ないままであるため、全3条件をすり抜けて
+無許可のproduction変更を通してしまう脆弱性を持っていた。
+
+是正として、新規
+`private_dictionary_p2a4_authorized_matching_diff_guard.js`に
+`matchingToolDiffIsExactlyAuthorized(diffText)`という厳密guardを
+実装した。これは`git diff <pre-head> -- <file>`をunified diff
+hunk単位（`@@ ... @@`ヘッダの直後から次のヘッダまたはEOFまでの
+本文）にparseし、diffが「空」または「事前に許可された2つのhunk
+本体と完全に内容一致（hunk数も完全一致、順不同）」である場合のみ
+許可する。行数制限のような弱い指標は一切用いない
+（「単なる変更行数制限は不可」という指示に従う）。この方式では、
+既存関数本体・CSS・HTMLラベル・定数への無関係な1行変更は、たとえ
+1行であっても「3個目の（未許可の）hunk」として現れるため、必ず
+FAILする。ヘッダ中の行番号（`@@ -a,b +c,d @@`）自体は比較対象から
+意図的に除外している。これはファイル内の無関係な箇所での行数変動が
+hunkの開始行番号を無害にずらすだけで、実際に「何が変更されたか」を
+表すhunk本体テキストの一致性判定には影響しないためである。
+
+この`matchingToolDiffIsExactlyAuthorized()`を、
+`private_dictionary_p2a4_final_integration_verification.js`の
+保護ファイルdiff監査、および
+`private_dictionary_ui_terminology_convergence_verification.js`
+（Checkpoint 14、AG/AH）の両方で共通利用する形へ置き換えた。AG/AH
+自身のterminology anchor検証ロジック（S32.16 R3で追加した10個の
+逐語的terminology文字列存在確認）は無変更のまま維持した。
+
+**5件のadversarial self-test。** 新規
+`private_dictionary_p2a4_authorized_matching_diff_guard_selftest.js`
+（8件PASS、うち5件が指示で要求されたR4-G〜K）が、synthetic diff
+文字列を用いて以下を証明する: R4-G 実際の（現行の）matching tool
+diffが正しくauthorizedと判定される。R4-H 既存関数の本体への無関係な
+1行変更（新規`function`宣言行を伴わない）を許可済み2 hunkに追加した
+syntheticdiffがREJECTされる。R4-I CSS規則への無関係な1行変更が
+REJECTされる。R4-J HTMLラベル文言への無関係な変更がREJECTされる。
+R4-K 定数値への無関係な変更がREJECTされる。追加で、許可済み2 hunk
+のうち片方のみのdiff、空diff、許可済みhunk内部の1トークンのみの
+改竄（`keys.length===2`→`===3`）についても、それぞれ期待通りの
+判定（REJECT/ACCEPT）となることを確認した。
+
+**MAJOR-02: 最終集約suiteに"P2-A1"（Learning core）が欠落。**
+リポジトリ実態を確認したところ、"P2-A1"に対応する専用検証suiteは
+`tools/knowledge_builder/verification/private_dictionary_learning_
+core_verification.js`（65項目の設計書§21 Verification Planに
+1:1トレーサブルな`#N`ラベル付きassertion、`ALL PASS`/`process.exit
+(failures===0?0:1)`という独自summary形式）であることを確認した。
+これを`private_dictionary_p2a4_final_integration_verification.js`
+の`REGRESSION_SUITES`へsubprocessエントリとして追加した
+（`expected: null`、実測件数はbaseline未設定のためexit codeのみが
+gate、実測件数はそのまま報告する - 既存baselineへ合わせて水増し・
+切り詰めは一切行わない）。あわせてcoverage manifestテーブルへ
+対応する1行を追加した。
+
+**MAJOR-03: browser closure suiteの早期終了時exit code誤り、
+および最終集約suiteとの結線欠如。**
+`private_dictionary_p2a4_matching_tool_browser_closure_
+verification.js`の2つの早期終了分岐（Playwright `require()`失敗、
+Chromiumバイナリ未検出）は、従来`reportIncomplete(...)`の後に
+`process.exit(0)`していた。これは「Playwright/Chromiumが利用
+できない環境（今回のCodex audit環境自身がこれに該当したと見られる）
+を誤ってPASSと解釈しうる」という重大な欠陥であり、是正として両分岐
+とも`process.exit(1)`へ変更し、いずれの分岐でも早期終了前に必ず
+`N PASS / M FAIL / K INCOMPLETE`という完全なsummary行を出力する
+ようにした（既存の正常完了時の最終summary・`incomplete===0`
+assertion・`process.exit(failed===0 && incomplete===0?0:1)`は
+無変更）。
+
+あわせて、`private_dictionary_p2a4_final_integration_verification.js`
+の`REGRESSION_SUITES`へbrowser closure suite自身をsubprocess
+エントリとして追加し（既存の`runSuite()`によりexit codeでgateされる
+ため、K>0で必ずFAILする）、さらにこのsubprocessのstdoutから
+`N PASS / M FAIL / K INCOMPLETE`summary行を直接parseし
+`INCOMPLETE===0`を明示的にassertする専用チェックを追加した
+（「optionally also parsing/asserting INCOMPLETE===0」を実装）。
+これにより、browser closure suiteが単体で持つexit code規約が
+将来的に誤って緩んだ場合でも、最終集約suite側の直接parseが
+独立した安全網として機能する。
+
+**Chromiumバイナリ探索のportability改善（推奨事項、依存追加なし）。**
+従来のCHROMIUM_PATHは単一の開発機固有パス
+（`/opt/pw-browsers/chromium`）にハードコードされており、これが
+Codex audit環境で「見つからない」根本原因になったと見られる。是正
+として`resolveChromiumPath()`を追加し、(1) 環境変数
+`P2A4_CHROMIUM_PATH`による明示的override、(2) 既知の複数
+install path（従来のハードコードパスを含む）、(3) Playwright自身の
+`chromium.executablePath()`、(4) 見つからなければ`null`を返し
+呼び出し側がINCOMPLETE+exit 1として扱う、という優先順位で探索する。
+新規npmパッケージ等の依存追加は一切行っていない。ブラウザを
+「偽装」してPASSを強制する経路は存在しない（見つからなければ常に
+INCOMPLETE+exit 1）。
+
+**Production変更scope（R4）:**
+今回のR4でproduction変更が許可されたのは
+`tools/json_ab_trace_matching_tool_v12.1.15.html`の
+`graphNodeProvenanceSourceRow()`/`isGraphNodeWrapperPresentation()`
+判別ロジックの上記書き換えのみであり、`matchingToolDiffIsExactly
+Authorized()`による構造的guard（+49/-4行、2 hunkに厳密に閉域）で
+機械的に検証されている。他の3件（MAJOR-01/02/03）はいずれも
+verification-onlyの変更であり、production側（10個のpure core、
+P2-A3 production UI、comparison review core、quantity sidecar、
+既存artifact schema）はすべて無変更（diff=0、確認済み）。
+
+**本ラウンドの終着点:** R4完了時点で開発者側の対応はCodex
+Independent Auditの4件（BLOCKING-01・MAJOR-01・MAJOR-02・
+MAJOR-03）すべてに対し完了しているが、この判定はCodex自身による
+再監査（RE-AUDIT）を経ていない。したがって本ラウンドの完了は
+「Human Acceptance: PENDING」かつ「Codex: RE-AUDIT REQUIRED」で
+あり、開発者側からCLOSED判定を行うことはしない。

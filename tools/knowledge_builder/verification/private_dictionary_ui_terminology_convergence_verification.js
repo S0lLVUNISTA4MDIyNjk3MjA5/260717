@@ -376,18 +376,21 @@ function compatibilityChecks() {
   const missingTerminologyAnchors = CP12_CP13_TERMINOLOGY_ANCHORS.filter(s => !matchingHtmlCurrentSource.includes(s));
   assert(missingTerminologyAnchors.length === 0, `AG/AH Checkpoint 12/13 provenance UI terminology anchors are all still present verbatim in the matching tool HTML (missing: ${JSON.stringify(missingTerminologyAnchors)})`);
 
+  // R4 (Codex Independent Audit MAJOR-01): replaced the keyword-presence +
+  // "no other function definition touched" regex heuristic (bypassable by
+  // an unrelated 1-line change to an existing function body, CSS rule, HTML
+  // label, or constant) with the same strict, exact-hunk-body guard used by
+  // the final integration suite's own protected-diff check - see
+  // private_dictionary_p2a4_authorized_matching_diff_guard.js and its
+  // adversarial self-test file for the full rationale and the 5 synthetic
+  // bypass attempts it closes. AG/AH's own terminology-anchor check above is
+  // unchanged by this.
+  const { matchingToolDiffIsExactlyAuthorized } = require('./private_dictionary_p2a4_authorized_matching_diff_guard.js');
   let matchingDiff;
   try {
     matchingDiff = execSync(`git diff ${PRE_HEAD_SHA} -- tools/json_ab_trace_matching_tool_v12.1.15.html`, { cwd: REPO_ROOT }).toString();
   } catch (e) { matchingDiff = `ERROR: ${e.message}`; }
-  if (matchingDiff === '') {
-    assert(true, 'AG/AH tools/json_ab_trace_matching_tool_v12.1.15.html has zero diff against pre-head');
-  } else {
-    const bodyOnly = matchingDiff.replace(/^[+-]{3}.*$/gm, '');
-    const touchesOnlyAuthorizedGraphProvenanceFix = matchingDiff.includes('graphNodeProvenanceSourceRow')
-      && !/^[+-].*\bfunction\s+(?!graphNodeProvenanceSourceRow\b|formatNodeDetail\b)\w+\s*\(/m.test(bodyOnly);
-    assert(touchesOnlyAuthorizedGraphProvenanceFix, 'AG/AH tools/json_ab_trace_matching_tool_v12.1.15.html has a non-empty diff against pre-head, but it is confined to the explicitly-authorized P2-A4 Checkpoint 15-A R2 Graph provenance fix (design doc S32.16) - never an unexplained or unbounded change to this protected file');
-  }
+  assert(matchingToolDiffIsExactlyAuthorized(matchingDiff), 'AG/AH tools/json_ab_trace_matching_tool_v12.1.15.html diff against pre-head is either empty or confined EXACTLY to the two authorized Graph provenance source-row hunks (strict exact-hunk-body guard) - never an unexplained or unbounded change to this protected file');
 
   // AI/AJ: protected pure cores + comparison review core are byte-for-byte unchanged.
   const protectedCoreFiles = [

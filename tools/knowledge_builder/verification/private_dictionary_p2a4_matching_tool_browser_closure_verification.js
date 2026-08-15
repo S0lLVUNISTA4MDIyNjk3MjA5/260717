@@ -115,6 +115,33 @@ async function buildGoldenWrapper(overrides) {
   });
 }
 
+// P2-A4 Checkpoint 15-A R4 (Codex Independent Audit MAJOR-03): locate a
+// real, working Chromium binary without installing any new dependency and
+// without ever hardcoding a single dev-machine-only path as the sole source
+// of truth (the Codex audit's own environment could not find Chromium at
+// the previous hardcoded CHROMIUM_PATH, which is exactly the class of
+// environment-portability gap this closes). Order: an explicit env override
+// -> a short list of known install locations (including the previous
+// hardcoded path, kept for this environment) -> Playwright's own bundled
+// executablePath() -> a system Chrome/Chromium binary. Returns null (never a
+// fabricated/fake path) if none of these resolve to a real file, in which
+// case the caller must report INCOMPLETE and exit 1 - never silently
+// substitute or skip verification.
+function resolveChromiumPath(chromiumModule) {
+  if (process.env.P2A4_CHROMIUM_PATH && fs.existsSync(process.env.P2A4_CHROMIUM_PATH)) return process.env.P2A4_CHROMIUM_PATH;
+  const knownPaths = [
+    CHROMIUM_PATH,
+    '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable', '/snap/bin/chromium'
+  ];
+  for (const p of knownPaths) { if (fs.existsSync(p)) return p; }
+  try {
+    const bundled = chromiumModule.executablePath();
+    if (bundled && fs.existsSync(bundled)) return bundled;
+  } catch (e) { /* Playwright's own browser not installed either - fall through */ }
+  return null;
+}
+
 async function main() {
   let chromium;
   try {
@@ -122,12 +149,13 @@ async function main() {
   } catch (err) {
     reportIncomplete('A launch', `Playwright is not available in this environment (${err.message}) - browser closure cannot be verified here; Windows x64 Human acceptance manual covers this surface instead.`);
     console.log(`\n${passed} PASS / ${failed} FAIL / ${incomplete} INCOMPLETE`);
-    process.exit(0);
+    process.exit(1);
   }
-  if (!fs.existsSync(CHROMIUM_PATH)) {
-    reportIncomplete('A launch', `Chromium binary not found at ${CHROMIUM_PATH} - browser closure cannot be verified here.`);
+  const resolvedChromiumPath = resolveChromiumPath(chromium);
+  if (!resolvedChromiumPath) {
+    reportIncomplete('A launch', `No working Chromium binary found (checked P2A4_CHROMIUM_PATH env override, known install paths including ${CHROMIUM_PATH}, and Playwright's own bundled executablePath()) - browser closure cannot be verified here; this is a HOLD, never a silent PASS.`);
     console.log(`\n${passed} PASS / ${failed} FAIL / ${incomplete} INCOMPLETE`);
-    process.exit(0);
+    process.exit(1);
   }
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cp15-browser-'));
@@ -136,12 +164,20 @@ async function main() {
   fs.writeFileSync(sysPath, JSON.stringify([
     { trace_id: 'REQ-1', desc: 'Browser Golden Compressor' },
     { trace_id: 'REQ-2', desc: 'Browser Golden Alias' },
-    { trace_id: 'REQ-3', desc: 'Browser Nonexistent Widget' }
+    { trace_id: 'REQ-3', desc: 'Browser Nonexistent Widget' },
+    // P2-A4 Checkpoint 15-A R4 (Codex Independent Audit BLOCKING-01): a row
+    // that itself carries an own object-valued `source` field (e.g. a
+    // PDF-adapter-derived row shape), so the R4-E real-browser check below
+    // can confirm this real, unmodified row's own `.source` field never
+    // gets confused with the Graph node wrapper's `.source` field by
+    // graphNodeProvenanceSourceRow() end to end, in real Chromium.
+    { trace_id: 'REQ-4', desc: 'Browser Golden Compressor', source: { kind: 'PDF', page: 7 } }
   ], null, 2));
   fs.writeFileSync(plmPath, JSON.stringify([
     { trace_id: 'PART-1', desc: 'Browser Golden Compressor' },
     { trace_id: 'PART-2', desc: 'Browser Golden Alias' },
-    { trace_id: 'PART-3', desc: 'Browser Nonexistent Widget' }
+    { trace_id: 'PART-3', desc: 'Browser Nonexistent Widget' },
+    { trace_id: 'PART-4', desc: 'Browser Golden Compressor', source: { kind: 'PDF', page: 7 } }
   ], null, 2));
 
   const wrapperA = await buildGoldenWrapper({ canonical_term: 'Browser Golden Compressor', aliases: ['Browser Golden Alias'] });
@@ -149,7 +185,7 @@ async function main() {
   const projectId = 'p2a4-cp15-browser-' + randHex(6);
   const pinA = await ActivationCore.buildProjectSnapshotPin({ project_id: projectId, snapshot_wrapper: wrapperA });
 
-  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
+  const browser = await chromium.launch({ executablePath: resolvedChromiumPath, headless: true });
   const page = await browser.newPage();
   const pageErrors = [];
   page.on('pageerror', err => pageErrors.push(String(err && err.message || err)));
@@ -440,6 +476,36 @@ print('HAS_PROVENANCE' if '辞書照合根拠' in wb else 'NO_PROVENANCE')
     tagInfoUnrelatedToApprovedDict: !!mergedResult.sysList[2]._tagInfo // presence/absence unrelated to the sidecar mutation
   }));
   assert(matchingResultUnaffected.trace_id === 'REQ-3' && matchingResultUnaffected.desc === 'Browser Nonexistent Widget', 'R1-K injecting a malformed provenance sidecar never mutates the real row\'s own matching/comparison identity fields');
+
+  // ==========================================================================
+  // R4-E (Codex Independent Audit BLOCKING-01, real-browser evidence). The
+  // REQ-4/PART-4 fixture row loaded at ingest time carries its own
+  // object-valued `.source` field (`{ kind:'PDF', page:7 }`) - a real,
+  // unmodified row now genuinely present in mergedResult.sysList, matched
+  // and annotated by the real pipeline, so it carries a real
+  // _approvedDictResolution sidecar. In the REAL, live (standard-mode)
+  // buildGraphElements(), its Graph node's `detail` is the wrapper shape
+  // `{ source: row, presentation }` around this exact row (see design doc
+  // S32 R4 addendum) - this proves the collision-prone row's own `.source`
+  // field never confuses graphNodeProvenanceSourceRow() end to end, through
+  // a real tap -> formatNodeDetail() -> DOM render, in real Chromium. The
+  // Node-level private_dictionary_p2a4_graph_provenance_source_row_
+  // verification.js additionally proves, by direct function invocation,
+  // that the same row would still resolve correctly even if a future
+  // rendering path ever passed it as an UNWRAPPED raw `detail` (R4-D).
+  // ==========================================================================
+  const tappedReq4 = await page.evaluate(() => {
+    const target = cy.nodes().filter(n => n.data('type') === 'requirement' && n.data('id') === 'REQ-4');
+    if (target.length !== 1) return { found: false, count: target.length };
+    target.emit('tap');
+    return { found: true };
+  });
+  assert(tappedReq4.found === true, `R4-E the real Graph node for trace_id="REQ-4" (a row whose own .source field is an object) is uniquely found and tapped by real identity (lookup result: ${JSON.stringify(tappedReq4)})`);
+  await page.waitForTimeout(500);
+  const detailAreaTextReq4 = await page.$eval('#detailArea', el => el.textContent).catch(() => '');
+  assert(detailAreaTextReq4.includes('種別: 要求（JSON A）'), `R4-E the real Graph node detail panel shows the correct node type ("種別: 要求（JSON A）") for the REQ-4 node - never derived from its own object-valued .source field (actual text: ${JSON.stringify(detailAreaTextReq4)})`);
+  assert(detailAreaTextReq4.includes('正規語完全一致 (Exact Canonical)'), `R4-E the real Graph node detail panel shows the real, formal EXACT_CANONICAL label for the REQ-4 node - confirming the real bound Snapshot (wrapperA) identity was correctly used to resolve it, not lost behind its own object-valued .source field (actual text: ${JSON.stringify(detailAreaTextReq4)})`);
+  assert(!detailAreaTextReq4.includes('辞書照合情報を表示できません') && !detailAreaTextReq4.includes('辞書照合情報なし'), `R4-E the REQ-4 node never falls back to the malformed/no-provenance fail-safe text (actual text: ${JSON.stringify(detailAreaTextReq4)})`);
 
   // ==========================================================================
   // L. Project Pin sanitized error smoke (Checkpoint 11/12 file-validation

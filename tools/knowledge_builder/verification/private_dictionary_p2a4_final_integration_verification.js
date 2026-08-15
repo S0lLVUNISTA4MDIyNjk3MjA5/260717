@@ -686,6 +686,7 @@ async function main() {
   console.log('\n--- Section 6: Coverage manifest + full regression + protected-file diff ---');
 
   const REGRESSION_SUITES = [
+    { label: 'P2-A1 Learning core', file: 'private_dictionary_learning_core_verification.js', expected: null },
     { label: 'P2-A2 rule extraction', file: 'private_dictionary_rule_extraction_core_verification.js', expected: null },
     { label: 'P2-A3 Candidate Review UI', file: 'private_dictionary_candidate_review_ui_verification.js', expected: 212, timeout: 180000 },
     { label: 'P2-A3 Candidate Review Workbook', file: 'private_dictionary_candidate_review_workbook_verification.js', expected: 521, timeout: 180000 },
@@ -700,7 +701,10 @@ async function main() {
     { label: 'Checkpoint 11 Pin Persistence', file: 'private_dictionary_project_snapshot_pin_persistence_core_verification.js', expected: 72 },
     { label: 'Checkpoint 12 Browser File Adapter', file: 'private_dictionary_project_pin_browser_file_adapter_verification.js', expected: 53 },
     { label: 'Checkpoint 13 Provenance Projection', file: 'private_dictionary_resolution_provenance_projection_verification.js', expected: 112 },
-    { label: 'Checkpoint 14 UI Terminology Convergence', file: 'private_dictionary_ui_terminology_convergence_verification.js', expected: 126, timeout: 180000 }
+    { label: 'Checkpoint 14 UI Terminology Convergence', file: 'private_dictionary_ui_terminology_convergence_verification.js', expected: 126, timeout: 180000 },
+    { label: 'Checkpoint 15-A R4 Graph provenance source-row (BLOCKING-01)', file: 'private_dictionary_p2a4_graph_provenance_source_row_verification.js', expected: 16 },
+    { label: 'Checkpoint 15-A R4 authorized-diff guard self-test', file: 'private_dictionary_p2a4_authorized_matching_diff_guard_selftest.js', expected: 8 },
+    { label: 'Checkpoint 15-A Browser closure (matching tool + P2-A3)', file: 'private_dictionary_p2a4_matching_tool_browser_closure_verification.js', expected: null, timeout: 180000 }
   ];
   const COMPARISON_REVIEW_SUITE = { label: 'Comparison review core', file: path.join('..', '..', 'design_notes', 'trace_comparison_review_state_core_verification.js'), expected: null };
   const QUANTITY_SIDECAR_SUITE = { label: 'Quantity sidecar binding', file: path.join('..', '..', 'design_notes', 'quantity_sidecar_binding_verification.js'), expected: null };
@@ -741,7 +745,7 @@ async function main() {
     const stdout = (result.stdout || '') + (result.stderr || '');
     const { passN, failN } = parseSummaryCounts(stdout);
     const ok = result.status === 0;
-    regressionResults.push({ ...suite, status: ok ? 'PASS' : 'FAIL', passN, failN });
+    regressionResults.push({ ...suite, status: ok ? 'PASS' : 'FAIL', passN, failN, stdout });
     let label = `Regression: ${suite.label} (${suite.file}) - exit ${result.status}${passN !== null ? `, ${passN} PASS / ${failN} FAIL` : (failN !== null ? `, ${failN} FAIL` : ' (no summary line parsed - gated on process exit status only)')}`;
     if (suite.expected !== null && passN !== null) {
       label += ` (baseline ${suite.expected}, ${passN >= suite.expected ? 'meets or exceeds' : 'BELOW'} baseline)`;
@@ -755,6 +759,25 @@ async function main() {
     }
   }
   for (const suite of REGRESSION_SUITES) runSuite(suite);
+
+  // P2-A4 Checkpoint 15-A R4 (Codex Independent Audit MAJOR-03): the browser
+  // closure suite is now one of REGRESSION_SUITES above (so it is gated on
+  // exit code by runSuite() like every other subprocess, and MAJOR-03 also
+  // requires that suite to exit 1 whenever INCOMPLETE>0), but this
+  // aggregator additionally parses and asserts INCOMPLETE===0 directly from
+  // its "N PASS / M FAIL / K INCOMPLETE" summary line, so a K>0 result is
+  // never masked even if some future change to that suite's own exit-code
+  // logic regressed.
+  const browserClosureResult = regressionResults.find(r => r.file === 'private_dictionary_p2a4_matching_tool_browser_closure_verification.js');
+  if (browserClosureResult) {
+    const incompleteMatch = (browserClosureResult.stdout || '').match(/(\d+)\s*PASS\s*\/\s*(\d+)\s*FAIL\s*\/\s*(\d+)\s*INCOMPLETE/);
+    assert(!!incompleteMatch, 'Browser closure suite summary line ("N PASS / M FAIL / K INCOMPLETE") is present and parseable in the aggregator');
+    if (incompleteMatch) {
+      const incompleteCount = Number(incompleteMatch[3]);
+      assert(incompleteCount === 0, `Browser closure suite: INCOMPLETE === 0 (found ${incompleteCount}) - an environment unable to produce real Chromium closure evidence must never be silently treated as covered by this aggregator`);
+    }
+  }
+
   runSuite(COMPARISON_REVIEW_SUITE);
   runSuite(QUANTITY_SIDECAR_SUITE);
 
@@ -776,31 +799,37 @@ async function main() {
   }
   assert(coresClean, `Protected: all 10 protected pure cores have zero diff against pre-head ${PRE_HEAD_SHA}${dirtyCores.length ? ' (dirty: ' + dirtyCores.join(', ') + ')' : ''}`);
 
-  // P2-A4 Checkpoint 15-A R2 (explicitly authorized, one-time production
-  // freeze exception - see design doc S32 R2 addendum and the Checkpoint
-  // 15-A R2 remediation instruction): the matching tool HTML is no longer
-  // required to be a byte-for-byte zero diff against the fixed Checkpoint
-  // 15 pre-head, because R2 fixed a real, pre-existing Graph node
-  // Dictionary Resolution provenance defect there (formatNodeDetail() was
-  // reading the wrong object for Graph nodes produced by the Trace
-  // Comparison Review overlay's buildGraphElements()). The diff MUST still
-  // be confined to exactly that authorized remediation - the new
-  // graphNodeProvenanceSourceRow() helper and its formatNodeDetail() call
-  // site - never a broader change (Resolver, matching, score, node/edge
-  // identity, Graph topology, relationPresentation, Detail table, Excel,
-  // and the sidecar/projection schemas are all required to be untouched;
-  // this is checked structurally below, and independently reconfirmed by
-  // the unmodified Checkpoint 13/7 regression suites in Section 6).
+  // P2-A4 Checkpoint 15-A R2/R4 (explicitly authorized, one-time-per-round
+  // production freeze exception - see design doc S32 R2/R4 addenda and the
+  // Checkpoint 15-A R2/R4 remediation instructions): the matching tool HTML
+  // is no longer required to be a byte-for-byte zero diff against the fixed
+  // Checkpoint 15 pre-head, because R2/R4 fixed a real, pre-existing Graph
+  // node Dictionary Resolution provenance defect there (formatNodeDetail()
+  // was reading the wrong object for Graph nodes produced by the Trace
+  // Comparison Review overlay's buildGraphElements(), and R2's own first fix
+  // was itself found ambiguous by the Codex Independent Audit's BLOCKING-01
+  // finding). R4 (Codex audit MAJOR-01): a byte-for-byte zero diff, restored
+  // as the DEFAULT requirement, is now only ever relaxed via
+  // matchingToolDiffIsExactlyAuthorized() - an EXACT hunk-body comparison
+  // against a hardcoded, content-for-content authorized hunk set (see
+  // private_dictionary_p2a4_authorized_matching_diff_guard.js and its own
+  // adversarial self-test file), never a keyword-presence + line-count
+  // heuristic. This closes the exact bypass Codex identified: an unrelated
+  // one-line change to an existing function body, CSS rule, HTML label, or
+  // constant can no longer sneak through by keeping the helper name present
+  // and the line count low, because ANY extra or altered hunk anywhere in
+  // the file fails the exact-match comparison (Resolver, matching, score,
+  // node/edge identity, Graph topology, relationPresentation, Detail table,
+  // Excel, and the sidecar/projection schemas remain independently
+  // reconfirmed by the unmodified Checkpoint 13/7 regression suites in
+  // Section 6).
+  const { matchingToolDiffIsExactlyAuthorized } = require('./private_dictionary_p2a4_authorized_matching_diff_guard.js');
   let matchingDiff;
   try { matchingDiff = execSync(`git diff ${PRE_HEAD_SHA} -- tools/json_ab_trace_matching_tool_v12.1.15.html`, { cwd: REPO_ROOT }).toString(); }
   catch (e) { matchingDiff = `ERROR: ${e.message}`; }
   const matchingDiffAddedLines = (matchingDiff.match(/^\+(?!\+\+)/gm) || []).length;
   const matchingDiffRemovedLines = (matchingDiff.match(/^-(?!--)/gm) || []).length;
-  const matchingDiffTouchesOnlyAuthorizedHelper = matchingDiff.includes('graphNodeProvenanceSourceRow')
-    && matchingDiff.includes('formatNodeDetail')
-    && !/^[+-].*\bfunction\s+(?!graphNodeProvenanceSourceRow\b|formatNodeDetail\b)\w+\s*\(/m.test(matchingDiff.replace(/^[+-]{3}.*$/gm, ''))
-    && (matchingDiffAddedLines + matchingDiffRemovedLines) > 0 && (matchingDiffAddedLines + matchingDiffRemovedLines) < 60;
-  assert(matchingDiffTouchesOnlyAuthorizedHelper, `Protected (R2 exception): tools/json_ab_trace_matching_tool_v12.1.15.html diff against pre-head is confined to the authorized R2 Graph provenance source-row fix (graphNodeProvenanceSourceRow + formatNodeDetail() call site only) - +${matchingDiffAddedLines}/-${matchingDiffRemovedLines} lines, no other function definition touched`);
+  assert(matchingToolDiffIsExactlyAuthorized(matchingDiff), `Protected (R2/R4 exception, strict exact-hunk guard): tools/json_ab_trace_matching_tool_v12.1.15.html diff against pre-head is confined EXACTLY to the two authorized Graph provenance source-row hunks (graphNodeProvenanceSourceRow/isGraphNodeWrapperPresentation definition + formatNodeDetail() call site) - +${matchingDiffAddedLines}/-${matchingDiffRemovedLines} lines, content-exact hunk-body match, no other hunk permitted`);
 
   const comparisonReviewFiles = ['trace_comparison_review_state_core.js', 'trace_comparison_review_session_core.js', 'trace_comparison_review_projection_core.js', 'trace_comparison_review_export_core.js'];
   let reviewCoreClean = true; const dirtyReview = [];
@@ -828,6 +857,8 @@ async function main() {
   // suite -> final result, backed by the actual re-run above.
   function resultFor(file) { const r = regressionResults.find(x => x.file === file); return r ? r.status : 'NOT RUN'; }
   const COVERAGE_MANIFEST = [
+    ['Dictionary layer merge/provenance (P2-A1 Learning core)', 'P2-A1', 'private_dictionary_learning_core_verification.js', resultFor('private_dictionary_learning_core_verification.js')],
+    ['Graph node provenance source-row shape discriminator (BLOCKING-01)', 'CP15-A R4', 'private_dictionary_p2a4_graph_provenance_source_row_verification.js', resultFor('private_dictionary_p2a4_graph_provenance_source_row_verification.js')],
     ['Proxy / hostile getter root inputs', 'CP7/CP9/CP10/CP11/CP13', 'private_dictionary_matching_integration_verification.js, private_dictionary_snapshot_activation_core_verification.js, private_dictionary_project_pin_matching_runtime_verification.js, private_dictionary_project_snapshot_pin_persistence_core_verification.js, private_dictionary_resolution_provenance_projection_verification.js', [resultFor('private_dictionary_matching_integration_verification.js'), resultFor('private_dictionary_snapshot_activation_core_verification.js'), resultFor('private_dictionary_project_pin_matching_runtime_verification.js'), resultFor('private_dictionary_project_snapshot_pin_persistence_core_verification.js'), resultFor('private_dictionary_resolution_provenance_projection_verification.js')].join('/')],
     ['Stateful/accessor descriptor inputs', 'CP10', 'private_dictionary_project_pin_matching_runtime_verification.js', resultFor('private_dictionary_project_pin_matching_runtime_verification.js')],
     ['Mutation-after-call (input aliasing)', 'CP8/CP5', 'private_dictionary_review_promotion_adapter_core_verification.js, private_dictionary_promotion_snapshot_composition_core_verification.js', [resultFor('private_dictionary_review_promotion_adapter_core_verification.js'), resultFor('private_dictionary_promotion_snapshot_composition_core_verification.js')].join('/')],
