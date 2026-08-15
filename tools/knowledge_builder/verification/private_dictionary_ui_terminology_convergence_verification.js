@@ -173,26 +173,57 @@ function staticChecks() {
   // HUMAN-03 filters: U-AD (predicate correctness in pureFilterChecks() below)
   // --------------------------------------------------------------------------------------------
 
-  // U. full filter option inventory
-  const decisionSelectMatch = html.match(/<select id="f-decision">([\s\S]*?)<\/select>/);
-  const decisionOptions = decisionSelectMatch[1].match(/<option value="([^"]+)">([^<]+)<\/option>/g);
-  assert(decisionOptions && decisionOptions.length === 5, 'U f-decision exposes exactly 5 options (ALL + UNREVIEWED + ACCEPT + REJECT + UNCERTAIN)');
-  const flagSelectMatch = html.match(/<select id="f-flag">([\s\S]*?)<\/select>/);
-  const flagOptions = flagSelectMatch[1].match(/<option value="([^"]+)">([^<]+)<\/option>/g);
-  assert(flagOptions && flagOptions.length === 3, 'U f-flag exposes exactly 3 options (ALL + ALIAS + CONFLICT)');
+  // U. full filter option inventory - ALL 5 semantic filter/sort selects
+  // (f-page is pagination, not a filter, and is explicitly excluded - S31.8R1).
+  function optionsOf(selectId) {
+    const m = html.match(new RegExp(`<select id="${selectId}">([\\s\\S]*?)<\\/select>`));
+    assert(!!m, `U <select id="${selectId}"> exists`);
+    return m[1].match(/<option value="([^"]+)">([^<]+)<\/option>/g) || [];
+  }
+  const decisionOptions = optionsOf('f-decision');
+  assert(decisionOptions.length === 5, 'U f-decision exposes exactly 5 options (ALL + UNREVIEWED + ACCEPT + REJECT + UNCERTAIN)');
+  const sourceOptions = optionsOf('f-source');
+  assert(sourceOptions.length === 3, 'U f-source exposes exactly 3 options (ALL + PDF + EXCEL)');
+  const flagOptions = optionsOf('f-flag');
+  assert(flagOptions.length === 3, 'U f-flag exposes exactly 3 options (ALL + ALIAS + CONFLICT)');
+  const sortOptions = optionsOf('f-sort');
+  assert(sortOptions.length === 6, 'U f-sort exposes exactly 6 options (keyword/exposure/documents/conflict/rule/decision)');
+  const ruleSelectMatch = html.match(/<select id="f-rule">([\s\S]*?)<\/select>/);
+  assert(!!ruleSelectMatch, 'U <select id="f-rule"> exists (options populated at runtime from RULE_LABELS - checked in the browser half)');
+  const pageSelectMatch = html.match(/<select id="f-page">([\s\S]*?)<\/select>/);
+  assert(!!pageSelectMatch, 'U <select id="f-page"> exists, but is explicitly out of HUMAN-03 scope (pagination, not a filter - S31.8R1)');
 
-  // V. every non-ALL option has a Japanese label
+  // V. every non-ALL option in every semantic FILTER select (f-decision/f-source/f-flag) has a
+  // Japanese label. f-sort is a separate category (S31.8/S31.3): it reorders rather than filters,
+  // and one of its option labels ("Rule", meaning "sort by rule_ids[0]") intentionally reuses the
+  // bare field name already excluded from HUMAN-01 bilingual treatment for the same reason
+  // RULE_LABELS itself was excluded (S31.3) - it is covered separately below.
   const jpChar = /[぀-ヿ一-鿿]/;
-  for (const opt of decisionOptions.concat(flagOptions)) {
+  for (const opt of decisionOptions.concat(sourceOptions, flagOptions)) {
     const label = opt.match(/>([^<]+)</)[1];
     if (label === 'すべて') continue;
     assert(jpChar.test(label), `V filter option label "${label}" contains a Japanese character`);
   }
+  // f-sort: every option except the intentionally-excluded "Rule" (S31.3) has a Japanese label.
+  for (const opt of sortOptions) {
+    const label = opt.match(/>([^<]+)</)[1];
+    if (label === 'Rule') continue;
+    assert(jpChar.test(label), `V (R1) sort option label "${label}" contains a Japanese character`);
+  }
+  assert(sortOptions.some(o => />Rule</.test(o)), 'V (R1) f-sort\'s "Rule" option is present and is the one documented, intentional bare-English exception (S31.3/S31.8R1), not an oversight');
 
-  // W. a human-readable explanation of the filter semantics is present, always visible
-  assert(/判定（Decision）:/.test(html) && /属性（Attribute）:/.test(html), 'W filter explanation text (panel-note) covers both 判定 and 属性 filters');
+  // W. a human-readable explanation exists for EVERY filter/sort category (R1: all 5, not just 2)
+  assert(/判定（Decision）:/.test(html), 'W filter explanation covers 判定 (Decision)');
+  assert(/出典（Source）:/.test(html), 'W (R1) filter explanation covers 出典 (Source) - was missing before R1');
+  assert(/Rule（抽出根拠）:/.test(html), 'W (R1) filter explanation covers Rule (抽出根拠) - was missing before R1');
+  assert(/属性（Attribute）:/.test(html), 'W filter explanation covers 属性 (Attribute)');
+  assert(/並び替え（Sort）:/.test(html), 'W (R1) filter explanation covers 並び替え (Sort) - was missing before R1, and explicitly states it reorders rather than hides rows');
   assert(/まだ人間の判断が確定していない候補のみ表示/.test(html), 'W UNREVIEWED filter explanation states its inclusion criterion');
+  assert(/PDF資料から抽出された候補のみ表示/.test(html) && /Excel資料から抽出された候補のみ表示/.test(html), 'W (R1) Source filter explanation states PDF/Excel inclusion criteria');
+  assert(/構造KEY/.test(html) && /見出し/.test(html) && /繰返し値/.test(html) && /引用/.test(html) && /括弧alias/.test(html) && /定義alias/.test(html),
+    'W (R1) Rule filter explanation covers all 6 rule labels with their extraction meaning');
   assert(/複数の正規語候補が競合する別名を伴う候補のみ表示/.test(html), 'W CONFLICT filter explanation states its inclusion criterion');
+  assert(/表示順のみ.*絞り込む.*ものではない|表示順のみ.*絞り込む\S*ものではない/.test(html.replace(/\n/g, '')) || html.includes('表示順のみ'), 'W (R1) Sort explanation explicitly distinguishes reordering from filtering');
 
   // --------------------------------------------------------------------------------------------
   // Privacy / accessibility: AK-AN
@@ -235,9 +266,9 @@ function pureFilterChecks() {
     schema_version: 'private-dictionary-candidate-evaluation/0.1',
     source_fingerprints: [],
     candidates: [
-      { candidate_id: 'pdc-1', canonical_term: 'Alpha', rule_ids: ['TERM_STRUCTURAL_KEY'], metrics: { exposure_count: 1, document_support_count: 1, alias_conflict_count: 0 }, evidence_refs: [] },
-      { candidate_id: 'pdc-2', canonical_term: 'Beta', rule_ids: ['TERM_STRUCTURAL_KEY'], metrics: { exposure_count: 1, document_support_count: 1, alias_conflict_count: 2 }, evidence_refs: [] },
-      { candidate_id: 'pdc-3', canonical_term: 'Gamma', rule_ids: ['TERM_STRUCTURAL_KEY'], metrics: { exposure_count: 1, document_support_count: 1, alias_conflict_count: 0 }, evidence_refs: [] },
+      { candidate_id: 'pdc-1', canonical_term: 'Alpha', rule_ids: ['TERM_STRUCTURAL_KEY'], metrics: { exposure_count: 5, document_support_count: 1, alias_conflict_count: 0 }, evidence_refs: [{ source_unit_id: 'u-pdf-1' }] },
+      { candidate_id: 'pdc-2', canonical_term: 'Beta', rule_ids: ['TERM_STRUCTURAL_KEY'], metrics: { exposure_count: 1, document_support_count: 1, alias_conflict_count: 2 }, evidence_refs: [{ source_unit_id: 'u-xlsx-1' }] },
+      { candidate_id: 'pdc-3', canonical_term: 'Gamma', rule_ids: ['TERM_EXPLICIT_QUOTED'], metrics: { exposure_count: 3, document_support_count: 1, alias_conflict_count: 0 }, evidence_refs: [{ source_unit_id: 'u-pdf-2' }] },
     ],
     alias_candidates: [
       { alias_candidate_id: 'pda-1', alias_term: 'A-alias', canonical_candidate_id: 'pdc-1', rule_ids: [] },
@@ -249,8 +280,31 @@ function pureFilterChecks() {
   state = ReviewState.setCandidateDecision(state, 'pdc-2', 'REJECT');
   // pdc-3 stays UNREVIEWED.
 
-  const index = { byUnitId: new Map() };
+  const index = { byUnitId: new Map([
+    ['u-pdf-1', { source_kind: 'PDF' }], ['u-pdf-2', { source_kind: 'PDF' }], ['u-xlsx-1', { source_kind: 'EXCEL' }],
+  ]) };
   const baseView = { query: '', decision: 'ALL', source: 'ALL', rule: 'ALL', flag: 'ALL', sort: 'keyword', pageSize: 50, candidatePage: 1 };
+
+  // R1: predicate correctness for 出典（Source）and Rule（抽出根拠）filters,
+  // and comparator correctness for 並び替え（Sort）- the same gap the
+  // reviewer flagged for the explanation text (MAJOR-01) is closed here on
+  // the predicate/comparator side too.
+  const pdfOnly = TableView.selectRows(evaluation, index, state, Object.assign({}, baseView, { source: 'PDF' })).sorted;
+  assert(pdfOnly.length === 2 && pdfOnly.every(c => c.candidate_id !== 'pdc-2'), 'R1 出典（Source）=PDF filter shows only PDF-derived candidates (pdc-1, pdc-3), never the EXCEL-derived pdc-2');
+  const excelOnly = TableView.selectRows(evaluation, index, state, Object.assign({}, baseView, { source: 'EXCEL' })).sorted;
+  assert(excelOnly.length === 1 && excelOnly[0].candidate_id === 'pdc-2', 'R1 出典（Source）=EXCEL filter shows only the EXCEL-derived candidate');
+  const ruleQuotedOnly = TableView.selectRows(evaluation, index, state, Object.assign({}, baseView, { rule: 'TERM_EXPLICIT_QUOTED' })).sorted;
+  assert(ruleQuotedOnly.length === 1 && ruleQuotedOnly[0].candidate_id === 'pdc-3', 'R1 Rule（抽出根拠）=TERM_EXPLICIT_QUOTED filter shows only the candidate extracted by that rule, never the TERM_STRUCTURAL_KEY candidates');
+  const ruleKeyOnly = TableView.selectRows(evaluation, index, state, Object.assign({}, baseView, { rule: 'TERM_STRUCTURAL_KEY' })).sorted;
+  assert(ruleKeyOnly.length === 2 && ruleKeyOnly.every(c => c.candidate_id !== 'pdc-3'), 'R1 Rule（抽出根拠）=TERM_STRUCTURAL_KEY filter shows only the two candidates extracted by that rule');
+
+  const byExposureDesc = TableView.selectRows(evaluation, index, state, Object.assign({}, baseView, { sort: 'exposure' })).sorted;
+  assert(byExposureDesc.map(c => c.candidate_id).join(',') === 'pdc-1,pdc-3,pdc-2', 'R1 並び替え（Sort）=出現数（多い順）orders 5 > 3 > 1 exactly, matching the "多い順" explanation');
+  const byDecisionOrder = TableView.selectRows(evaluation, index, state, Object.assign({}, baseView, { sort: 'decision' })).sorted;
+  assert(byDecisionOrder.map(c => c.candidate_id).join(',') === 'pdc-3,pdc-2,pdc-1', 'R1 並び替え（Sort）=判定 orders 未判定(pdc-3) → 却下(pdc-2) → 承認(pdc-1), matching the "未判定→保留→却下→承認" explanation exactly');
+  // Sort never changes which candidates are present, only their order (explanation's own claim).
+  assert(byExposureDesc.length === evaluation.candidates.length && byDecisionOrder.length === evaluation.candidates.length,
+    'R1 sorting never hides/filters candidates - the explanation\'s "表示順のみ、絞り込みではない" claim holds against the real comparator');
 
   // Y. UNREVIEWED filter never shows a reviewed item
   const unreviewedOnly = TableView.selectRows(evaluation, index, state, Object.assign({}, baseView, { decision: 'UNREVIEWED' })).sorted;
@@ -408,6 +462,25 @@ async function browserChecks() {
     assert(decisionOptionTexts.some(t => t.includes('承認（ACCEPT）')) && decisionOptionTexts.some(t => t.includes('却下（REJECT）')),
       'Browser: f-decision options carry the bilingual labels in the real DOM');
     assert(await page.locator('.panel-note', { hasText: '判定（Decision）' }).isVisible(), 'Browser: filter explanation text is visible on the candidates panel');
+
+    // R1: f-rule is populated at runtime from RULE_LABELS - confirm the real DOM actually has more
+    // than just "すべて", and that its explanation is visible alongside 出典/並び替え.
+    const ruleOptionCount = await page.locator('#f-rule option').count();
+    assert(ruleOptionCount > 1, 'R1 Browser: f-rule is populated at runtime with real rule options beyond just すべて');
+    assert(await page.locator('.panel-note', { hasText: '出典（Source）' }).isVisible(), 'R1 Browser: 出典（Source）filter explanation is visible in the real DOM');
+    assert(await page.locator('.panel-note', { hasText: 'Rule（抽出根拠）' }).isVisible(), 'R1 Browser: Rule（抽出根拠）filter explanation is visible in the real DOM');
+    assert(await page.locator('.panel-note', { hasText: '並び替え（Sort）' }).isVisible(), 'R1 Browser: 並び替え（Sort）explanation is visible in the real DOM');
+
+    // R1: f-source filter switching actually narrows the real rendered table.
+    const totalRows = await page.locator('#rows tr').count();
+    await page.selectOption('#f-source', 'PDF');
+    await page.waitForTimeout(200);
+    const pdfRows = await page.locator('#rows tr').count();
+    assert(pdfRows <= totalRows, 'R1 Browser: selecting 出典（Source）=PDF never increases the row count beyond the unfiltered total');
+    await page.selectOption('#f-source', 'ALL');
+    await page.waitForTimeout(200);
+    const restoredSourceRows = await page.locator('#rows tr').count();
+    assert(restoredSourceRows === totalRows, 'R1 Browser: restoring 出典（Source）=すべて returns to the original row count');
 
     const beforeCount = await page.locator('#rows tr').count();
     await page.selectOption('#f-decision', 'UNREVIEWED');

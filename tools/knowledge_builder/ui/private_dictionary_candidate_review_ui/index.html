@@ -160,13 +160,22 @@
           </div>
         </div>
 
-        <!-- P2-A4 Checkpoint 14 (HUMAN-03, S31.8): human-readable filter
-             explanations, always visible (never tooltip-only). Written
-             directly from the existing selectRows() predicate in
-             table_view.js - the predicate itself is unchanged. -->
+        <!-- P2-A4 Checkpoint 14 R1 (HUMAN-03, S31.8/S31.8R1): human-readable
+             filter explanations for every semantic filter (判定/出典/Rule/
+             属性), always visible (never tooltip-only). 並び替え（Sort）is
+             explained separately since it reorders rather than hides rows.
+             f-page is display-count pagination, not a filter, and is
+             intentionally out of HUMAN-03 scope (S31.8R1). Written directly
+             from the existing selectRows()/comparator logic in
+             table_view.js - the predicate/comparator itself is unchanged. -->
         <p class="panel-note">
-          判定（Decision）: 「未判定（UNREVIEWED）」＝まだ人間の判断が確定していない候補のみ表示。「承認（ACCEPT）」「却下（REJECT）」「保留（UNCERTAIN）」＝それぞれの判定が確定した候補のみ表示。
+          判定（Decision）: 「未判定（UNREVIEWED）」＝まだ人間の判断が確定していない候補のみ表示。「承認（ACCEPT）」「却下（REJECT）」「保留（UNCERTAIN）」＝それぞれの判定が確定した候補のみ表示。<br>
+          出典（Source）: 「PDF由来」＝PDF資料から抽出された候補のみ表示。「Excel由来」＝Excel資料から抽出された候補のみ表示。1つの候補が両方の出典から抽出されていれば、いずれの選択でも表示されます。<br>
+          Rule（抽出根拠）: 候補がどの抽出規則で見つかったかで絞り込みます。「構造KEY」＝表のキー列など構造的な項目名。「見出し」＝文書のセクション見出し。「繰返し値」＝表の値として複数箇所に繰り返し出現した値。「引用」＝本文中の引用符（"..."）で囲まれた語句。「括弧alias」＝「正式名称（略称）」のような括弧書きのalias表現。「定義alias」＝「〜を以下「X」という」等の定義表現。<br>
           属性（Attribute）: 「別名候補あり（Alias）」＝別名候補を1件以上伴う正規語候補のみ表示。「競合あり（Conflict）」＝複数の正規語候補が競合する別名を伴う候補のみ表示。
+        </p>
+        <p class="panel-note">
+          並び替え（Sort）: 一覧の表示順のみを変更し、候補を絞り込む（非表示にする）ものではありません。「キーワード」＝五十音・アルファベット順。「出現数（多い順）」「文書数（多い順）」＝各件数が多い順。「競合優先（Conflict Priority）」＝競合件数が多い順。「Rule」＝抽出規則ID順。「判定」＝未判定→保留→却下→承認の順。
         </p>
 
         <div class="bulkbar">

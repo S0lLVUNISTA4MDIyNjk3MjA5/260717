@@ -3993,25 +3993,57 @@ Source of Truthとする。predicateは一切変更しない（§18）。
 | `f-decision` | REJECT | REJECT | 却下（REJECT） | `decision === 'REJECT'` |
 | `f-decision` | UNCERTAIN | UNCERTAIN | 保留（UNCERTAIN） | `decision === 'UNCERTAIN'` |
 | `f-source` | ALL/PDF/EXCEL | すべて/PDF由来/Excel由来 | 変更なし | `sourceKindsOf(c,index).has(view.source)` |
-| `f-rule` | ALL + 各rule | すべて + RULE_LABELS | 変更なし（対象外、S31.3） | `c.rule_ids.indexOf(view.rule) !== -1` |
+| `f-rule` | ALL + 各rule | すべて + RULE_LABELS | ラベル自体は変更なし（対象外、S31.3）。説明を追加（下記） | `c.rule_ids.indexOf(view.rule) !== -1` |
 | `f-flag` | ALL | すべて | すべて（変更なし） | フィルタなし |
 | `f-flag` | ALIAS | Aliasあり | 別名候補あり（Alias） | `aliasTermsFor(c,evaluation).length > 0` |
 | `f-flag` | CONFLICT | Conflictあり | 競合あり（Conflict） | `c.metrics.alias_conflict_count > 0` |
-| `f-sort` | conflict | Conflict優先 | 競合優先（Conflict Priority） | 表示順のみ、絞り込みではない |
+| `f-sort` | keyword/exposure/documents/conflict/rule/decision | （下記参照） | 競合優先のみ表示変更（他は変更なし） | 表示順のみ、絞り込みではない |
+| `f-page` | 50/100/200 | 変更なし | 変更なし（対象外、HUMAN-03スコープ外） | pagination（表示件数）であり、filterではない |
+
+**R1（独立レビュー指摘MAJOR-01への対応）**: 初版実装は`f-decision`/
+`f-flag`のみに説明を追加し、`f-source`/`f-rule`/`f-sort`の説明が
+欠落していた。R1では全5種のfilter/sortカテゴリ（`f-page`を除く）に
+常時表示の説明を追加する。
 
 各filterのhuman-readable説明（helper text、常時表示、tooltipのみに
-閉じない）を`toolbar`直下に短い説明リストとして追加する。例:
+閉じない）を`toolbar`直下に短い説明リストとして追加する:
 
 - 判定（Decision）: 「未判定（UNREVIEWED）」＝まだ人間の判断が確定
   していない候補のみ表示。「承認（ACCEPT）」「却下（REJECT）」
   「保留（UNCERTAIN）」＝それぞれの判定が確定した候補のみ表示。
+- 出典（Source）: 「PDF由来」＝PDF資料から抽出された候補のみ表示。
+  「Excel由来」＝Excel資料から抽出された候補のみ表示。1つの候補が
+  両方の出典から抽出されていれば、いずれの選択でも表示される
+  （`sourceKindsOf()`がSetで両方の出典を保持するため）。
+- Rule（抽出根拠）: 候補がどの抽出規則（`rule_extraction_core.js`の
+  `TERM_*`/`ALIAS_*`）で見つかったかで絞り込む。「構造KEY」＝表の
+  キー列など構造的な項目名（structural_role==='KEY'）。「見出し」＝
+  文書のセクション見出し（structural_role==='SECTION_HEADING'）。
+  「繰返し値」＝表の値として複数箇所に繰り返し出現した値
+  （structural_role==='VALUE'）。「引用」＝本文中の引用符（"..."）で
+  囲まれた語句。「括弧alias」＝「正式名称（略称）」のような括弧書き
+  のalias表現。「定義alias」＝「〜を以下「X」という」等の定義表現。
+  各ラベルの意味はcore側の該当コードブロックのコメントから直接
+  書き起こした（推測ではない）。
 - 属性（Attribute）: 「別名候補あり（Alias）」＝別名候補を1件以上
   伴う正規語候補のみ表示。「競合あり（Conflict）」＝複数の正規語候補
   が競合し人間による解決が必要な別名を伴う候補のみ表示。
+- 並び替え（Sort）: 一覧の**表示順のみ**を変更するもので、候補を
+  絞り込む（非表示にする）ものではない - この一文自体が判定/出典/
+  Rule/属性との違いを明示する。「キーワード」＝五十音・アルファベット
+  順（`localeCompare('ja')`）。「出現数（多い順）」「文書数（多い順）」
+  ＝各件数の降順。「競合優先（Conflict Priority）」＝競合件数の降順。
+  「Rule」＝`rule_ids[0]`の文字列順。「判定」＝
+  `{UNREVIEWED:0, UNCERTAIN:1, REJECT:2, ACCEPT:3}`の順（未判定→
+  保留→却下→承認）。
+- 表示件数（`f-page`）: filterではなくpagination controlであり、
+  HUMAN-03の対象外とする（表示件数を変えても候補の集合自体は変わら
+  ない）。
 
-f-decision/f-flagの各説明は`selectRows()`の実predicateから直接
-書き起こしたものであり、predicate自体は変更しない。verification
-（S31.11）で表示説明と実predicate結果の一致を確認する。
+f-decision/f-source/f-rule/f-flag/f-sortの各説明は
+`selectRows()`の実predicate・実comparatorから直接書き起こしたもの
+であり、predicate/comparator自体は変更しない。verification（S31.11）
+で表示説明と実predicate結果の一致を確認する。
 
 Alias/Conflictタブ自体には状態filterが存在しない（既存仕様どおり、
 変更しない）。
