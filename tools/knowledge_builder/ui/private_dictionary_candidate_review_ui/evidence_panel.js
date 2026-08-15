@@ -37,7 +37,7 @@
       metaCell('Status', candidate.status),
       metaCell('出現数', candidate.metrics.exposure_count),
       metaCell('文書数', candidate.metrics.document_support_count),
-      metaCell('Conflict', candidate.metrics.alias_conflict_count > 0 ? `${candidate.metrics.alias_conflict_count} 件` : 'なし'),
+      metaCell('競合（Conflict）', candidate.metrics.alias_conflict_count > 0 ? `${candidate.metrics.alias_conflict_count} 件` : 'なし'),
       metaCell('Rule', candidate.rule_ids.map(r => Table.RULE_LABELS[r] || r).join(' / ')),
     );
 
@@ -45,7 +45,7 @@
     aliasBox.replaceChildren();
     const aliases = Table.aliasTermsFor(candidate, evaluation);
     if (aliases.length) for (const a of aliases) aliasBox.append(Dom.el('span', 'chip', a));
-    else aliasBox.append(Dom.el('span', 'dash', 'alias 候補なし'));
+    else aliasBox.append(Dom.el('span', 'dash', '別名（alias）候補なし'));
 
     const list = document.getElementById('d-evidence');
     list.replaceChildren();

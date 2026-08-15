@@ -17,7 +17,7 @@
   const Pagination = globalThis.P2A3Pagination;
 
   const RESOLUTION_LABELS = [
-    ['UNRESOLVED', '未解決'], ['SELECT_CANONICAL', 'canonicalを選択'], ['REJECT_ALL', 'すべて却下'],
+    ['UNRESOLVED', '未解決'], ['SELECT_CANONICAL', '正規語（canonical）を選択'], ['REJECT_ALL', 'すべて却下'],
     ['CONTEXT_DEPENDENT', '文脈依存'], ['UNCERTAIN', '判断保留'],
   ];
 
@@ -89,14 +89,14 @@
       card.append(list);
 
       card.append(Dom.el('p', 'conflict-note',
-        '自動解決は行いません。ここでの選択は review state にのみ保存され、抽出結果の conflict は変更されません。'));
+        '自動解決は行いません。ここでの選択はレビュー状態にのみ保存され、抽出結果の競合（conflict）は変更されません。'));
       return card;
     });
 
     document.getElementById('conflict-list').replaceChildren(...cards);
     document.getElementById('conflict-empty').hidden = evaluation.conflicts.length > 0;
     Pagination.renderControls(document.getElementById('conflict-pager'), info,
-      p => handlers.onConflictPage(p), 'Conflict専用のページ設定');
+      p => handlers.onConflictPage(p), '競合（Conflict）専用のページ設定');
   }
 
   return { render, RESOLUTION_LABELS };

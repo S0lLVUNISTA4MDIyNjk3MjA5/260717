@@ -41,7 +41,7 @@
     set('s-progress', `${summary.candidate_progress_percent}%`);
     const bar = document.getElementById('s-progress-bar');
     if (bar) bar.style.width = `${summary.candidate_progress_percent}%`;
-    set('s-progress-sub', `判定済 ${summary.candidate_reviewed} / ${summary.candidate_total}（alias・conflict は別集計）`);
+    set('s-progress-sub', `判定済 ${summary.candidate_reviewed} / ${summary.candidate_total}（別名（alias）・競合（conflict）は別集計）`);
     set('tc-candidates', summary.candidate_total);
     set('tc-aliases', summary.alias_total);
     set('tc-conflicts', summary.conflict_unresolved);

@@ -142,7 +142,7 @@
       // build must leave the badge exactly as it was.
       app.dirty = false;
       $('dirty-badge').hidden = true;
-      setStatus('private レビュー Workbook を生成しました（LOCAL PRIVATE / 外部共有禁止）。', 'ok');
+      setStatus('レビュー作業を保存しました（非公開 / LOCAL PRIVATE、外部共有禁止）。', 'ok');
     } catch (_) {
       showError(null, 'INTERNAL');
     } finally {
@@ -153,8 +153,8 @@
 
   async function exportShareableSummaryWorkbook() {
     if (!app.session || app.running || app.workbookBusy) return;
-    askConfirm('共有用サマリーの生成確認',
-      'このファイルは共有用集計です。キーワード、alias、file名、evidence、レビューコメントは含みません。共有前に内容を確認してください。',
+    askConfirm('共有用レビュー集計の生成確認',
+      'このファイルは共有用の件数集計のみです。キーワード、別名（alias）、file名、evidence、レビューメモは含みません。作業を再開するための非公開ファイルとは別物です。共有前に内容を確認してください。',
       async () => {
         if (!app.session) return;
         const evaluation = app.session.evaluation;
@@ -164,7 +164,7 @@
         try {
           const bytes = ShareableSummaryExport.buildShareableSummaryWorkbookBytes(evaluation, reviewState);
           WorkbookDownload.downloadBytes(bytes, WorkbookContract.SHAREABLE_FILE_NAME);
-          setStatus('共有用サマリー Workbook を生成しました。内容を確認してから共有してください。', 'ok');
+          setStatus('共有用レビュー集計を生成しました。内容を確認してから共有してください。', 'ok');
         } catch (_) {
           showError(null, 'INTERNAL');
         } finally {
@@ -176,10 +176,13 @@
 
   function startResumeFlow() {
     if (!app.session || app.running || app.workbookBusy) return;
+    // P2-A4 Checkpoint 14 (HUMAN-02, S31.5/§15): make explicit that this is
+    // a FILE LOAD that replaces the current unsaved state - never implied
+    // by the word "再開" alone.
     if (app.dirty) {
-      askConfirm('未保存のレビュー結果があります',
-        '現在の未保存レビュー結果は、読み込んだレビュー結果で置き換えられます。',
-        () => $('resume-input').click(), '読み込む');
+      askConfirm('保存済みレビュー作業の読み込み確認',
+        '保存したレビュー作業ファイルを読み込みます。現在の未保存の変更は、読み込んだ内容で置き換えられます（元に戻せません）。',
+        () => $('resume-input').click(), '読み込んで置き換える');
     } else {
       $('resume-input').click();
     }
@@ -206,7 +209,7 @@
       app.dirty = false;
       $('dirty-badge').hidden = true;
       renderAll();
-      setStatus('保存済みのレビュー結果を再開しました。', 'ok');
+      setStatus('保存したレビュー作業を読み込んで再開しました。', 'ok');
     } catch (thrown) {
       // Failure: nothing above this catch has touched app.session, selectedRows, dirty or the
       // pending confirm - the atomic pipeline only ever returns a value or throws.
@@ -405,7 +408,9 @@
     app.session.reviewState = ReviewState.setCandidateDecisionBulk(app.session.reviewState, ids, decision);
     markDirty();
     renderAll();
-    toast(`${ids.length} 件を ${decision === 'UNREVIEWED' ? '未判定へ戻しました' : decision + ' にしました'}`);
+    // P2-A4 Checkpoint 14 (HUMAN-01, S31.4): reuse the single bilingual
+    // decision-label map rather than the raw enum string.
+    toast(`${ids.length} 件を ${decision === 'UNREVIEWED' ? '未判定へ戻しました' : Dom.DECISION_LABELS[decision] + ' にしました'}`);
   }
 
   function askConfirm(title, text, onOk, okLabel) {
@@ -549,10 +554,10 @@
         const decision = button.dataset.bulk;
         if (app.selectedRows.size === 0) { toast('先に対象行を選択してください。'); return; }
         if (decision === 'ACCEPT') {
-          askConfirm('一括 ACCEPT の確認',
-            `全ページ合計で選択中の ${app.selectedRows.size} 件をまとめて ACCEPT にします`
+          askConfirm('一括承認（ACCEPT）の確認',
+            `全ページ合計で選択中の ${app.selectedRows.size} 件をまとめて承認（ACCEPT）にします`
             + `（表示中のページだけではありません）。辞書への自動登録は行われませんが、判定は上書きされます。よろしいですか？`,
-            () => applyBulk('ACCEPT'), 'ACCEPT にする');
+            () => applyBulk('ACCEPT'), '承認（ACCEPT）にする');
         } else {
           applyBulk(decision);
         }

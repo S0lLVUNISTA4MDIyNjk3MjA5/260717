@@ -88,6 +88,18 @@ body {
 .privacy-bar p { margin: 0; font-size: 12.5px; }
 .lock { width: 9px; height: 9px; border-radius: 50%; background: var(--private); margin-top: 7px; flex: none; }
 
+/* ---------------- workbook help (P2-A4 Checkpoint 14, HUMAN-02/S31.7) ---------------- */
+/* Always-visible explanation distinguishing the private save/resume
+   workflow from the shareable summary export - never conveyed by color
+   alone, never tooltip-only. */
+.workbook-help {
+  display: flex; flex-wrap: wrap; gap: 4px 24px;
+  background: var(--surface); border-bottom: 1px solid var(--line);
+  padding: 8px 20px; color: var(--ink-2);
+}
+.workbook-help p { margin: 0; font-size: 12px; flex: 1 1 320px; }
+.workbook-help strong { color: var(--ink); }
+
 /* ---------------- dashboard ---------------- */
 .dashboard {
   display: grid; gap: 10px; padding: 14px 20px;

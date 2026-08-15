@@ -22,7 +22,7 @@
   const REASON_LABELS = {
     GENERAL_TERM: '一般語すぎる', NUMERIC_OR_SYMBOLIC: '数値・記号中心', CONTEXT_DEPENDENT: '文脈依存',
     EXTRACTION_ERROR: '誤抽出', DUPLICATE_CANDIDATE: '別候補と重複', ALIAS_UNCLEAR: 'alias関係が不明',
-    CANONICAL_TOO_LONG: 'canonicalが長すぎる', NEWLINE_BOUNDARY_OVER_CAPTURE: '改行境界の過剰取得',
+    CANONICAL_TOO_LONG: '正規語（canonical）が長すぎる', NEWLINE_BOUNDARY_OVER_CAPTURE: '改行境界の過剰取得',
     INSUFFICIENT_EVIDENCE: 'evidence不足', OTHER: 'その他',
   };
 

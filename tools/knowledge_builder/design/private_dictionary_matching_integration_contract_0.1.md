@@ -3755,3 +3755,375 @@ Resolver outputから生成して通す。
 display/export」はCheckpoint 12時点でRemaining MUST-CLOSEに数えられて
 おらず、Checkpoint 13で新たにCLOSEDへ追加されるのみで、他項目の分類は
 変更しない。
+
+## S31 Checkpoint 14: HUMAN-01/02/03 UI Convergence
+### （P2-A3 Candidate Review UI + Matching Integration Terminology Cleanup）
+
+Checkpoint 14はUI/UX収束のみを目的とする。辞書判定ロジック・
+Promotion・Snapshot・Resolver・Matching score・Comparison review
+semanticsは一切変更しない。表示文言・helper text・ボタン名称・
+verificationのみを対象とする。
+
+### S31.1 対象範囲の確定
+
+固定pre-head `45d296a9719fa68b00adfeaf9ce3da79e3da5c2e` 上で調査した
+結果、対象は以下に確定する。
+
+**P2-A3 Candidate Review UI**（実際に稼働している方 - 検証されない
+mock版 `tools/knowledge_builder/ui/p2a3_candidate_review_mock/` は
+対象外）:
+`tools/knowledge_builder/ui/private_dictionary_candidate_review_ui/`
+配下の `index.html`, `dom.js`, `table_view.js`, `alias_view.js`,
+`conflict_view.js`, `evidence_panel.js`, `app.js`。
+
+`review_state.js`（DECISIONS/RESOLUTIONS/REASON_CODESの内部enum定義と
+reducer本体）は review core semantics であり**変更しない** - 同ファイル
+冒頭のコメントが既に「Values stored are the fixed English enums from
+the contract; Japanese appears only in the view layer」と明記しており、
+表示ラベルはview層（今回touchするファイル）へ寄せる設計方針と一致する。
+`private_review_export.js`/`private_review_import.js`/
+`shareable_summary_export.js`/`workbook_contract.js`/`workbook_cells.js`
+/`workbook_validation.js`（Workbook I/Oとschema）も**変更しない**（schema
+やprivacy boundaryを変えないため）。
+
+**matching tool側**（`tools/json_ab_trace_matching_tool_v12.1.15.html`）:
+Checkpoint 12 Project Pin UI（`Project設定 (Project Pin)`/`照合セッション
+に適用 (Apply to Matching Session)`）とCheckpoint 13 provenance UI
+（`正規語完全一致 (Exact Canonical)`/`承認済み別名 (Approved Alias)`/
+`辞書未登録 (Unknown Term)`/`辞書競合 (Dictionary Conflict)`/`辞書解決
+(Dictionary Resolution)`）はいずれも既に日本語first + English併記で、
+本Checkpointの用語集（S31.2）と整合している（`正規語`/`別名`/`競合`の
+語根がP2-A3側と一致）。**再変更しない** - 無意味な再変更の禁止（§5）に
+従う。よってmatching HTMLの変更は本Checkpointでは発生しない。
+
+### S31.2 Canonical display glossary（用語集）
+
+P2-A3とmatching toolの双方で共通して使う表示用語を固定する。internal
+term列はenum/schema値であり**変更しない**。表示形式は「日本語（English
+companion）」の順で統一する。
+
+| internal term | user-facing 日本語 | English companion | meaning |
+|---|---|---|---|
+| （candidate種別: `evaluation.candidates`） | 正規語候補 | Canonical Candidate | 辞書の正規語となりうる候補語 |
+| （candidate種別: `evaluation.alias_candidates`） | 別名候補 | Alias Candidate | 正規語候補とは独立に採否判断する別名候補 |
+| （candidate種別: `evaluation.conflicts`） | 競合 | Conflict | 同一別名が複数の正規語候補を指し、人間の解決が必要な状態 |
+| `ACCEPT` | 承認 | ACCEPT | レビュー担当者がこの候補を採用と判断した状態 |
+| `REJECT` | 却下 | REJECT | レビュー担当者がこの候補を不採用と判断した状態 |
+| `UNCERTAIN` | 保留 | UNCERTAIN | 判断を保留した状態（採否未確定） |
+| `UNREVIEWED` | 未判定 | UNREVIEWED | まだ人間の判断が一度も行われていない状態（既定値） |
+| `UNRESOLVED`（conflict resolution） | 未解決 | UNRESOLVED | 競合がまだ解決されていない状態 |
+| `SELECT_CANONICAL`（conflict resolution） | 正規語を選択 | Select Canonical | 競合する正規語候補のうち1件を選ぶ解決 |
+| APPROVED_ALIAS（Checkpoint 7/13既存） | 承認済み別名 | Approved Alias | 人間レビュー済みaliasとして正式に使用可能 |
+| DICTIONARY_CONFLICT（Checkpoint 7/13既存） | 辞書競合 | Dictionary Conflict | 辞書上で一意に解決できない |
+| EXACT_CANONICAL（Checkpoint 7/13既存） | 正規語完全一致 | Exact Canonical | 入力語が正規語自体と完全一致 |
+| UNKNOWN_TERM（Checkpoint 7/13既存） | 辞書未登録 | Unknown Term | 辞書に該当エントリなし |
+| （Project Snapshot Pin、Checkpoint 9-12既存） | Project設定 | Project Pin | このプロジェクトで使う辞書Snapshotの固定情報 |
+| （dictionary snapshot wrapper、Checkpoint 3以降既存） | 辞書Snapshot | Snapshot | 辞書の特定バージョンの固定スナップショット |
+| （P2-A3 private resume artifact） | レビュー作業（の保存ファイル） | Review Progress | reviewer decisions・private note・進捗を含む非公開ファイル |
+| （P2-A3 shareable summary artifact） | 共有用レビュー集計 | Shareable Review Summary | 件数集計のみを含む共有可能なファイル |
+
+enumと表示用語の混同を避けるため: 上記表の「internal term」列が
+enum文字列そのものである行（`ACCEPT`等）は、表示側でも常にその
+英大文字綴りをEnglish companionとして使う（"Accepted"のような別の
+英語表現へ言い換えない）。これは実際にWorkbookへ書き出される値
+（`private_review_export.js`のCandidates/Aliasesシート等）と表示が
+食い違わないようにするための意図的な選択であり、§7の推奨候補
+（"Accepted"等）から離れる部分だが、実データとの一致を優先した。
+
+「未判定」は既存コードベースで既に使われているJapanese語彙であり
+（`index.html`のUNREVIEWEDオプション表示、§7推奨の新語「未レビュー」
+ではなく）、Checkpoint 14では既存語彙を保持しつつEnglish companion
+`(UNREVIEWED)`のみを追加する - 無用な語彙変更を避ける。
+
+### S31.3 HUMAN-01対象語 / 対象外語の確定
+
+**対象**（Private Dictionary contract上の専門語、P2-A3 UI内で発見した
+英語のみ表示箇所）:
+- Alias（タブ・表見出し・stat card・filter option・panel note・
+  bulk button・decisionSegment tooltip等、複数箇所）
+- Conflict（同上）
+- Canonical（alias-tabの表見出し、conflict_view.jsのRESOLUTION_LABELS内
+  "canonicalを選択"の"canonical"）
+- ACCEPT/REJECT/UNCERTAIN（dashboard stat・filter option・bulk button・
+  decisionSegment・confirm dialog・toast）
+- UNREVIEWED（既にJP表示あり、English companionのみ追加）
+
+**対象外**（意図的に変更しない、理由付き）:
+- `Rule`（field label/table header）・`RULE_LABELS`の各値（構造KEY等）:
+  抽出ruleの内部分類名であり、HUMAN-01の対象語リストに明示されて
+  おらず、§8「一般ユーザーに価値が薄い通常語まで機械的に二言語化
+  しない」に該当。
+- `Scope`/`Status`ラベルおよびその値`SESSION`/`PROBATION`
+  （evidence_panel.js meta、alias_view.js列）: 対象語リストの
+  `Active`/`Superseded`/`Rolled Back`はSnapshotのライフサイクル状態
+  （別のenum系列、Checkpoint 6/9の`private_dictionary_snapshot_
+  activation_core.js`が扱うactivation lifecycle）であり、
+  `SESSION`/`PROBATION`（P2-A3候補のpromotion scope/status、
+  `workbook_contract.js`のSCOPE_VALUE/STATUS_VALUE）とは別概念。
+  今回のP2-A3 UI調査では`Active`/`Superseded`/`Rolled Back`という
+  文字列そのものは一切出現しない（別のUI/画面に属する）ため、
+  該当箇所が存在せず対応不要。
+- Candidate: 表示文言としては既に「候補」（日本語）で統一済み。
+  `candidate_id`等はaudit専用の折り畳みセクション内の生ID表示であり、
+  ラベルprose文言ではないため対象外（rawなIDをbilingual化する意味が
+  ない）。
+- `Resolution`: P2-A3側では「conflict resolution」という語のUI表示は
+  RESOLUTION_LABELS配列を通してのみ発生し、既に全選択肢が日本語
+  ラベル（未解決/canonicalを選択/すべて却下/文脈依存/判断保留）。
+  "canonicalを選択"の"canonical"のみS31.2の用語集に合わせて
+  「正規語（canonical）を選択」へ修正する。
+
+### S31.4 用語集の一元化（実装方針）
+
+`dom.js`へ新規 `DECISION_LABELS`（`{ACCEPT, REJECT, UNCERTAIN,
+UNREVIEWED}` → 表示文字列のfrozen map）を追加する。`dom.js`は
+`table_view.js`/`alias_view.js`/`conflict_view.js`/`app.js`いずれよりも
+先に読み込まれる最も基礎的な共有moduleであり（`index.html`の
+script順）、依存方向を逆転させない。`decisionSegment()`の
+aria-label/titleと、`app.js`のconfirm dialog文言・toast文言が同じ
+mapを参照する。`index.html`内の静的markup（dashboard stat・filter
+option・bulk button）は既存の実装パターン（`RULE_LABELS`はJS駆動だが
+個々の静的文言はHTML直書きのままという既存の混在パターン）を踏襲し、
+静的文字列として直接書き換える（巨大なi18n基盤は導入しない、§8）。
+
+### S31.5 HUMAN-02: private save/resume semantics
+
+実装（`app.js`/`private_review_export.js`/`private_review_import.js`
+調査結果）を根拠とする:
+
+- 保存artifact（`export-private-button`が生成する
+  `WorkbookContract.PRIVATE_FILE_NAME`）は candidate/alias/conflictの
+  reviewer decision・reason_code・**note（reviewer private note、
+  最大2000文字）**・schema version・evidence参照・source document
+  fingerprintを含む、`review_state.js`のreviewer判断層
+  （working state）をそのまま書き出したprivate working artifactである
+  （`private_review_export.js`のbuildCandidatesRows等が`d.note`を
+  そのまま出力）。
+- 「レビューを再開」ボタン（`resume-button`）は実際には**file load
+  operation**である: `startResumeFlow()`が`resume-input`（hidden file
+  input）のクリックを発火し、`handleResumeFile()`が選択された
+  `.xlsx`を`PrivateReviewImport.validateAndBuildPendingReviewState()`
+  で検証・変換したうえで`app.session.reviewState`**のみ**を置換する
+  （evaluation/evidenceIndex/source fingerprintsは一切変更しない -
+  「人間判断層だけを入れ替える」という既存不変条件、コメントに
+  明記済み）。
+- 既存実装は既に「未保存のレビュー結果があります」confirm dialog
+  （`app.dirty`が真の場合のみ表示、`startResumeFlow()`内）で
+  destructive load操作であることを警告している。この既存confirm
+  dialogの機構自体は変更しない（新しいstate machineを作らない、
+  §15）が、文言をより明示的にする。
+
+**新ボタン名称・説明**（表示文言のみ変更、`id`/handler名は変更しない）:
+
+| 要素 | 旧文言 | 新文言 |
+|---|---|---|
+| `export-private-button` | レビュー結果をExcel保存 | レビュー作業を保存（Save Review Progress） |
+| `resume-button` | レビューを再開 | 保存したレビュー作業を読み込んで再開（Resume from Saved File） |
+
+常時表示のexplanatory text（title属性だけに頼らない、§25/S31.9）を
+`topbar`直下・`privacy-bar`の近傍に新設する短い説明ブロックとして
+追加する: 「レビュー作業を保存」「保存したレビュー作業を読み込んで
+再開」の2ボタンについて、これらが reviewer decisions・private
+note・進捗を含む非公開ファイル（LOCAL PRIVATE）であり、共有用の
+集計ファイルとは別物であることを常時読めるテキストで明示する。
+
+resume時のconfirm dialog文言（`app.js` `startResumeFlow()`内）も
+「現在の未保存レビュー結果は、読み込んだレビュー結果で置き換え
+られます。」から、load操作であることがより明確な文言へ調整する
+（既存confirm機構は維持、文言のみ）。
+
+### S31.6 HUMAN-02: shareable summary semantics
+
+実装（`shareable_summary_export.js`調査結果）を根拠とする:
+
+- `export-shareable-button`が生成する
+  `WorkbookContract.SHAREABLE_FILE_NAME`は、`buildAllowlistProjection()`
+  という**allowlist方式**（生のevaluation/reviewStateを直接読まず、
+  明示的に許可したfieldのみを新規projectionへ集める設計、raw
+  objectをfilterする方式ではない）で構築される。ファイル冒頭コメントが
+  明示的に禁止しているフィールド: `candidate_id`, `alias_candidate_id`,
+  `conflict_id`, `selected_candidate_id`, `source_unit_id`,
+  `provenance_ref_id`, canonical term, alias term, file name, sheet
+  name, PDF/Excel本文, evidence excerpt, **reviewer note**, private
+  path, source_kind。含まれるのは件数集計（Summary/Decisions/Reason
+  Codes/Rules/Conflict Resolutions）と`{source_document_id,
+  document_fingerprint}`のみ。
+- 既存実装は既にconfirm dialog（`exportShareableSummaryWorkbook()`
+  内）で「このファイルは共有用集計です。キーワード、alias、file名、
+  evidence、レビューコメントは含みません。」と明示している。この
+  文言は正確（実装のallowlistと一致）であり、大きな変更は不要。
+
+**新ボタン名称・説明**:
+
+| 要素 | 旧文言 | 新文言 |
+|---|---|---|
+| `export-shareable-button` | 共有用サマリーをExcel保存 | 共有用レビュー集計をExcel保存（Export Shareable Review Summary） |
+
+常時表示のexplanatory textで、これが「共有用の件数集計のみ」であり
+「作業再開用の非公開ファイルではない」ことを明示する（S31.5の
+private側explanatory textと対になる形で配置する）。
+
+### S31.7 private vs shareable の視覚・意味上の区別
+
+既存レイアウト（`topbar-right`のボタン列 + `privacy-bar`）の範囲内で
+対応する（大幅な画面再設計はしない、§14/§26）。具体的には:
+
+`privacy-bar`の直後に新しい `<div class="workbook-help" role="note">`
+ブロックを追加し、2つの短い段落で区別する:
+- A. 作業継続用（非公開）: 「レビュー作業を保存」「保存したレビュー
+  作業を読み込んで再開」の2ボタンの説明。reviewer decisions・
+  private note・進捗を含み、外部共有を想定しない旨。
+- B. 共有用（集計のみ）: 「共有用レビュー集計をExcel保存」ボタンの
+  説明。件数集計のみで再開不可、共有前提である旨。
+
+色のみに依存せず（§25/AK）、テキストで常時明示する。既存
+`.privacy-bar`パターン（アイコン + 短い説明paragraph、role="note"）を
+再利用し、新しいCSSフレームワークは導入しない。
+
+### S31.8 Filter option inventory（P2-A3 candidates panel）
+
+実装（`table_view.js` `selectRows()`、`index.html`該当箇所）を
+Source of Truthとする。predicateは一切変更しない（§18）。
+
+| dropdown | option value | 現行label | 新label | predicate（要約） |
+|---|---|---|---|---|
+| `f-decision` | ALL | すべて | すべて（変更なし） | フィルタなし |
+| `f-decision` | UNREVIEWED | 未判定 | 未判定（UNREVIEWED） | `decision === 'UNREVIEWED'`（未設定時の既定値も含む） |
+| `f-decision` | ACCEPT | ACCEPT | 承認（ACCEPT） | `decision === 'ACCEPT'` |
+| `f-decision` | REJECT | REJECT | 却下（REJECT） | `decision === 'REJECT'` |
+| `f-decision` | UNCERTAIN | UNCERTAIN | 保留（UNCERTAIN） | `decision === 'UNCERTAIN'` |
+| `f-source` | ALL/PDF/EXCEL | すべて/PDF由来/Excel由来 | 変更なし | `sourceKindsOf(c,index).has(view.source)` |
+| `f-rule` | ALL + 各rule | すべて + RULE_LABELS | 変更なし（対象外、S31.3） | `c.rule_ids.indexOf(view.rule) !== -1` |
+| `f-flag` | ALL | すべて | すべて（変更なし） | フィルタなし |
+| `f-flag` | ALIAS | Aliasあり | 別名候補あり（Alias） | `aliasTermsFor(c,evaluation).length > 0` |
+| `f-flag` | CONFLICT | Conflictあり | 競合あり（Conflict） | `c.metrics.alias_conflict_count > 0` |
+| `f-sort` | conflict | Conflict優先 | 競合優先（Conflict Priority） | 表示順のみ、絞り込みではない |
+
+各filterのhuman-readable説明（helper text、常時表示、tooltipのみに
+閉じない）を`toolbar`直下に短い説明リストとして追加する。例:
+
+- 判定（Decision）: 「未判定（UNREVIEWED）」＝まだ人間の判断が確定
+  していない候補のみ表示。「承認（ACCEPT）」「却下（REJECT）」
+  「保留（UNCERTAIN）」＝それぞれの判定が確定した候補のみ表示。
+- 属性（Attribute）: 「別名候補あり（Alias）」＝別名候補を1件以上
+  伴う正規語候補のみ表示。「競合あり（Conflict）」＝複数の正規語候補
+  が競合し人間による解決が必要な別名を伴う候補のみ表示。
+
+f-decision/f-flagの各説明は`selectRows()`の実predicateから直接
+書き起こしたものであり、predicate自体は変更しない。verification
+（S31.11）で表示説明と実predicate結果の一致を確認する。
+
+Alias/Conflictタブ自体には状態filterが存在しない（既存仕様どおり、
+変更しない）。
+
+### S31.9 Empty state / current filter visibility
+
+`index.html`の`#empty`（候補0件）・`#alias-empty`・`#conflict-empty`
+文言は既に「該当する候補がありません。」等が存在する。HUMAN-03の
+要求（§20: 壊れたと誤解させない）に対し、現行文言で十分明確なため
+そのまま維持する。current filter visibility（§21）は、既存の
+`<select>`のselected valueがそのまま現在のfilter状態を表しており、
+複数filterが同時に有効な場合でも各`<select>`を見れば分かるため、
+追加UIは不要と判断する（既存で充足）。
+
+### S31.10 Cross-tool terminology整合の確認結果
+
+matching tool（`tools/json_ab_trace_matching_tool_v12.1.15.html`）を
+grepで確認した結果:
+- `正規語`/`別名`/`競合`の語根は、S31.2用語集のP2-A3側表示と完全に
+  一致している（`正規語完全一致 (Exact Canonical)`/`承認済み別名
+  (Approved Alias)`/`辞書競合 (Dictionary Conflict)`等）。
+- `Project設定 (Project Pin)`/`照合セッションに適用 (Apply to
+  Matching Session)`（Checkpoint 12）は既に日本語first + English
+  併記。
+- 「Alias: P2-A3 = 別称、Matching = 別名」のような訳語の揺れは
+  存在しない（P2-A3は本Checkpoint以前は英語のみ表示だったため、
+  そもそも「別称」という訳語自体が存在しなかった - 揺れの実例は
+  発見されなかったが、S31.2の用語集を固定することで将来の訳語追加
+  時の揺れを防止する）。
+
+結論: matching tool側の変更は不要（§5/S31.1で確定済み）。
+
+### S31.11 Verification matrix概要
+
+新規 `private_dictionary_ui_terminology_convergence_verification.js`
+（Node、`private_dictionary_candidate_review_ui_verification.js`と
+同じsandbox/静的解析パターンを踏襲）で、Checkpoint 14 request §36の
+A-AO区分を実装する。主要な検証方針:
+
+- HUMAN-01（A-G）: `index.html`/`dom.js`/`table_view.js`/
+  `alias_view.js`/`conflict_view.js`/`evidence_panel.js`/`app.js`の
+  静的ソーススキャンで、対象語（S31.3）が「日本語（English）」の
+  companionパターンで出現することを確認。内部enum配列
+  （`review_state.js`のDECISIONS等）が不変であることをbyte比較で
+  確認。
+- HUMAN-02 private save/resume（H-O）: 実際に
+  `PrivateReviewExport.buildPrivateReviewWorkbookBytes()`→
+  `PrivateReviewImport.validateAndBuildPendingReviewState()`の
+  round-tripをNode側で実行し、旧UI変更前の既存fixtureに対しても
+  成功することを確認（artifact schemaは無変更のため、Checkpoint 14
+  前後で同一workbookが読める）。
+- HUMAN-02 shareable export（P-T）: `buildAllowlistProjection()`の
+  出力キー集合が変更されていないことを確認、`reviewer note`が
+  出力に含まれないことを確認。
+- HUMAN-03 filters（U-AD）: `table_view.js`の`selectRows()`を実際に
+  呼び出し、各filter optionの実predicate結果とS31.8の説明文言が
+  記述する集合が一致することをデータ駆動で確認（未判定filterに
+  reviewed itemが混入しない等）。
+- Compatibility（AE-AJ）: 既存
+  `private_dictionary_candidate_review_ui_verification.js`/
+  `private_dictionary_candidate_review_workbook_verification.js`/
+  Checkpoint 13 provenance verification/Checkpoint 12 verificationを
+  無改変のまま再実行し、regression 0を確認。
+- Privacy/accessibility（AK-AO）: 新設のexplanatory
+  text/helper textのソースを静的スキャンし、reviewer note・
+  dictionary term payload・file名・filesystem path・native Errorの
+  文字列が新規に出現しないことを確認。
+
+Browser verificationは実Chromium/Playwrightで
+`private_dictionary_candidate_review_ui_verification.js`が既に持つ
+browser half（既存パターン）を土台に、Checkpoint 14固有のUI要素
+（新ボタン文言、explanatory text、filter説明）を追加確認する。
+
+### S31.12 P2-A4 Exit Criteria更新（Checkpoint 14 CLOSED後）
+
+**CLOSED（追加）:**
+- HUMAN-01/02/03 UI convergence（本Checkpoint）
+
+**Remaining MUST-CLOSE:**
+- integrated E2E acceptance / clean regression（全Checkpoint通しの
+  E2E受入）
+- privacy/regression closure（最終的な横断privacy監査）
+- human real-machine acceptance（実機での人間受入確認、S31.13の
+  チェックリストを用いた5-10分の確認作業）
+
+**FUTURE SLICE（無変更）:**
+- persistent unknown/conflict maintenance queue
+- STANDARD/DOMAIN/SESSION full layers
+
+既存S30.16の分類（Checkpoint 13時点）と矛盾しない -
+「HUMAN-01/02/03 UI convergence」はCheckpoint 13時点でRemaining
+MUST-CLOSEに数えられており、Checkpoint 14で新たにCLOSEDへ移動する
+のみで、他項目の分類は変更しない。
+
+### S31.13 Human向け受入チェックリスト（5-10分）
+
+Checkpoint 14完了時、人間レビュー担当者が以下を実機（実Chromium）で
+確認できる:
+
+1. P2-A3 Candidate Review画面を開き、topbar右側の3ボタンの文言を読む
+   だけで「レビュー作業を保存」「保存したレビュー作業を読み込んで
+   再開」「共有用レビュー集計をExcel保存」の役割の違いが分かるか。
+2. privacy-barの下に表示される作業継続用（非公開）/共有用（集計のみ）
+   の説明を読み、private save/resumeとshareable exportを混同しない
+   ことを確認できるか。
+3. 候補タブのfilter説明（判定/属性）を読まずにdropdown選択肢だけを
+   見た場合と、説明を読んだ場合とで理解度に差が出るか（説明の効果
+   確認）。
+4. dashboard・タブ・table見出しの「別名（Alias）」「競合（Conflict）」
+   「正規語（Canonical）」の日本語と英語が対応していることを確認
+   できるか。
+5. 一括ACCEPT等のconfirm dialogの文言が、実際の操作内容（判定の
+   上書き、辞書への自動登録はしない）と一致しているか。
+
+いずれも「はい」であれば受入合格とする。

@@ -74,7 +74,7 @@
     document.getElementById('alias-rows').replaceChildren(...rows);
     document.getElementById('alias-empty').hidden = rows.length > 0;
     Pagination.renderControls(document.getElementById('alias-pager'), info,
-      p => handlers.onAliasPage(p), 'Alias専用のページ設定');
+      p => handlers.onAliasPage(p), '別名（Alias）専用のページ設定');
   }
 
   return { render };

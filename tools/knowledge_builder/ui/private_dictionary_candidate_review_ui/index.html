@@ -19,9 +19,9 @@
     </div>
     <div class="topbar-right">
       <span id="dirty-badge" class="dirty-badge" hidden>未保存の変更があります</span>
-      <button id="export-private-button" class="btn ghost" type="button" disabled title="レビュー結果を private Excel（LOCAL PRIVATE）として保存します">レビュー結果をExcel保存</button>
-      <button id="resume-button" class="btn ghost" type="button" disabled title="private Excel からレビュー状態のみを再開します">レビューを再開</button>
-      <button id="export-shareable-button" class="btn ghost" type="button" disabled title="集計のみを含む共有用 Excel を保存します">共有用サマリーをExcel保存</button>
+      <button id="export-private-button" class="btn ghost" type="button" disabled title="レビュー結果を private Excel（LOCAL PRIVATE）として保存します">レビュー作業を保存（Save Review Progress）</button>
+      <button id="resume-button" class="btn ghost" type="button" disabled title="private Excel からレビュー状態のみを再開します">保存したレビュー作業を読み込んで再開（Resume from Saved File）</button>
+      <button id="export-shareable-button" class="btn ghost" type="button" disabled title="集計のみを含む共有用 Excel を保存します">共有用レビュー集計をExcel保存（Export Shareable Review Summary）</button>
       <input id="resume-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
     </div>
   </header>
@@ -30,6 +30,16 @@
     <span class="lock" aria-hidden="true"></span>
     <p><strong>この画面の内容は機密（LOCAL PRIVATE）です。</strong>
        キーワード・出典・メモは外部送信禁止です。解析はすべてこのブラウザのメモリ内で行われ、ファイルはローカルサーバーへ送信されません。</p>
+  </div>
+
+  <!-- P2-A4 Checkpoint 14 (HUMAN-02, S31.7): always-visible (never
+       tooltip-only) explanation distinguishing the two save/export
+       workflows, placed next to the privacy notice they both relate to. -->
+  <div class="workbook-help" role="note">
+    <p><strong>作業継続用（非公開）:</strong>
+       「レビュー作業を保存」「保存したレビュー作業を読み込んで再開」は、レビュー担当者の判定・メモ・進捗を含む非公開ファイルの保存／読み込みです。外部への共有を想定していません。</p>
+    <p><strong>共有用（集計のみ）:</strong>
+       「共有用レビュー集計をExcel保存」は、キーワード・別名（alias）・file名・evidence・レビューメモを含まない件数集計のみのファイルです。作業を再開するための機能はありません。</p>
   </div>
 
   <p id="boot-error" class="boot-error" hidden></p>
@@ -83,12 +93,12 @@
 
       <section class="dashboard" aria-label="レビュー進捗">
         <article class="stat"><span>候補総数</span><strong id="s-total">0</strong></article>
-        <article class="stat warn"><span>未判定</span><strong id="s-unreviewed">0</strong></article>
-        <article class="stat ok"><span>ACCEPT</span><strong id="s-accept">0</strong></article>
-        <article class="stat ng"><span>REJECT</span><strong id="s-reject">0</strong></article>
-        <article class="stat hold"><span>UNCERTAIN</span><strong id="s-uncertain">0</strong></article>
-        <article class="stat"><span>Alias / 未判定</span><strong id="s-alias">0</strong></article>
-        <article class="stat"><span>Conflict / 未解決</span><strong id="s-conflict">0</strong></article>
+        <article class="stat warn"><span>未判定（UNREVIEWED）</span><strong id="s-unreviewed">0</strong></article>
+        <article class="stat ok"><span>承認（ACCEPT）</span><strong id="s-accept">0</strong></article>
+        <article class="stat ng"><span>却下（REJECT）</span><strong id="s-reject">0</strong></article>
+        <article class="stat hold"><span>保留（UNCERTAIN）</span><strong id="s-uncertain">0</strong></article>
+        <article class="stat"><span>別名候補（Alias） / 未判定</span><strong id="s-alias">0</strong></article>
+        <article class="stat"><span>競合（Conflict） / 未解決</span><strong id="s-conflict">0</strong></article>
         <article class="stat"><span>PDF / Excel 由来</span><strong id="s-source">0</strong></article>
         <article class="stat progress-card">
           <span>レビュー進捗</span>
@@ -101,8 +111,8 @@
 
       <nav class="tabs" role="tablist">
         <button class="tab is-active" role="tab" data-tab="candidates" aria-selected="true">候補<span class="tab-count" id="tc-candidates">0</span></button>
-        <button class="tab" role="tab" data-tab="aliases" aria-selected="false">Alias<span class="tab-count" id="tc-aliases">0</span></button>
-        <button class="tab" role="tab" data-tab="conflicts" aria-selected="false">Conflict<span class="tab-count alert" id="tc-conflicts">0</span></button>
+        <button class="tab" role="tab" data-tab="aliases" aria-selected="false">別名（Alias）<span class="tab-count" id="tc-aliases">0</span></button>
+        <button class="tab" role="tab" data-tab="conflicts" aria-selected="false">競合（Conflict）<span class="tab-count alert" id="tc-conflicts">0</span></button>
       </nav>
 
       <!-- 候補タブ -->
@@ -110,14 +120,14 @@
         <div class="toolbar">
           <div class="field grow">
             <label for="q">キーワード検索</label>
-            <input id="q" type="search" placeholder="キーワード / alias を検索" autocomplete="off">
+            <input id="q" type="search" placeholder="キーワード / 別名（alias）を検索" autocomplete="off">
           </div>
           <div class="field">
             <label for="f-decision">判定</label>
             <select id="f-decision">
-              <option value="ALL">すべて</option><option value="UNREVIEWED">未判定</option>
-              <option value="ACCEPT">ACCEPT</option><option value="REJECT">REJECT</option>
-              <option value="UNCERTAIN">UNCERTAIN</option>
+              <option value="ALL">すべて</option><option value="UNREVIEWED">未判定（UNREVIEWED）</option>
+              <option value="ACCEPT">承認（ACCEPT）</option><option value="REJECT">却下（REJECT）</option>
+              <option value="UNCERTAIN">保留（UNCERTAIN）</option>
             </select>
           </div>
           <div class="field">
@@ -133,14 +143,14 @@
           <div class="field">
             <label for="f-flag">属性</label>
             <select id="f-flag">
-              <option value="ALL">すべて</option><option value="ALIAS">Aliasあり</option><option value="CONFLICT">Conflictあり</option>
+              <option value="ALL">すべて</option><option value="ALIAS">別名候補あり（Alias）</option><option value="CONFLICT">競合あり（Conflict）</option>
             </select>
           </div>
           <div class="field">
             <label for="f-sort">並び替え</label>
             <select id="f-sort">
               <option value="keyword">キーワード</option><option value="exposure">出現数（多い順）</option>
-              <option value="documents">文書数（多い順）</option><option value="conflict">Conflict優先</option>
+              <option value="documents">文書数（多い順）</option><option value="conflict">競合優先（Conflict Priority）</option>
               <option value="rule">Rule</option><option value="decision">判定</option>
             </select>
           </div>
@@ -150,14 +160,23 @@
           </div>
         </div>
 
+        <!-- P2-A4 Checkpoint 14 (HUMAN-03, S31.8): human-readable filter
+             explanations, always visible (never tooltip-only). Written
+             directly from the existing selectRows() predicate in
+             table_view.js - the predicate itself is unchanged. -->
+        <p class="panel-note">
+          判定（Decision）: 「未判定（UNREVIEWED）」＝まだ人間の判断が確定していない候補のみ表示。「承認（ACCEPT）」「却下（REJECT）」「保留（UNCERTAIN）」＝それぞれの判定が確定した候補のみ表示。
+          属性（Attribute）: 「別名候補あり（Alias）」＝別名候補を1件以上伴う正規語候補のみ表示。「競合あり（Conflict）」＝複数の正規語候補が競合する別名を伴う候補のみ表示。
+        </p>
+
         <div class="bulkbar">
           <label class="check"><input type="checkbox" id="select-all"><span>表示中をすべて選択</span></label>
           <span id="sel-count" class="sel-count">0件選択中</span>
           <div class="bulk-actions">
-            <button class="btn sm ok" type="button" data-bulk="ACCEPT">一括 ACCEPT</button>
-            <button class="btn sm ng" type="button" data-bulk="REJECT">一括 REJECT</button>
-            <button class="btn sm hold" type="button" data-bulk="UNCERTAIN">一括 UNCERTAIN</button>
-            <button class="btn sm ghost" type="button" data-bulk="UNREVIEWED">判定を戻す</button>
+            <button class="btn sm ok" type="button" data-bulk="ACCEPT">一括承認（ACCEPT）</button>
+            <button class="btn sm ng" type="button" data-bulk="REJECT">一括却下（REJECT）</button>
+            <button class="btn sm hold" type="button" data-bulk="UNCERTAIN">一括保留（UNCERTAIN）</button>
+            <button class="btn sm ghost" type="button" data-bulk="UNREVIEWED">判定を戻す（未判定）</button>
           </div>
         </div>
 
@@ -167,12 +186,12 @@
               <th class="c-check"><span class="sr">選択</span></th>
               <th class="c-decision">判定</th>
               <th class="c-keyword">キーワード</th>
-              <th class="c-alias">Alias</th>
+              <th class="c-alias">別名（Alias）</th>
               <th class="c-rule">Rule</th>
               <th class="c-src">出典</th>
               <th class="c-num">出現数</th>
               <th class="c-num">文書数</th>
-              <th class="c-num">Conflict</th>
+              <th class="c-num">競合（Conflict）</th>
               <th class="c-reason">理由</th>
               <th class="c-note">メモ</th>
               <th class="c-detail"><span class="sr">詳細</span></th>
@@ -189,30 +208,30 @@
 
       <!-- Alias タブ -->
       <section id="panel-aliases" class="panel" role="tabpanel" hidden>
-        <p class="panel-note">alias は canonical とは<strong>別の人間判断</strong>です。canonical を ACCEPT しても alias は自動 ACCEPT されません。</p>
+        <p class="panel-note">別名（alias）は正規語（canonical）とは<strong>別の人間判断</strong>です。正規語を承認（ACCEPT）しても別名は自動承認されません。</p>
         <div class="table-wrap">
           <table class="grid">
             <thead><tr>
-              <th class="c-decision">判定</th><th class="c-keyword">Alias</th><th class="c-keyword">Canonical</th>
+              <th class="c-decision">判定</th><th class="c-keyword">別名（Alias）</th><th class="c-keyword">正規語（Canonical）</th>
               <th class="c-rule">Rule</th><th class="c-src">Scope</th><th class="c-src">Status</th>
               <th class="c-reason">理由</th><th class="c-note">メモ</th><th class="c-evidence">Evidence</th>
             </tr></thead>
             <tbody id="alias-rows"></tbody>
           </table>
-          <p id="alias-empty" class="empty" hidden>alias 候補はありません。</p>
+          <p id="alias-empty" class="empty" hidden>別名（alias）候補はありません。</p>
         </div>
         <div class="pager">
           <div class="field inline">
             <label for="f-alias-page">Alias 表示件数</label>
             <select id="f-alias-page"><option>50</option><option>100</option><option>200</option></select>
           </div>
-          <nav id="alias-pager" class="page-nav" aria-label="Aliasページ送り"></nav>
+          <nav id="alias-pager" class="page-nav" aria-label="別名（Alias）ページ送り"></nav>
         </div>
       </section>
 
       <!-- Conflict タブ -->
       <section id="panel-conflicts" class="panel" role="tabpanel" hidden>
-        <p class="panel-note">同じ alias が複数の canonical を指しています。<strong>自動解決は行いません。</strong>件数に関わらず全件確認してください。</p>
+        <p class="panel-note">同じ別名（alias）が複数の正規語候補（canonical）を指しています。<strong>自動解決は行いません。</strong>件数に関わらず全件確認してください。</p>
         <div id="conflict-list" class="conflict-list"></div>
         <p id="conflict-empty" class="empty" hidden>alias conflict はありません。</p>
         <div class="pager">
@@ -220,7 +239,7 @@
             <label for="f-conflict-page">Conflict 表示件数</label>
             <select id="f-conflict-page"><option>50</option><option>100</option><option>200</option></select>
           </div>
-          <nav id="conflict-pager" class="page-nav" aria-label="Conflictページ送り"></nav>
+          <nav id="conflict-pager" class="page-nav" aria-label="競合（Conflict）ページ送り"></nav>
         </div>
       </section>
     </section>
@@ -234,7 +253,7 @@
     </div>
     <div class="detail-body">
       <div id="d-meta" class="meta-grid"></div>
-      <section class="detail-sec"><h3>Alias 候補</h3><div id="d-alias" class="chips"></div></section>
+      <section class="detail-sec"><h3>別名（Alias）候補</h3><div id="d-alias" class="chips"></div></section>
       <section class="detail-sec"><h3>Evidence（出典）</h3><ul id="d-evidence" class="evidence"></ul></section>
       <details class="detail-sec audit">
         <summary>監査情報（ID）</summary>
@@ -246,11 +265,11 @@
 
   <div id="confirm" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-title">
     <div class="modal-card">
-      <h2 id="confirm-title">一括 ACCEPT の確認</h2>
+      <h2 id="confirm-title">一括承認（ACCEPT）の確認</h2>
       <p id="confirm-text"></p>
       <div class="modal-actions">
         <button id="confirm-cancel" class="btn ghost" type="button">キャンセル</button>
-        <button id="confirm-ok" class="btn primary" type="button">ACCEPT にする</button>
+        <button id="confirm-ok" class="btn primary" type="button">承認（ACCEPT）にする</button>
       </div>
     </div>
   </div>
