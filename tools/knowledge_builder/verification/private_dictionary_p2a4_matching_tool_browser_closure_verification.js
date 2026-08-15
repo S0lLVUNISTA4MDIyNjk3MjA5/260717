@@ -12,10 +12,31 @@
  *   E. Load-alone-doesn't-Apply
  *   F. explicit Apply
  *   G. Detail provenance
- *   H. Graph node selection/provenance
+ *   H. Graph node selection/provenance (R1: strengthened - see R1 note below)
  *   I. Excel export action
  *   J. Snapshot-switch-old-provenance-unchanged
- *   K. malformed-provenance-fail-safe-display
+ *   K. malformed-provenance-fail-safe-display (R1: strengthened - see R1 note below)
+ *
+ * R1 (post-review MAJOR-01 fix, design doc S32.16): the original H only
+ * asserted the node detail panel became non-placeholder text after a tap on
+ * an unconditional first node; the original K exercised a malformed Project
+ * Pin FILE (Checkpoint 11/12 concern), never a malformed
+ * row._approvedDictResolution sidecar (Checkpoint 13 concern) - so neither
+ * fully closed the §25 items they were meant to. R1 replaces H with an
+ * identity-selected node (never .first()/index-only/fuzzy-label) whose real
+ * _approvedDictResolution is asserted by real DOM content (Dictionary
+ * Resolution label, resolution summary, Snapshot identity, EXACT_CANONICAL/
+ * APPROVED_ALIAS display) - and adds a dedicated malformed-sidecar block
+ * (real Checkpoint 13-R1 "AN" contract case: a hostile annotation entry
+ * alongside a valid sibling) that asserts the real fail-safe text, zero
+ * partial-annotation leakage, zero partial-Snapshot-identity leakage, and
+ * zero native Error/stack leakage, in both Detail and Graph. The former K
+ * (malformed Pin file) is retained but reclassified below as "L - Project
+ * Pin sanitized error smoke" - a real, useful check, but never counted as
+ * provenance closure evidence. A 0-node Graph result is now a hard FAIL
+ * (HOLD), never a silent INCOMPLETE - the golden fixture is fixed and known
+ * to produce nodes. INCOMPLETE=0 is now itself a Checkpoint 15 completion
+ * gate (see the final summary below).
  *
  * Dependency closure (design doc S32.7 / Checkpoint 15 §24): Graph/Excel
  * need cytoscape/xlsx, normally loaded from CDN. This script intercepts
@@ -234,19 +255,62 @@ async function main() {
   assert(detailHasDictColumn, 'G real Detail table header includes the real dictionary resolution provenance column once toggled on (real Checkpoint 13 UI wiring)');
 
   // ==========================================================================
-  // H. Graph node selection/provenance
+  // H (R1-A..E). Graph node selection/provenance - identity-selected node,
+  // real DOM content assertions (not just "non-placeholder length").
   // ==========================================================================
   await page.click('.tab-btn[data-tab="tabGraph"]');
   await page.waitForTimeout(1500);
   const nodeCount = await page.evaluate(() => (typeof cy !== 'undefined' && cy) ? cy.nodes().length : -1);
-  if (nodeCount > 0) {
-    await page.evaluate(() => { cy.nodes().first().emit('tap'); });
-    await page.waitForTimeout(500);
-    const detailAreaHtml = await page.$eval('#detailArea', el => el.innerHTML).catch(() => '');
-    assert(detailAreaHtml && detailAreaHtml.length > 20 && !/ノードをクリックすると詳細を表示します/.test(detailAreaHtml), 'H real Graph node tap (via the real cy.on(\'tap\',\'node\',...) production handler) populates the real node detail panel');
-  } else {
-    reportIncomplete('H Graph node selection', `real Cytoscape graph rendered ${nodeCount} nodes in this environment/fixture - could not exercise a real node tap; production Detail/Excel provenance wiring (G/I) already independently confirmed via the same real sidecar`);
-  }
+  // R1-item-18: the golden fixture is fixed and known to produce Graph
+  // nodes; a 0-node result here is a real defect/environment problem, never
+  // a silently-accepted "environmental" INCOMPLETE.
+  assert(nodeCount > 0, `R1-setup real Cytoscape graph renders at least 1 real node from the golden fixture (found: ${nodeCount}) - a golden fixture producing 0 nodes is a HOLD-worthy defect, not an environmental gap`);
+
+  // R1-A: select the EXACT_CANONICAL node by its real, formal identity
+  // (trace_id, carried verbatim on node.data('detail').trace_id from
+  // buildGraphElements()) - never node index, label fuzzy match, or
+  // canonical-string matching.
+  const tappedReq1 = await page.evaluate(() => {
+    const target = cy.nodes().filter(n => n.data('type') === 'requirement' && n.data('id') === 'REQ-1');
+    if (target.length !== 1) return { found: false, count: target.length };
+    target.emit('tap');
+    return { found: true };
+  });
+  assert(tappedReq1.found === true, `R1-A the real Graph node for trace_id="REQ-1" (identity match on node.data('id'), a real formal identity - not index/label/canonical-text) is uniquely found and tapped via the real cy.on('tap','node',...) handler (lookup result: ${JSON.stringify(tappedReq1)})`);
+  await page.waitForTimeout(500);
+  const detailAreaTextReq1 = await page.$eval('#detailArea', el => el.textContent).catch(() => '');
+
+  assert(!/ノードをクリックすると詳細を表示します/.test(detailAreaTextReq1) && detailAreaTextReq1.length > 20, 'R1-setup real Graph node tap populates the real node detail panel (non-placeholder)');
+  // R1-B: the real, formal "Dictionary Resolution" label (from the real
+  // formatNodeDetail()/APPROVED_DICT provenance wiring, tools/json_ab_...
+  // line ~10531) is present verbatim in the real DOM text.
+  assert(detailAreaTextReq1.includes('辞書解決 (Dictionary Resolution)'), `R1-B real Graph node detail panel shows the real, formal "辞書解決 (Dictionary Resolution)" label for the identity-selected EXACT_CANONICAL node (actual text: ${JSON.stringify(detailAreaTextReq1)})`);
+  // R1-C: a real resolution summary is present (compact summary line - real
+  // counts, e.g. "正規語1 / 別名0 / 未登録0 / 競合0" - via the real
+  // approvedDictProvenanceCompactSummary()).
+  assert(/正規語\d+\s*\/\s*別名\d+\s*\/\s*未登録\d+\s*\/\s*競合\d+/.test(detailAreaTextReq1), `R1-C real Graph node detail panel shows the real resolution-count summary line (正規語/別名/未登録/競合) for the identity-selected node (actual text: ${JSON.stringify(detailAreaTextReq1)})`);
+  // R1-D: a real Snapshot identity fragment (snapshot_id and/or
+  // snapshot_version of the real, currently-active golden wrapperA) is
+  // present.
+  assert(detailAreaTextReq1.includes(wrapperA.snapshot_id) && detailAreaTextReq1.includes(`v${wrapperA.snapshot_version}`), `R1-D real Graph node detail panel shows the real active Snapshot's identity (snapshot_id=${wrapperA.snapshot_id}, snapshot_version=${wrapperA.snapshot_version}) verbatim (actual text: ${JSON.stringify(detailAreaTextReq1)})`);
+  // R1-E: the real, formal EXACT_CANONICAL resolution-type label (Japanese
+  // + English companion, from the real APPROVED_DICT_RESOLUTION_TYPE_LABELS
+  // map) is present for this node's real annotation.
+  assert(detailAreaTextReq1.includes('正規語完全一致 (Exact Canonical)'), `R1-E real Graph node detail panel shows the real, formal EXACT_CANONICAL label ("正規語完全一致 (Exact Canonical)") for the REQ-1 node, which real matching resolved as an exact canonical hit against wrapperA (actual text: ${JSON.stringify(detailAreaTextReq1)})`);
+  assert(detailAreaTextReq1.includes('Browser Golden Compressor'), 'R1-E the real resolved_canonical term ("Browser Golden Compressor") appears in the real Graph node detail panel, sourced from the real annotation, not a hand-typed string');
+
+  // R1-E (companion): also confirm the real APPROVED_ALIAS node (REQ-2)
+  // shows its own distinct, real, formal label.
+  const tappedReq2 = await page.evaluate(() => {
+    const target = cy.nodes().filter(n => n.data('type') === 'requirement' && n.data('id') === 'REQ-2');
+    if (target.length !== 1) return { found: false, count: target.length };
+    target.emit('tap');
+    return { found: true };
+  });
+  assert(tappedReq2.found === true, `R1-E the real Graph node for trace_id="REQ-2" is uniquely found and tapped by real identity (lookup result: ${JSON.stringify(tappedReq2)})`);
+  await page.waitForTimeout(500);
+  const detailAreaTextReq2 = await page.$eval('#detailArea', el => el.textContent).catch(() => '');
+  assert(detailAreaTextReq2.includes('承認済み別名 (Approved Alias)'), `R1-E real Graph node detail panel shows the real, formal APPROVED_ALIAS label ("承認済み別名 (Approved Alias)") for the REQ-2 node, which real matching resolved as an approved alias against wrapperA (actual text: ${JSON.stringify(detailAreaTextReq2)})`);
 
   // ==========================================================================
   // I. Excel export action
@@ -291,18 +355,104 @@ print('HAS_PROVENANCE' if '辞書照合根拠' in wb else 'NO_PROVENANCE')
   const detailCellAfter = await page.$eval('#detailTableBody tr[data-idx="0"]', el => el.textContent).catch(() => null);
   assert(detailCellBefore !== null && detailCellBefore === detailCellAfter, 'J after a later real Snapshot switch (setSnapshot to a second real Snapshot), the already-rendered Detail row for the golden result is byte-identical - re-rendering never recomputes a past row\'s provenance from the new "current" Snapshot');
 
-  // restore original binding + reconfirm Project Pin UI still reflects it is now stale against the reloaded file (not required to re-Apply for K below)
+  // restore the original golden binding (wrapperA) so the malformed-sidecar
+  // block below operates against the same session the rest of this file
+  // has been asserting against.
+  await page.evaluate(async (wrapper) => { await globalThis.PrivateDictionaryMatchingSession.setSnapshot(wrapper); }, wrapperA);
+  await page.waitForTimeout(200);
 
   // ==========================================================================
-  // K. Malformed-provenance-fail-safe-display
+  // K (R1-F..J). Malformed-provenance-fail-safe-display - a REAL malformed
+  // row._approvedDictResolution sidecar (never a malformed Pin FILE - that
+  // is a distinct concern, reclassified as L below), injected via the test
+  // harness directly onto a REAL row already produced by real matching,
+  // exercised through the REAL Detail/Graph rendering and the REAL
+  // projectApprovedDictionaryResolutionProvenance() fail-safe path - the
+  // same "AN" hostile-annotation-among-valid-siblings contract case already
+  // established and reviewed in Checkpoint 13-R1
+  // (private_dictionary_resolution_provenance_projection_verification.js).
+  // Production source is never modified - only a already-matched row's own
+  // (non-enumerable) sidecar property is redefined from the test harness,
+  // exactly like every other malformed-sidecar test in this P2-A4 family.
+  // ==========================================================================
+  const malformedSetup = await page.evaluate(() => {
+    const row = mergedResult.sysList[2]; // REQ-3 ("Browser Nonexistent Widget", previously UNKNOWN_TERM - untouched by the R1-A..E/J assertions above)
+    const desc = Object.getOwnPropertyDescriptor(row, '_approvedDictResolution');
+    const schemaVersion = APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION;
+    const hostileAnnotation = {};
+    Object.defineProperty(hostileAnnotation, 'original_term', { get() { throw new Error('R1 hostile annotation leak canary - must never reach the DOM'); } });
+    Object.defineProperty(hostileAnnotation, 'resolution_type', { value: 'EXACT_CANONICAL' });
+    const malformedSidecar = {
+      schema_version: schemaVersion,
+      snapshot_binding: {
+        snapshot_id: 'dsnap-' + 'f'.repeat(32), snapshot_version: 9, // deliberately NOT wrapperA's real identity - a partial-Snapshot-display leak would show THIS fake identity
+        wrapper_integrity_sha256: 'a'.repeat(64), dictionary_payload_sha256: 'b'.repeat(64),
+        dictionary_id: 'pdict-' + 'c'.repeat(32), dictionary_version: '1', scope: 'PROJECT'
+      },
+      annotations: [
+        hostileAnnotation,
+        { original_term: 'MALFORMED-LEAK-CANARY-TERM', resolved_canonical: 'MALFORMED-LEAK-CANARY-TERM', resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'e1', dictionary_snapshot_id: 's', wrapper_integrity_sha256: 'a'.repeat(64), scope: 'PROJECT', status: 'ACTIVE' }
+      ]
+    };
+    Object.defineProperty(row, '_approvedDictResolution', { value: malformedSidecar, enumerable: false, configurable: true });
+    renderDirty.detail = true; renderDirty.graph = true;
+    return { hadNonEnumerableDescriptorBefore: !!desc && desc.enumerable === false, traceId: row.trace_id };
+  });
+  assert(malformedSetup.hadNonEnumerableDescriptorBefore === true && malformedSetup.traceId === 'REQ-3', `R1-F test harness confirmed the real row's real _approvedDictResolution was a genuine non-enumerable property (per the Checkpoint 7 contract) before safely redefining it to a malformed value for REQ-3 (setup: ${JSON.stringify(malformedSetup)})`);
+
+  // Force a real re-render (the same real renderDirty/ensureLazyTabRenderedAsync
+  // path a genuine data change would take) by switching tabs away and back -
+  // never calling the render function directly.
+  await page.click('.tab-btn[data-tab="tabLogic"]');
+  await page.waitForTimeout(200);
+  await page.click('.tab-btn[data-tab="tabDetail"]');
+  await page.waitForTimeout(500);
+  const malformedRowText = await page.$eval('#detailTableBody tr[data-reqid="REQ-3"]', el => el.textContent).catch(() => null);
+  assert(typeof malformedRowText === 'string' && malformedRowText.length > 0, 'R1-G setup: the real Detail table row for the malformed REQ-3 row is located in the real re-rendered DOM');
+  assert(malformedRowText.includes('辞書照合情報を表示できません') || malformedRowText.includes('Dictionary provenance unavailable'), `R1-G the real Detail table shows the real, formal fail-safe text ("辞書照合情報を表示できません (Dictionary provenance unavailable)") for the row with a real malformed sidecar (actual row text: ${JSON.stringify(malformedRowText)})`);
+  assert(!malformedRowText.includes('MALFORMED-LEAK-CANARY-TERM'), 'R1-H the malformed row never leaks the valid sibling annotation\'s content (no partial-annotation display) in the real Detail DOM');
+  assert(!malformedRowText.includes('正規語完全一致') && !malformedRowText.includes('EXACT_CANONICAL'), 'R1-H the malformed row never leaks a resolution-type label derived from its own corrupted sidecar in the real Detail DOM');
+  assert(!malformedRowText.includes('dsnap-' + 'f'.repeat(32)) && !malformedRowText.includes('v9'), `R1-I the malformed row never leaks a partial Snapshot identity (its fake snapshot_id="dsnap-${'f'.repeat(32)}"/version="v9") in the real Detail DOM (actual row text: ${JSON.stringify(malformedRowText)})`);
+  assert(!/R1 hostile annotation leak canary|Error|at Object|at eval|\.js:\d+/.test(malformedRowText), `R1-J the malformed row's real DOM text never leaks the native Error message/stack from the hostile getter (actual row text: ${JSON.stringify(malformedRowText)})`);
+
+  // Same malformed row, via the real Graph node tap path.
+  await page.click('.tab-btn[data-tab="tabGraph"]');
+  await page.waitForTimeout(1200);
+  const tappedReq3 = await page.evaluate(() => {
+    const target = cy.nodes().filter(n => n.data('type') === 'requirement' && n.data('id') === 'REQ-3');
+    if (target.length !== 1) return { found: false, count: target.length };
+    target.emit('tap');
+    return { found: true };
+  });
+  assert(tappedReq3.found === true, `R1-G(Graph) the real Graph node for the malformed trace_id="REQ-3" row is uniquely found and tapped by real identity (lookup result: ${JSON.stringify(tappedReq3)})`);
+  await page.waitForTimeout(500);
+  const detailAreaTextReq3 = await page.$eval('#detailArea', el => el.textContent).catch(() => '');
+  assert(detailAreaTextReq3.includes('辞書照合情報を表示できません') || detailAreaTextReq3.includes('Dictionary provenance unavailable'), `R1-G(Graph) the real Graph node detail panel also shows the same real fail-safe text for the malformed row (actual text: ${JSON.stringify(detailAreaTextReq3)})`);
+  assert(!detailAreaTextReq3.includes('MALFORMED-LEAK-CANARY-TERM') && !detailAreaTextReq3.includes('dsnap-' + 'f'.repeat(32)), `R1-H/I(Graph) the real Graph node detail panel leaks neither the partial annotation nor the partial Snapshot identity of the malformed sidecar (actual text: ${JSON.stringify(detailAreaTextReq3)})`);
+  assert(!/R1 hostile annotation leak canary|at Object|at eval/.test(detailAreaTextReq3), 'R1-J(Graph) the real Graph node detail panel never leaks the native Error message/stack');
+
+  // R1-K: the malformed sidecar injection never mutates the real matching/
+  // comparison result itself - only the (already-malformed, test-injected)
+  // provenance sidecar and its own display are affected.
+  const matchingResultUnaffected = await page.evaluate(() => ({
+    trace_id: mergedResult.sysList[2].trace_id,
+    desc: mergedResult.sysList[2].desc,
+    tagInfoUnrelatedToApprovedDict: !!mergedResult.sysList[2]._tagInfo // presence/absence unrelated to the sidecar mutation
+  }));
+  assert(matchingResultUnaffected.trace_id === 'REQ-3' && matchingResultUnaffected.desc === 'Browser Nonexistent Widget', 'R1-K injecting a malformed provenance sidecar never mutates the real row\'s own matching/comparison identity fields');
+
+  // ==========================================================================
+  // L. Project Pin sanitized error smoke (Checkpoint 11/12 file-validation
+  // concern - real and useful, but explicitly NOT counted as Checkpoint 13
+  // provenance-sidecar closure evidence; see R1-F..K above for that).
   // ==========================================================================
   const malformedPinPath = path.join(tmpDir, 'malformed_pin.json');
   fs.writeFileSync(malformedPinPath, '{not valid json');
   await page.setInputFiles('#projectPinFileLoadInput', malformedPinPath);
   await page.waitForTimeout(300);
   const statusAfterMalformed = await page.$eval('#projectPinFileStatus', el => el.textContent).catch(() => '');
-  assert(/ファイル形式が正しくありません/.test(statusAfterMalformed), 'K loading a real malformed/corrupt Pin file shows the real sanitized Japanese fail-safe message ("ファイル形式が正しくありません"), never a raw stack/parse error');
-  assert(!/SyntaxError|Unexpected token|at Object/.test(statusAfterMalformed), 'K the fail-safe display never leaks a native JSON.parse error message');
+  assert(/ファイル形式が正しくありません/.test(statusAfterMalformed), 'L (Project Pin sanitized error smoke) loading a real malformed/corrupt Pin FILE shows the real sanitized Japanese fail-safe message ("ファイル形式が正しくありません"), never a raw stack/parse error');
+  assert(!/SyntaxError|Unexpected token|at Object/.test(statusAfterMalformed), 'L (Project Pin sanitized error smoke) the fail-safe display never leaks a native JSON.parse error message');
 
   const finalPageErrors = pageErrors.filter(e => !/net::ERR_FAILED/.test(e));
   assert(finalPageErrors.length === 0, `Overall: zero uncaught page errors across the entire real-browser session (found: ${JSON.stringify(finalPageErrors.slice(0, 5))})`);
@@ -310,12 +460,17 @@ print('HAS_PROVENANCE' if '辞書照合根拠' in wb else 'NO_PROVENANCE')
   await browser.close();
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) {}
 
+  // R1-item-17: INCOMPLETE is now itself a completion gate, never silently
+  // tolerated when Playwright/Chromium/local vendor dependencies are
+  // actually available (as they are in this environment).
+  assert(incomplete === 0, `Overall: zero INCOMPLETE findings (found ${incomplete}) - in an environment where Playwright/Chromium/local vendor dependencies are available, an unclosed browser-closure item is a HOLD, never a silent PASS`);
+
   console.log('\n' + '='.repeat(78));
   console.log(`${passed} PASS / ${failed} FAIL / ${incomplete} INCOMPLETE`);
   if (findings.length) {
     console.log('Findings:');
     for (const f of findings) console.log(`  - ${f}`);
   }
-  process.exit(failed === 0 ? 0 : 1);
+  process.exit(failed === 0 && incomplete === 0 ? 0 : 1);
 }
 main().catch(err => { console.error('THREW', err); process.exit(1); });
