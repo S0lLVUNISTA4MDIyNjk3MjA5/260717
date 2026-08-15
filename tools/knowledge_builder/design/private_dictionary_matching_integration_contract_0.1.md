@@ -3642,15 +3642,50 @@ sidecarの外側にあるdictionary payload全体・review note・private workbo
 Excel exportはユーザー明示操作（既存「照合結果一覧Excel出力」ボタン）
 時のみ - 自動/バックグラウンドexportは追加しない（§29）。
 
-### S30.13 Malformed sidecar fallback
+### S30.13 Malformed sidecar fallback（R1: atomic fail-closed検証）
 
 `projectApprovedDictionaryResolutionProvenance()`はhostile
 getter/malformed annotation/getter throwいずれに対してもtry/catchで
-`available:false`のunavailable objectへfallbackし、native Error.message
-等を一切伝播しない。Detail render/Graph render/Excel exportいずれも、
+`available:false`のfallback objectへ落ち、native Error.message等を
+一切伝播しない。Detail render/Graph render/Excel exportいずれも、
 1件の異常sidecarが全体のrenderingをクラッシュさせない（try/catchは
 projection helper内で完結させ、呼び出し側は常に安全な戻り値のみを
 受け取る設計とする）。
+
+**R1（独立レビュー指摘MAJOR-01への対応）**: 初版実装は個々の
+malformed annotationを`continue`でskipし、残った有効なannotationだけで
+`available:true`のprojectionを構築していた。これは、formal sidecarの
+一部が破損している事実を隠したまま「利用可能な監査情報」として
+表示・Excel出力してしまう問題があった（例: EXACT_CANONICAL 1件 +
+破損したDICTIONARY_CONFLICT 1件を持つsidecarが、後者を黙って
+落として「正規語1 / 競合0」と表示されてしまう）。
+
+R1では、formal sidecarを**atomic provenance artifact**として扱う。
+以下のいずれかが不正な場合、annotation単位のskipではなく**row
+projection全体**を`available:false`とする:
+
+- `snapshot_binding`が非object、またはいずれかのfieldの型が不正
+- `annotations`が非array
+- `annotations`のいずれか1件でも非object、fieldの型が不正、または
+  `resolution_type`が`APPROVED_DICT_RESOLUTION_TYPES`に含まれない
+
+また、「sidecarが一度も付与されていない（辞書機能未使用、正常な状態）」
+と「sidecarは存在するが形式が不正（異常な状態）」を明確に区別する:
+
+- sidecarが`undefined`（プロパティ自体が存在しない、getter throwでも
+  ない）→ `available:false, malformed:false` →
+  「辞書照合情報なし (No dictionary resolution provenance)」
+- sidecarが存在するが読み取り不能/形式不正（getter throw含む）→
+  `available:false, malformed:true` →
+  「辞書照合情報を表示できません (Dictionary provenance unavailable)」
+
+`_approvedDictResolution`プロパティ自体の読み取りが例外を投げる場合
+（プロパティは概念上存在するがhostile）も`malformed:true`側へ分類する
+- 「読み取れない」と「一度も処理されていない」を混同しない。
+
+annotations=[]（Snapshot使用・対象語なし、S30.4）は本fallbackの対象
+ではない - formal shapeとして正しく空配列であるケースは引き続き
+`available:true`。
 
 ### S30.14 Reproducibility
 

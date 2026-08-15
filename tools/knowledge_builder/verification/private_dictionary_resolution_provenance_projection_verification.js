@@ -488,7 +488,7 @@ async function main() {
     `);
     assert(result.ok === true, 'T buildDetailRows does not throw even when one row\'s sidecar getter is hostile');
     assert(result.rows.length === 2, 'T all rows still render (hostile row is not dropped from the table, only its provenance falls back)');
-    assert(result.rows[1]['辞書解決A'].includes('辞書照合情報を表示できません') || result.rows[1]['辞書解決A'].includes('辞書照合情報なし'), 'T the hostile row\'s own provenance cell falls back to a safe unavailable label, never a thrown/undefined value');
+    assert(result.rows[1]['辞書解決A'].includes('辞書照合情報を表示できません'), 'T (R1) the hostile row\'s own provenance cell shows the distinct malformed label (辞書照合情報を表示できません) - never conflated with the plain "no sidecar" label, and never a thrown/undefined value');
   }
 
   // ==========================================================================
@@ -682,11 +682,15 @@ async function main() {
       (function() { try { return { ok:true, p: __approvedDictProvenanceDiagnostics.project(globalThis.__hostileRow) }; } catch(e) { return { ok:false, message:e.message }; } })()
     `);
     assert(result.ok === true, 'AM hostile sidecar getter never throws out of the projection helper');
-    assert(result.p.available === false, 'AM hostile sidecar getter falls back to available:false (fail-safe "辞書照合情報を表示できません" state)');
+    assert(result.p.available === false, 'AM hostile sidecar getter falls back to available:false');
+    assert(result.p.malformed === true, 'AM (R1) a sidecar that exists but is unreadable is classified malformed:true (辞書照合情報を表示できません), never conflated with the plain "no sidecar" state');
   }
 
-  // AN. one hostile annotation entry among otherwise-valid ones is skipped,
-  // not fatal to the whole row's projection
+  // AN. (R1, post-review MAJOR-01 fix) one hostile/malformed annotation
+  // entry among otherwise-valid ones invalidates the WHOLE row projection -
+  // never a silent per-annotation skip that could understate a real
+  // resolution (e.g. drop a DICTIONARY_CONFLICT while still reporting
+  // available:true). The formal sidecar is an atomic artifact.
   {
     const sAN = loadMatchingToolSandbox();
     run(sAN, `
@@ -710,7 +714,152 @@ async function main() {
       (function() { try { return { ok:true, p: __approvedDictProvenanceDiagnostics.project(globalThis.__mixedRow) }; } catch(e) { return { ok:false, message:e.message }; } })()
     `);
     assert(result.ok === true, 'AN a hostile individual annotation entry never throws out of the projection helper');
-    assert(result.p.available === true && result.p.counts.annotationCount === 1 && result.p.annotations[0].original_term === 'Good Term', 'AN the hostile annotation is silently dropped while the valid sibling annotation is still projected correctly (granular resilience, not a whole-row failure)');
+    assert(result.p.available === false && result.p.malformed === true, 'AN (R1) the hostile annotation invalidates the ENTIRE row projection (available:false, malformed:true) - it never silently drops just the bad entry and reports the valid sibling as if the row were fully available');
+    assert(result.p.counts.annotationCount === 0 && result.p.annotations.length === 0, 'AN (R1) no partial annotation list is ever exposed for a malformed sidecar - not even the valid sibling');
+  }
+
+  // R1-A. malformed snapshot_binding (wrong field type) -> whole projection unavailable
+  {
+    const sR1A = loadMatchingToolSandbox();
+    run(sR1A, `
+      globalThis.__rowR1A = { desc:'x' };
+      Object.defineProperty(globalThis.__rowR1A, '_approvedDictResolution', {
+        value: {
+          schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
+          snapshot_binding: { snapshot_id:{ not:'a string' }, snapshot_version:1, wrapper_integrity_sha256:'a'.repeat(64), dictionary_payload_sha256:'b'.repeat(64), dictionary_id:'d', dictionary_version:'1', scope:'PROJECT' },
+          annotations: [ { original_term:'Good Term', resolved_canonical:'Good Term', resolution_type:'EXACT_CANONICAL', dictionary_entry_id:'e1', dictionary_snapshot_id:'s', wrapper_integrity_sha256:'a'.repeat(64), scope:'PROJECT', status:'ACTIVE' } ]
+        },
+        enumerable: false, configurable: true
+      });
+    `);
+    const p = run(sR1A, `__approvedDictProvenanceDiagnostics.project(globalThis.__rowR1A)`);
+    assert(p.available === false && p.malformed === true, 'R1-A a malformed snapshot_binding field (wrong type) invalidates the whole projection, even though every annotation is otherwise perfectly valid');
+  }
+
+  // R1-B. one malformed annotation among otherwise-valid annotations -> whole projection unavailable
+  {
+    const sR1B = loadMatchingToolSandbox();
+    run(sR1B, `
+      globalThis.__rowR1B = { desc:'x' };
+      Object.defineProperty(globalThis.__rowR1B, '_approvedDictResolution', {
+        value: {
+          schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
+          snapshot_binding: { snapshot_id:'s', snapshot_version:1, wrapper_integrity_sha256:'a'.repeat(64), dictionary_payload_sha256:'b'.repeat(64), dictionary_id:'d', dictionary_version:'1', scope:'PROJECT' },
+          annotations: [
+            { original_term:'Good Term', resolved_canonical:'Good Term', resolution_type:'EXACT_CANONICAL', dictionary_entry_id:'e1', dictionary_snapshot_id:'s', wrapper_integrity_sha256:'a'.repeat(64), scope:'PROJECT', status:'ACTIVE' },
+            { original_term: 42, resolved_canonical:null, resolution_type:'UNKNOWN_TERM', dictionary_entry_id:null, dictionary_snapshot_id:'s', wrapper_integrity_sha256:'a'.repeat(64), scope:null, status:null }
+          ]
+        },
+        enumerable: false, configurable: true
+      });
+    `);
+    const p = run(sR1B, `__approvedDictProvenanceDiagnostics.project(globalThis.__rowR1B)`);
+    assert(p.available === false && p.malformed === true, 'R1-B one malformed annotation field (original_term is a number, not string/null) invalidates the whole row projection, not just that one annotation');
+  }
+
+  // R1-C. unknown/invented resolution_type -> whole projection unavailable
+  {
+    const sR1C = loadMatchingToolSandbox();
+    run(sR1C, `
+      globalThis.__rowR1C = { desc:'x' };
+      Object.defineProperty(globalThis.__rowR1C, '_approvedDictResolution', {
+        value: {
+          schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
+          snapshot_binding: { snapshot_id:'s', snapshot_version:1, wrapper_integrity_sha256:'a'.repeat(64), dictionary_payload_sha256:'b'.repeat(64), dictionary_id:'d', dictionary_version:'1', scope:'PROJECT' },
+          annotations: [ { original_term:'X', resolved_canonical:null, resolution_type:'SOMETHING_INVENTED', dictionary_entry_id:null, dictionary_snapshot_id:'s', wrapper_integrity_sha256:'a'.repeat(64), scope:null, status:null } ]
+        },
+        enumerable: false, configurable: true
+      });
+    `);
+    const p = run(sR1C, `__approvedDictProvenanceDiagnostics.project(globalThis.__rowR1C)`);
+    assert(p.available === false && p.malformed === true, 'R1-C a resolution_type outside the formal EXACT_CANONICAL/APPROVED_ALIAS/UNKNOWN_TERM/DICTIONARY_CONFLICT set invalidates the whole projection');
+  }
+
+  // R1-D. annotations is not an array -> whole projection unavailable
+  {
+    const sR1D = loadMatchingToolSandbox();
+    run(sR1D, `
+      globalThis.__rowR1D = { desc:'x' };
+      Object.defineProperty(globalThis.__rowR1D, '_approvedDictResolution', {
+        value: {
+          schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
+          snapshot_binding: { snapshot_id:'s', snapshot_version:1, wrapper_integrity_sha256:'a'.repeat(64), dictionary_payload_sha256:'b'.repeat(64), dictionary_id:'d', dictionary_version:'1', scope:'PROJECT' },
+          annotations: 'not-an-array'
+        },
+        enumerable: false, configurable: true
+      });
+    `);
+    const p = run(sR1D, `__approvedDictProvenanceDiagnostics.project(globalThis.__rowR1D)`);
+    assert(p.available === false && p.malformed === true, 'R1-D a non-array annotations field invalidates the whole projection');
+  }
+
+  // R1-E. valid sidecar with annotations=[] is still available (unaffected by R1 - zero eligible terms remains a normal, valid state)
+  {
+    const p = project(s1, 'mergedResult.sysList[4]');
+    assert(p.available === true && p.malformed === false && p.counts.annotationCount === 0, 'R1-E a formally valid sidecar with zero annotations (Snapshot使用・対象語なし) remains available:true, malformed:false - R1 atomicity applies only to actually-malformed shapes, never to a correctly-empty annotations array');
+  }
+
+  // R1-F. a completely valid multi-annotation sidecar still projects every annotation losslessly
+  {
+    const sR1F = loadMatchingToolSandbox();
+    run(sR1F, `
+      globalThis.__rowR1F = { desc:'x' };
+      Object.defineProperty(globalThis.__rowR1F, '_approvedDictResolution', {
+        value: {
+          schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
+          snapshot_binding: { snapshot_id:'s', snapshot_version:1, wrapper_integrity_sha256:'a'.repeat(64), dictionary_payload_sha256:'b'.repeat(64), dictionary_id:'d', dictionary_version:'1', scope:'PROJECT' },
+          annotations: [
+            { original_term:'T1', resolved_canonical:'T1', resolution_type:'EXACT_CANONICAL', dictionary_entry_id:'e1', dictionary_snapshot_id:'s', wrapper_integrity_sha256:'a'.repeat(64), scope:'PROJECT', status:'ACTIVE' },
+            { original_term:'T2', resolved_canonical:'T2c', resolution_type:'APPROVED_ALIAS', dictionary_entry_id:'e2', dictionary_snapshot_id:'s', wrapper_integrity_sha256:'a'.repeat(64), scope:'PROJECT', status:'ACTIVE' },
+            { original_term:'T3', resolved_canonical:null, resolution_type:'UNKNOWN_TERM', dictionary_entry_id:null, dictionary_snapshot_id:'s', wrapper_integrity_sha256:'a'.repeat(64), scope:null, status:null },
+            { original_term:'T4', resolved_canonical:null, resolution_type:'DICTIONARY_CONFLICT', dictionary_entry_id:null, dictionary_snapshot_id:'s', wrapper_integrity_sha256:'a'.repeat(64), scope:null, status:null }
+          ]
+        },
+        enumerable: false, configurable: true
+      });
+    `);
+    const p = run(sR1F, `__approvedDictProvenanceDiagnostics.project(globalThis.__rowR1F)`);
+    assert(p.available === true && p.malformed === false && p.counts.annotationCount === 4, 'R1-F a fully valid 4-annotation sidecar projects available:true with all 4 annotations counted');
+    assert(p.counts.exactCount === 1 && p.counts.aliasCount === 1 && p.counts.unknownCount === 1 && p.counts.conflictCount === 1, 'R1-F all four resolution types are losslessly reflected in counts for a fully valid sidecar');
+  }
+
+  // R1-G. Detail/Graph/Excel never surface a partial provenance for a malformed row
+  {
+    const sR1G = loadMatchingToolSandbox();
+    configureSingleFieldKeyPair(sR1G);
+    sR1G.__wrapper = wrapper;
+    await runAsync(sR1G, 'setApprovedDictionarySnapshotForMatching(globalThis.__wrapper)');
+    await setMergedResultAndAnnotate(sR1G, [{ desc:'Primary Compressor', trace_id:'REQ-R1G' }], [{ desc:'Primary Compressor', trace_id:'PART-R1G' }]);
+    run(sR1G, `
+      const badSidecar = mergedResult.sysList[0]._approvedDictResolution;
+      Object.defineProperty(mergedResult.sysList[0], '_approvedDictResolution', {
+        value: { schema_version: badSidecar.schema_version, snapshot_binding: badSidecar.snapshot_binding, annotations: 'not-an-array' },
+        enumerable: false, configurable: true
+      });
+    `);
+    const detailRow = run(sR1G, 'buildDetailRows(mergedResult.sysList, mergedResult.plmList)')[0];
+    const nodeDetailText = run(sR1G, `formatNodeDetail({ type:'requirement', fullLabel:'REQ-R1G', detail: mergedResult.sysList[0] })`);
+    const sheetRows = run(sR1G, 'buildApprovedDictResolutionProvenanceSheetRows(mergedResult.sysList, mergedResult.plmList)');
+    assert(detailRow['辞書解決A'] === '辞書照合情報を表示できません (Dictionary provenance unavailable)', 'R1-G Detail table shows the malformed label for a corrupted sidecar - never a partial "正規語1" summary derived from a broken sidecar');
+    assert(nodeDetailText.includes('辞書照合情報を表示できません'), 'R1-G Graph node detail shows the same malformed label - never a partial annotation list');
+    assert(sheetRows.filter(r => r.side === 'JSON A').length === 0, 'R1-G Excel provenance sheet contributes zero JSON A rows for the malformed sys row - never a partial/fabricated annotation row (the untouched plm-side row correctly still contributes its own valid row)');
+  }
+
+  // R1-H. malformed provenance never affects comparison/matching itself
+  {
+    const sR1H = loadMatchingToolSandbox();
+    configureSingleFieldKeyPair(sR1H);
+    sR1H.__wrapper = wrapper;
+    await runAsync(sR1H, 'setApprovedDictionarySnapshotForMatching(globalThis.__wrapper)');
+    await setMergedResultAndAnnotate(sR1H, [{ desc:'Primary Compressor', trace_id:'REQ-R1H' }], [{ desc:'Primary Compressor', trace_id:'PART-R1H' }]);
+    run(sR1H, `
+      Object.defineProperty(mergedResult.sysList[0], '_approvedDictResolution', {
+        value: { schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION, snapshot_binding: null, annotations: [] },
+        enumerable: false, configurable: true
+      });
+    `);
+    const detailRow = run(sR1H, 'buildDetailRows(mergedResult.sysList, mergedResult.plmList)')[0];
+    assert(Number(detailRow['照合JSON B件数']) === 1 && Number(detailRow['最大信頼度']) === 1, 'R1-H a malformed/corrupted provenance sidecar never affects the row\'s own matching result (comparison count/confidence unchanged)');
   }
 
   // AO. no native Error message/stack ever leaks into the projection output

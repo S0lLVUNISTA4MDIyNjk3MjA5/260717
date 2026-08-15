@@ -4373,8 +4373,28 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     try { return container[key]; } catch (_err) { return undefined; }
   }
 
+  // R1 (post-Checkpoint-13 independent review, MAJOR-01): the formal
+  // sidecar is treated as an ATOMIC provenance artifact. "no sidecar at
+  // all" (available:false, malformed:false - a normal, expected state -
+  // the dictionary feature was never applied to this row) is a DISTINCT
+  // outcome from "a sidecar exists but any part of its formal shape is
+  // invalid/hostile" (available:false, malformed:true - an abnormal state
+  // that must never be silently downgraded to a partial/best-effort
+  // success). A single malformed field, a single malformed annotation, an
+  // unknown resolution_type, a non-array annotations list, or a malformed
+  // snapshot_binding invalidates the WHOLE row projection - never a
+  // silent per-annotation skip that could understate a real
+  // DICTIONARY_CONFLICT/UNKNOWN_TERM while still claiming available:true.
   const APPROVED_DICT_PROVENANCE_UNAVAILABLE = Object.freeze({
     available: false,
+    malformed: false,
+    snapshotBinding: null,
+    counts: Object.freeze({ annotationCount: 0, exactCount: 0, aliasCount: 0, unknownCount: 0, conflictCount: 0 }),
+    annotations: Object.freeze([])
+  });
+  const APPROVED_DICT_PROVENANCE_MALFORMED = Object.freeze({
+    available: false,
+    malformed: true,
     snapshotBinding: null,
     counts: Object.freeze({ annotationCount: 0, exactCount: 0, aliasCount: 0, unknownCount: 0, conflictCount: 0 }),
     annotations: Object.freeze([])
@@ -4386,66 +4406,77 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   // (S30.3). Returns a fresh, deep-frozen, alias-free display object -
   // never the raw sidecar/row reference (S30.2/§34). Annotation order is
   // preserved exactly as captured by Checkpoint 7 (§35) - never re-sorted.
+  // R1: validation is atomic (all-or-nothing) - see the constants above.
   function projectApprovedDictionaryResolutionProvenance(row) {
     try {
       if (!row || typeof row !== 'object') return APPROVED_DICT_PROVENANCE_UNAVAILABLE;
-      const sidecar = safeReadApprovedDictSidecarField(row, '_approvedDictResolution');
-      if (!sidecar || typeof sidecar !== 'object') return APPROVED_DICT_PROVENANCE_UNAVAILABLE;
-      if (safeReadApprovedDictSidecarField(sidecar, 'schema_version') !== APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION) return APPROVED_DICT_PROVENANCE_UNAVAILABLE;
+
+      let sidecar;
+      try {
+        sidecar = row['_approvedDictResolution'];
+      } catch (_err) {
+        // R1: a getter that exists but throws is evidence of an abnormal
+        // (hostile/corrupted) row, never a plain "not processed yet" row.
+        return APPROVED_DICT_PROVENANCE_MALFORMED;
+      }
+      if (sidecar === undefined) return APPROVED_DICT_PROVENANCE_UNAVAILABLE; // normal: this row was never processed under any Snapshot
+      if (sidecar === null || typeof sidecar !== 'object') return APPROVED_DICT_PROVENANCE_MALFORMED;
+      if (safeReadApprovedDictSidecarField(sidecar, 'schema_version') !== APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION) return APPROVED_DICT_PROVENANCE_MALFORMED;
 
       const rawBinding = safeReadApprovedDictSidecarField(sidecar, 'snapshot_binding');
-      let snapshotBinding = null;
-      if (rawBinding && typeof rawBinding === 'object') {
-        const captured = {};
-        let bindingOk = true;
-        for (const field of APPROVED_DICT_BINDING_FIELDS) {
-          const v = safeReadApprovedDictSidecarField(rawBinding, field);
-          if (v !== null && typeof v !== 'string' && typeof v !== 'number') { bindingOk = false; break; }
-          captured[field] = v;
-        }
-        if (bindingOk) snapshotBinding = Object.freeze(captured);
+      if (!rawBinding || typeof rawBinding !== 'object') return APPROVED_DICT_PROVENANCE_MALFORMED;
+      const snapshotBinding = {};
+      for (const field of APPROVED_DICT_BINDING_FIELDS) {
+        const v = safeReadApprovedDictSidecarField(rawBinding, field);
+        if (v !== null && typeof v !== 'string' && typeof v !== 'number') return APPROVED_DICT_PROVENANCE_MALFORMED;
+        snapshotBinding[field] = v;
       }
 
       const rawAnnotations = safeReadApprovedDictSidecarField(sidecar, 'annotations');
+      if (!Array.isArray(rawAnnotations)) return APPROVED_DICT_PROVENANCE_MALFORMED;
       const annotations = [];
       const counts = { annotationCount: 0, exactCount: 0, aliasCount: 0, unknownCount: 0, conflictCount: 0 };
-      if (Array.isArray(rawAnnotations)) {
-        for (let i = 0; i < rawAnnotations.length; i++) {
-          const raw = safeReadApprovedDictSidecarField(rawAnnotations, i);
-          if (!raw || typeof raw !== 'object') continue; // §26: skip malformed entries, never crash the whole projection
-          const item = {};
-          let ok = true;
-          for (const field of APPROVED_DICT_ANNOTATION_FIELDS) {
-            const v = safeReadApprovedDictSidecarField(raw, field);
-            if (v !== null && typeof v !== 'string') { ok = false; break; }
-            item[field] = v;
-          }
-          if (!ok || !APPROVED_DICT_RESOLUTION_TYPES.has(item.resolution_type)) continue;
-          annotations.push(Object.freeze(item));
-          counts.annotationCount++;
-          if (item.resolution_type === 'EXACT_CANONICAL') counts.exactCount++;
-          else if (item.resolution_type === 'APPROVED_ALIAS') counts.aliasCount++;
-          else if (item.resolution_type === 'UNKNOWN_TERM') counts.unknownCount++;
-          else if (item.resolution_type === 'DICTIONARY_CONFLICT') counts.conflictCount++;
+      for (let i = 0; i < rawAnnotations.length; i++) {
+        const raw = safeReadApprovedDictSidecarField(rawAnnotations, i);
+        if (!raw || typeof raw !== 'object') return APPROVED_DICT_PROVENANCE_MALFORMED; // R1: one bad annotation invalidates the whole row, never a silent skip
+        const item = {};
+        for (const field of APPROVED_DICT_ANNOTATION_FIELDS) {
+          const v = safeReadApprovedDictSidecarField(raw, field);
+          if (v !== null && typeof v !== 'string') return APPROVED_DICT_PROVENANCE_MALFORMED;
+          item[field] = v;
         }
+        if (!APPROVED_DICT_RESOLUTION_TYPES.has(item.resolution_type)) return APPROVED_DICT_PROVENANCE_MALFORMED;
+        annotations.push(Object.freeze(item));
+        counts.annotationCount++;
+        if (item.resolution_type === 'EXACT_CANONICAL') counts.exactCount++;
+        else if (item.resolution_type === 'APPROVED_ALIAS') counts.aliasCount++;
+        else if (item.resolution_type === 'UNKNOWN_TERM') counts.unknownCount++;
+        else if (item.resolution_type === 'DICTIONARY_CONFLICT') counts.conflictCount++;
       }
 
       return Object.freeze({
         available: true,
-        snapshotBinding,
+        malformed: false,
+        snapshotBinding: Object.freeze(snapshotBinding),
         counts: Object.freeze(counts),
         annotations: Object.freeze(annotations)
       });
     } catch (_err) {
-      return APPROVED_DICT_PROVENANCE_UNAVAILABLE;
+      return APPROVED_DICT_PROVENANCE_MALFORMED;
     }
   }
 
   // §S30.7/§16: compact one-line summary shared by Detail/Graph. Pure
   // formatting over an already-projected object - never re-reads the raw
-  // sidecar/row.
+  // sidecar/row. R1: "no sidecar" and "malformed sidecar" render distinct
+  // Japanese-first/English-併記 labels - a malformed row must never be
+  // silently indistinguishable from a row that simply never used the
+  // dictionary feature.
   function approvedDictProvenanceCompactSummary(projection) {
-    if (!projection || !projection.available) return '辞書照合情報なし (No dictionary resolution provenance)';
+    if (!projection || !projection.available) {
+      if (projection && projection.malformed) return '辞書照合情報を表示できません (Dictionary provenance unavailable)';
+      return '辞書照合情報なし (No dictionary resolution provenance)';
+    }
     const c = projection.counts;
     if (c.annotationCount === 0) return 'Snapshot使用・対象語なし (Snapshot used, no eligible terms)';
     return `正規語${c.exactCount} / 別名${c.aliasCount} / 未登録${c.unknownCount} / 競合${c.conflictCount}`;
