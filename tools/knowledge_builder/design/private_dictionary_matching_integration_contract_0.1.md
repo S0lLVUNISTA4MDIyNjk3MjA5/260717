@@ -3687,6 +3687,34 @@ annotations=[]（Snapshot使用・対象語なし、S30.4）は本fallbackの対
 ではない - formal shapeとして正しく空配列であるケースは引き続き
 `available:true`。
 
+**R2（独立レビュー指摘MAJOR-02への対応）**: R1時点のbinding検証は
+各fieldの**型**（string/number）のみを確認しており、Checkpoint 7が
+固定した7-field formal contract（`snapshot_id`は`dsnap-<hex32>`、
+`snapshot_version`はsafe integer >= 1、`wrapper_integrity_sha256`/
+`dictionary_payload_sha256`は`hex64`、`dictionary_id`は
+`pdict-<hex32>`、`dictionary_version`は先頭0なし最大16桁の10進数
+文字列（または`"0"`）、`scope`は`PROJECT`固定）までは検証していな
+かった。型だけ正しいformat違反のbinding（例:
+`snapshot_id:"x"`, `scope:"DOMAIN"`）でも`available:true`を通過して
+しまう欠陥があった。
+
+R2では、この7-field formal formatの検証を独自に再実装せず、既存
+Checkpoint 7-R4の`captureApprovedDictBatchBinding(rawBinding)`
+（本HTML内、無変更、対応するCheckpoint 7の215件回帰スイートで
+既に検証済み）をそのまま呼び出す形に変更した。この関数は
+`SNAPSHOT_ID_RE`/`HEX64_RE`/`checkSnapshotVersion`
+（`private_dictionary_snapshot_core.js`由来）、`DICTIONARY_ID_RE`/
+`VERSION_RE`（`private_dictionary_learning_core.js`由来）を
+`APPROVED_DICT_SNAPSHOT_ID_PATTERN`等として本HTML内に転記した
+既存定数を用いる - 新規のformat定義や2つ目のformat contractコピーを
+作らない。`captureApprovedDictBatchBinding()`が`null`を返した場合
+（7 fieldのいずれか1つでもformal format違反）、projection全体を
+`available:false, malformed:true`とする（R1のatomicity原則の延長）。
+
+annotation側の`dictionary_entry_id`（`pde-<hex32>`）等のより深い
+format検証（`captureApprovedDictAnnotation()`が実装済み）は、R2の
+指摘範囲外（MAJOR-02はbinding限定）であり、本ラウンドでは変更しない。
+
 ### S30.14 Reproducibility
 
 projection結果はrow._approvedDictResolutionの内容のみに依存し、現在の

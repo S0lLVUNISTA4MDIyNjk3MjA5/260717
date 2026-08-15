@@ -4423,14 +4423,18 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       if (sidecar === null || typeof sidecar !== 'object') return APPROVED_DICT_PROVENANCE_MALFORMED;
       if (safeReadApprovedDictSidecarField(sidecar, 'schema_version') !== APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION) return APPROVED_DICT_PROVENANCE_MALFORMED;
 
+      // R2 (post-Checkpoint-13-R1 independent review, MAJOR-02): binding
+      // validation must check the FULL Checkpoint 7 formal 7-field format
+      // (dsnap-<hex32>, safe-integer>=1, hex64 x2, pdict-<hex32>, canonical
+      // decimal version string, scope===PROJECT) - not merely each field's
+      // JS type. captureApprovedDictBatchBinding() is the exact, already-
+      // reviewed Checkpoint 7-R4 helper that already implements this; reused
+      // verbatim here rather than re-deriving a second, drift-prone copy of
+      // the same format contract.
       const rawBinding = safeReadApprovedDictSidecarField(sidecar, 'snapshot_binding');
-      if (!rawBinding || typeof rawBinding !== 'object') return APPROVED_DICT_PROVENANCE_MALFORMED;
-      const snapshotBinding = {};
-      for (const field of APPROVED_DICT_BINDING_FIELDS) {
-        const v = safeReadApprovedDictSidecarField(rawBinding, field);
-        if (v !== null && typeof v !== 'string' && typeof v !== 'number') return APPROVED_DICT_PROVENANCE_MALFORMED;
-        snapshotBinding[field] = v;
-      }
+      const capturedBinding = captureApprovedDictBatchBinding(rawBinding);
+      if (!capturedBinding) return APPROVED_DICT_PROVENANCE_MALFORMED;
+      const snapshotBinding = capturedBinding;
 
       const rawAnnotations = safeReadApprovedDictSidecarField(sidecar, 'annotations');
       if (!Array.isArray(rawAnnotations)) return APPROVED_DICT_PROVENANCE_MALFORMED;

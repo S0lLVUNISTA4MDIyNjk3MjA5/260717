@@ -701,7 +701,7 @@ async function main() {
       Object.defineProperty(globalThis.__mixedRow, '_approvedDictResolution', {
         value: {
           schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
-          snapshot_binding: { snapshot_id:'s', snapshot_version:1, wrapper_integrity_sha256:'a'.repeat(64), dictionary_payload_sha256:'b'.repeat(64), dictionary_id:'d', dictionary_version:'1', scope:'PROJECT' },
+          snapshot_binding: { snapshot_id:'dsnap-'+'a'.repeat(32), snapshot_version:1, wrapper_integrity_sha256:'a'.repeat(64), dictionary_payload_sha256:'b'.repeat(64), dictionary_id:'pdict-'+'c'.repeat(32), dictionary_version:'1', scope:'PROJECT' },
           annotations: [
             hostileAnnotation,
             { original_term:'Good Term', resolved_canonical:'Good Term', resolution_type:'EXACT_CANONICAL', dictionary_entry_id:'e1', dictionary_snapshot_id:'s', wrapper_integrity_sha256:'a'.repeat(64), scope:'PROJECT', status:'ACTIVE' }
@@ -744,7 +744,7 @@ async function main() {
       Object.defineProperty(globalThis.__rowR1B, '_approvedDictResolution', {
         value: {
           schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
-          snapshot_binding: { snapshot_id:'s', snapshot_version:1, wrapper_integrity_sha256:'a'.repeat(64), dictionary_payload_sha256:'b'.repeat(64), dictionary_id:'d', dictionary_version:'1', scope:'PROJECT' },
+          snapshot_binding: { snapshot_id:'dsnap-'+'a'.repeat(32), snapshot_version:1, wrapper_integrity_sha256:'a'.repeat(64), dictionary_payload_sha256:'b'.repeat(64), dictionary_id:'pdict-'+'c'.repeat(32), dictionary_version:'1', scope:'PROJECT' },
           annotations: [
             { original_term:'Good Term', resolved_canonical:'Good Term', resolution_type:'EXACT_CANONICAL', dictionary_entry_id:'e1', dictionary_snapshot_id:'s', wrapper_integrity_sha256:'a'.repeat(64), scope:'PROJECT', status:'ACTIVE' },
             { original_term: 42, resolved_canonical:null, resolution_type:'UNKNOWN_TERM', dictionary_entry_id:null, dictionary_snapshot_id:'s', wrapper_integrity_sha256:'a'.repeat(64), scope:null, status:null }
@@ -765,7 +765,7 @@ async function main() {
       Object.defineProperty(globalThis.__rowR1C, '_approvedDictResolution', {
         value: {
           schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
-          snapshot_binding: { snapshot_id:'s', snapshot_version:1, wrapper_integrity_sha256:'a'.repeat(64), dictionary_payload_sha256:'b'.repeat(64), dictionary_id:'d', dictionary_version:'1', scope:'PROJECT' },
+          snapshot_binding: { snapshot_id:'dsnap-'+'a'.repeat(32), snapshot_version:1, wrapper_integrity_sha256:'a'.repeat(64), dictionary_payload_sha256:'b'.repeat(64), dictionary_id:'pdict-'+'c'.repeat(32), dictionary_version:'1', scope:'PROJECT' },
           annotations: [ { original_term:'X', resolved_canonical:null, resolution_type:'SOMETHING_INVENTED', dictionary_entry_id:null, dictionary_snapshot_id:'s', wrapper_integrity_sha256:'a'.repeat(64), scope:null, status:null } ]
         },
         enumerable: false, configurable: true
@@ -783,7 +783,7 @@ async function main() {
       Object.defineProperty(globalThis.__rowR1D, '_approvedDictResolution', {
         value: {
           schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
-          snapshot_binding: { snapshot_id:'s', snapshot_version:1, wrapper_integrity_sha256:'a'.repeat(64), dictionary_payload_sha256:'b'.repeat(64), dictionary_id:'d', dictionary_version:'1', scope:'PROJECT' },
+          snapshot_binding: { snapshot_id:'dsnap-'+'a'.repeat(32), snapshot_version:1, wrapper_integrity_sha256:'a'.repeat(64), dictionary_payload_sha256:'b'.repeat(64), dictionary_id:'pdict-'+'c'.repeat(32), dictionary_version:'1', scope:'PROJECT' },
           annotations: 'not-an-array'
         },
         enumerable: false, configurable: true
@@ -807,7 +807,7 @@ async function main() {
       Object.defineProperty(globalThis.__rowR1F, '_approvedDictResolution', {
         value: {
           schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
-          snapshot_binding: { snapshot_id:'s', snapshot_version:1, wrapper_integrity_sha256:'a'.repeat(64), dictionary_payload_sha256:'b'.repeat(64), dictionary_id:'d', dictionary_version:'1', scope:'PROJECT' },
+          snapshot_binding: { snapshot_id:'dsnap-'+'a'.repeat(32), snapshot_version:1, wrapper_integrity_sha256:'a'.repeat(64), dictionary_payload_sha256:'b'.repeat(64), dictionary_id:'pdict-'+'c'.repeat(32), dictionary_version:'1', scope:'PROJECT' },
           annotations: [
             { original_term:'T1', resolved_canonical:'T1', resolution_type:'EXACT_CANONICAL', dictionary_entry_id:'e1', dictionary_snapshot_id:'s', wrapper_integrity_sha256:'a'.repeat(64), scope:'PROJECT', status:'ACTIVE' },
             { original_term:'T2', resolved_canonical:'T2c', resolution_type:'APPROVED_ALIAS', dictionary_entry_id:'e2', dictionary_snapshot_id:'s', wrapper_integrity_sha256:'a'.repeat(64), scope:'PROJECT', status:'ACTIVE' },
@@ -860,6 +860,152 @@ async function main() {
     `);
     const detailRow = run(sR1H, 'buildDetailRows(mergedResult.sysList, mergedResult.plmList)')[0];
     assert(Number(detailRow['照合JSON B件数']) === 1 && Number(detailRow['最大信頼度']) === 1, 'R1-H a malformed/corrupted provenance sidecar never affects the row\'s own matching result (comparison count/confidence unchanged)');
+  }
+
+  // ==========================================================================
+  // R2 (independent review round 2, MAJOR-02): formal snapshot_binding
+  // FORMAT validation, not merely per-field type. Reuses the exact,
+  // already-reviewed Checkpoint 7-R4 captureApprovedDictBatchBinding()
+  // helper (dsnap-<hex32>/pdict-<hex32>/hex64 x2/safe-integer>=1/canonical
+  // decimal version string/scope===PROJECT) rather than a second,
+  // drift-prone copy of the same format contract.
+  // ==========================================================================
+
+  const R2_VALID_BINDING = Object.freeze({
+    snapshot_id: 'dsnap-' + 'a'.repeat(32),
+    snapshot_version: 1,
+    wrapper_integrity_sha256: 'a'.repeat(64),
+    dictionary_payload_sha256: 'b'.repeat(64),
+    dictionary_id: 'pdict-' + 'c'.repeat(32),
+    dictionary_version: '1',
+    scope: 'PROJECT'
+  });
+  const R2_VALID_ANNOTATIONS = Object.freeze([
+    { original_term: 'Good Term', resolved_canonical: 'Good Term', resolution_type: 'EXACT_CANONICAL', dictionary_entry_id: 'pde-' + 'd'.repeat(32), dictionary_snapshot_id: R2_VALID_BINDING.snapshot_id, wrapper_integrity_sha256: R2_VALID_BINDING.wrapper_integrity_sha256, scope: 'PROJECT', status: 'ACTIVE' }
+  ]);
+  function projectR2Binding(sandbox, bindingOverrides) {
+    run(sandbox, `
+      globalThis.__r2Row = { desc:'x' };
+      Object.defineProperty(globalThis.__r2Row, '_approvedDictResolution', {
+        value: {
+          schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
+          snapshot_binding: ${JSON.stringify(Object.assign({}, R2_VALID_BINDING, bindingOverrides))},
+          annotations: ${JSON.stringify(R2_VALID_ANNOTATIONS)}
+        },
+        enumerable: false, configurable: true
+      });
+    `);
+    return run(sandbox, `__approvedDictProvenanceDiagnostics.project(globalThis.__r2Row)`);
+  }
+
+  // R2-A. invalid snapshot_id FORMAT (well-typed string, wrong shape) -> malformed
+  {
+    const s = loadMatchingToolSandbox();
+    const p = projectR2Binding(s, { snapshot_id: 'not-the-right-shape' });
+    assert(p.available === false && p.malformed === true, 'R2-A a snapshot_id that is a string but violates the dsnap-<hex32> format (not merely a type mismatch) invalidates the whole projection');
+  }
+
+  // R2-B. snapshot_version = 0 -> malformed (formal contract requires >=1)
+  {
+    const s = loadMatchingToolSandbox();
+    const p = projectR2Binding(s, { snapshot_version: 0 });
+    assert(p.available === false && p.malformed === true, 'R2-B snapshot_version=0 (below the formal >=1 floor) invalidates the whole projection');
+  }
+
+  // R2-B2. snapshot_version = -1 -> malformed
+  {
+    const s = loadMatchingToolSandbox();
+    const p = projectR2Binding(s, { snapshot_version: -1 });
+    assert(p.available === false && p.malformed === true, 'R2-B2 a negative snapshot_version invalidates the whole projection');
+  }
+
+  // R2-B3. snapshot_version = 1.5 (non-safe-integer) -> malformed
+  {
+    const s = loadMatchingToolSandbox();
+    const p = projectR2Binding(s, { snapshot_version: 1.5 });
+    assert(p.available === false && p.malformed === true, 'R2-B3 a non-integer snapshot_version invalidates the whole projection');
+  }
+
+  // R2-C. invalid wrapper_integrity_sha256 (wrong length / non-hex) -> malformed
+  {
+    const s = loadMatchingToolSandbox();
+    const p = projectR2Binding(s, { wrapper_integrity_sha256: 'not-a-hex-hash' });
+    assert(p.available === false && p.malformed === true, 'R2-C an invalid wrapper_integrity_sha256 (fails the hex64 format) invalidates the whole projection');
+  }
+
+  // R2-D. invalid dictionary_payload_sha256 -> malformed
+  {
+    const s = loadMatchingToolSandbox();
+    const p = projectR2Binding(s, { dictionary_payload_sha256: 'ALSO-NOT-HEX-64' });
+    assert(p.available === false && p.malformed === true, 'R2-D an invalid dictionary_payload_sha256 (fails the hex64 format) invalidates the whole projection');
+  }
+
+  // R2-E. invalid dictionary_id FORMAT -> malformed
+  {
+    const s = loadMatchingToolSandbox();
+    const p = projectR2Binding(s, { dictionary_id: 'wrong-prefix-' + 'e'.repeat(32) });
+    assert(p.available === false && p.malformed === true, 'R2-E a dictionary_id that violates the pdict-<hex32> format invalidates the whole projection');
+  }
+
+  // R2-F. invalid dictionary_version (leading zero "01") -> malformed
+  {
+    const s = loadMatchingToolSandbox();
+    const p = projectR2Binding(s, { dictionary_version: '01' });
+    assert(p.available === false && p.malformed === true, 'R2-F a dictionary_version with a leading zero ("01") violates the canonical decimal-string format and invalidates the whole projection');
+  }
+
+  // R2-F2. invalid dictionary_version (17 digits, exceeds the 16-digit cap) -> malformed
+  {
+    const s = loadMatchingToolSandbox();
+    const p = projectR2Binding(s, { dictionary_version: '1'.repeat(17) });
+    assert(p.available === false && p.malformed === true, 'R2-F2 a dictionary_version exceeding 16 digits invalidates the whole projection');
+  }
+
+  // R2-G. scope !== PROJECT -> malformed
+  {
+    const s = loadMatchingToolSandbox();
+    const p = projectR2Binding(s, { scope: 'DOMAIN' });
+    assert(p.available === false && p.malformed === true, 'R2-G a scope other than PROJECT (even a formally valid dictionary scope value elsewhere in the system) invalidates the whole projection - this pipeline\'s formal contract is PROJECT-only');
+  }
+
+  // R2-H. a null binding field -> malformed
+  {
+    const s = loadMatchingToolSandbox();
+    const p = projectR2Binding(s, { snapshot_id: null });
+    assert(p.available === false && p.malformed === true, 'R2-H a null value on a formally-required (non-nullable) binding field invalidates the whole projection');
+  }
+
+  // R2-I. a fully format-valid 7-field binding remains available (R2 adds
+  // stricter rejection, never stricter acceptance requirements beyond the
+  // formal contract itself)
+  {
+    const s = loadMatchingToolSandbox();
+    const p = projectR2Binding(s, {});
+    assert(p.available === true && p.malformed === false, 'R2-I a binding that satisfies the full formal 7-field format (dsnap-/pdict-/hex64 x2/safe-int>=1/canonical version/PROJECT scope) is accepted and available:true');
+    assert(p.snapshotBinding.snapshot_id === R2_VALID_BINDING.snapshot_id && p.snapshotBinding.dictionary_version === '1', 'R2-I the accepted binding\'s fields passthrough unchanged (no silent reformatting/coercion)');
+  }
+
+  // R2-J. malformed binding (format-invalid, not just wrong-typed) never
+  // surfaces partial provenance in Detail/Graph/Excel
+  {
+    const sR2J = loadMatchingToolSandbox();
+    configureSingleFieldKeyPair(sR2J);
+    sR2J.__wrapper = wrapper;
+    await runAsync(sR2J, 'setApprovedDictionarySnapshotForMatching(globalThis.__wrapper)');
+    await setMergedResultAndAnnotate(sR2J, [{ desc: 'Primary Compressor', trace_id: 'REQ-R2J' }], [{ desc: 'Primary Compressor', trace_id: 'PART-R2J' }]);
+    run(sR2J, `
+      const okSidecar = mergedResult.sysList[0]._approvedDictResolution;
+      Object.defineProperty(mergedResult.sysList[0], '_approvedDictResolution', {
+        value: { schema_version: okSidecar.schema_version, snapshot_binding: Object.assign({}, okSidecar.snapshot_binding, { dictionary_version: '007' }), annotations: okSidecar.annotations },
+        enumerable: false, configurable: true
+      });
+    `);
+    const detailRow = run(sR2J, 'buildDetailRows(mergedResult.sysList, mergedResult.plmList)')[0];
+    const nodeDetailText = run(sR2J, `formatNodeDetail({ type:'requirement', fullLabel:'REQ-R2J', detail: mergedResult.sysList[0] })`);
+    const sheetRows = run(sR2J, 'buildApprovedDictResolutionProvenanceSheetRows(mergedResult.sysList, mergedResult.plmList)');
+    assert(detailRow['辞書解決A'] === '辞書照合情報を表示できません (Dictionary provenance unavailable)', 'R2-J Detail table shows the malformed label for a format-invalid (leading-zero dictionary_version) binding, even though every annotation is perfectly valid - never a partial "正規語1" summary built on top of a corrupted binding');
+    assert(nodeDetailText.includes('辞書照合情報を表示できません'), 'R2-J Graph node detail shows the same malformed label for the format-invalid binding');
+    assert(sheetRows.filter(r => r.side === 'JSON A').length === 0, 'R2-J Excel provenance sheet contributes zero JSON A rows for the format-invalid-binding row');
   }
 
   // AO. no native Error message/stack ever leaks into the projection output
