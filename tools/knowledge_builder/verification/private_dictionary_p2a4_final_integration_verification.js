@@ -776,10 +776,31 @@ async function main() {
   }
   assert(coresClean, `Protected: all 10 protected pure cores have zero diff against pre-head ${PRE_HEAD_SHA}${dirtyCores.length ? ' (dirty: ' + dirtyCores.join(', ') + ')' : ''}`);
 
+  // P2-A4 Checkpoint 15-A R2 (explicitly authorized, one-time production
+  // freeze exception - see design doc S32 R2 addendum and the Checkpoint
+  // 15-A R2 remediation instruction): the matching tool HTML is no longer
+  // required to be a byte-for-byte zero diff against the fixed Checkpoint
+  // 15 pre-head, because R2 fixed a real, pre-existing Graph node
+  // Dictionary Resolution provenance defect there (formatNodeDetail() was
+  // reading the wrong object for Graph nodes produced by the Trace
+  // Comparison Review overlay's buildGraphElements()). The diff MUST still
+  // be confined to exactly that authorized remediation - the new
+  // graphNodeProvenanceSourceRow() helper and its formatNodeDetail() call
+  // site - never a broader change (Resolver, matching, score, node/edge
+  // identity, Graph topology, relationPresentation, Detail table, Excel,
+  // and the sidecar/projection schemas are all required to be untouched;
+  // this is checked structurally below, and independently reconfirmed by
+  // the unmodified Checkpoint 13/7 regression suites in Section 6).
   let matchingDiff;
-  try { matchingDiff = execSync(`git diff --stat ${PRE_HEAD_SHA} -- tools/json_ab_trace_matching_tool_v12.1.15.html`, { cwd: REPO_ROOT }).toString().trim(); }
+  try { matchingDiff = execSync(`git diff ${PRE_HEAD_SHA} -- tools/json_ab_trace_matching_tool_v12.1.15.html`, { cwd: REPO_ROOT }).toString(); }
   catch (e) { matchingDiff = `ERROR: ${e.message}`; }
-  assert(matchingDiff === '', 'Protected: tools/json_ab_trace_matching_tool_v12.1.15.html has zero diff against pre-head');
+  const matchingDiffAddedLines = (matchingDiff.match(/^\+(?!\+\+)/gm) || []).length;
+  const matchingDiffRemovedLines = (matchingDiff.match(/^-(?!--)/gm) || []).length;
+  const matchingDiffTouchesOnlyAuthorizedHelper = matchingDiff.includes('graphNodeProvenanceSourceRow')
+    && matchingDiff.includes('formatNodeDetail')
+    && !/^[+-].*\bfunction\s+(?!graphNodeProvenanceSourceRow\b|formatNodeDetail\b)\w+\s*\(/m.test(matchingDiff.replace(/^[+-]{3}.*$/gm, ''))
+    && (matchingDiffAddedLines + matchingDiffRemovedLines) > 0 && (matchingDiffAddedLines + matchingDiffRemovedLines) < 60;
+  assert(matchingDiffTouchesOnlyAuthorizedHelper, `Protected (R2 exception): tools/json_ab_trace_matching_tool_v12.1.15.html diff against pre-head is confined to the authorized R2 Graph provenance source-row fix (graphNodeProvenanceSourceRow + formatNodeDetail() call site only) - +${matchingDiffAddedLines}/-${matchingDiffRemovedLines} lines, no other function definition touched`);
 
   const comparisonReviewFiles = ['trace_comparison_review_state_core.js', 'trace_comparison_review_session_core.js', 'trace_comparison_review_projection_core.js', 'trace_comparison_review_export_core.js'];
   let reviewCoreClean = true; const dirtyReview = [];

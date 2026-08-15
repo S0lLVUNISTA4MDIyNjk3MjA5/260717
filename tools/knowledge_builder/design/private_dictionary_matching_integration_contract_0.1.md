@@ -4438,3 +4438,105 @@ layer、DOMAIN runtime layer、SESSION dictionary layer拡張、
 automatic active/latest Snapshot選択、AI synonym/fuzzy resolution、
 dictionary auto-promotion、public release workflow。これらは
 Checkpoint 15のHOLD理由にはならない。
+
+### S32.16 Checkpoint 15-A R1/R2追補: Graph node provenance production defectと是正
+
+**R1で発見した実production defect:** R1でGraph provenanceの
+positive-path（node tap後にDictionary Resolution内容そのものを
+実DOM文字列でassert）を実装したところ、実Chromium上で常に
+「辞書照合情報なし (No dictionary resolution provenance)」が
+表示される不具合を発見した。Detail/Excelは無傷（実resolution結果を
+正しく表示）で、Graph node detail panelのみが影響を受けていた。
+
+**Root cause:** `formatNodeDetail()`（matching tool HTML）は
+Checkpoint 13実装時、Graph node `data.detail` が
+`sysList`/`plmList`の生rowそのものである（コメント: "data.detail
+IS the original sysList/plmList row reference"）という前提で
+`projectApprovedDictionaryResolutionProvenance(data.detail)` を
+直接呼んでいた。しかし、この前提は元々の`buildGraphElements()`
+（約10311行、現在は到達不能なdead code）にのみ当てはまり、実際に
+実行時binding として最終的に有効になる`buildGraphElements()`は、
+Trace Comparison Review overlay（B-4b/Phase7、Checkpoint 13より
+古い既存機能）が再定義したバージョン（約11991行）であり、これは
+requirement/partノードの`data.detail`を`{source: row,
+presentation}`というwrapper objectとして構築する。したがって
+`_approvedDictResolution`を保持する実rowは`data.detail.source`側に
+あり、`data.detail`自体には存在しなかった。Checkpoint 13時点の
+Node検証（`formatNodeDetail()`を生rowを直接渡して単体呼び出し）は
+実際の`buildGraphElements()`/`renderGraph()`パイプラインを経由して
+いなかったため、この不整合を検出できなかった。
+
+**是正（R2、production freeze例外として明示的に許可）:**
+`formatNodeDetail()`直前に、Graph node `data.detail` payloadから
+provenance対象rowを一意に取得する小さなprivate helper
+`graphNodeProvenanceSourceRow(data)`を追加した:
+
+```js
+function graphNodeProvenanceSourceRow(data) {
+  const detail = data && data.detail;
+  if (detail && typeof detail === 'object' && detail.source && typeof detail.source === 'object') return detail.source;
+  return detail;
+}
+```
+
+`data.detail.source`が実オブジェクトであればwrapper shapeとみなし
+`detail.source`（実row）を返し、そうでなければ`data.detail`自体
+（生row shape、backward compatibility用）を返す。実際の
+`canonicalizeRows()`出力（`mergedResult.sysList[idx]`）はflatな
+オブジェクトで`.source`フィールドを持たないことを実データで確認
+済みのため、生row shapeとwrapper shapeの判別に偽陽性は生じない。
+`formatNodeDetail()`内の該当1箇所
+（`projectApprovedDictionaryResolutionProvenance(data.detail)`
+→ `projectApprovedDictionaryResolutionProvenance(
+graphNodeProvenanceSourceRow(data))`）のみを変更し、trace_id/
+label/canonical termによる再lookupやResolver呼び出しは一切行わない
+（Source of Truthは引き続き実row自身の`_approvedDictResolution`の
+みで、Checkpoint 13 contract自体は無変更）。diffは新設helper関数
+1つ+呼び出し箇所1行+コメント更新のみ（+25/-4行）で、他の関数定義
+には一切触れていないことを`private_dictionary_p2a4_final_
+integration_verification.js`が構造的に検証する。
+
+**Resolver再実行なし/Graph構造不変:** node tapはprojectionのみで
+実Resolver呼び出しを増やさないこと、node/edge数・ID・score・
+relationPresentationが修正前後で不変であることを、既存Checkpoint
+7 Matching Integration suite（215/0、無改変のまま再実行）と
+Checkpoint 13 Provenance Projection suite（112/0、無改変のまま
+再実行）で確認した。
+
+**Browser evidence（R2で完成）:** 実Chromium上で、identity選択
+（`node.data('id')`、index/label/canonical-text禁止）した
+EXACT_CANONICAL/APPROVED_ALIASノードのGraph detail panelに、実際の
+「辞書解決 (Dictionary Resolution)」ラベル・正規語/別名/未登録/
+競合集計・実Snapshot identity（snapshot_id/version）・
+「正規語完全一致 (Exact Canonical)」/「承認済み別名 (Approved
+Alias)」表示が実DOM文字列として現れることを確認。あわせて、test
+harnessのみでreal row（non-enumerable descriptorを保持したまま
+安全に差し替え）の`_approvedDictResolution`をmalformed化した
+Checkpoint 13-R1 "AN"契約ケース（hostile annotationが有効な
+sibling annotationと混在）を用い、Detail・Graph双方で実際に
+「辞書照合情報を表示できません (Dictionary provenance
+unavailable)」へfail-safeし、有効annotationのpartial表示・
+Snapshot identityのpartial表示・native Error/stackのleakageが
+一切ないことを確認した（旧malformed Project Pin fileテストは
+「Project Pin sanitized error smoke」として分離・再分類し、
+provenance closureのカウントには含めない）。
+
+**既存Checkpoint 14 suiteへの構造的・恒久的な影響（弱体化ではない）:**
+`private_dictionary_ui_terminology_convergence_verification.js`
+（CLOSED済み、固定pre-head `41a38c156097d4f449dae140da0469b
+22f947ec9`）自身の保護ファイルdiff監査項目「AG/AH: matching tool
+HTML はCheckpoint 14固定pre-headに対しzero diff」は、本R2の
+明示的に許可された例外により、今後恒久的に1件のみFAILし続ける
+（他124件のHUMAN-01/02/03機能assertionはすべてPASSのまま）。
+これはCP14自体の機能への回帰ではなく、「CP14以降matching tool
+HTMLは一切変更されない」という、CP14時点では正しかった前提が、
+後続checkpointでの正式に許可された例外により恒久的に成立しなく
+なったことを示す構造的帰結である。既存case変更・弱体化禁止の
+方針に従い、CLOSED済みのCP14 suite自体は変更しない。
+
+**Production freeze例外scope:** 今回のみ、
+`tools/json_ab_trace_matching_tool_v12.1.15.html` の上記
+Graph provenance接続修正のみをproduction freeze例外として許可。
+10個のpure core、P2-A3 production UI、comparison review core、
+quantity sidecar、既存artifact schemaは引き続き無変更
+（diff=0、確認済み）。

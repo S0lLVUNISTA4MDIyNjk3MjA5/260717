@@ -10497,6 +10497,26 @@ ${h.name}`, type:'requirement', detail:srcA };
   // 選択ノード詳細：既定は要約表示（生JSONの丸ごと展開を避ける）。
   // 「元の生データを表示」チェック時のみ従来どおりJSON全体を表示する。
   let lastSelectedGraphElement = null;
+  // P2-A4 Checkpoint 15-A R2 (production defect remediation): a Graph node's
+  // `detail` payload is, depending on which buildGraphElements() binding is
+  // active at render time, either the raw sysList/plmList row itself
+  // (buildGraphElements() defined near line 10311; detail:item), or a
+  // wrapper object `{ source: row, presentation }` built by the Trace
+  // Comparison Review overlay's buildGraphElements() (defined later in this
+  // file; the implementation actually active for standard, non-overview
+  // Graph rendering). The dictionary resolution sidecar
+  // (_approvedDictResolution) is always attached to the real row itself,
+  // never to the wrapper, so this helper resolves a node's `detail` payload
+  // to whichever of the two IS that real row - a pure shape check over a
+  // reference this function already holds. It never looks a row up by id,
+  // label, or canonical text, never touches the Resolver, and never
+  // re-derives provenance itself (see S32 R2 addendum for the Graph node
+  // data-shape investigation this is based on).
+  function graphNodeProvenanceSourceRow(data) {
+    const detail = data && data.detail;
+    if (detail && typeof detail === 'object' && detail.source && typeof detail.source === 'object') return detail.source;
+    return detail;
+  }
   function formatNodeDetail(data) {
     const lines = [];
     if (data.fullLabel) { lines.push(data.fullLabel); lines.push(''); }
@@ -10522,11 +10542,12 @@ ${h.name}`, type:'requirement', detail:srcA };
     if (src.review_status) lines.push(`確認状態: ${src.review_status}`);
     // P2-A4 Checkpoint 13 (S30.8): Dictionary Resolution provenance, read
     // only from the existing row sidecar via the single projection helper -
-    // never a Graph-side Resolver re-run. data.detail IS the original
-    // sysList/plmList row reference (buildGraphElements[Plm](), unchanged),
-    // so no id lookup is needed here.
+    // never a Graph-side Resolver re-run. graphNodeProvenanceSourceRow()
+    // (R2) resolves data.detail to the real row regardless of which of the
+    // two currently-reachable Graph node data shapes produced it - it is
+    // still never an id/label/canonical-text lookup.
     if (data.type === 'requirement' || data.type === 'part') {
-      const provenance = projectApprovedDictionaryResolutionProvenance(data.detail);
+      const provenance = projectApprovedDictionaryResolutionProvenance(graphNodeProvenanceSourceRow(data));
       lines.push('');
       lines.push(`辞書解決 (Dictionary Resolution): ${approvedDictProvenanceCompactSummary(provenance)}`);
       if (provenance.available && provenance.snapshotBinding) {
