@@ -704,6 +704,7 @@ async function main() {
     { label: 'Checkpoint 14 UI Terminology Convergence', file: 'private_dictionary_ui_terminology_convergence_verification.js', expected: 126, timeout: 180000 },
     { label: 'Checkpoint 15-A R4 Graph provenance source-row (BLOCKING-01)', file: 'private_dictionary_p2a4_graph_provenance_source_row_verification.js', expected: 16 },
     { label: 'Checkpoint 15-A R4 authorized-diff guard self-test', file: 'private_dictionary_p2a4_authorized_matching_diff_guard_selftest.js', expected: 8 },
+    { label: 'Checkpoint 15-A R5 Dictionary Snapshot file adapter (MAJOR-01)', file: 'private_dictionary_p2a4_dict_snapshot_file_adapter_browser_verification.js', expected: 28, timeout: 180000 },
     { label: 'Checkpoint 15-A Browser closure (matching tool + P2-A3)', file: 'private_dictionary_p2a4_matching_tool_browser_closure_verification.js', expected: null, timeout: 180000 }
   ];
   const COMPARISON_REVIEW_SUITE = { label: 'Comparison review core', file: path.join('..', '..', 'design_notes', 'trace_comparison_review_state_core_verification.js'), expected: null };
@@ -829,7 +830,7 @@ async function main() {
   catch (e) { matchingDiff = `ERROR: ${e.message}`; }
   const matchingDiffAddedLines = (matchingDiff.match(/^\+(?!\+\+)/gm) || []).length;
   const matchingDiffRemovedLines = (matchingDiff.match(/^-(?!--)/gm) || []).length;
-  assert(matchingToolDiffIsExactlyAuthorized(matchingDiff), `Protected (R2/R4 exception, strict exact-hunk guard): tools/json_ab_trace_matching_tool_v12.1.15.html diff against pre-head is confined EXACTLY to the two authorized Graph provenance source-row hunks (graphNodeProvenanceSourceRow/isGraphNodeWrapperPresentation definition + formatNodeDetail() call site) - +${matchingDiffAddedLines}/-${matchingDiffRemovedLines} lines, content-exact hunk-body match, no other hunk permitted`);
+  assert(matchingToolDiffIsExactlyAuthorized(matchingDiff), `Protected (R2/R4/R5 exception, strict exact-hunk guard): tools/json_ab_trace_matching_tool_v12.1.15.html diff against pre-head is confined EXACTLY to the four authorized hunks (graphNodeProvenanceSourceRow/isGraphNodeWrapperPresentation definition + formatNodeDetail() call site [R2/R4]; Dictionary Snapshot browser File Adapter markup + JS logic [R5]) - +${matchingDiffAddedLines}/-${matchingDiffRemovedLines} lines, content-exact hunk-body match, no other hunk permitted`);
 
   const comparisonReviewFiles = ['trace_comparison_review_state_core.js', 'trace_comparison_review_session_core.js', 'trace_comparison_review_projection_core.js', 'trace_comparison_review_export_core.js'];
   let reviewCoreClean = true; const dirtyReview = [];
@@ -859,6 +860,7 @@ async function main() {
   const COVERAGE_MANIFEST = [
     ['Dictionary layer merge/provenance (P2-A1 Learning core)', 'P2-A1', 'private_dictionary_learning_core_verification.js', resultFor('private_dictionary_learning_core_verification.js')],
     ['Graph node provenance source-row shape discriminator (BLOCKING-01)', 'CP15-A R4', 'private_dictionary_p2a4_graph_provenance_source_row_verification.js', resultFor('private_dictionary_p2a4_graph_provenance_source_row_verification.js')],
+    ['Dictionary Snapshot browser File Adapter (Human Acceptance MAJOR-01)', 'CP15-A R5', 'private_dictionary_p2a4_dict_snapshot_file_adapter_browser_verification.js', resultFor('private_dictionary_p2a4_dict_snapshot_file_adapter_browser_verification.js')],
     ['Proxy / hostile getter root inputs', 'CP7/CP9/CP10/CP11/CP13', 'private_dictionary_matching_integration_verification.js, private_dictionary_snapshot_activation_core_verification.js, private_dictionary_project_pin_matching_runtime_verification.js, private_dictionary_project_snapshot_pin_persistence_core_verification.js, private_dictionary_resolution_provenance_projection_verification.js', [resultFor('private_dictionary_matching_integration_verification.js'), resultFor('private_dictionary_snapshot_activation_core_verification.js'), resultFor('private_dictionary_project_pin_matching_runtime_verification.js'), resultFor('private_dictionary_project_snapshot_pin_persistence_core_verification.js'), resultFor('private_dictionary_resolution_provenance_projection_verification.js')].join('/')],
     ['Stateful/accessor descriptor inputs', 'CP10', 'private_dictionary_project_pin_matching_runtime_verification.js', resultFor('private_dictionary_project_pin_matching_runtime_verification.js')],
     ['Mutation-after-call (input aliasing)', 'CP8/CP5', 'private_dictionary_review_promotion_adapter_core_verification.js, private_dictionary_promotion_snapshot_composition_core_verification.js', [resultFor('private_dictionary_review_promotion_adapter_core_verification.js'), resultFor('private_dictionary_promotion_snapshot_composition_core_verification.js')].join('/')],

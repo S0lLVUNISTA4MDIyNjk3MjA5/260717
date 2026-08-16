@@ -390,7 +390,7 @@ function compatibilityChecks() {
   try {
     matchingDiff = execSync(`git diff ${PRE_HEAD_SHA} -- tools/json_ab_trace_matching_tool_v12.1.15.html`, { cwd: REPO_ROOT }).toString();
   } catch (e) { matchingDiff = `ERROR: ${e.message}`; }
-  assert(matchingToolDiffIsExactlyAuthorized(matchingDiff), 'AG/AH tools/json_ab_trace_matching_tool_v12.1.15.html diff against pre-head is either empty or confined EXACTLY to the two authorized Graph provenance source-row hunks (strict exact-hunk-body guard) - never an unexplained or unbounded change to this protected file');
+  assert(matchingToolDiffIsExactlyAuthorized(matchingDiff), 'AG/AH tools/json_ab_trace_matching_tool_v12.1.15.html diff against pre-head is either empty or confined EXACTLY to the authorized hunks (strict exact-hunk-body guard: Graph provenance source-row [R2/R4] + Dictionary Snapshot browser File Adapter [R5]) - never an unexplained or unbounded change to this protected file');
 
   // AI/AJ: protected pure cores + comparison review core are byte-for-byte unchanged.
   const protectedCoreFiles = [

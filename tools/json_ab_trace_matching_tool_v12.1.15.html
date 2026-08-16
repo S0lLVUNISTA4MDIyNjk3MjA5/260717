@@ -495,6 +495,32 @@
         </div>
       </div>
 
+      <!-- P2-A4 Checkpoint 15-A MAJOR-01 (Human Acceptance blocker
+           remediation): minimal browser adapter so a user can explicitly
+           select a Snapshot Wrapper JSON file and set it into the matching
+           session. This delegates entirely to the EXISTING, unmodified
+           Checkpoint 7 contract (globalThis.PrivateDictionaryMatchingSession
+           .setSnapshot(), i.e. setApprovedDictionarySnapshotForMatching()) -
+           no new validation, no automatic/latest/newest lookup, no
+           Activation Record/Project config search, no localStorage/
+           sessionStorage/IndexedDB/network persistence. The file's parsed
+           content is never trusted beyond being passed, as-is, to the real
+           Loader/Resolver-backed setSnapshot() - this UI performs no
+           Snapshot validation of its own. -->
+      <div class="profile-card" id="dictSnapshotFilePanel" style="margin-bottom:12px;">
+        <div class="profile-grid">
+          <div>
+            <label style="margin-top:0;">辞書Snapshot (Dictionary Snapshot)</label>
+            <input type="file" id="dictSnapshotFileInput" accept=".json,application/json" />
+          </div>
+          <div class="profile-hint">選択したSnapshot Wrapperファイルを、既存のsetSnapshot()へそのまま渡します（自動探索・自動保存は行いません）。</div>
+        </div>
+        <div class="btn-row" style="margin-top:10px;">
+          <button id="dictSnapshotSetBtn" class="secondary" type="button" disabled>📌 辞書Snapshotを照合セッションに設定 (Set Dictionary Snapshot)</button>
+        </div>
+        <div id="dictSnapshotStatus" class="field-hint" role="status">未設定 (Not set)</div>
+      </div>
+
       <!-- P2-A4 Checkpoint 12: Private Dictionary Project Snapshot Pin
            browser File Adapter（S29）。File選択だけでは照合セッションへ
            bindしない - 「照合セッションに適用」を明示クリックした場合のみ
@@ -4028,6 +4054,82 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       getStatus: approvedDictionaryMatchingStatus
     });
   }
+
+  /* P2-A4 Checkpoint 15-A MAJOR-01 (Human Acceptance blocker remediation):
+     Dictionary Snapshot browser File Adapter. Mirrors the Project Pin file
+     adapter's own separation of concerns (§29) - file SELECTION never binds
+     anything by itself; only the explicit "設定" button click calls the
+     real, unmodified globalThis.PrivateDictionaryMatchingSession.setSnapshot()
+     (Checkpoint 7 contract). No Snapshot validation is reimplemented here -
+     a parse failure on the selected file is reported directly (nothing valid
+     to submit); a structurally-valid-but-semantically-invalid Snapshot is
+     rejected by the real Loader/Resolver-backed setSnapshot() itself, whose
+     already-sanitized status/lastErrorCode this panel only displays. No
+     localStorage/sessionStorage/IndexedDB/network/Activation Record/
+     latest-newest lookup of any kind. */
+
+  let dictSnapshotFileSelectedContent = null; // parsed JSON from the explicitly-selected file only; never trusted beyond being passed to setSnapshot() as-is.
+
+  const DICT_SNAPSHOT_ERROR_DISPLAY = Object.freeze({
+    APPROVED_DICT_RESOLVER_UNAVAILABLE: 'このSnapshotを検証できませんでした（内部コンポーネント未初期化）',
+    APPROVED_DICT_RESOLUTION_FAILED: 'Snapshotの検証に失敗しました',
+    APPROVED_DICT_BINDING_MISMATCH: 'Snapshotの内容が壊れているか、形式が正しくありません',
+    APPROVED_DICT_SESSION_CHANGED: '設定中に別の操作が行われたため、この設定は反映されませんでした'
+  });
+  function dictSnapshotErrorDisplayMessage(code) {
+    return DICT_SNAPSHOT_ERROR_DISPLAY[code] || 'Snapshotファイルの形式が正しくありません';
+  }
+
+  // Never uses innerHTML - snapshot_id/dictionary_id etc. are already-
+  // sanitized identity fields (never raw dictionary entries/canonical
+  // terms/aliases/reviewer notes/payload), and textContent additionally
+  // guarantees no markup injection regardless.
+  function renderDictSnapshotStatus() {
+    const el = $('dictSnapshotStatus');
+    if (!el) return;
+    const status = approvedDictionaryMatchingStatus();
+    if (status.active) {
+      const b = status.snapshotBinding || {};
+      el.textContent = `有効 (Active) / snapshot_id: ${b.snapshot_id || ''} / snapshot_version: ${b.snapshot_version ?? ''} / dictionary_id: ${b.dictionary_id || ''} / dictionary_version: ${b.dictionary_version || ''} / scope: ${b.scope || ''}`;
+    } else if (status.lastErrorCode) {
+      el.textContent = dictSnapshotErrorDisplayMessage(status.lastErrorCode);
+    } else {
+      el.textContent = '未設定 (Not set)';
+    }
+  }
+
+  $('dictSnapshotFileInput')?.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    dictSnapshotFileSelectedContent = null;
+    const setBtn = $('dictSnapshotSetBtn');
+    if (setBtn) setBtn.disabled = true;
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        dictSnapshotFileSelectedContent = JSON.parse(String(reader.result));
+        if (setBtn) setBtn.disabled = false;
+      } catch (_err) {
+        // Not valid JSON - nothing to submit; setSnapshot() is never called
+        // with unparseable content (§F: mere file selection, valid or not,
+        // never changes the active Snapshot - only the explicit "設定"
+        // click does; this only reports that the selected file cannot be
+        // submitted at all, without touching approvedDictionaryRuntime).
+        dictSnapshotFileSelectedContent = null;
+        const el = $('dictSnapshotStatus');
+        if (el) el.textContent = 'ファイル形式が正しくありません (JSON形式ではありません)';
+      }
+    };
+    reader.onerror = () => { dictSnapshotFileSelectedContent = null; };
+    reader.readAsText(file);
+  });
+  $('dictSnapshotSetBtn')?.addEventListener('click', async () => {
+    if (!dictSnapshotFileSelectedContent) return;
+    await globalThis.PrivateDictionaryMatchingSession.setSnapshot(dictSnapshotFileSelectedContent);
+    renderDictSnapshotStatus();
+    renderProjectPinFileStatus(); // Project Pin panel's own "matches current Snapshot" display depends on runtime state that may have just changed.
+  });
+  renderDictSnapshotStatus();
 
   /* ═══════════════════════════════════════════════════════════════════════
      P2-A4 Checkpoint 12 (design doc S29): Project Snapshot Pin browser File

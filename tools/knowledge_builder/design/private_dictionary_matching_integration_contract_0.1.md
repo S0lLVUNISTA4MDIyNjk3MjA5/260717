@@ -4782,3 +4782,117 @@ MAJOR-03）すべてに対し完了しているが、この判定はCodex自身�
 再監査（RE-AUDIT）を経ていない。したがって本ラウンドの完了は
 「Human Acceptance: PENDING」かつ「Codex: RE-AUDIT REQUIRED」で
 あり、開発者側からCLOSED判定を行うことはしない。
+
+### S32.18 Checkpoint 15-A R5追補: Human Acceptance Blocker Remediation
+（MAJOR-01: Initial Snapshot Activation UI）
+
+R4完了後、Codex Cloud Independent Browser AuditはPASS
+（BLOCKING 0・MAJOR 0・MINOR 0）となったが、続くHuman Acceptance
+Package Preparation作業の過程で、開発者ではない受入担当者が
+production UIだけを操作してP2-A4を受け入れることを妨げる
+MANUAL BLOCKERが新たに確認された。R5はこの是正のみを扱う。
+
+**発見された問題（MANUAL BLOCKER）:** fixed SHA
+`b452c9c6a16cff9bab9270a5830686aae428871d`時点のmatching tool HTML
+には、Dictionary Snapshotを「未設定の状態から」照合セッションへ
+設定するuser-facing操作経路が一切存在しなかった。
+`globalThis.PrivateDictionaryMatchingSession.setSnapshot()`/
+`.setProjectPin()`はCheckpoint 10（§S26）で導入された、host injection
+用のfrozen public APIとして実装済みだったが、画面上のどのボタンの
+click handlerからも呼び出されていなかった（addEventListenerの
+grep調査で確認）。また、既存のProject Pin Save/Load/Applyボタン
+（Checkpoint 12）は、Snapshotを新規に有効化する経路ではなく、
+「既に有効化されている現在のSnapshotのbindingと、読み込んだPin
+ファイルのbindingが一致するかを確認するだけ」の機能であることを、
+実際にSnapshot Aが有効な状態でSnapshot B用のPinを読み込む実験で
+確認した（「このProject用の設定ファイルではないか、現在の
+Snapshotと一致しません」で即座に拒否され、Loadの時点でVALIDATED
+にすらならない）。したがって、開発環境の外側（Windows x64 Chrome/
+Edge実機）で非開発者がF12開発者ツールを使わずにHuman Acceptance
+Manual 2章C以降を進めることは、この修正前は不可能だった。
+
+**是正方針（最小限のbrowser adapter、既存contractは一切変更しない）:**
+新しい「辞書Snapshot (Dictionary Snapshot)」パネルを、既存の
+Project Pinパネルの直前に追加した。構成は指示どおり最小限:
+
+- `<input type="file" id="dictSnapshotFileInput">`: Snapshot Wrapper
+  JSONファイルの選択のみ。選択しただけでは何もbindしない。
+- `<button id="dictSnapshotSetBtn">`: 「辞書Snapshotを照合セッション
+  に設定 (Set Dictionary Snapshot)」。選択済みファイルの内容
+  （`JSON.parse()`しただけの、UI側では一切検証していない生オブジェ
+  クト）を、そのまま既存の
+  `globalThis.PrivateDictionaryMatchingSession.setSnapshot()`
+  （実体は無変更の`setApprovedDictionarySnapshotForMatching()`、
+  Checkpoint 7 contract）へ渡すだけ。Snapshotの意味論的な検証
+  （schema/整合性ハッシュ/Resolver経由のterms:[]検証等）はUI側で
+  一切再実装しておらず、既存の実Loader/Resolver-backed
+  fail-closed経路にすべて委譲している。
+- `<div id="dictSnapshotStatus">`: `approvedDictionaryMatchingStatus()`
+  が返す、既にsanitizeされたsnapshot_binding
+  （snapshot_id/snapshot_version/dictionary_id/dictionary_version/
+  scope）のみを`textContent`で表示（`innerHTML`は一切使用せず、
+  XSS経路も排除）。辞書エントリ・canonical term一覧・alias一覧・
+  reviewer note・raw payloadはこの画面のどこにも表示しない。
+
+**明示操作のみ・自動化なし:** ファイル選択イベント（`change`）は
+`dictSnapshotSetBtn`を有効化するだけで、`setSnapshot()`は一切
+呼び出さない。実際にSnapshot設定を行うのは`dictSnapshotSetBtn`の
+`click`イベントのみ。latest/newest自動選択、Activation Record/
+Project config自動探索、localStorage/sessionStorage/IndexedDB/
+networkへの自動保存はいずれも実装しておらず、ページ再読込で
+Snapshot設定が失われることを実Chromiumで確認済み（R5検証M/H項目）。
+
+**Invalid Snapshotの扱い:** 構造的に不正なSnapshot Wrapper
+（例: `{}`や無関係なオブジェクト）は、既存の実`setSnapshot()`
+fail-closed経路がそのまま`APPROVED_DICT_RESOLUTION_FAILED`等の
+既存allowlistコードで拒否し、本パネルはこれをnative Error
+message/stackを一切含まない、既存のsanitizeパターンと同型の
+日本語メッセージへ変換して表示するのみ（`DICT_SNAPSHOT_ERROR_
+DISPLAY`は`APPROVED_DICT_ERROR_CODE_ALLOWLIST`の4コードのみを
+対象とし、それ以外は既存のgeneric fallbackメッセージへ丸める）。
+JSON自体として解析できないファイル（`JSON.parse()`失敗）は、
+そもそも`setSnapshot()`へ何も渡さず、別の安全なメッセージ
+（「ファイル形式が正しくありません」）を表示するだけで、native
+`SyntaxError`は一切露出しない。
+
+**Snapshot A/B切替:** 既にSnapshot Aが有効な状態で、別のSnapshot
+Wrapperファイルを選択して`dictSnapshotSetBtn`をクリックすると、
+`setSnapshot()`の既存contract（再呼び出しは常に無条件で新しい
+Snapshotをcommitする、Checkpoint 10-R1のrevision機構は無変更）
+により、Snapshot Bへ切り替わる。既に描画済みの行の
+`_approvedDictResolution` provenance（Checkpoint 13 contract）は、
+この切替によって一切再計算・再表示されない（実Chromiumで、
+切替前後のREQ-1行のformatNodeDetail()出力がbyte-for-byte一致する
+ことを確認済み）。切替後に新たに実行した照合のみが、新しい
+Snapshot Bを実際に使用することも確認済み。
+
+**Production変更scope（R5）:** 今回のR5でproduction変更が許可
+されたのは`tools/json_ab_trace_matching_tool_v12.1.15.html`への
+上記browser adapterの追加（HTML markup 1箇所+JS logic 1箇所、
+既存関数・既存contractは一切変更しない純粋な追加）のみ。
+`private_dictionary_p2a4_authorized_matching_diff_guard.js`の
+`AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS`をHUNK_3/HUNK_4として拡張し、
+R2/R4の既存2 hunkと合わせて計4 hunkの厳密exact-hunk-body一致で
+機械的に検証している（他のいずれか1行でも変更があれば、この
+guard自体がFAILする設計はR4のまま維持）。pure core・Resolver・
+Project Pin contract・Snapshot schemaはすべて無変更（diff=0、
+確認済み）。
+
+**検証:** 新規
+`private_dictionary_p2a4_dict_snapshot_file_adapter_browser_
+verification.js`（実Chromium、28件PASS）が、指示のA〜M全項目
+（未設定からのUI操作のみでのSnapshot A設定、formal identity表示、
+invalid Snapshot拒否、native Error非露出、Snapshot A→B切替、
+ファイル選択のみでは切り替わらないこと、latest/newest自動探索
+なしの静的・動的両確認、reload後の非永続化確認、Project Pin
+Save/Load/Applyの継続動作、Snapshot B用Pinの誤適用拒否維持、
+旧row provenance不変、新matchingが新Snapshotを使用すること）を
+実際のクリック・ファイル選択のみで証明している。
+
+**本ラウンドの終着点:** R5完了時点で、Human Acceptance Package
+Preparationで発見されたMANUAL BLOCKER（Q5、およびQ3の根本原因）は
+是正されたが、production SHAが変わったため、この判定はCodex
+Independent Browser Auditの再監査を経ていない。したがって本
+ラウンドの完了も「Human Acceptance: PENDING」かつ「Codex Cloud
+re-audit: REQUIRED」であり、開発者側からHuman Acceptanceへの移行
+やCLOSED判定を行うことはしない。
