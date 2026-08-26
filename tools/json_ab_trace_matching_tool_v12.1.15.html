@@ -57,6 +57,8 @@
   <script src="https://unpkg.com/tiny-segmenter@0.2.0/dist/tiny-segmenter-0.2.0.js" onerror="window.__tsLoadFailed=true"></script>
   <script src="./generated/quantity_annotation_schema_v1.browser.js"></script>
   <script src="./quantity_sidecar_binding_core.js"></script>
+  <!-- L3-1 (staged, not yet applied to the tracked protected file - see checkpoint report) -->
+  <script src="./canonical_matching_field_registry_core.js"></script>
   <script src="./generated/trace_comparison_schema_v2.browser.js"></script>
   <script src="./design_notes/json_schema_minivalidator.js"></script>
   <script src="./design_notes/trace_comparison_record_set_validator.js"></script>
@@ -5102,6 +5104,8 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     return best.key;
   }
 
+  let lastAutoFieldPairingDiagnostics = null;
+
   function defaultKeyPairs() {
     const pairs = [];
     const add = (sysField, plmField, method) => {
@@ -5114,6 +5118,17 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
 
     // V11: 選択プロファイルの推奨ペアを最優先する。ただし実JSONに存在するキーだけを採用する。
     profilePreferredPairs().forEach(p => add(p.sysField, p.plmField, p.method));
+
+    if (globalThis.CanonicalMatchingFieldRegistry) {
+      const sysRows = rowsForSchema('sys');
+      const plmRows = rowsForSchema('plm');
+      const suggestion = globalThis.CanonicalMatchingFieldRegistry.suggestSafeAutoFieldPairing(sysRows, plmRows);
+      lastAutoFieldPairingDiagnostics = suggestion;
+      if (!suggestion.failedClosed) suggestion.pairs.forEach(p => add(p.sysField, p.plmField, p.method));
+      return pairs;
+    }
+    console.warn('CanonicalMatchingFieldRegistry not loaded - falling back to legacy unsafe auto field inference (see L3-1 checkpoint notes).');
+
     if (pairs.length >= 2 || activeTraceProfile().id !== 'generic') {
       // プロファイルで最低1件取れた場合でも、補助候補を1〜2件追加する。
       const sysTextForSupplement = preferredInternalTraceField('sys') || chooseJsonField('sys', 'sysMatchText') || availableJsonKeys('sys')[0] || '';
@@ -6467,9 +6482,13 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       invalidateMatchCache();
       matchLogic.keyPairs = defaultKeyPairs();
       const detail = invalid.map(p => `${p.sysField || '（未設定）'}→${p.plmField || '（未設定）'}`).join(' / ');
-      keyPairReconcileNotice = invalid.length
-        ? `入力列が変わったため旧照合ペアを再推定しました: ${detail}`
-        : '入力列から照合ペアを推定しました。';
+      if (!matchLogic.keyPairs.length) {
+        keyPairReconcileNotice = '安全に自動推定できる照合列が見つかりませんでした。「＋ 照合ペアを追加」から手動で設定してください。';
+      } else {
+        keyPairReconcileNotice = invalid.length
+          ? `入力列が変わったため旧照合ペアを再推定しました: ${detail}`
+          : '入力列から照合ペアを推定しました。';
+      }
       return { changed:true, invalid };
     }
     keyPairReconcileNotice = '';

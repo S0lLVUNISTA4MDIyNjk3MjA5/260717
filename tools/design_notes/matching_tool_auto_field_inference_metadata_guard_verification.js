@@ -17,7 +17,7 @@
  *        Used once, interactively, to freeze evidence of the original failure - not part of the
  *        normal `node ...verification.js` regression run.
  *
- * Two scenarios, matching L3-1 task §1 and §15:
+ * Three scenarios, matching L3-1 task §1/§15 and L3-1-FINAL task §2:
  *   A. Real-world reproduction: the SAME real "照合用JSON" trace file (produced by the actual PDF
  *      tool, via Playwright, from a real generated PDF - see the architecture assessment's
  *      cross-format experiment) loaded on both System and PLM sides. This is the literal scenario
@@ -26,6 +26,15 @@
  *      differs (Pump/Valve/Sensor vs Motor/Breaker/Controller) but `id_scheme_version` is identical
  *      on every record on both sides. Proves the fix is not a literal-field-name patch but closes
  *      the whole defect class (any constant/near-constant technical field, not just this one name).
+ *   C. Hunk-4 fail-closed branch closure (L3-1-FINAL task §2): both sides load successfully but
+ *      EVERY field on both sides is technical/identity/provenance metadata (no trace_text/
+ *      trace_title/description-shaped field at all) - the one input shape where
+ *      suggestSafeAutoFieldPairing() has no eligible field on either side and defaultKeyPairs()
+ *      genuinely returns an empty array, which is the only way
+ *      reconcileKeyPairsForLoadedInput()'s new fail-closed status-message branch (Hunk 4) can
+ *      execute at all. Scenarios A and B never reach this branch (both always have a usable
+ *      trace_text/trace_title field), which is why this scenario exists as a separate, dedicated
+ *      case rather than an assertion added to A or B.
  *
  * Usage: node matching_tool_auto_field_inference_metadata_guard_verification.js [--html <path>] [--expect-bug]
  *
@@ -90,6 +99,22 @@ function metadataCrossProductFixture(side) {
   };
 }
 
+// Scenario C fixture: every field on every record, both sides, is technical/identity/provenance
+// metadata - no trace_text/trace_title/description-shaped field anywhere. This is the one shape
+// that leaves ZERO auto-eligible fields on either side, so suggestSafeAutoFieldPairing() must fail
+// closed and defaultKeyPairs() must return an empty array (the only way the Hunk-4 branch fires).
+function metadataOnlyFixture(side) {
+  return {
+    trace_format: 'chapter-section-trace-v1', schema_version: '1.2',
+    _trace_records: [0, 1, 2].map(i => ({
+      trace_id: `${side}-meta-${i}`, parent_id: 'sec-1', stable_key: `${side}-key-${i}`,
+      content_hash: `hash-${side}-${i}`, block_type: 'table_row', trace_category: 'table_row',
+      source_section_id: 'sec-1', id_scheme_version: 'stable-uid-id-v2', schema_version: '1.2',
+      review_status: 'unreviewed', ai_reviewed: false,
+    })),
+  };
+}
+
 async function writeTmpJson(obj, name) {
   const p = path.join('/tmp', name);
   fs.writeFileSync(p, JSON.stringify(obj, null, 2));
@@ -110,10 +135,11 @@ async function loadAndMatch(page, sysPath, plmPath) {
     const keyPairs = (typeof matchLogic !== 'undefined' && matchLogic.keyPairs) ? JSON.parse(JSON.stringify(matchLogic.keyPairs)) : [];
     const rows = (typeof traceMatrixRows !== 'undefined' && traceMatrixRows) ? traceMatrixRows.map(r => {
       const a = r._autoRow || r;
-      return { A_ID: a.A_ID, B_ID: a.B_ID, confidence: a.信頼度, method: a.方式, basis: a.根拠 };
+      return { A_ID: a.A_ID, B_ID: a.B_ID, confidence: a.信頼度, method: a.方式, basis: a.根拠, classification: a.分類 };
     }) : [];
     const diag = (typeof lastAutoFieldPairingDiagnostics !== 'undefined') ? lastAutoFieldPairingDiagnostics : null;
-    return { keyPairs, rows, diag };
+    const reconcileNotice = (typeof keyPairReconcileNotice !== 'undefined') ? keyPairReconcileNotice : null;
+    return { keyPairs, rows, diag, reconcileNotice };
   });
 }
 
@@ -188,6 +214,45 @@ async function main() {
       const hasNonMetadataPair = result.keyPairs.some(kp => kp.sysField !== 'id_scheme_version' && kp.plmField !== 'id_scheme_version');
       check('B. a non-metadata field pair was still offered (guard does not just blank everything)', hasNonMetadataPair, JSON.stringify(result.keyPairs));
     }
+    await page.close();
+  }
+
+  // ---- Scenario C: Hunk-4 fail-closed branch closure (L3-1-FINAL task §2) ----------------------
+  if (!EXPECT_BUG) {
+    const page = await browser.newPage();
+    page.on('dialog', async d => { await d.accept(); });
+    const sysPath = await writeTmpJson(metadataOnlyFixture('sys'), 'l3_1_scenario_c_sys.json');
+    const plmPath = await writeTmpJson(metadataOnlyFixture('plm'), 'l3_1_scenario_c_plm.json');
+    const result = await loadAndMatch(page, sysPath, plmPath);
+    console.log('Scenario C keyPairs:', JSON.stringify(result.keyPairs));
+    console.log('Scenario C reconcileNotice:', JSON.stringify(result.reconcileNotice));
+    console.log('Scenario C rows:', JSON.stringify(result.rows));
+    console.log('Scenario C diagnostics:', result.diag ? JSON.stringify({ failedClosed: result.diag.failedClosed, reason: result.diag.reason }) : 'n/a');
+
+    // A. keyPairs.length === 0
+    check('C-A. auto keyPairs is empty (no field pair was inferred at all)', result.keyPairs.length === 0, JSON.stringify(result.keyPairs));
+
+    // B. No technical/metadata pair is selected.
+    const METADATA_FIELD_NAMES = ['trace_id', 'parent_id', 'stable_key', 'content_hash', 'block_type', 'trace_category', 'source_section_id', 'id_scheme_version', 'schema_version', 'review_status', 'ai_reviewed'];
+    const anyMetadataPair = result.keyPairs.some(kp => METADATA_FIELD_NAMES.includes(kp.sysField) || METADATA_FIELD_NAMES.includes(kp.plmField));
+    check('C-B. no technical/metadata field pair selected', anyMetadataPair === false, JSON.stringify(result.keyPairs));
+
+    // C. No legacy heuristic silently substitutes an unsafe pair (equivalent to A given the module
+    // is confirmed loaded - see the wired-check earlier in main() - so an empty result here can only
+    // mean the safe suggester itself failed closed, never that it was skipped in favor of the legacy
+    // path, which would have produced SOME pair given scoreFieldForRole() never returns nothing for
+    // a non-empty field set).
+    check('C-C. legacy heuristic did not silently substitute an unsafe pair (registry diagnostics confirm the safe path ran and failed closed)', !!result.diag && result.diag.failedClosed === true, result.diag ? JSON.stringify(result.diag.reason) : 'no diagnostics recorded');
+
+    // D. The Human-facing status message clearly tells the user that no safe automatic matching
+    // columns were found and manual configuration is required.
+    const expectedNotice = '安全に自動推定できる照合列が見つかりませんでした。「＋ 照合ペアを追加」から手動で設定してください。';
+    check('C-D. human-facing status message explicitly states no safe auto mapping was found and manual configuration is required', result.reconcileNotice === expectedNotice, JSON.stringify(result.reconcileNotice));
+
+    // E. No match rows are generated merely from technical/common metadata.
+    const confirmedMatchRows = result.rows.filter(r => r.classification === '対応あり');
+    check('C-E. zero confirmed match rows (classification 対応あり) generated from metadata-only records', confirmedMatchRows.length === 0, `${confirmedMatchRows.length} of ${result.rows.length} total rows`);
+
     await page.close();
   }
 

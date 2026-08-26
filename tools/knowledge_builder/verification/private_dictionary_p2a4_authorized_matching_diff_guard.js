@@ -132,7 +132,78 @@ const HUNK_2 = [
 const HUNK_3 = "         </div>\n       </div>\n \n+      <!-- P2-A4 Checkpoint 15-A MAJOR-01 (Human Acceptance blocker\n+           remediation): minimal browser adapter so a user can explicitly\n+           select a Snapshot Wrapper JSON file and set it into the matching\n+           session. This delegates entirely to the EXISTING, unmodified\n+           Checkpoint 7 contract (globalThis.PrivateDictionaryMatchingSession\n+           .setSnapshot(), i.e. setApprovedDictionarySnapshotForMatching()) -\n+           no new validation, no automatic/latest/newest lookup, no\n+           Activation Record/Project config search, no localStorage/\n+           sessionStorage/IndexedDB/network persistence. The file's parsed\n+           content is never trusted beyond being passed, as-is, to the real\n+           Loader/Resolver-backed setSnapshot() - this UI performs no\n+           Snapshot validation of its own. -->\n+      <div class=\"profile-card\" id=\"dictSnapshotFilePanel\" style=\"margin-bottom:12px;\">\n+        <div class=\"profile-grid\">\n+          <div>\n+            <label style=\"margin-top:0;\">辞書Snapshot (Dictionary Snapshot)</label>\n+            <input type=\"file\" id=\"dictSnapshotFileInput\" accept=\".json,application/json\" />\n+          </div>\n+          <div class=\"profile-hint\">選択したSnapshot Wrapperファイルを、既存のsetSnapshot()へそのまま渡します（自動探索・自動保存は行いません）。</div>\n+        </div>\n+        <div class=\"btn-row\" style=\"margin-top:10px;\">\n+          <button id=\"dictSnapshotSetBtn\" class=\"secondary\" type=\"button\" disabled>📌 辞書Snapshotを照合セッションに設定 (Set Dictionary Snapshot)</button>\n+        </div>\n+        <div id=\"dictSnapshotStatus\" class=\"field-hint\" role=\"status\">未設定 (Not set)</div>\n+      </div>\n+\n       <!-- P2-A4 Checkpoint 12: Private Dictionary Project Snapshot Pin\n            browser File Adapter（S29）。File選択だけでは照合セッションへ\n            bindしない - 「照合セッションに適用」を明示クリックした場合のみ";
 const HUNK_4 = "     });\n   }\n \n+  /* P2-A4 Checkpoint 15-A MAJOR-01 (Human Acceptance blocker remediation):\n+     Dictionary Snapshot browser File Adapter. Mirrors the Project Pin file\n+     adapter's own separation of concerns (§29) - file SELECTION never binds\n+     anything by itself; only the explicit \"設定\" button click calls the\n+     real, unmodified globalThis.PrivateDictionaryMatchingSession.setSnapshot()\n+     (Checkpoint 7 contract). No Snapshot validation is reimplemented here -\n+     a parse failure on the selected file is reported directly (nothing valid\n+     to submit); a structurally-valid-but-semantically-invalid Snapshot is\n+     rejected by the real Loader/Resolver-backed setSnapshot() itself, whose\n+     already-sanitized status/lastErrorCode this panel only displays. No\n+     localStorage/sessionStorage/IndexedDB/network/Activation Record/\n+     latest-newest lookup of any kind. */\n+\n+  let dictSnapshotFileSelectedContent = null; // parsed JSON from the explicitly-selected file only; never trusted beyond being passed to setSnapshot() as-is.\n+\n+  const DICT_SNAPSHOT_ERROR_DISPLAY = Object.freeze({\n+    APPROVED_DICT_RESOLVER_UNAVAILABLE: 'このSnapshotを検証できませんでした（内部コンポーネント未初期化）',\n+    APPROVED_DICT_RESOLUTION_FAILED: 'Snapshotの検証に失敗しました',\n+    APPROVED_DICT_BINDING_MISMATCH: 'Snapshotの内容が壊れているか、形式が正しくありません',\n+    APPROVED_DICT_SESSION_CHANGED: '設定中に別の操作が行われたため、この設定は反映されませんでした'\n+  });\n+  function dictSnapshotErrorDisplayMessage(code) {\n+    return DICT_SNAPSHOT_ERROR_DISPLAY[code] || 'Snapshotファイルの形式が正しくありません';\n+  }\n+\n+  // Never uses innerHTML - snapshot_id/dictionary_id etc. are already-\n+  // sanitized identity fields (never raw dictionary entries/canonical\n+  // terms/aliases/reviewer notes/payload), and textContent additionally\n+  // guarantees no markup injection regardless.\n+  function renderDictSnapshotStatus() {\n+    const el = $('dictSnapshotStatus');\n+    if (!el) return;\n+    const status = approvedDictionaryMatchingStatus();\n+    if (status.active) {\n+      const b = status.snapshotBinding || {};\n+      el.textContent = `有効 (Active) / snapshot_id: ${b.snapshot_id || ''} / snapshot_version: ${b.snapshot_version ?? ''} / dictionary_id: ${b.dictionary_id || ''} / dictionary_version: ${b.dictionary_version || ''} / scope: ${b.scope || ''}`;\n+    } else if (status.lastErrorCode) {\n+      el.textContent = dictSnapshotErrorDisplayMessage(status.lastErrorCode);\n+    } else {\n+      el.textContent = '未設定 (Not set)';\n+    }\n+  }\n+\n+  $('dictSnapshotFileInput')?.addEventListener('change', (e) => {\n+    const file = e.target.files && e.target.files[0];\n+    dictSnapshotFileSelectedContent = null;\n+    const setBtn = $('dictSnapshotSetBtn');\n+    if (setBtn) setBtn.disabled = true;\n+    if (!file) return;\n+    const reader = new FileReader();\n+    reader.onload = () => {\n+      try {\n+        dictSnapshotFileSelectedContent = JSON.parse(String(reader.result));\n+        if (setBtn) setBtn.disabled = false;\n+      } catch (_err) {\n+        // Not valid JSON - nothing to submit; setSnapshot() is never called\n+        // with unparseable content (§F: mere file selection, valid or not,\n+        // never changes the active Snapshot - only the explicit \"設定\"\n+        // click does; this only reports that the selected file cannot be\n+        // submitted at all, without touching approvedDictionaryRuntime).\n+        dictSnapshotFileSelectedContent = null;\n+        const el = $('dictSnapshotStatus');\n+        if (el) el.textContent = 'ファイル形式が正しくありません (JSON形式ではありません)';\n+      }\n+    };\n+    reader.onerror = () => { dictSnapshotFileSelectedContent = null; };\n+    reader.readAsText(file);\n+  });\n+  $('dictSnapshotSetBtn')?.addEventListener('click', async () => {\n+    if (!dictSnapshotFileSelectedContent) return;\n+    await globalThis.PrivateDictionaryMatchingSession.setSnapshot(dictSnapshotFileSelectedContent);\n+    renderDictSnapshotStatus();\n+    renderProjectPinFileStatus(); // Project Pin panel's own \"matches current Snapshot\" display depends on runtime state that may have just changed.\n+  });\n+  renderDictSnapshotStatus();\n+\n   /* ═══════════════════════════════════════════════════════════════════════\n      P2-A4 Checkpoint 12 (design doc S29): Project Snapshot Pin browser File\n      Adapter. Three separated responsibilities (S29.1):";
 
-const AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS = [HUNK_1, HUNK_2, HUNK_3, HUNK_4];
+// L3-1G: HUNK_5-HUNK_8 authorize exactly the Canonical Matching Field Registry safe-auto-pairing
+// wiring into defaultKeyPairs()/reconcileKeyPairsForLoadedInput() - see
+// tools/knowledge_builder/design/canonical_matching_input_contract_0.1.md and the L3-1/L3-1G/
+// L3-1-FINAL checkpoint reports for the full rationale and test evidence.
+
+// HUNK_5: script src addition for canonical_matching_field_registry_core.js.
+const HUNK_5 = [
+  '   <script src="https://unpkg.com/tiny-segmenter@0.2.0/dist/tiny-segmenter-0.2.0.js" onerror="window.__tsLoadFailed=true"></script>',
+  '   <script src="./generated/quantity_annotation_schema_v1.browser.js"></script>',
+  '   <script src="./quantity_sidecar_binding_core.js"></script>',
+  '+  <!-- L3-1 (staged, not yet applied to the tracked protected file - see checkpoint report) -->',
+  '+  <script src="./canonical_matching_field_registry_core.js"></script>',
+  '   <script src="./generated/trace_comparison_schema_v2.browser.js"></script>',
+  '   <script src="./design_notes/json_schema_minivalidator.js"></script>',
+  '   <script src="./design_notes/trace_comparison_record_set_validator.js"></script>'
+].join('\n');
+
+// HUNK_6: defaultKeyPairs(): lastAutoFieldPairingDiagnostics declaration.
+const HUNK_6 = [
+  '     return best.key;',
+  '   }',
+  ' ',
+  '+  let lastAutoFieldPairingDiagnostics = null;',
+  '+',
+  '   function defaultKeyPairs() {',
+  '     const pairs = [];',
+  '     const add = (sysField, plmField, method) => {'
+].join('\n');
+
+// HUNK_7: defaultKeyPairs(): guarded CanonicalMatchingFieldRegistry integration
+// (fail-closed, legacy heuristic preserved below as fallback).
+const HUNK_7 = [
+  ' ',
+  '     // V11: 選択プロファイルの推奨ペアを最優先する。ただし実JSONに存在するキーだけを採用する。',
+  '     profilePreferredPairs().forEach(p => add(p.sysField, p.plmField, p.method));',
+  '+',
+  '+    if (globalThis.CanonicalMatchingFieldRegistry) {',
+  '+      const sysRows = rowsForSchema(\'sys\');',
+  '+      const plmRows = rowsForSchema(\'plm\');',
+  '+      const suggestion = globalThis.CanonicalMatchingFieldRegistry.suggestSafeAutoFieldPairing(sysRows, plmRows);',
+  '+      lastAutoFieldPairingDiagnostics = suggestion;',
+  '+      if (!suggestion.failedClosed) suggestion.pairs.forEach(p => add(p.sysField, p.plmField, p.method));',
+  '+      return pairs;',
+  '+    }',
+  '+    console.warn(\'CanonicalMatchingFieldRegistry not loaded - falling back to legacy unsafe auto field inference (see L3-1 checkpoint notes).\');',
+  '+',
+  '     if (pairs.length >= 2 || activeTraceProfile().id !== \'generic\') {',
+  '       // プロファイルで最低1件取れた場合でも、補助候補を1〜2件追加する。',
+  '       const sysTextForSupplement = preferredInternalTraceField(\'sys\') || chooseJsonField(\'sys\', \'sysMatchText\') || availableJsonKeys(\'sys\')[0] || \'\';'
+].join('\n');
+
+// HUNK_8: reconcileKeyPairsForLoadedInput(): fail-closed / manual-mapping-required status message.
+const HUNK_8 = [
+  '       invalidateMatchCache();',
+  '       matchLogic.keyPairs = defaultKeyPairs();',
+  '       const detail = invalid.map(p => `${p.sysField || \'（未設定）\'}→${p.plmField || \'（未設定）\'}`).join(\' / \');',
+  '-      keyPairReconcileNotice = invalid.length',
+  '-        ? `入力列が変わったため旧照合ペアを再推定しました: ${detail}`',
+  '-        : \'入力列から照合ペアを推定しました。\';',
+  '+      if (!matchLogic.keyPairs.length) {',
+  '+        keyPairReconcileNotice = \'安全に自動推定できる照合列が見つかりませんでした。「＋ 照合ペアを追加」から手動で設定してください。\';',
+  '+      } else {',
+  '+        keyPairReconcileNotice = invalid.length',
+  '+          ? `入力列が変わったため旧照合ペアを再推定しました: ${detail}`',
+  '+          : \'入力列から照合ペアを推定しました。\';',
+  '+      }',
+  '       return { changed:true, invalid };',
+  '     }',
+  '     keyPairReconcileNotice = \'\';'
+].join('\n');
+
+const AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS = [HUNK_1, HUNK_2, HUNK_3, HUNK_4, HUNK_5, HUNK_6, HUNK_7, HUNK_8];
 
 // Parses a `git diff` text into an array of hunk-body strings (everything
 // after each `@@ ... @@` header line, up to the next header or EOF), with

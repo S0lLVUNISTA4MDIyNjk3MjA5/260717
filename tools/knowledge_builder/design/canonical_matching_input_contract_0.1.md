@@ -1,7 +1,13 @@
 # Canonical Matching Input Contract 0.1 (Checkpoint L3-1)
 
-Status: **module implemented and tested; wiring into the Matching Tool staged but NOT applied to
-the tracked file** (see §8 Governance blocker). Baseline: f7f5d624db06a80a62da41290b0c099c9e768665.
+Status: **implemented, tested, and formally integrated into the tracked Matching Tool**
+(L3-1-FINAL). The governance blocker described in §8 below is resolved: the human reviewer
+authorized the exact 4-hunk diff after an independent governance review (L3-1G) and a dedicated
+closure test for the one previously-unexercised branch (L3-1-FINAL §2); the guard's
+authorized-hunks allowlist was extended to HUNK_5–HUNK_8 covering exactly this integration, and the
+wiring is now live in `tools/json_ab_trace_matching_tool_v12.1.15.html`. §8 is kept below as the
+historical record of the governance process this went through, not as a current blocker.
+Baseline: f7f5d624db06a80a62da41290b0c099c9e768665.
 
 ## 1. Problem being solved
 
@@ -108,7 +114,7 @@ returns `{ pairs: [], failedClosed: true, reason }` and adds nothing. The Matchi
 explicit "＋ 照合ペアを追加" UI is completely unaffected — a human can still map any field, including
 ones this module marks ineligible for *automatic* selection; the module only advises the guess path.
 
-## 8. Governance blocker — wiring NOT applied to the tracked file
+## 8. Governance history — how the wiring was authorized (RESOLVED)
 
 `tools/json_ab_trace_matching_tool_v12.1.15.html` is under a strict, code-enforced exact-hunk
 protected-file freeze
