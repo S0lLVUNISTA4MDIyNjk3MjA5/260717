@@ -1,0 +1,450 @@
+{
+  "file_name": "he1_fixture.pdf",
+  "chapter_number": "TRACE",
+  "chapter_title": "設備仕様確認",
+  "trace_format": "chapter-section-trace-v1",
+  "schema_version": "1.2",
+  "generated_at": "2026-08-26T07:04:04.580Z",
+  "generator": {
+    "name": "仕様書PDF→JSON 変換・確認ツール",
+    "version": "1.15-manual-guided-ui-20260714"
+  },
+  "source": {
+    "document_id": "doci-fccc3cc079916996857dbcdc68f442f2",
+    "document_instance_id": "doci-fccc3cc079916996857dbcdc68f442f2",
+    "document_series_id": "series-681050e63584de39ba549dbab7b99bf7",
+    "file_name": "he1_fixture.pdf",
+    "document_sha256": "92239ae209c5a4f9f9f08508fa1c6c87cacba2ea469934f8801e7e4e3bcb4a0f",
+    "profile_id": "profile-C995932B",
+    "profile_version": "2.0",
+    "profile_sha256": "fd996cc655f0a446c27b5e19f4010ff948042f458fd38ac047f111cd951f94d2",
+    "id_scheme_version": "stable-uid-id-v2",
+    "extraction_signature": "f92c8bc03f6a7c6561891a77bd50824ce4bc4709d5edd690bb5ed46634ea9952",
+    "tag_vocabulary_id": "trace-domain-ja",
+    "tag_vocabulary_version": "1.0.0"
+  },
+  "options": {
+    "text_unit": "block",
+    "list_unit": "item",
+    "table_unit": "row"
+  },
+  "statistics": {
+    "sections": 1,
+    "records": 5,
+    "skipped": 0
+  },
+  "warnings": [],
+  "tag_vocabulary": {
+    "vocabulary_id": "trace-domain-ja",
+    "vocabulary_version": "1.0.0",
+    "vocabulary_sha256": "4602f1c47116ab18e39a53bfe38c8d753dae61a8806674672c9638a0a0f4305f"
+  },
+  "_trace_adapter": {
+    "kind": "section_document_export",
+    "side": "sys",
+    "source_file": "he1_fixture.pdf",
+    "record_count": 5,
+    "generated_at": "2026-08-26T07:04:04.580Z"
+  },
+  "_trace_records": [
+    {
+      "_adapterKind": "section_document_export",
+      "_adapterSide": "sys",
+      "id": "blk-bb592fe28267b09f8b64352c9604d59e",
+      "trace_id": "blk-bb592fe28267b09f8b64352c9604d59e",
+      "parent_id": "sec-7eaa5af7a870cc6104a87b1b9a3df249",
+      "trace_title": "確認結果一覧",
+      "trace_text": "本節は、設備仕様確認試験の結果一覧を示す。",
+      "trace_content": [
+        "本節は、設備仕様確認試験の結果一覧を示す。"
+      ],
+      "trace_category": "text",
+      "trace_key_text": "設備仕様確認 4.1 確認結果一覧 確認結果一覧 本節は、設備仕様確認試験の結果一覧を示す。",
+      "chapter_number": "",
+      "chapter_title": "設備仕様確認",
+      "section_number": "4.1",
+      "section_title": "確認結果一覧",
+      "block_type": "paragraph",
+      "source_file": "he1_fixture.pdf",
+      "source_path": "$.sections[0].content[0]",
+      "source_kind": "paragraph",
+      "source_section_id": "sec-7eaa5af7a870cc6104a87b1b9a3df249",
+      "source_section_title": "確認結果一覧",
+      "source_block_id": "u:sections[0].content[0]",
+      "stable_key": "",
+      "stable_key_quality": "none",
+      "id_scheme_version": "stable-uid-id-v2",
+      "source_raw_text": "本節は、設備仕様確認試験の結果一覧を示す。",
+      "content_hash": "a95bd06bcba1d77acd7a7cf3c05bf17d658205bae3a80cab19d01417be0cc1d1",
+      "source_page": 1,
+      "source_bbox": [
+        0.08399470766145965,
+        0.13065843059269752,
+        0.4367724798395902,
+        0.14550597952368588
+      ],
+      "source_refs": [
+        {
+          "page": 1,
+          "bbox": [
+            0.08399470766145965,
+            0.13065843059269752,
+            0.4367724798395902,
+            0.14550597952368588
+          ],
+          "source_text": "本節は、設備仕様確認試験の結果一覧を示す。",
+          "extraction_method": "pdfjs_text",
+          "confidence": 1
+        }
+      ],
+      "review_status": "unreviewed",
+      "ai_reviewed": false,
+      "ai_reviewed_at": "",
+      "ai_review_method": "",
+      "ai_review_model": "",
+      "ai_review_comment": "",
+      "tags": [],
+      "unregistered_tags": [],
+      "annotations": [
+        {
+          "type": "extraction",
+          "value": "pdfjs_text",
+          "source": "system"
+        }
+      ],
+      "quality_flags": []
+    },
+    {
+      "_adapterKind": "section_document_export",
+      "_adapterSide": "sys",
+      "id": "blk-e29db926619174a077c797ed02c0d11a",
+      "trace_id": "blk-e29db926619174a077c797ed02c0d11a",
+      "parent_id": "sec-7eaa5af7a870cc6104a87b1b9a3df249",
+      "trace_title": "確認結果一覧 非常停止スイッチ",
+      "trace_text": "非常停止スイッチ 応答時間0.5秒以内 0.4秒",
+      "trace_content": [
+        "非常停止スイッチ 応答時間0.5秒以内 0.4秒"
+      ],
+      "trace_category": "table_row",
+      "trace_key_text": "設備仕様確認 4.1 確認結果一覧 確認結果一覧 非常停止スイッチ 非常停止スイッチ 応答時間0.5秒以内 0.4秒",
+      "chapter_number": "",
+      "chapter_title": "設備仕様確認",
+      "section_number": "4.1",
+      "section_title": "確認結果一覧",
+      "block_type": "table_row",
+      "source_file": "he1_fixture.pdf",
+      "source_path": "$.sections[0].content[1].rows[0]",
+      "source_kind": "table_row",
+      "source_section_id": "sec-7eaa5af7a870cc6104a87b1b9a3df249",
+      "source_section_title": "確認結果一覧",
+      "source_block_id": "u:sections[0].content[1]",
+      "stable_key": "skey-row-dce0d6462fd466686dd9afa249e2ce9c",
+      "stable_key_quality": "weak",
+      "id_scheme_version": "stable-uid-id-v2",
+      "source_raw_text": "非常停止スイッチ 応答時間0.5秒以内 0.4秒",
+      "content_hash": "aa76b4f408db02d8df33c8ae36059b2b748acfeabc5a04ab9c08a067842eba84",
+      "source_page": 1,
+      "source_bbox": [
+        0.08399470766145965,
+        0.1876730184876928,
+        0.6323289582170006,
+        0.20252056741868116
+      ],
+      "source_refs": [
+        {
+          "page": 1,
+          "bbox": [
+            0.08399470766145965,
+            0.1876730184876928,
+            0.6323289582170006,
+            0.20252056741868116
+          ],
+          "source_text": "非常停止スイッチ\t応答時間0.5秒以内\t0.4秒",
+          "extraction_method": "pdfjs_text",
+          "confidence": 1
+        }
+      ],
+      "review_status": "unreviewed",
+      "ai_reviewed": false,
+      "ai_reviewed_at": "",
+      "ai_review_method": "",
+      "ai_review_model": "",
+      "ai_review_comment": "",
+      "tags": [],
+      "unregistered_tags": [],
+      "annotations": [
+        {
+          "type": "table_semantic",
+          "value": "requirements",
+          "source": "system"
+        },
+        {
+          "type": "extraction",
+          "value": "pdfjs_text",
+          "source": "system"
+        }
+      ],
+      "quality_flags": [],
+      "table_headers": [
+        "項目",
+        "基準値",
+        "測定値"
+      ],
+      "table_row": {
+        "項目": "非常停止スイッチ",
+        "基準値": "応答時間0.5秒以内",
+        "測定値": "0.4秒"
+      },
+      "table_semantic_kind": "requirements"
+    },
+    {
+      "_adapterKind": "section_document_export",
+      "_adapterSide": "sys",
+      "id": "blk-723d22757dddab09ea1d8951779629c1",
+      "trace_id": "blk-723d22757dddab09ea1d8951779629c1",
+      "parent_id": "sec-7eaa5af7a870cc6104a87b1b9a3df249",
+      "trace_title": "確認結果一覧 冷却水ポンプ",
+      "trace_text": "冷却水ポンプ 定格流量100L/分以上 105L/分",
+      "trace_content": [
+        "冷却水ポンプ 定格流量100L/分以上 105L/分"
+      ],
+      "trace_category": "table_row",
+      "trace_key_text": "設備仕様確認 4.1 確認結果一覧 確認結果一覧 冷却水ポンプ 冷却水ポンプ 定格流量100L/分以上 105L/分",
+      "chapter_number": "",
+      "chapter_title": "設備仕様確認",
+      "section_number": "4.1",
+      "section_title": "確認結果一覧",
+      "block_type": "table_row",
+      "source_file": "he1_fixture.pdf",
+      "source_path": "$.sections[0].content[1].rows[1]",
+      "source_kind": "table_row",
+      "source_section_id": "sec-7eaa5af7a870cc6104a87b1b9a3df249",
+      "source_section_title": "確認結果一覧",
+      "source_block_id": "u:sections[0].content[1]",
+      "stable_key": "skey-row-0bc6501b3639007e439fcf577da114ec",
+      "stable_key_quality": "weak",
+      "id_scheme_version": "stable-uid-id-v2",
+      "source_raw_text": "冷却水ポンプ 定格流量100L/分以上 105L/分",
+      "content_hash": "600d08955263b0fcaef7e2569a86710bf64dd6d72a37048e43b4072d79515762",
+      "source_page": 1,
+      "source_bbox": [
+        0.08399470766145965,
+        0.20905348894831602,
+        0.6572585874509218,
+        0.22390103787930438
+      ],
+      "source_refs": [
+        {
+          "page": 1,
+          "bbox": [
+            0.08399470766145965,
+            0.20905348894831602,
+            0.6572585874509218,
+            0.22390103787930438
+          ],
+          "source_text": "冷却水ポンプ\t定格流量100L/分以上\t105L/分",
+          "extraction_method": "pdfjs_text",
+          "confidence": 1
+        }
+      ],
+      "review_status": "unreviewed",
+      "ai_reviewed": false,
+      "ai_reviewed_at": "",
+      "ai_review_method": "",
+      "ai_review_model": "",
+      "ai_review_comment": "",
+      "tags": [],
+      "unregistered_tags": [],
+      "annotations": [
+        {
+          "type": "table_semantic",
+          "value": "requirements",
+          "source": "system"
+        },
+        {
+          "type": "extraction",
+          "value": "pdfjs_text",
+          "source": "system"
+        }
+      ],
+      "quality_flags": [],
+      "table_headers": [
+        "項目",
+        "基準値",
+        "測定値"
+      ],
+      "table_row": {
+        "項目": "冷却水ポンプ",
+        "基準値": "定格流量100L/分以上",
+        "測定値": "105L/分"
+      },
+      "table_semantic_kind": "requirements"
+    },
+    {
+      "_adapterKind": "section_document_export",
+      "_adapterSide": "sys",
+      "id": "blk-be59007fa0cde8f1054c9cb7da296754",
+      "trace_id": "blk-be59007fa0cde8f1054c9cb7da296754",
+      "parent_id": "sec-7eaa5af7a870cc6104a87b1b9a3df249",
+      "trace_title": "確認結果一覧 主遮断器",
+      "trace_text": "主遮断器 定格電圧AC440V AC442V",
+      "trace_content": [
+        "主遮断器 定格電圧AC440V AC442V"
+      ],
+      "trace_category": "table_row",
+      "trace_key_text": "設備仕様確認 4.1 確認結果一覧 確認結果一覧 主遮断器 主遮断器 定格電圧AC440V AC442V",
+      "chapter_number": "",
+      "chapter_title": "設備仕様確認",
+      "section_number": "4.1",
+      "section_title": "確認結果一覧",
+      "block_type": "table_row",
+      "source_file": "he1_fixture.pdf",
+      "source_path": "$.sections[0].content[1].rows[2]",
+      "source_kind": "table_row",
+      "source_section_id": "sec-7eaa5af7a870cc6104a87b1b9a3df249",
+      "source_section_title": "確認結果一覧",
+      "source_block_id": "u:sections[0].content[1]",
+      "stable_key": "skey-row-9940cd76d5a209808f9092c591b75218",
+      "stable_key_quality": "weak",
+      "id_scheme_version": "stable-uid-id-v2",
+      "source_raw_text": "主遮断器 定格電圧AC440V AC442V",
+      "content_hash": "bf65f6b30d32a57db57a5394ca87371eaf82216d337e80ee228f36149bb115b2",
+      "source_page": 1,
+      "source_bbox": [
+        0.08399470766145965,
+        0.23043395940893927,
+        0.6570066033279375,
+        0.24528150833992762
+      ],
+      "source_refs": [
+        {
+          "page": 1,
+          "bbox": [
+            0.08399470766145965,
+            0.23043395940893927,
+            0.6570066033279375,
+            0.24528150833992762
+          ],
+          "source_text": "主遮断器\t定格電圧AC440V\tAC442V",
+          "extraction_method": "pdfjs_text",
+          "confidence": 1
+        }
+      ],
+      "review_status": "unreviewed",
+      "ai_reviewed": false,
+      "ai_reviewed_at": "",
+      "ai_review_method": "",
+      "ai_review_model": "",
+      "ai_review_comment": "",
+      "tags": [],
+      "unregistered_tags": [],
+      "annotations": [
+        {
+          "type": "table_semantic",
+          "value": "requirements",
+          "source": "system"
+        },
+        {
+          "type": "extraction",
+          "value": "pdfjs_text",
+          "source": "system"
+        }
+      ],
+      "quality_flags": [],
+      "table_headers": [
+        "項目",
+        "基準値",
+        "測定値"
+      ],
+      "table_row": {
+        "項目": "主遮断器",
+        "基準値": "定格電圧AC440V",
+        "測定値": "AC442V"
+      },
+      "table_semantic_kind": "requirements"
+    },
+    {
+      "_adapterKind": "section_document_export",
+      "_adapterSide": "sys",
+      "id": "blk-546a40dfee073e621e130186e7661506",
+      "trace_id": "blk-546a40dfee073e621e130186e7661506",
+      "parent_id": "sec-7eaa5af7a870cc6104a87b1b9a3df249",
+      "trace_title": "確認結果一覧 温度センサ",
+      "trace_text": "温度センサ 使用温度範囲-20̃85°C 82°C",
+      "trace_content": [
+        "温度センサ 使用温度範囲-20̃85°C 82°C"
+      ],
+      "trace_category": "table_row",
+      "trace_key_text": "設備仕様確認 4.1 確認結果一覧 確認結果一覧 温度センサ 温度センサ 使用温度範囲-20̃85°C 82°C",
+      "chapter_number": "",
+      "chapter_title": "設備仕様確認",
+      "section_number": "4.1",
+      "section_title": "確認結果一覧",
+      "block_type": "table_row",
+      "source_file": "he1_fixture.pdf",
+      "source_path": "$.sections[0].content[1].rows[3]",
+      "source_kind": "table_row",
+      "source_section_id": "sec-7eaa5af7a870cc6104a87b1b9a3df249",
+      "source_section_title": "確認結果一覧",
+      "source_block_id": "u:sections[0].content[1]",
+      "stable_key": "skey-row-86c84772b0f206d6ac9bb42a74f525a6",
+      "stable_key_quality": "weak",
+      "id_scheme_version": "stable-uid-id-v2",
+      "source_raw_text": "温度センサ 使用温度範囲-20̃85℃ 82℃",
+      "content_hash": "6f11fe4b622bbf8ba706779a509dfce0ba598ce0be888204fbb2535c7af770c7",
+      "source_page": 1,
+      "source_bbox": [
+        0.08399470766145965,
+        0.2518144298695625,
+        0.6272052810496516,
+        0.26666197880055087
+      ],
+      "source_refs": [
+        {
+          "page": 1,
+          "bbox": [
+            0.08399470766145965,
+            0.2518144298695625,
+            0.6272052810496516,
+            0.26666197880055087
+          ],
+          "source_text": "温度センサ\t使用温度範囲-20̃85℃\t82℃",
+          "extraction_method": "pdfjs_text",
+          "confidence": 1
+        }
+      ],
+      "review_status": "unreviewed",
+      "ai_reviewed": false,
+      "ai_reviewed_at": "",
+      "ai_review_method": "",
+      "ai_review_model": "",
+      "ai_review_comment": "",
+      "tags": [],
+      "unregistered_tags": [],
+      "annotations": [
+        {
+          "type": "table_semantic",
+          "value": "requirements",
+          "source": "system"
+        },
+        {
+          "type": "extraction",
+          "value": "pdfjs_text",
+          "source": "system"
+        }
+      ],
+      "quality_flags": [],
+      "table_headers": [
+        "項目",
+        "基準値",
+        "測定値"
+      ],
+      "table_row": {
+        "項目": "温度センサ",
+        "基準値": "使用温度範囲-20̃85℃",
+        "測定値": "82℃"
+      },
+      "table_semantic_kind": "requirements"
+    }
+  ]
+}
