@@ -6485,6 +6485,34 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     return hitTokens.every(t => segmentIsBoilerplateOnEitherSide(t, pair));
   }
 
+  // RISK-FUZZY-01 remediation (Checkpoint 2-C): a shared, non-repeated LEADING SUBSTRING (a report
+  // heading, item-name prefix, etc.) between exactly ONE keyword/target pair can single-handedly
+  // inflate whole-string bigram/vector similarity even when the DISCRIMINATIVE remainder (the text
+  // AFTER that shared prefix) shares nothing at all between the two sides - reproduced concretely:
+  // "確認結果一覧 温度" vs "確認結果一覧 圧力" (remainder "温度" vs "圧力" share zero bigrams, yet the
+  // whole-string bigram similarity alone reaches 0.71-0.75, and the 'vector' boost formula's
+  // bigram/token-Jaccard rescue can push a weak tfidfCos match above minConfidence). This is
+  // DIFFERENT from segmentIsBoilerplateForPair()'s population-frequency check just above (which
+  // only catches a REPEATED, separately-EXTRACTED keyword segment) - a single-occurrence shared
+  // prefix inside one undivided text field is never extracted as its own segment, so it needs this
+  // direct, pairwise, structural discriminator instead. Genuine fuzzy/vector positives keep HIGH
+  // remainder similarity even after the same prefix is stripped - confirmed against the real
+  // HE-11/HE-12 regression fixtures: PDF "非常停止スイッチ 応答時間0.5秒以内 0.4秒" vs Excel
+  // "非常停止スイッチ / 応答時間0.5秒以内 / 0.4秒" keeps remainder bigram similarity ~0.90 (there
+  // genuinely IS shared content beyond the shared item-name prefix, not just a coincidental
+  // heading) - so this check only suppresses the narrow case where the shared prefix is doing
+  // ALL of the work and the remainder is completely unrelated (remainder bigramSim <= 0), never a
+  // pair whose similarity is genuinely distributed across the whole string.
+  function sharedPrefixDominatesSimilarity(kwNorm, targetNorm) {
+    if (!kwNorm || !targetNorm) return false;
+    let lcp = 0;
+    const maxLcp = Math.min(kwNorm.length, targetNorm.length);
+    while (lcp < maxLcp && kwNorm[lcp] === targetNorm[lcp]) lcp++;
+    if (lcp < 2) return false; // no meaningful shared prefix to be concerned about
+    const remA = kwNorm.slice(lcp), remB = targetNorm.slice(lcp);
+    return bigramSimilarity(remA, remB) <= 0;
+  }
+
   // ── 1キーワード × 1JSON B項目 × 1キー指定ペアの照合 ──
   function calcPairMatch(keyword, plm, pair, keywordMeta = null) {
     const kw = normalizeForMatch(keyword);
@@ -6540,20 +6568,35 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       if (f.synonym) cand.push([f.autoSynonym ? 'auto-synonym' : 'synonym', getScore(f.autoSynonym ? 'auto-synonym' : 'synonym')]);
     } else if (mode === 'fuzzy') {
       if (exactHit) cand.push(['exact', 1.0]);
-      if (f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75)) cand.push(['fuzzy', getScore('fuzzy')]);
+      // RISK-FUZZY-01 remediation (Checkpoint 2-C): 'fuzzy'/'vector' previously had NO
+      // boilerplate-segment guard at all, unlike 'partial'/'code' (Checkpoint 2-A/2-A.1) - a
+      // near-constant heading shared across most/all rows on either side could single-handedly
+      // drive bigramSim/tokenJaccard high enough to cross fuzzyThreshold or the vector boost gate,
+      // producing an accepted edge between two otherwise-unrelated items (reproduced concretely:
+      // "確認結果一覧 温度" vs "確認結果一覧 圧力"). Extends the SAME existing, already-tested
+      // segmentIsBoilerplateForPair() population-frequency check (never a new mechanism) so the
+      // governing keyword must not itself be a near-constant segment on either side - a pure
+      // eligibility gate, never a change to any score formula, so genuine fuzzy/vector positives
+      // (whose keyword is NOT population-boilerplate) are completely unaffected.
+      if (f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75) && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target)) cand.push(['fuzzy', getScore('fuzzy')]);
     } else if (mode === 'vector') {
       const vs = vectorConfidenceFromFeatures(f);
-      if (vs > 0) cand.push(['vector', vs]);
+      if (vs > 0 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target)) cand.push(['vector', vs]);
     } else { // auto
       if (exactHit) cand.push(['exact', 1.0]);
       if ((containsHit || codeHit) && fieldLooksLike(pair.plmField, 'code')) cand.push(['code', getScore('code')]);
       if (containsHit && fieldLooksLike(pair.plmField, 'model')) cand.push(['model', getScore('model')]);
       if (codeHit && !fieldLooksLike(pair.plmField, 'code') && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !codeHitIsBoilerplateForPair(keyword, plm, pair)) cand.push(['partial', getScore('partial')]);
       if (f.synonym) cand.push([f.autoSynonym ? 'auto-synonym' : 'synonym', getScore(f.autoSynonym ? 'auto-synonym' : 'synonym')]);
-      if (kw.length >= minLen && f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75) && f.bigramSim < 1) cand.push(['fuzzy', getScore('fuzzy')]);
+      // RISK-FUZZY-01 remediation (Checkpoint 2-C): same boilerplate-segment gate as the explicit
+      // 'fuzzy'/'vector' modes above, PLUS sharedPrefixDominatesSimilarity() (defined above
+      // codeHitIsBoilerplateForPair()) for the single-occurrence shared-prefix case that a
+      // population-frequency check alone cannot see - applied to auto mode's own fuzzy/vector
+      // candidates identically to the explicit-mode branches.
+      if (kw.length >= minLen && f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75) && f.bigramSim < 1 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target)) cand.push(['fuzzy', getScore('fuzzy')]);
       if (containsHit && !exactHit && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta)) cand.push(['partial', getScore('partial')]);
       const vs = vectorConfidenceFromFeatures(f);
-      if (vs > 0) cand.push(['vector', vs]);
+      if (vs > 0 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target)) cand.push(['vector', vs]);
     }
 
     for (const [m, s] of cand) {

@@ -544,6 +544,66 @@ async function main() {
     await page.close();
   }
 
+  // ── TEST H: RISK-FUZZY-01 remediation (Checkpoint 2-C) ─────────────────────────────────────────
+  // Pins the real fix (sharedPrefixDominatesSimilarity() + the boilerplate-segment guard now also
+  // applied to 'fuzzy'/'vector' candidates in calcPairMatch()) against the exact reproduction from
+  // the Checkpoint 2-C investigation: a shared heading/prefix ("確認結果一覧") dominating whole-string
+  // bigram/vector similarity between two rows describing UNRELATED physical quantities (温度/圧力).
+  {
+    const page = await browser.newPage();
+    await page.goto('file://' + HTML_PATH);
+    await page.waitForTimeout(300);
+    const result = await page.evaluate(() => {
+      const pair = { sysField: 'f', plmField: 'f', method: 'auto', enabled: true };
+      function bestMatch(kwText, plmRow) {
+        const entries = extractKeywordEntries(kwText);
+        let best = { score: 0, method: 'none' };
+        for (const entry of entries) {
+          const r = calcPairMatch(entry.text, plmRow, pair, entry);
+          if (r.score > best.score) best = { score: r.score, method: r.method };
+        }
+        return best;
+      }
+      // H1: population-wide shared heading (every row on both sides shares "確認結果一覧"), matching
+      // HE-09/10's original structural pattern - the risk pair itself.
+      const popRows = [
+        { f: '確認結果一覧 搬送速度1.3' }, { f: '確認結果一覧 照度520' }, { f: '確認結果一覧 騒音65' },
+        { f: '確認結果一覧 絶縁2.1' }, { f: '確認結果一覧 接地45' }, { f: '確認結果一覧 温度' }
+      ];
+      const popTargetB = { f: '確認結果一覧 圧力' };
+      activeBoilerplateContext = { sysList: popRows, plmList: popRows.map(r => r === popRows[5] ? popTargetB : r) };
+      const h1 = bestMatch(popRows[5].f, popTargetB);
+      activeBoilerplateContext = null;
+
+      // H2: single-occurrence shared prefix (only ONE row on each side carries the heading at all;
+      // no population-frequency signal exists) - the narrower, structurally distinct case that
+      // segmentIsBoilerplateForPair() alone cannot see, requiring sharedPrefixDominatesSimilarity().
+      const soloA = [{ f: '搬送ローラー速度確認' }, { f: '照明照度確認' }, { f: '確認結果一覧 温度' }];
+      const soloB = { f: '確認結果一覧 圧力' };
+      const h2 = bestMatch('確認結果一覧 温度', soloB);
+
+      // H3: genuine cross-format near-duplicate that ALSO shares a leading substring (item name),
+      // mirroring the real HE-11/HE-12 fixture pattern - must NOT be suppressed, since the
+      // DISCRIMINATIVE remainder after the shared prefix is still highly similar on both sides.
+      const h3 = bestMatch('非常停止スイッチ 応答時間0.5秒以内 0.4秒', { f: '非常停止スイッチ / 応答時間0.5秒以内 / 0.4秒' });
+
+      // H4: with fuzzyThreshold user-lowered to 0.65 (a legitimate, if aggressive, setting), the
+      // risk pair must still be blocked - proving this is a real structural gate, not something
+      // that only happens to work at the current default threshold.
+      const savedThreshold = matchLogic.fuzzyThreshold;
+      matchLogic.fuzzyThreshold = 0.65;
+      const h4 = bestMatch('確認結果一覧 温度', popTargetB);
+      matchLogic.fuzzyThreshold = savedThreshold;
+
+      return { h1, h2, h3, h4, minConfidence: matchLogic.minConfidence };
+    });
+    check('TEST H1 (population-wide shared heading): 温度/圧力 best candidate stays below minConfidence (no accepted edge)', result.h1.score < result.minConfidence, JSON.stringify(result.h1));
+    check('TEST H2 (single-occurrence shared prefix): 温度/圧力 best candidate stays below minConfidence (no accepted edge)', result.h2.score < result.minConfidence, JSON.stringify(result.h2));
+    check('TEST H3 (genuine cross-format near-duplicate sharing an item-name prefix): still matches at high confidence, method fuzzy or vector', result.h3.score >= result.minConfidence && (result.h3.method === 'fuzzy' || result.h3.method === 'vector'), JSON.stringify(result.h3));
+    check('TEST H4 (fuzzyThreshold lowered to 0.65): risk pair still blocked (no accepted edge) even under a more permissive threshold', result.h4.score < result.minConfidence, JSON.stringify(result.h4));
+    await page.close();
+  }
+
   const pass = checks.filter(c => c.ok).length;
   const fail = checks.length - pass;
   console.log('');

@@ -1,32 +1,32 @@
-// HE-1 Remediation Checkpoint 2-B: RISK-FUZZY-01 characterization (non-blocking).
+// HE-1 Remediation Checkpoint 2-B/2-C: RISK-FUZZY-01 characterization (non-blocking, historical).
 //
-// This is NOT a PASS/FAIL regression gate. Checkpoint 2-B is explicitly forbidden from
-// changing Matching Correctness logic (partial scoring / boilerplate significance /
-// threshold / fuzzy scoring / canonical field eligibility) - see the Checkpoint 2-B task
-// description. This script only PINS the current, unmodified behaviour of the whole-string
-// character-bigram Dice-coefficient fuzzy scorer (bigramSet/bigramSimilarity,
-// json_ab_trace_matching_tool_v12.1.15.html lines ~5267-5279, threshold read from
-// matchLogic.fuzzyThreshold ?? 0.75 at lines ~6543/6553) as a disclosed, tracked risk for
-// human re-evaluation to weigh, NOT to fix.
+// STATUS UPDATE (Checkpoint 2-C): RISK-FUZZY-01 was investigated against the REAL matching
+// engine (not just this standalone whole-string bigramSimilarity() calculation) and CONFIRMED to
+// produce a real accepted wrong edge in the real matching path (method 'vector', confidence 0.79,
+// for "確認結果一覧 温度" vs "確認結果一覧 圧力" when the shared heading occurs on a single row
+// pair with no population-frequency signal - the 'auto'-mode boost formula in
+// vectorConfidenceFromFeatures() had no boilerplate-segment awareness at all). Per the Checkpoint
+// 2-C disposition rule ("if it really becomes an accepted wrong edge, fix it before Human
+// re-evaluation"), this WAS fixed: calcPairMatch()'s 'fuzzy'/'vector' candidates (explicit-mode
+// and 'auto'-mode) now also require !segmentIsBoilerplateForPair(...) (extending the existing
+// Checkpoint 2-A/2-A.1 population-frequency guard, previously applied only to 'partial'/'code')
+// AND the new !sharedPrefixDominatesSimilarity(...) (a pairwise, non-population-based check: after
+// stripping the longest common prefix between keyword/target, the DISCRIMINATIVE remainder must
+// still share at least one bigram - closing the single-occurrence-heading gap population-frequency
+// detection alone cannot see). The PERMANENT regression pin for this fix is TEST H in
+// matching_correctness_boilerplate_segment_verification.js (real matching-engine reproduction via
+// calcPairMatch(), not a standalone bigram calculation) - that is now the authoritative,
+// PASS/FAIL-gated test for RISK-FUZZY-01. See the Checkpoint 2-C final report for the full
+// investigation (both the population-wide and single-occurrence reproductions, and why genuine
+// fuzzy/vector positives - confirmed against the real HE-11/HE-12 regression fixtures - are
+// unaffected).
 //
-// RISK-FUZZY-01 (discovered during Checkpoint 2-A.1 adversarial testing):
-// bigramSimilarity() computes Dice's coefficient over ALL character bigrams of the WHOLE
-// input string, with no boilerplate-segment awareness (that awareness only exists in the
-// separate, unrelated boilerplate-suppression fix from Checkpoint 2-A/2-A.1, which acts on
-// a different code path - explicit shared-heading/prefix segments, not the fuzzy scorer).
-// When two fields share a long common heading/prefix and differ only in a short
-// distinguishing suffix, the shared characters dominate the bigram set, so similarity can
-// reach or exceed the 0.75 default fuzzy threshold even though the two fields describe
-// UNRELATED content (e.g. two different measured quantities under the same table heading).
-// This can produce an unwanted 'fuzzy' match candidate purely from heading overlap.
-//
-// This script recomputes the exact same function against a fixed set of example pairs and
-// prints whether each pair would cross the current default threshold (0.75). Values are
-// PINNED to what the current, live code returns as of Checkpoint 2-B - if a future,
-// authorized Matching Correctness change alters bigramSimilarity()/the default threshold,
-// this script's printed numbers will drift from the PINNED comments below. That drift is
-// informational only; this script exits 0 regardless, by design (§ task: "a small,
-// non-blocking characterization test may be added ... but it must not be a PASS/FAIL gate").
+// This script is KEPT as a non-blocking, purely informational historical record of the ORIGINAL
+// standalone whole-string bigramSimilarity() characterization from Checkpoint 2-B (before the real
+// matching-engine investigation) - it still recomputes the exact same function against the same
+// example pairs and reports whether each pair crosses the raw bigram threshold in isolation, which
+// remains true (the fix is a candidate-ELIGIBILITY gate in calcPairMatch(), not a change to
+// bigramSimilarity() itself) but no longer implies an accepted edge in the real engine.
 
 'use strict';
 
@@ -75,5 +75,5 @@ for (const [a, b, pinned, note] of PAIRS) {
 }
 console.log(anyDrift
   ? 'NOTE: one or more pinned values drifted from current code output. This is informational only (see file header) - investigate whether an authorized Matching Correctness change caused it, but this script intentionally never fails the build.'
-  : 'Current behaviour matches all pinned values. RISK-FUZZY-01 remains present and unresolved (by design - out of scope for Checkpoint 2-B). Disposition deferred to post-Checkpoint-2-B triage, before Human re-evaluation.');
+  : 'Current behaviour matches all pinned values (the raw bigram numbers are UNCHANGED - the Checkpoint 2-C fix is an eligibility gate around calcPairMatch()\'s candidates, not a change to bigramSimilarity() itself). RISK-FUZZY-01 has been FIXED as of Checkpoint 2-C - see TEST H in matching_correctness_boilerplate_segment_verification.js for the authoritative, PASS/FAIL-gated real-engine regression test.');
 process.exit(0); // always 0 - never a PASS/FAIL gate, see file header.
