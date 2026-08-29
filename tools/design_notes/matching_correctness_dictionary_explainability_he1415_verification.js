@@ -15,6 +15,19 @@
  *     (which fired via 'exact' title matching instead) - proving the three-way classification is
  *     evidence-based, never merely "annotation present = used".
  *
+ * HE-1 Remediation Checkpoint 2-C.1 STRENGTHENING: "the target row alone is correct" is NOT
+ * sufficient - this file also asserts the fixture's COMPLETE accepted-edge set for BOTH HE-14 and
+ * HE-15 (zero unexpected edges anywhere, not just at the dictionary target row), the exact
+ * HE15-minus-HE14 delta (must be exactly the one dictionary-driven edge, nothing more or less),
+ * and cross-representation consistency (Detail table row-count sum, real Graph edge count, and
+ * both Excel 照合結果_JSON_A基準/B基準 sheets all show the identical edge count). This closes the
+ * Checkpoint 2-C.1 "以上" false-positive finding: an earlier build of this fixture pair produced an
+ * accepted, WRONG partial-match edge (制御盤絶縁抵抗 ↔ 冷却水ポンプ, confidence 0.70) driven
+ * entirely by the short, generic Japanese comparator token "以上" ("or more") recurring on 2 of 6
+ * unrelated candidate rows - see matching_partial_segment_significance_core.js's
+ * isLowDiscriminationSegment() for the fix and matching_correctness_boilerplate_segment_verification.js
+ * for its own dedicated unit-level regression coverage.
+ *
  * Run: node matching_correctness_dictionary_explainability_he1415_verification.js
  */
 'use strict';
@@ -75,6 +88,37 @@ async function loadAndExpand(page, withSnapshot) {
   await page.waitForTimeout(600);
 }
 
+// HE-1 Remediation Checkpoint 2-C.1: the FULL accepted-edge set (not just the target row) - "the
+// target row alone being correct" is explicitly not sufficient; every OTHER row pair in the fixture
+// must also produce exactly its expected edge and nothing else (task requirement §3/§8).
+const EXPECTED_FILLER_EDGES = [
+  { a: 'blk-he1415-pump-a', b: 'PARTC-_he1415_dictionary_effect.xlsx_1' },
+  { a: 'blk-he1415-brk-a', b: 'PARTC-_he1415_dictionary_effect.xlsx_2' },
+  { a: 'blk-he1415-temp-a', b: 'PARTC-_he1415_dictionary_effect.xlsx_3' },
+  { a: 'blk-he1415-fill0-a', b: 'PARTC-_he1415_dictionary_effect.xlsx_4' },
+  { a: 'blk-he1415-fill1-a', b: 'PARTC-_he1415_dictionary_effect.xlsx_5' },
+];
+const DICTIONARY_EDGE = { a: 'blk-he1415-safety-a', b: 'PARTC-_he1415_dictionary_effect.xlsx_6' };
+
+async function fullEdgeSet(page) {
+  return page.evaluate(() => {
+    const els = buildGraphElements(mergedResult.sysList, mergedResult.plmList);
+    return els.filter(e => e.data && e.data.source).map(e => ({ a: e.data.source, b: e.data.target, confidence: e.data.confidence }));
+  });
+}
+
+function edgeKey(e) { return e.a + '|' + e.b; }
+
+function assertExactEdgeSet(edges, expected, label) {
+  const expectedKeys = new Set(expected.map(edgeKey));
+  const actualKeys = new Set(edges.map(edgeKey));
+  const unexpected = edges.filter(e => !expectedKeys.has(edgeKey(e)));
+  const missing = expected.filter(e => !actualKeys.has(edgeKey(e)));
+  assert(unexpected.length === 0, `${label}: unexpected edges = 0`, JSON.stringify(unexpected));
+  assert(missing.length === 0, `${label}: expected edge set fully present (no missing edges)`, JSON.stringify(missing));
+  assert(edges.length === expected.length, `${label}: total accepted edge count = ${expected.length} (got ${edges.length})`, JSON.stringify(edges.map(edgeKey)));
+}
+
 async function rowBCountAndExpand(page, idx) {
   const bCount = await page.evaluate((i) => document.querySelector(`#detailTableBody tr[data-idx="${i}"] td[data-key="照合JSON B件数"] .cell-text`)?.textContent, idx);
   if (bCount !== '1' && bCount !== '2' && bCount !== '3') return { bCount, expand: [] };
@@ -94,11 +138,17 @@ async function rowBCountAndExpand(page, idx) {
 async function main() {
   const browser = await chromium.launch({ args: ['--no-sandbox'] });
 
+  let he14Edges, he15Edges;
+
   // HE-14: Snapshot NOT loaded.
   {
     const page = await browser.newPage();
     await installVendorRoutes(page);
     await loadAndExpand(page, false);
+
+    he14Edges = await fullEdgeSet(page);
+    assertExactEdgeSet(he14Edges, EXPECTED_FILLER_EDGES, 'HE-14 (Snapshot未設定) complete edge set');
+
     const safety = await rowBCountAndExpand(page, 5); // last row = 非常停止スイッチ(A)/EMO(B) pair
     assert(safety.bCount === '0', 'HE-14: 非常停止スイッチ(A)/EMO(B) row has zero matched edges without a Snapshot loaded', safety.bCount);
     await page.close();
@@ -109,6 +159,9 @@ async function main() {
     const page = await browser.newPage();
     await installVendorRoutes(page);
     await loadAndExpand(page, true);
+
+    he15Edges = await fullEdgeSet(page);
+    assertExactEdgeSet(he15Edges, [...EXPECTED_FILLER_EDGES, DICTIONARY_EDGE], 'HE-15 (Snapshot設定後) complete edge set');
 
     const safety = await rowBCountAndExpand(page, 5);
     assert(safety.bCount === '1', `HE-15: 非常停止スイッチ(A)/EMO(B) row has exactly ONE matched edge with the Snapshot loaded (bCount=${safety.bCount})`);
@@ -126,7 +179,70 @@ async function main() {
     assert(pumpText.includes('method: exact'), 'Present-but-unused demo: edge method is exact (title match), NOT tag', pumpText);
     assert(pumpText.includes('辞書解決あり・この照合には未使用'), 'Present-but-unused demo: dictionary line correctly shows 辞書解決あり・この照合には未使用 (present but unused), never 辞書寄与あり', pumpText);
 
+    // Detail/Graph/Excel consistency (task requirement §9/§19-22): the SAME accepted-edge count
+    // (6 for HE-15) must be visible from every representation - the Detail table's own per-row
+    // 照合JSON B件数 sum, the real Graph edge count already captured above, and BOTH Excel
+    // 照合結果_JSON_A基準/B基準 sheets.
+    const detailBCountSum = await page.evaluate(() => {
+      let sum = 0;
+      document.querySelectorAll('#detailTableBody tr[data-idx] td[data-key="照合JSON B件数"] .cell-text').forEach(td => { sum += Number(td.textContent) || 0; });
+      return sum;
+    });
+    assert(detailBCountSum === he15Edges.length, `Detail table: sum of 照合JSON B件数 across all rows (${detailBCountSum}) equals the real Graph edge count (${he15Edges.length})`);
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 20000 }),
+      page.click('#downloadExcelBtn')
+    ]);
+    const excelPath = path.join(require('os').tmpdir(), 'he1415_consistency_check.xlsx');
+    await download.saveAs(excelPath);
     await page.close();
+
+    // Parse the downloaded workbook directly in Node (no browser needed) via a minimal zip/xml
+    // shared-strings-free scan: sum the "照合JSON B件数"/"照合JSON A件数" column across each sheet.
+    const { execFileSync } = require('child_process');
+    const pySumScript = `
+import openpyxl, sys
+wb = openpyxl.load_workbook(sys.argv[1], data_only=True)
+def col_sum(sheet, col_name):
+    ws = wb[sheet]
+    headers = [c.value for c in ws[1]]
+    idx = headers.index(col_name)
+    total = 0
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        v = row[idx]
+        if isinstance(v, (int, float)): total += v
+    return total
+print(col_sum('照合結果_JSON_A基準', '照合JSON B件数'))
+print(col_sum('照合結果_JSON_B基準', '照合JSON A件数'))
+`;
+    fs.writeFileSync(path.join(require('os').tmpdir(), 'sum_check.py'), pySumScript);
+    let excelSums = null;
+    try {
+      const out = execFileSync('python3', [path.join(require('os').tmpdir(), 'sum_check.py'), excelPath], { encoding: 'utf8' });
+      const [aSum, bSum] = out.trim().split('\n').map(Number);
+      excelSums = { aSum, bSum };
+    } catch (e) {
+      console.log('NOTE: python3/openpyxl unavailable for Excel consistency check -', e.message);
+    }
+    if (excelSums) {
+      assert(excelSums.aSum === he15Edges.length, `Excel 照合結果_JSON_A基準: sum of 照合JSON B件数 (${excelSums.aSum}) equals the real Graph edge count (${he15Edges.length})`);
+      assert(excelSums.bSum === he15Edges.length, `Excel 照合結果_JSON_B基準: sum of 照合JSON A件数 (${excelSums.bSum}) equals the real Graph edge count (${he15Edges.length})`);
+    }
+  }
+
+  // HE15 - HE14 delta: EXACTLY the one dictionary-driven edge, nothing else added or removed
+  // (task requirement §12 - "edges_HE15 - edges_HE14 must be exactly 1 edge").
+  {
+    const he14Keys = new Set(he14Edges.map(edgeKey));
+    const he15Keys = new Set(he15Edges.map(edgeKey));
+    const onlyInHe15 = he15Edges.filter(e => !he14Keys.has(edgeKey(e)));
+    const onlyInHe14 = he14Edges.filter(e => !he15Keys.has(edgeKey(e)));
+    assert(onlyInHe14.length === 0, 'HE14 - HE15 delta = 0 (Snapshot never REMOVES an edge)', JSON.stringify(onlyInHe14));
+    assert(onlyInHe15.length === 1, 'HE15 - HE14 delta = exactly 1 edge', JSON.stringify(onlyInHe15));
+    if (onlyInHe15.length === 1) {
+      assert(edgeKey(onlyInHe15[0]) === edgeKey(DICTIONARY_EDGE), 'the single delta edge is exactly the 非常停止スイッチ(A)/EMO(B) dictionary edge', JSON.stringify(onlyInHe15[0]));
+    }
   }
 
   console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

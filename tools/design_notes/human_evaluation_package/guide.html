@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>KMS L3-1 評価ガイド</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  body { font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif; color: #1e293b; line-height: 1.75; font-size: 13px; }
+  .cover { text-align: center; padding-top: 120px; page-break-after: always; }
+  .cover .badge { display: inline-block; background: #fef3c7; color: #92400e; padding: 6px 16px; border-radius: 8px; font-weight: bold; margin-bottom: 30px; }
+  .cover h1 { font-size: 2em; color: #1d4ed8; }
+  .cover .meta { margin-top: 60px; font-size: 0.9em; color: #64748b; }
+  h1.section { font-size: 1.4em; color: #1d4ed8; border-bottom: 3px solid #2563eb; padding-bottom: 8px; margin-top: 0; page-break-before: always; }
+  h2 { font-size: 1.1em; color: #1e40af; margin-top: 1.6em; }
+  .step { background: #f8fafc; border: 1px solid #cbd5e1; border-left: 5px solid #2563eb; border-radius: 6px; padding: 10px 16px; margin: 14px 0; }
+  .step .label { font-weight: bold; color: #2563eb; font-size: 0.85em; }
+  figure { margin: 14px 0; page-break-inside: avoid; }
+  figure img { width: 100%; border: 1px solid #cbd5e1; border-radius: 6px; }
+  figcaption { font-size: 0.82em; color: #64748b; margin-top: 4px; }
+  .note { background: #eff6ff; border-left: 4px solid #2563eb; padding: 8px 14px; margin: 12px 0; font-size: 0.92em; }
+  .warn { background: #fef2f2; border-left: 4px solid #dc2626; padding: 8px 14px; margin: 12px 0; font-size: 0.92em; }
+  .before-after { display: flex; gap: 16px; margin: 12px 0; }
+  .before-after > div { flex: 1; border-radius: 6px; padding: 10px 14px; }
+  .before-after .before { background: #fef2f2; border: 1px solid #fecaca; }
+  .before-after .after { background: #f0fdf4; border: 1px solid #bbf7d0; }
+  .before-after b { display: block; margin-bottom: 4px; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 0.9em; }
+  table th, table td { border: 1px solid #cbd5e1; padding: 6px 10px; text-align: left; }
+  table th { background: #f1f5f9; }
+  code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 0.92em; }
+  .toc { padding: 0; }
+  .toc div { padding: 4px 0; border-bottom: 1px dotted #cbd5e1; }
+  footer { position: running(footer); }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <span class="badge">評価版 ― Human Evaluation Build</span>
+  <h1>Knowledge Matching Suite<br>L3-1 人による評価ガイド</h1>
+  <p style="color:#475569; font-size:1.05em; margin-top:20px;">安全な自動照合列選択の確認のために</p>
+  <div class="meta">
+    Source: claude/canonical-matching-level3-l3-1 @ 3d2a5fc<br>
+    Human Evaluation Build（Production Acceptance ではありません）
+  </div>
+</div>
+
+<h1 class="section">1. この評価版の目的</h1>
+<p>このガイドは、Knowledge Matching Suite の「L3-1」と呼ばれる改善が正しく機能しているかを、
+実際の画面操作を通じて確認していただくためのものです。</p>
+<p>対象となるのは、PDF・Excelの文書を「照合用JSON」に変換し、2つの文書（JSON A / JSON B）を
+自動で照合する「Matching（照合）」ツールです。</p>
+<div class="note">このパッケージは<b>評価専用</b>です。製品としての最終版・正式リリースではありません。
+評価の結果は同梱の Checklist（CSV）に記録してください。</div>
+
+<h1 class="section">2. 何が改善されたか</h1>
+<p>Matchingツールは、2つのJSONを読み込んだ際に「どの項目同士を照合すればよいか」を
+自動で推定する機能を持っています。</p>
+<div class="before-after">
+  <div class="before"><b>以前</b>文字列の見た目（コードっぽい・文章っぽい等）だけから自動推定するため、
+  <code>id_scheme_version</code> のような<b>内部管理用の技術情報</b>を、誤って照合列として
+  選んでしまうことがありました。その結果、無関係なデータ同士が「一致」と判定される
+  不具合（誤検出）が発生していました。</div>
+  <div class="after"><b>現在（L3-1）</b>照合対象として<b>安全と分類された業務フィールドだけ</b>を
+  自動選択候補にするようになりました。技術情報・内部ID・バージョン番号などは、
+  どれだけ値の形が「それらしく」見えても、自動選択の対象にはなりません。<br><br>
+  安全に判断できない場合は、<b>勝手に推測せず、手動設定を求める</b>ようになりました。</div>
+</div>
+<div class="warn"><b>誤解しないでいただきたいこと：</b>「自動照合は必ず正しい」ようになった、
+という意味ではありません。今回の改善は、あくまで「危険な自動推定を避けるよう改善した」
+というものです。あいまい照合（fuzzy・partial等）の精度そのものは、引き続き評価対象です。</div>
+
+<h1 class="section">3. 今回評価してほしい範囲</h1>
+<ul>
+  <li>PDF・ExcelからJSONを作る一連の操作が問題なく行えるか</li>
+  <li>Matchingツールが自動で選ぶ照合列に、内部管理用の技術情報が含まれていないか</li>
+  <li>安全に自動推定できない場合、正しく「手動設定してください」と案内されるか</li>
+  <li>実際に4件の設備データを照合した際、正しい組み合わせが見つかるか（誤検出が無いか）</li>
+  <li>辞書Snapshotを設定した場合の効果が確認できるか</li>
+  <li>画面を見て、結果の理由が自分で説明できるか</li>
+</ul>
+<p>詳しい記録項目は <code>KMS_L3-1_Human_Evaluation_Checklist_JA.csv</code>（HE-01〜HE-20）を
+ご覧ください。</p>
+
+<h1 class="section">4. PDFからJSONを作る</h1>
+<div class="step"><span class="label">STEP 1</span> <code>01-JSON-Creation/PDF/</code> の中の
+HTMLファイルをブラウザで開きます。</div>
+<figure><img src="screenshots/01_pdf_tool_open.png"><figcaption>図4-1: PDF→JSON変換ツールの初期画面</figcaption></figure>
+<div class="step"><span class="label">STEP 2</span> 「PDFを開いて変換」を押し、評価用サンプル
+（<code>Samples/L3-1-Human-Evaluation/A_source_PDF_fixture.pdf</code>）を選択します。自動で
+変換が始まります。</div>
+<figure><img src="screenshots/02_pdf_tool_converted.png"><figcaption>図4-2: 変換結果の表示（4件の設備データが正しく読み取られている）</figcaption></figure>
+<div class="step"><span class="label">STEP 3〜5</span> 内容を確認し、「照合用JSONを保存」まで
+進めると、Matchingツールで使えるJSONファイルが保存されます（同梱のサンプルでは
+<code>C_PDF_matching.json</code> がこれに当たります）。</div>
+
+<h1 class="section">5. ExcelからJSONを作る</h1>
+<div class="step"><span class="label">STEP 1</span> <code>01-JSON-Creation/Excel/</code> の中の
+HTMLファイルをブラウザで開きます。</div>
+<figure><img src="screenshots/03_excel_tool_open.png"><figcaption>図5-1: Excel→JSON変換ツールの初期画面</figcaption></figure>
+<div class="step"><span class="label">STEP 2</span> 評価用サンプル
+（<code>Samples/L3-1-Human-Evaluation/B_source_Excel_fixture.xlsx</code>）を選び、「JSONへ変換」を
+押します。</div>
+<figure><img src="screenshots/04_excel_tool_converted.png"><figcaption>図5-2: 変換結果（4件の設備データ）</figcaption></figure>
+<div class="step"><span class="label">STEP 3</span> 「JSON様式プロファイル」で
+「照合用JSON（Excel行単位）」を選び、「様式を適用」を押します。未確認行がある場合は
+「未確認を一括確認」で確認済みにしてから、「照合用JSON出力」を押します（サンプルでは
+<code>D_Excel_matching.json</code> がこれに当たります）。</div>
+
+<h1 class="section">6. JSON A/BをMatchingへ読み込む</h1>
+<div class="step"><span class="label">STEP 1</span> <code>04-Matching/index.html</code> を
+ブラウザで開きます。</div>
+<figure><img src="screenshots/05_matching_tool_open.png"><figcaption>図6-1: Matchingツールの初期画面</figcaption></figure>
+<div class="step"><span class="label">STEP 2</span> 「JSON A」に <code>C_PDF_matching.json</code>、
+「JSON B」に <code>D_Excel_matching.json</code> を選択します。</div>
+<figure><img src="screenshots/06_matching_files_selected.png"><figcaption>図6-2: JSON A/Bにファイルを選択した状態</figcaption></figure>
+<div class="step"><span class="label">STEP 3</span> 「読み込み・照合」ボタンを押します。</div>
+
+<h1 class="section">7. 自動照合列がどう選ばれたか確認する</h1>
+<p>読み込みが完了すると、「照合ロジック設定」タブに、自動で選ばれた照合ペアが表示されます。</p>
+<figure><img src="screenshots/08_matching_auto_keypairs.png"><figcaption>図7-1: 自動選択された照合ペア。trace_title / trace_text / trace_key_text
+といった<b>業務内容そのもの</b>が選ばれており、id_scheme_version 等の技術情報は
+含まれていません。</figcaption></figure>
+<div class="note"><b>ここが今回の評価の核心です。</b>表の「JSON Aキー」「JSON Bキー」列に、
+<code>id_scheme_version</code>・<code>schema_version</code>・<code>trace_id</code> のような
+内部管理用の項目名が<b>表示されていないこと</b>を確認してください。</div>
+
+<h1 class="section">8. 安全に自動推定できない場合の表示</h1>
+<p>業務項目が何も見つからない場合（例：技術的なメタ情報だけのJSON）にどう表示されるかを、
+負のコントロール用サンプル（<code>E_negative_control_JSON_A_metadata_only.json</code> /
+<code>F_negative_control_JSON_B_metadata_only.json</code>）で確認できます。</p>
+<figure><img src="screenshots/09_matching_failclosed_status.png"><figcaption>図8-1: 安全な自動推定ができない場合の画面。「安全に自動推定できる照合列が
+見つかりませんでした。『＋ 照合ペアを追加』から手動で設定してください。」というメッセージが表示され、
+照合ペアは0件のままです。</figcaption></figure>
+<div class="warn">この状態で、無関係なデータ同士が「一致」と表示されないことを必ず確認してください
+（照合結果一覧を開いても対応関係が0件であるはずです）。</div>
+
+<h1 class="section">9. 手動Field Mapping</h1>
+<p>自動選択に頼らず、自分で照合列を指定することもできます。「＋ 照合ペアを追加」を押すと、
+新しい行が追加されます。</p>
+<figure><img src="screenshots/10_matching_manual_addpair.png"><figcaption>図9-1: 「＋ 照合ペアを追加」で行を追加した状態。プルダウンからJSON A側・
+JSON B側の列を自由に選べます。</figcaption></figure>
+<p>プルダウンには、読み込んだJSONに実際に存在する列名がすべて表示されます。
+（安全性チェックは「自動選択」の場面だけに働くもので、手動選択そのものを制限するものではありません。）</p>
+
+<h1 class="section">10. 辞書Snapshotを設定する</h1>
+<p>「辞書Snapshot」欄から、Snapshotファイルを選択して設定できます。評価用サンプル
+（<code>G_sample_dictionary_snapshot.json</code>）を使って確認してください。</p>
+<figure><img src="screenshots/11_matching_snapshot_set.png"><figcaption>図10-1: Snapshot設定後の画面。「有効 (Active)」として snapshot_id・
+dictionary_id 等の識別情報が表示されます。</figcaption></figure>
+<div class="note">このサンプルSnapshotは、評価用にあらかじめ用意した見本です。ご自身の
+辞書データから作成したものではありません。詳しくは
+<code>KNOWN_LIMITATIONS_L3-1_JA.txt</code>（8番）をご覧ください。</div>
+
+<h1 class="section">11. 辞書Snapshotの効果を1件の対応関係で確認する（HE-14/HE-15）</h1>
+<p>ここでは <b>まったく同じ2つのJSON</b>（<code>I_dictionary_effect_json_a.json</code> /
+<code>J_dictionary_effect_json_b.json</code>）を使い、「辞書Snapshotを設定する前」と
+「設定した後」で <b>ただ1件の対応関係だけ</b> がどう変わるかを確認します。
+違いを自分で探す必要はありません。以下の手順どおりに、指定した場所を見てください。</p>
+
+<div class="step"><span class="label">STEP 1（HE-14・基準状態）</span><br>
+上記2つのJSONをJSON A / JSON Bにそれぞれ読み込みます（Snapshotはまだ設定しません）。
+「照合結果一覧」タブで、JSON A表示名の末尾が <code>回転式旋回レバー 有効 合格</code> となっている
+行（非常停止スイッチの行）を見つけてください。</div>
+<p><b>ここで確認すること：</b>この行の「照合JSON B件数」が <b>0</b> であることを確認してください
+（展開ボタン▶が表示されない場合も、対応する候補が無い＝正しい状態です）。</p>
+
+<div class="step"><span class="label">STEP 2（HE-15・Snapshot設定後）</span><br>
+JSONを読み込み直す必要はありません。「照合ロジック設定」タブで
+<code>K_dictionary_snapshot.json</code> を辞書Snapshot欄に設定し、「タグ生成を有効化」
+「タグを照合に使用」の両方にチェックを入れて「再照合して反映」を押します。
+「照合結果一覧」タブに戻り、STEP 1と同じ行（非常停止スイッチの行）を展開（▶）してください。</div>
+
+<div class="before-after">
+<div class="before"><b>HE-14（Snapshot未設定）</b>照合JSON B件数 = 0<br>対応関係なし・辞書情報の表示なし</div>
+<div class="after"><b>HE-15（Snapshot設定後）</b>照合JSON B件数 = 1<br>confidence 0.88 / method: tag<br>辞書: <b>辞書寄与あり</b><br>EMO → APPROVED_ALIAS → 非常停止スイッチ</div>
+</div>
+
+<p><b>ここで確認すること：</b>展開した行に、次の情報がすべて表示されていることを確認してください。</p>
+<table>
+<tr><th>項目</th><th>表示される内容</th></tr>
+<tr><td>接続先・件数</td><td>EMOの行が1件（照合JSON B件数が0→1に変化）</td></tr>
+<tr><td>confidence / method</td><td>0.88 / tag</td></tr>
+<tr><td>辞書の表示</td><td>「辞書寄与あり」</td></tr>
+<tr><td>original term（元の語）</td><td>EMO</td></tr>
+<tr><td>resolution_type（解決区分）</td><td>APPROVED_ALIAS</td></tr>
+<tr><td>resolved canonical（解決後の正規語）</td><td>非常停止スイッチ</td></tr>
+</table>
+<p>HE-14（対応なし）とHE-15（対応あり・辞書寄与あり、詳細つき）を見比べて、
+「Snapshotを設定したことで何が変わったか」を自分の言葉で説明できるか確認してください。</p>
+
+<div class="note"><b>補足（HE-21）：</b>「辞書情報が乗っている行 ＝ 必ず辞書が使われた」ではありません。
+同じ照合結果画面のまま、JSON A表示名が <code>冷却水ポンプ 定格流量100L/分以上 105L/分</code>
+の行を展開してください。この行にも辞書の別名解決情報は存在しますが、実際の対応は
+method: exact（タイトル完全一致）で決まっており、辞書の表示は「辞書寄与あり」ではなく
+「<b>辞書解決あり・この照合には未使用</b>」となります。辞書情報の有無と、その情報が実際に
+対応関係の決め手になったかどうかは、別のことです。</div>
+
+<h1 class="section">12. Matching結果を見る</h1>
+<p>「照合結果一覧」タブで、対応関係の一覧が確認できます。</p>
+<figure><img src="screenshots/12_matching_detail_table.png"><figcaption>図12-1: 照合結果一覧。今回のサンプルでは、非常停止スイッチ・冷却水ポンプ・
+主遮断器・温度センサの4件が、いずれも信頼度0.82（vector方式）で正しく対応しています。
+説明文の行（1件）は対応するExcel側データが存在しないため「対応なし」と表示されます
+（これは正しい挙動です）。</figcaption></figure>
+
+<h1 class="section">13. Detail / provenanceを見る</h1>
+<p>照合結果一覧の各行には「照合根拠」列があり、どのフィールドがどのように一致したかが
+表示されます（例：<code>vector: trace_text→trace_text / 非常停止スイッチ...</code>）。
+「元データの詳細列も表示」にチェックを入れると、元のJSONの内容も併せて確認できます。</p>
+<div class="note">結果の理由を自分で説明できるかどうかは、評価の重要な観点です
+（Checklist HE-20）。</div>
+
+<h1 class="section">14. Graph / Excel output</h1>
+<p>「ナレッジグラフ」タブでは、対応関係をグラフとして表示できます。「照合結果一覧Excel出力」
+からはExcelファイルとして結果を保存できます。</p>
+<figure><img src="screenshots/14_matching_graph_tab.png"><figcaption>図14-1: グラフタブ。この評価環境ではインターネット接続が無いため、
+グラフ描画ライブラリ（cytoscape）が読み込めず、グラフが空欄のまま表示されています。
+インターネット接続がある環境では、ノードが表示されます。</figcaption></figure>
+<div class="warn">グラフ表示・Excel出力は、外部ライブラリをインターネット経由で読み込む仕組みのため、
+オフライン環境では正しく動作しない場合があります。詳しくは
+<code>KNOWN_LIMITATIONS_L3-1_JA.txt</code>（7番）をご覧ください。</div>
+
+<h1 class="section">14b. Excel出力でJSON A基準／B基準を見比べる（HE-22）</h1>
+<p>HE-15の状態（<code>K_dictionary_snapshot.json</code> を設定した状態）のまま、
+「照合結果一覧Excel出力」を押してExcelファイルを保存し、開いてください。</p>
+<div class="step"><span class="label">STEP</span><br>
+ワークブックに次の4シートがあることを確認してください：
+<code>照合結果一覧</code> ／ <code>照合結果_JSON_A基準</code> ／
+<code>照合結果_JSON_B基準</code> ／ <code>辞書照合根拠</code>。</div>
+<p><b>ここで確認すること：</b></p>
+<ul>
+  <li><code>照合結果_JSON_A基準</code> シートで非常停止スイッチの行（照合JSON B件数=1）を探す</li>
+  <li><code>照合結果_JSON_B基準</code> シートでEMOの行（照合JSON A件数=1）を探す</li>
+  <li>両方のシートで、最大信頼度が同じ <b>0.88</b>、照合根拠の文言が同じ内容であることを確認する</li>
+</ul>
+<p>JSON A基準／B基準のどちらから見ても、同じ1件の対応関係が同じ内容で確認できるか
+（2回別々に照合し直したような食い違いが無いか）を評価してください。</p>
+
+<h1 class="section">15. 評価時に記録してほしいこと</h1>
+<p>同梱の <code>KMS_L3-1_Human_Evaluation_Checklist_JA.csv</code> に、以下を記録してください。</p>
+<table>
+<tr><th>列</th><th>記入内容</th></tr>
+<tr><td>Actual result</td><td>実際に確認できた結果（画面の表示内容など）</td></tr>
+<tr><td>PASS/FAIL</td><td>期待した結果と一致していたか</td></tr>
+<tr><td>Comment</td><td>気付いた点、疑問点、違和感があれば自由に記載</td></tr>
+</table>
+<p>特に次の2点は、自由記述でもよいので必ずコメントしてください：</p>
+<ul>
+  <li><b>HE-19</b>：画面を見て、A側とB側のどのデータを比較しているのかが直感的に分かったか</li>
+  <li><b>HE-20</b>：ある照合結果について、「なぜその結果になったのか」を自分の言葉で説明できるか</li>
+</ul>
+<p style="margin-top:2em; color:#64748b; font-size:0.9em;">
+ご協力ありがとうございます。評価結果は、次のL3-2（辞書・数量まわりの改善検討）の
+判断材料として活用させていただきます。</p>
+
+</body>
+</html>

@@ -6435,26 +6435,37 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     let byField = boilerplateSegmentIndexCache.get(rows);
     if (!byField) { byField = new Map(); boilerplateSegmentIndexCache.set(rows, byField); }
     if (!byField.has(field)) {
+      // HE-1 Remediation Checkpoint 2-C.1: normalizeFieldValue:normalizeForMatch makes the
+      // isLowDiscriminationSegment short-token containment check use the SAME text normalization
+      // calcPairMatch's own containsHit test applies - required for containment counting to be a
+      // faithful proxy for "would containsHit actually see this substring here."
       byField.set(field, globalThis.MatchingPartialSegmentSignificance.buildBoilerplateSegmentIndex(
         rows,
         row => (row == null ? '' : row[field]),
-        segmentsForBoilerplateIndex
+        segmentsForBoilerplateIndex,
+        { normalizeFieldValue: normalizeForMatch }
       ));
     }
     return byField.get(field);
   }
-  // True iff normalizedSegment is boilerplate on the JSON A/sys side (activeBoilerplateContext.
+  // True iff normalizedSegment is low-discrimination on the JSON A/sys side (activeBoilerplateContext.
   // sysList, pair.sysField) OR the JSON B/plm side (activeBoilerplateContext.plmList,
   // pair.plmField) - an OR, never a merged/summed population (1/4 on each side must stay 1/4 and
   // 1/4, never become 2/8 - see Checkpoint 2-A.1 report §1). Either side alone being near-constant
   // is sufficient to make a segment low-discrimination, because the risk it creates (many-to-one on
   // whichever side is NOT near-constant) does not require both sides to agree.
+  // HE-1 Remediation Checkpoint 2-C.1: uses isLowDiscriminationSegment() (the superset of the
+  // original majority-boilerplate rule, ALSO catching a short generic token that merely recurs at
+  // all on a small minority of rows - e.g. Japanese "以上"/"以下" - see
+  // matching_partial_segment_significance_core.js for the full rationale). Every existing caller of
+  // this function (partial/code/fuzzy/vector, both explicit-mode and 'auto' mode) inherits the
+  // stricter check automatically through this single point.
   function segmentIsBoilerplateOnEitherSide(normalizedSegment, pair) {
     if (!normalizedSegment) return false;
     const sysIdx = boilerplateSegmentIndexForField(activeBoilerplateContext?.sysList, pair.sysField);
-    if (sysIdx && sysIdx.isBoilerplateSegment(normalizedSegment)) return true;
+    if (sysIdx && sysIdx.isLowDiscriminationSegment(normalizedSegment)) return true;
     const plmIdx = boilerplateSegmentIndexForField(activeBoilerplateContext?.plmList, pair.plmField);
-    if (plmIdx && plmIdx.isBoilerplateSegment(normalizedSegment)) return true;
+    if (plmIdx && plmIdx.isLowDiscriminationSegment(normalizedSegment)) return true;
     return false;
   }
   function segmentIsBoilerplateForPair(keyword, pair, keywordMeta) {

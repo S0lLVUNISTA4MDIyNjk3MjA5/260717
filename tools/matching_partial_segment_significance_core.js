@@ -57,6 +57,55 @@
   // boilerplate). Below the floor, no segment is ever flagged boilerplate for that field.
   const DEFAULT_MIN_ROWS_FOR_DETECTION = 3;
 
+  // HE-1 Remediation Checkpoint 2-C.1 (Matching Correctness): a SECOND, independent low-
+  // discrimination signal, orthogonal to the frequency-RATIO rule above.
+  //
+  // The ratio rule above answers "does this segment dominate MOST of the population" (Checkpoint
+  // 2-A's original defect: a document heading shared by ~all sibling rows). It deliberately does
+  // NOT flag a segment that only recurs on a SMALL, non-majority number of rows (e.g. 2 out of 6 -
+  // a 0.33 ratio, far below the 0.8 default). Checkpoint 2-C.1's finding: a short, generic
+  // comparator/operator fragment (e.g. Japanese "以上"/"以下"/"以内"/"未満"/"超" - "or more"/"or
+  // less"/"within"/"under"/"exceeding", extracted by the caller's tokenizer as its own bare 'token'
+  // sub-entry alongside the item-specific number+unit it modifies) can recur on just 2 or 3
+  // otherwise-COMPLETELY-UNRELATED rows and still, by itself, satisfy 'partial'-match containment
+  // credit under the ratio rule, because 2-3 rows never reaches an 0.8 ratio. Reproduced
+  // concretely: "制御盤絶縁抵抗 測定値1MΩ以上 1.2MΩ" vs "冷却水ポンプ / 定格流量100L/分以上 /
+  // 105L/分" - two UNRELATED equipment specs - produced an accepted partial edge (score 0.70)
+  // driven entirely by the shared 2-character token "以上", occurring on only 2 of 6 candidate
+  // rows (see the Checkpoint 2-C.1 report).
+  //
+  // This is a LENGTH-SCALED discriminativeness requirement, never a blacklist of specific words:
+  // ANY segment at or under shortSegmentMaxLength characters is held to a stricter standard - it
+  // must be (very close to) UNIQUE in the candidate population, not merely non-majority - whatever
+  // its literal text happens to be, in any language. A genuinely discriminative short token (e.g. a
+  // real short product code that happens not to repeat elsewhere) is completely unaffected, because
+  // it will not exceed shortSegmentMaxOccurrence. A LONGER segment/phrase is governed exclusively
+  // by the ratio rule above, unchanged from Checkpoint 2-A/2-A.1 - this module does not reduce the
+  // ratio rule's threshold or its 3-row floor for longer content.
+  //
+  // Deliberately measured by RAW SUBSTRING CONTAINMENT across candidate field values, NOT by
+  // segmentFn's own extraction-boundary frequency (unlike the ratio rule above). A first
+  // implementation attempt reused segmentFn's document-frequency Map for this too, and MISSED the
+  // real "以上" reproduction case: segmentFn (the caller's own keyword tokenizer, tuned for
+  // whole-phrase/code extraction) splits a short comparator differently depending on its
+  // neighbouring characters - "…1MΩ以上" (preceded by a symbol) yields a bare "以上" entry, while
+  // "…100L/分以上" (preceded by a kanji "分") fuses it into one combined "分以上" entry - so the two
+  // occurrences of the SAME semantic token never landed on the same map key, undercounting it as
+  // "occurs on only 1 row" even though the literal substring "以上" is genuinely present in both
+  // rows' text. calcPairMatch()'s own containsHit (what a 'partial'/'code' credit actually rests
+  // on) is a raw substring test against the target's WHOLE field text, independent of how that
+  // target's own keywords happen to be segmented - so the short-segment rule must count occurrences
+  // the same way containsHit does, not via segmentFn's extraction boundaries.
+  const DEFAULT_SHORT_SEGMENT_MAX_LENGTH = 3;
+  const DEFAULT_SHORT_SEGMENT_MAX_OCCURRENCE = 1;
+
+  // Occurrence-count-based detection (unlike the ratio rule) is statistically meaningful starting
+  // at just 2 candidate rows: if a short segment already occurs on 2 of 2 rows, it manifestly
+  // cannot discriminate between them. This floor exists only to avoid flagging a short segment that
+  // has never been observed anywhere else (a single-row/degenerate population) as suspicious by
+  // default.
+  const DEFAULT_MIN_ROWS_FOR_SHORT_SEGMENT_DETECTION = 2;
+
   /**
    * Computes document frequency (1 row = 1 count, regardless of in-row repeats) for every distinct
    * segment string produced by segmentFn across rows.
@@ -84,16 +133,55 @@
   }
 
   /**
+   * Counts, for a single normalized candidate segment, how many DISTINCT rows' field values
+   * CONTAIN it as a raw substring (not how many rows independently EXTRACT it as its own segment -
+   * see the DEFAULT_SHORT_SEGMENT_MAX_LENGTH rationale above for why that distinction matters).
+   * @param {Array} rows
+   * @param {(row:any)=>string} getFieldValue - raw (pre-normalization) field value
+   * @param {(raw:string)=>string} normalizeFieldValue - the SAME normalization the caller applies
+   *   to the segment strings it will query with, so containment comparisons are apples-to-apples
+   * @param {string} normalizedSegment
+   * @returns {number}
+   */
+  function countRowsContainingSegment(rows, getFieldValue, normalizeFieldValue, normalizedSegment) {
+    if (!normalizedSegment) return 0;
+    const list = Array.isArray(rows) ? rows : [];
+    let count = 0;
+    for (const row of list) {
+      const raw = getFieldValue(row);
+      if (raw === null || raw === undefined || raw === '') continue;
+      const normalized = normalizeFieldValue(String(raw));
+      if (normalized.includes(normalizedSegment)) count++;
+    }
+    return count;
+  }
+
+  /**
    * Builds a reusable boilerplate-segment index for one field's values across a candidate row
-   * population.
+   * population. Exposes TWO independent low-discrimination signals (see the constants above for
+   * the full rationale): isBoilerplateSegment (near-constant across MOST of the population, by
+   * segmentFn's own extraction-frequency - the original Checkpoint 2-A rule, unchanged) and
+   * isLowDiscriminationSegment (a superset: ALSO true for a SHORT segment that merely appears, as a
+   * raw substring, in more than shortSegmentMaxOccurrence rows' field text - Checkpoint 2-C.1,
+   * measured by substring containment, not segmentFn's extraction boundaries - see
+   * countRowsContainingSegment). Callers that specifically want the original majority-boilerplate
+   * semantics keep using isBoilerplateSegment; callers suppressing 'partial'/'code'/'fuzzy'/
+   * 'vector' match credit should use isLowDiscriminationSegment, which is the superset check.
    * @param {Array} rows - candidate rows (e.g. the full plmList for one matching run)
    * @param {(row:any)=>string} getFieldValue
    * @param {(rawFieldValue:string)=>string[]} segmentFn
-   * @param {{boilerplateFrequencyRatio?:number, minRowsForBoilerplateDetection?:number}} [options]
+   * @param {{boilerplateFrequencyRatio?:number, minRowsForBoilerplateDetection?:number,
+   *   shortSegmentMaxLength?:number, shortSegmentMaxOccurrence?:number,
+   *   minRowsForShortSegmentDetection?:number, normalizeFieldValue?:(raw:string)=>string}} [options]
+   *   normalizeFieldValue defaults to identity (the caller is expected to pass already-normalized
+   *   segment strings AND its own normalization function when using containment-based detection -
+   *   the matching tool passes its own normalizeForMatch()).
    * @returns {{
    *   contractVersion:string, totalRows:number, boilerplateFrequencyRatio:number,
-   *   minRowsForBoilerplateDetection:number,
+   *   minRowsForBoilerplateDetection:number, shortSegmentMaxLength:number,
+   *   shortSegmentMaxOccurrence:number, minRowsForShortSegmentDetection:number,
    *   isBoilerplateSegment:(normalizedSegment:string)=>boolean,
+   *   isLowDiscriminationSegment:(normalizedSegment:string)=>boolean,
    *   detail:Map<string,{occurrenceRowCount:number,totalRows:number,frequencyRatio:number,boilerplate:boolean}>
    * }}
    */
@@ -101,17 +189,31 @@
     const opts = options || {};
     const ratio = typeof opts.boilerplateFrequencyRatio === 'number' ? opts.boilerplateFrequencyRatio : DEFAULT_BOILERPLATE_FREQUENCY_RATIO;
     const minRows = typeof opts.minRowsForBoilerplateDetection === 'number' ? opts.minRowsForBoilerplateDetection : DEFAULT_MIN_ROWS_FOR_DETECTION;
+    const shortMaxLength = typeof opts.shortSegmentMaxLength === 'number' ? opts.shortSegmentMaxLength : DEFAULT_SHORT_SEGMENT_MAX_LENGTH;
+    const shortMaxOccurrence = typeof opts.shortSegmentMaxOccurrence === 'number' ? opts.shortSegmentMaxOccurrence : DEFAULT_SHORT_SEGMENT_MAX_OCCURRENCE;
+    const shortMinRows = typeof opts.minRowsForShortSegmentDetection === 'number' ? opts.minRowsForShortSegmentDetection : DEFAULT_MIN_ROWS_FOR_SHORT_SEGMENT_DETECTION;
+    const normalizeFieldValue = typeof opts.normalizeFieldValue === 'function' ? opts.normalizeFieldValue : (s => s);
     const { totalRows, frequency } = computeSegmentDocumentFrequency(rows, getFieldValue, segmentFn);
 
     const boilerplate = new Set();
     const detail = new Map();
-    if (totalRows >= minRows) {
-      for (const [seg, count] of frequency.entries()) {
-        const frequencyRatio = count / totalRows;
-        const isBoilerplate = frequencyRatio >= ratio;
-        detail.set(seg, { occurrenceRowCount: count, totalRows, frequencyRatio, boilerplate: isBoilerplate });
-        if (isBoilerplate) boilerplate.add(seg);
-      }
+    for (const [seg, count] of frequency.entries()) {
+      const frequencyRatio = totalRows > 0 ? count / totalRows : 0;
+      const isBoilerplate = totalRows >= minRows && frequencyRatio >= ratio;
+      detail.set(seg, { occurrenceRowCount: count, totalRows, frequencyRatio, boilerplate: isBoilerplate });
+      if (isBoilerplate) boilerplate.add(seg);
+    }
+
+    // Containment counts are computed lazily and cached per queried segment (not eagerly for every
+    // extracted segment key), since isLowDiscriminationSegment may be asked about a segment that
+    // was never one of segmentFn's own extracted entries at all (e.g. queried directly by
+    // calcPairMatch's `keyword` for a 'token'-sourced entry from the OTHER side's tokenizer run).
+    const containmentCountCache = new Map();
+    function containmentCount(normalizedSegment) {
+      if (containmentCountCache.has(normalizedSegment)) return containmentCountCache.get(normalizedSegment);
+      const count = countRowsContainingSegment(rows, getFieldValue, normalizeFieldValue, normalizedSegment);
+      containmentCountCache.set(normalizedSegment, count);
+      return count;
     }
 
     return {
@@ -119,7 +221,17 @@
       totalRows,
       boilerplateFrequencyRatio: ratio,
       minRowsForBoilerplateDetection: minRows,
+      shortSegmentMaxLength: shortMaxLength,
+      shortSegmentMaxOccurrence: shortMaxOccurrence,
+      minRowsForShortSegmentDetection: shortMinRows,
       isBoilerplateSegment: (normalizedSegment) => !!normalizedSegment && boilerplate.has(normalizedSegment),
+      isLowDiscriminationSegment: (normalizedSegment) => {
+        if (!normalizedSegment) return false;
+        if (boilerplate.has(normalizedSegment)) return true;
+        if (normalizedSegment.length > shortMaxLength) return false;
+        if (totalRows < shortMinRows) return false;
+        return containmentCount(normalizedSegment) > shortMaxOccurrence;
+      },
       detail,
     };
   }
@@ -128,7 +240,11 @@
     CONTRACT_VERSION,
     DEFAULT_BOILERPLATE_FREQUENCY_RATIO,
     DEFAULT_MIN_ROWS_FOR_DETECTION,
+    DEFAULT_SHORT_SEGMENT_MAX_LENGTH,
+    DEFAULT_SHORT_SEGMENT_MAX_OCCURRENCE,
+    DEFAULT_MIN_ROWS_FOR_SHORT_SEGMENT_DETECTION,
     computeSegmentDocumentFrequency,
+    countRowsContainingSegment,
     buildBoilerplateSegmentIndex,
   };
 });

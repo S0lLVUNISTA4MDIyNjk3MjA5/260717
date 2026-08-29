@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Knowledge Matching Suite ― L3-1 評価版</title>
+<style>
+  body { font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.8; color: #222; }
+  h1 { font-size: 1.6em; border-bottom: 3px solid #2563eb; padding-bottom: 10px; }
+  h2 { font-size: 1.2em; color: #1d4ed8; margin-top: 2em; }
+  .badge { display: inline-block; background: #fef3c7; color: #92400e; padding: 4px 10px; border-radius: 6px; font-size: 0.85em; font-weight: bold; }
+  .flow { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 20px; margin: 20px 0; }
+  .step { display: flex; align-items: center; margin: 8px 0; }
+  .step .n { background: #2563eb; color: #fff; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.85em; margin-right: 12px; flex-shrink: 0; }
+  .arrow { text-align: center; color: #94a3b8; margin: -4px 0; }
+  .card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; margin: 10px 0; }
+  .card a { color: #1d4ed8; text-decoration: none; font-weight: bold; }
+  .card a:hover { text-decoration: underline; }
+  .note { background: #eff6ff; border-left: 4px solid #2563eb; padding: 10px 16px; margin: 16px 0; font-size: 0.95em; }
+  .warn { background: #fef2f2; border-left: 4px solid #dc2626; padding: 10px 16px; margin: 16px 0; font-size: 0.95em; }
+  footer { margin-top: 3em; font-size: 0.85em; color: #64748b; }
+</style>
+</head>
+<body>
+
+<span class="badge">評価版 ― Human Evaluation Build</span>
+<h1>Knowledge Matching Suite<br>L3-1 評価版へようこそ</h1>
+
+<p>このパッケージは、PDF・Excelの文書を「照合用JSON」に変換し、2つの文書の対応関係を
+自動で照合する一連のツールをまとめたものです。<strong>製品としての最終版ではなく、
+評価・確認のためのビルドです。</strong></p>
+
+<h2>この評価版で確認すること</h2>
+<p>今回のバージョンでは、「Matching（照合）」ツールが照合に使う項目（列）を自動で選ぶ際に、
+<strong>安全でない項目（内部管理用の技術情報など）を誤って選んでしまう不具合</strong>を修正しました。
+この評価版では、その修正が実際に効いているかを、実データで確認していただくことが主な目的です。</p>
+
+<h2>基本の流れ</h2>
+<div class="flow">
+  <div class="step"><div class="n">1</div>文書A（PDFまたはExcel）→ JSON作成</div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="n">2</div>文書B（PDFまたはExcel）→ JSON作成</div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="n">3</div>（必要に応じて）辞書候補レビュー → Snapshot作成</div>
+  <div class="arrow">↓</div>
+  <div class="step"><div class="n">4</div>JSON A + JSON B → Matching（照合）</div>
+</div>
+
+<h2>各ツールを開く</h2>
+<div class="card">📄 <a href="01-JSON-Creation/PDF/spec_to_json_conversion_tool_alpha_v0.10.1.html">01-JSON-Creation/PDF ― PDFからJSONを作る</a></div>
+<div class="card">📊 <a href="01-JSON-Creation/Excel/excel_to_json_conversion_tool_alpha_v0.10.1.html">01-JSON-Creation/Excel ― ExcelからJSONを作る</a></div>
+<div class="card">📚 <a href="02-Dictionary-Review/app/index.html">02-Dictionary-Review ― 辞書候補レビュー（任意）</a></div>
+<div class="card">🔗 <a href="04-Matching/index.html">04-Matching ― JSON A/BをMatching（照合）する</a></div>
+<div class="card">📁 <a href="Samples/L3-1-Human-Evaluation/">Samples/L3-1-Human-Evaluation ― 評価用サンプル一式</a></div>
+<div class="card">📖 <a href="Manual/KMS_L3-1_Human_Evaluation_Guide_JA.pdf">評価ガイド（PDF）を開く</a></div>
+
+<div class="note">
+<strong>操作に迷ったら:</strong> <code>Manual/KMS_L3-1_Human_Evaluation_Guide_JA.pdf</code>
+に、実際の画面のスクリーンショット付きで手順を説明しています。まずそちらをご覧ください。
+</div>
+
+<div class="warn">
+<strong>ご協力のお願い:</strong> 評価内容は
+<code>Manual/KMS_L3-1_Human_Evaluation_Checklist_JA.csv</code>
+に記録してください。「何が改善されたか」「なぜこの結果になったか説明できるか」といった
+項目も含まれています。
+</div>
+
+<h2>必要な環境</h2>
+<p>Webブラウザ（Google Chrome など）だけで動作します。インターネット接続・サーバー起動・
+ターミナル操作は、通常の評価作業では必要ありません。（Graph表示・Excel出力の一部機能のみ、
+外部ライブラリ読み込みのためインターネット接続が必要な場合があります。詳しくは
+<code>Manual/KNOWN_LIMITATIONS_L3-1_JA.txt</code> をご覧ください。）</p>
+
+<footer>
+Knowledge Matching Suite — L3-1 Human Evaluation Build<br>
+Source: claude/canonical-matching-level3-l3-1 @ 3d2a5fc<br>
+本ビルドは Human Evaluation（人による評価）専用です。Production Acceptance / Final Release ではありません。
+</footer>
+
+</body>
+</html>

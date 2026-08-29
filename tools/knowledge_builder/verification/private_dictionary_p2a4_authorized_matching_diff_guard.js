@@ -247,6 +247,12 @@ const HUNK_8 = [
 // partial-match suppression (2-A/2-A.1) EXTENDED with sharedPrefixDominatesSimilarity() (2-C,
 // RISK-FUZZY-01 remediation) - see the Checkpoint 2-C addendum near
 // AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS below for the full rationale.
+// HE-1 Remediation Checkpoint 2-A/2-A.1/2-C/2-C.1 (re-authorized this round): boilerplate-
+// segment partial-match suppression (2-A/2-A.1), extended with sharedPrefixDominatesSimilarity()
+// (2-C, RISK-FUZZY-01) and normalizeFieldValue:normalizeForMatch wiring for
+// isLowDiscriminationSegment()'s containment-based short-token check (2-C.1, the "以上" false-
+// positive fix) - see the Checkpoint 2-C/2-C.1 addenda near AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS
+// below for the full rationale.
 const HUNK_9 = [
   "     return [...new Set(activeKeyPairs().map(p => p.plmField).filter(Boolean))];",
   "   }",
@@ -284,26 +290,37 @@ const HUNK_9 = [
   "+    let byField = boilerplateSegmentIndexCache.get(rows);",
   "+    if (!byField) { byField = new Map(); boilerplateSegmentIndexCache.set(rows, byField); }",
   "+    if (!byField.has(field)) {",
+  "+      // HE-1 Remediation Checkpoint 2-C.1: normalizeFieldValue:normalizeForMatch makes the",
+  "+      // isLowDiscriminationSegment short-token containment check use the SAME text normalization",
+  "+      // calcPairMatch's own containsHit test applies - required for containment counting to be a",
+  "+      // faithful proxy for \"would containsHit actually see this substring here.\"",
   "+      byField.set(field, globalThis.MatchingPartialSegmentSignificance.buildBoilerplateSegmentIndex(",
   "+        rows,",
   "+        row => (row == null ? '' : row[field]),",
-  "+        segmentsForBoilerplateIndex",
+  "+        segmentsForBoilerplateIndex,",
+  "+        { normalizeFieldValue: normalizeForMatch }",
   "+      ));",
   "+    }",
   "+    return byField.get(field);",
   "+  }",
-  "+  // True iff normalizedSegment is boilerplate on the JSON A/sys side (activeBoilerplateContext.",
+  "+  // True iff normalizedSegment is low-discrimination on the JSON A/sys side (activeBoilerplateContext.",
   "+  // sysList, pair.sysField) OR the JSON B/plm side (activeBoilerplateContext.plmList,",
   "+  // pair.plmField) - an OR, never a merged/summed population (1/4 on each side must stay 1/4 and",
   "+  // 1/4, never become 2/8 - see Checkpoint 2-A.1 report §1). Either side alone being near-constant",
   "+  // is sufficient to make a segment low-discrimination, because the risk it creates (many-to-one on",
   "+  // whichever side is NOT near-constant) does not require both sides to agree.",
+  "+  // HE-1 Remediation Checkpoint 2-C.1: uses isLowDiscriminationSegment() (the superset of the",
+  "+  // original majority-boilerplate rule, ALSO catching a short generic token that merely recurs at",
+  "+  // all on a small minority of rows - e.g. Japanese \"以上\"/\"以下\" - see",
+  "+  // matching_partial_segment_significance_core.js for the full rationale). Every existing caller of",
+  "+  // this function (partial/code/fuzzy/vector, both explicit-mode and 'auto' mode) inherits the",
+  "+  // stricter check automatically through this single point.",
   "+  function segmentIsBoilerplateOnEitherSide(normalizedSegment, pair) {",
   "+    if (!normalizedSegment) return false;",
   "+    const sysIdx = boilerplateSegmentIndexForField(activeBoilerplateContext?.sysList, pair.sysField);",
-  "+    if (sysIdx && sysIdx.isBoilerplateSegment(normalizedSegment)) return true;",
+  "+    if (sysIdx && sysIdx.isLowDiscriminationSegment(normalizedSegment)) return true;",
   "+    const plmIdx = boilerplateSegmentIndexForField(activeBoilerplateContext?.plmList, pair.plmField);",
-  "+    if (plmIdx && plmIdx.isBoilerplateSegment(normalizedSegment)) return true;",
+  "+    if (plmIdx && plmIdx.isLowDiscriminationSegment(normalizedSegment)) return true;",
   "+    return false;",
   "+  }",
   "+  function segmentIsBoilerplateForPair(keyword, pair, keywordMeta) {",
@@ -806,6 +823,19 @@ const HUNK_22 = [
  * per this guard's own stated convention ("UPDATE that hunk's definition in place" - see file
  * header). The hunk COUNT stays 21 (unchanged from Checkpoint 2-B); no new HUNK_23 was needed.
  * Verified against both PRE_HEAD_SHA references exactly as in every prior round. */
+/* HE-1 Remediation Checkpoint 2-C.1 addendum: the "以上" (RISK: short generic Japanese
+ * comparator token) false-positive fix wired matching_partial_segment_significance_core.js's new
+ * isLowDiscriminationSegment() containment check into boilerplateSegmentIndexForField() via a
+ * normalizeFieldValue:normalizeForMatch option - a small, single-hunk addition inside the SAME
+ * HUNK_9 region Checkpoint 2-A/2-C already cover, re-authorized in place per this guard's own
+ * stated convention. Hunk count stays 21 (unchanged from Checkpoint 2-C); no new hunk was needed.
+ * matching_partial_segment_significance_core.js itself (where isLowDiscriminationSegment() and the
+ * short-token/containment-counting logic actually live) is a SEPARATE file from
+ * json_ab_trace_matching_tool_v12.1.15.html and is not covered by this guard at all - it is not
+ * one of the "protected pure core" files tracked elsewhere in this repo's governance either (it
+ * was introduced by this same HE-1 Remediation lineage at Checkpoint 2-A, not a pre-existing
+ * P2-A4 production file), so ordinary git history is its only change record. Verified against both
+ * PRE_HEAD_SHA references exactly as in every prior round. */
 const AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS = [HUNK_1, HUNK_2, HUNK_3, HUNK_4, HUNK_5, HUNK_6, HUNK_7, HUNK_8, HUNK_9, HUNK_10, HUNK_11, HUNK_12, HUNK_14, HUNK_15, HUNK_16, HUNK_17, HUNK_18, HUNK_19, HUNK_20, HUNK_21, HUNK_22];
 
 // Parses a `git diff` text into an array of hunk-body strings (everything
