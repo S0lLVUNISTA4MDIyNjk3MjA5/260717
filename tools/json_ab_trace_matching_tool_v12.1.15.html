@@ -1720,6 +1720,10 @@
   let detailHeaders = [];
   let detailFiltered = [];    // フィルタ後の表示インデックス集合
   let isDetailEditMode = false;
+  // HE-1 Remediation Checkpoint 2-B: which parent rows (keyed by row._nodeId, unique on both
+  // A基準/B基準) currently have their per-edge expand detail open. Default collapsed (empty Set) -
+  // never auto-expands every row, preserving existing list-at-a-glance readability (task §1).
+  let detailExpandedKeys = new Set();
 
   /* ═══════════════════════════════════════════
      DOM参照
@@ -10155,6 +10159,67 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     });
   }
 
+  // HE-1 Remediation Checkpoint 2-B: renders one accepted edge as a full-width detail row under
+  // its parent (task §1/§2). `edge` is a PLAIN-DATA object precomputed by buildEdgeExpandEntries()
+  // (declared inside the private-dictionary-review IIFE further down this file, where
+  // presentationEvidenceLine()/dictionaryContributionLine() actually live as closures, not global
+  // bindings - this function only reads plain strings/numbers off it, no cross-scope function call).
+  // targetId already equals a real Graph node id (getGraphData()'s reqId / 'PARTC-'+ncName(bId)
+  // scheme - task §5), computed once at the same source as the parent row's own aggregate count.
+  function renderDetailExpandRow(parentIdx, edge, colCount) {
+    return `<tr class="detail-expand-row" data-parent-idx="${parentIdx}" data-target-id="${escapeHtml(edge.targetId)}">
+      <td class="detail-expand-cell" colspan="${colCount}" style="background:#f8fafc;border-left:3px solid #93c5fd;padding:8px 14px;font-size:12.5px;line-height:1.7;">
+        <div><strong>↳ 接続先:</strong> ${escapeHtml(edge.targetLabel)} <span style="color:#64748b;">(${escapeHtml(edge.targetId)})</span>
+          &nbsp;/&nbsp; <strong>confidence:</strong> ${escapeHtml(formatCell(edge.confidence))}
+          &nbsp;/&nbsp; <strong>method:</strong> ${escapeHtml(formatCell(edge.method))}
+          &nbsp;<button type="button" onclick="highlightGraphFromTable('${escapeHtml(edge.targetId)}')" title="Graphで接続先ノードをハイライト" style="padding:1px 6px;font-size:10.5px;border:1px solid #93c5fd;border-radius:4px;background:#fff;color:#1d4ed8;cursor:pointer;">Graphで表示</button></div>
+        <div><strong>照合根拠:</strong> ${escapeHtml(edge.evidenceLine)}</div>
+        <div><strong>辞書:</strong> ${escapeHtml(edge.dictLine)}</div>
+      </td>
+    </tr>`;
+  }
+  window.toggleDetailRowExpand = function(nodeId) {
+    if (!nodeId) return;
+    if (detailExpandedKeys.has(nodeId)) detailExpandedKeys.delete(nodeId); else detailExpandedKeys.add(nodeId);
+    renderDetailTableFull();
+  };
+  // HE-1 Remediation Checkpoint 2-B (task §4): table→Graph identity correspondence. nodeId/targetId
+  // here are ALREADY real Graph element ids (same reqId/'PARTC-'+ncName(...) scheme getGraphData()
+  // uses), so no separate mapping table is needed - cy.getElementById() either finds the exact same
+  // element or (task §5) Graph/cytoscape simply isn't available yet, which must never block the
+  // detail table/expand feature itself, only this optional highlight affordance degrades.
+  let _tableHighlightedGraphEl = null;
+  function detailGraphToast(msg) {
+    let el = document.getElementById('detailGraphToast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'detailGraphToast';
+      el.style.cssText = 'position:fixed;bottom:16px;right:16px;background:#1f2937;color:#fff;padding:8px 14px;border-radius:6px;font-size:12.5px;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,.25);';
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.style.display = 'block';
+    clearTimeout(el._hideTimer);
+    el._hideTimer = setTimeout(() => { el.style.display = 'none'; }, 2500);
+  }
+  window.highlightGraphFromTable = function(nodeId) {
+    if (!nodeId) return;
+    if (typeof cy === 'undefined' || !cy) {
+      detailGraphToast('Graph未読み込みのためハイライトできません（表・展開機能自体には影響ありません）');
+      return;
+    }
+    const el = cy.getElementById(nodeId);
+    if (!el || el.empty()) { detailGraphToast('Graph上に該当ノードが見つかりません: ' + nodeId); return; }
+    if (_tableHighlightedGraphEl && !_tableHighlightedGraphEl.removed()) {
+      _tableHighlightedGraphEl.style({ 'border-width':'', 'border-color':'', 'background-color':'' });
+    }
+    el.style({ 'border-width':5, 'border-color':'#dc2626', 'background-color':'#fee2e2' });
+    _tableHighlightedGraphEl = el;
+    cy.animate({ fit:{ eles: el, padding:80 } }, { duration:300 });
+    const tabBtn = document.querySelector('[data-tab="tabGraph"]');
+    if (tabBtn) tabBtn.click();
+  };
+
   function renderDetailTableFull() {
     if (!detailRows.length) {
       detailTableHead.innerHTML='';
@@ -10163,16 +10228,34 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     }
     detailHeaders = Object.keys(detailRows[0]).filter(k => !k.startsWith('_'))
       .filter(h => !isDetailColumnHiddenByDefault(h));
-    detailTableHead.innerHTML = `<tr>${detailHeaders.map(h=>`<th class="${jsonColumnClass(h)}">${escapeHtml(h)}</th>`).join('')}</tr>`;
+    // HE-1 Remediation Checkpoint 2-B: one narrow leading column for the per-row edge-expand
+    // toggle (task §1/§2 - a single added column, not ten extra columns; expand DETAIL renders as
+    // a full-width row directly under its parent, never as more table columns).
+    detailTableHead.innerHTML = `<tr><th style="width:28px;"></th>${detailHeaders.map(h=>`<th class="${jsonColumnClass(h)}">${escapeHtml(h)}</th>`).join('')}</tr>`;
     if (!(detailFiltered instanceof Set)) detailFiltered = new Set(detailRows.map((_,i)=>i));
     const filteredIndices = [...detailFiltered].filter(i => detailRows[i]).sort((a,b)=>a-b);
     const showIndices = filteredIndices.slice(0, Math.max(1, detailTableVisibleLimit || PHASE4_TABLE_LIMIT));
+    const colCount = detailHeaders.length + 1;
     detailTableBody.innerHTML = showIndices.map(idx=> {
       const row = detailRows[idx];
-      return `<tr data-idx="${idx}" data-reqid="${escapeHtml(row._reqId||'')}">
+      const edges = Array.isArray(row._edgeRows) ? row._edgeRows : [];
+      const nodeId = row._nodeId || '';
+      const expanded = edges.length > 0 && detailExpandedKeys.has(nodeId);
+      const toggleCell = edges.length
+        ? `<button type="button" onclick="toggleDetailRowExpand('${escapeHtml(nodeId)}')" title="接続先を${expanded ? '折りたたむ' : '展開する'}" style="padding:2px 7px;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer;">${expanded ? '▼' : '▶'}</button>`
+        : '';
+      const graphCell = nodeId
+        ? `<button type="button" onclick="highlightGraphFromTable('${escapeHtml(nodeId)}')" title="Graphでこのノードをハイライト" style="padding:1px 5px;font-size:10px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;color:#475569;cursor:pointer;margin-left:2px;">G</button>`
+        : '';
+      const parentTr = `<tr data-idx="${idx}" data-reqid="${escapeHtml(row._reqId||'')}" data-nodeid="${escapeHtml(nodeId)}">
+        <td style="text-align:center;white-space:nowrap;">${toggleCell}${graphCell}</td>
         ${detailHeaders.map(h=>{ const val = formatCellMultiline(row[h]); return `<td class="${jsonColumnClass(h)}" data-key="${escapeHtml(h)}" title="${escapeHtml(val)}"><div class="cell-text">${escapeHtml(val)}</div></td>`; }).join('')}
       </tr>`;
-    }).join('') + (filteredIndices.length > showIndices.length ? `<tr class="phase4-more-row"><td colspan="${detailHeaders.length || 1}">${showIndices.length.toLocaleString()} / ${filteredIndices.length.toLocaleString()} 件を表示中 <button type="button" class="secondary" onclick="loadMoreDetailRows()" style="padding:4px 10px;font-size:12px;margin-left:8px;">さらに表示</button></td></tr>` : '');
+      if (!expanded) return parentTr;
+      // Count invariant (task §3): exactly one expand row per element of row._edgeRows, the same
+      // array 照合JSON B件数/照合JSON A件数 was already computed from - never a re-derived count.
+      return parentTr + edges.map(edge => renderDetailExpandRow(idx, edge, colCount)).join('');
+    }).join('') + (filteredIndices.length > showIndices.length ? `<tr class="phase4-more-row"><td colspan="${colCount}">${showIndices.length.toLocaleString()} / ${filteredIndices.length.toLocaleString()} 件を表示中 <button type="button" class="secondary" onclick="loadMoreDetailRows()" style="padding:4px 10px;font-size:12px;margin-left:8px;">さらに表示</button></td></tr>` : '');
     detailCountEl.textContent = filteredIndices.length > showIndices.length ? `${showIndices.length} / ${filteredIndices.length}` : filteredIndices.length;
     attachDetailExpandListeners();
     updateDetailFilterBadge();
@@ -11440,6 +11523,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       '_bGranularityRule': base._bGranularityRule || overrides._bGranularityRule || '',
       '_matchedChunk': base._matchedChunk || null,
       '_chunkMatches': Array.isArray(base._chunkMatches) ? base._chunkMatches : [],
+      '_tagEvidence': base._tagEvidence || null,
       requirement_trace_id: base.requirement_trace_id || overrides.requirement_trace_id || null,
       actual_trace_id: base.actual_trace_id || overrides.actual_trace_id || null,
       matcher_a_id: base.matcher_a_id || overrides.matcher_a_id || base['A_ID'] || overrides.A_ID || null,
@@ -12186,6 +12270,76 @@ ${h.name}`, type:'requirement', detail:srcA };
     return `${p.evidence.method}: ${p.evidence.evidenceText} (${p.evidence.confidence}) [${p.decision.source}]${tagText}${diceText}`;
   }
 
+  // ── HE-1 Remediation Checkpoint 2-B: per-edge Dictionary Explainability ──
+  // Distinguishes THREE states, never guessed from the mere presence of a dictionary
+  // annotation on a row (task §8's correctness requirement):
+  //   'none'            - neither side's raw row carries an EXACT_CANONICAL/APPROVED_ALIAS
+  //                        annotation at all (no dictionary resolution exists to have used).
+  //   'present_unused'  - at least one side has such an annotation, but THIS edge's own
+  //                        matching evidence (relationPresentation's sharedTags, populated
+  //                        only when 方式 is 'tag'/'code' - see evaluateTagMatch()) does not
+  //                        include that annotation's resolved_canonical value. The dictionary
+  //                        resolved something on one of the two rows, but it was not what
+  //                        produced THIS edge (e.g. the edge matched via 'exact'/'vector' on an
+  //                        unrelated field, or the shared tag driving 'tag'/'code' method came
+  //                        from a different, non-approved-dictionary tag source).
+  //   'used'            - at least one of the annotations' resolved_canonical values is
+  //                        actually present in this edge's own sharedTags - the dictionary
+  //                        resolution was real, live matching evidence for this specific edge.
+  function approvedAnnotationsForRawRow(rawRow) {
+    if (!rawRow || typeof rawRow !== 'object') return [];
+    let sidecar;
+    try {
+      sidecar = rawRow._approvedDictResolution;
+    } catch (_err) {
+      // Mirrors projectApprovedDictionaryResolutionProvenance()'s hostile-getter
+      // defense: a corrupted/throwing sidecar getter must never propagate up
+      // through the Detail table's edge-expand rendering - treat it as "no
+      // usable annotations", the same fail-safe posture already established.
+      return [];
+    }
+    const anns = sidecar && Array.isArray(sidecar.annotations) ? sidecar.annotations : [];
+    return anns.filter(a => a && (a.resolution_type === 'EXACT_CANONICAL' || a.resolution_type === 'APPROVED_ALIAS'));
+  }
+  function dictionaryContributionForEdge(r) {
+    const aRaw = rowSourceMaps().a.get(r['A_ID'])?.row;
+    const bRaw = rowSourceMaps().b.get(r['B_ID'])?.row;
+    const aAnns = approvedAnnotationsForRawRow(aRaw).map(a => ({ ...a, side:'A' }));
+    const bAnns = approvedAnnotationsForRawRow(bRaw).map(a => ({ ...a, side:'B' }));
+    const allAnns = [...aAnns, ...bAnns];
+    if (!allAnns.length) return { status:'none', label:'辞書寄与なし', annotations:[] };
+    const p = relationPresentation(r);
+    const sharedNormalized = new Set((p?.evidence?.sharedTags || []).map(normalizeTagValue));
+    const used = allAnns.filter(a => sharedNormalized.has(normalizeTagValue(a.resolved_canonical)));
+    if (used.length) return { status:'used', label:'辞書寄与あり', annotations:used };
+    return { status:'present_unused', label:'辞書解決あり・この照合には未使用', annotations:allAnns };
+  }
+  function dictionaryContributionLine(r) {
+    const c = dictionaryContributionForEdge(r);
+    if (c.status === 'none') return c.label;
+    const detail = c.annotations.map(a => `${a.side}: ${a.original_term || ''} → resolution:${a.resolution_type} canonical:${a.resolved_canonical || ''} snapshot:${a.dictionary_snapshot_id || ''}`).join(' / ');
+    return `${c.label}${detail ? ' (' + detail + ')' : ''}`;
+  }
+  // Precomputed, PLAIN-DATA per-edge entries for the Detail table's expand rows. renderDetailTableFull()
+  // (the outer, non-IIFE scope - see below) cannot call presentationEvidenceLine()/
+  // dictionaryContributionLine() itself (both are declared inside this IIFE's closure, not global -
+  // confirmed empirically: only bare, undeclared assignments like `buildDetailRows = ...` leak to the
+  // global object from inside an IIFE; real `function` declarations stay IIFE-local), so every string
+  // an expand row needs is computed HERE, once, at the same time and from the exact same `current`
+  // array the parent row's own aggregate fields (照合JSON B/A件数 etc.) are computed from - guaranteeing
+  // the count invariant (task §3) by construction, not by a separately-derived lookup at render time.
+  // otherSideIsB=true for the A基準 builder (target = the JSON B side of each edge); false for B基準.
+  function buildEdgeExpandEntries(rows, otherSideIsB) {
+    return (rows || []).map(r => ({
+      targetLabel: otherSideIsB ? (r['B_表示名'] || r['B_ID'] || '') : (r['A_表示名'] || r['A_ID'] || ''),
+      targetId: otherSideIsB ? ('PARTC-' + ncName(r['B_ID'] || '')) : (r['A_ID'] || ''),
+      confidence: r['信頼度'],
+      method: r['方式'],
+      evidenceLine: presentationEvidenceLine(r),
+      dictLine: dictionaryContributionLine(r)
+    }));
+  }
+
   buildDetailRows = function(sysList, plmList) {
     ensureEffectiveCache();
     const sourceFields = selectedDetailSourceFields('A', sysList);
@@ -12199,7 +12353,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       const maxC = current.length ? Math.max(...current.map(r => Number(r['信頼度']) || 0)) : 0;
       const bestMatch = current.reduce((best, r) => (Number(r['信頼度']) || 0) > (best ? Number(best['信頼度']) || 0 : -1) ? r : best, null);
       return {
-        '_reqId':aId, '_nodeId':aId, 'No':idx+1,
+        '_reqId':aId, '_nodeId':aId, '_edgeRows':buildEdgeExpandEntries(current, true), 'No':idx+1,
         'JSON A表示名':sysDisplayName(item, idx),
         '照合JSON B件数':current.length,
         '照合JSON B表示名一覧':numberedLines(current.map(r => r['B_表示名'])),
@@ -12236,7 +12390,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       const maxC = current.length ? Math.max(...current.map(r => Number(r['信頼度']) || 0)) : 0;
       const bestMatch = current.reduce((best, r) => (Number(r['信頼度']) || 0) > (best ? Number(best['信頼度']) || 0 : -1) ? r : best, null);
       return {
-        '_nodeId':'PARTC-' + ncName(bId), 'No':idx+1,
+        '_nodeId':'PARTC-' + ncName(bId), '_edgeRows':buildEdgeExpandEntries(current, false), 'No':idx+1,
         'JSON B表示名':plmDisplayName(item, idx),
         '照合JSON A件数':current.length,
         '照合JSON A一覧':numberedLines(current.map(r => `${r['A_ID']}: ${r['A_表示名']}`)),
@@ -13488,6 +13642,22 @@ ${h.name}`, type:'requirement', detail:srcA };
       const indices = detailRows?.length && detailFiltered instanceof Set ? [...detailFiltered].sort((a,b)=>a-b) : source.map((_,i)=>i);
       const rows = indices.map(i=>{const r={...(source[i]||{})};Object.keys(r).filter(k=>k.startsWith('_')).forEach(k=>delete r[k]);return r;}).filter(r=>Object.keys(r).length);
       const wb=XLSX.utils.book_new(); addJsonSheet(wb,'照合結果一覧',rows);
+      // HE-1 Remediation Checkpoint 2-B (task §9/§10/§11/§13): explicitly-named A基準/B基準
+      // sheets, added ALONGSIDE the existing "照合結果一覧" sheet above (whose prior behaviour -
+      // current basis toggle + current on-screen filter - is left byte-for-byte unchanged, so
+      // anything already keyed on that exact sheet name keeps working - no silent breaking
+      // rename). These two new sheets are always the FULL, unfiltered node-aggregated projection
+      // for each basis, built from the same buildDetailRows()/buildDetailRowsPlm() functions the
+      // rest of the tool already uses (i.e. the same underlying accepted-edge set both already
+      // read from) - never a second matching run - so edge identity/confidence/method/evidence/
+      // dictionary-attribution/provenance are guaranteed consistent across both sheets by
+      // construction. Row granularity intentionally stays node-aggregated, matching the existing
+      // "照合結果一覧" granularity - not changed to 1-edge-1-row.
+      const stripHiddenKeys = r => { const c={...r}; Object.keys(c).filter(k=>k.startsWith('_')).forEach(k=>delete c[k]); return c; };
+      const aBasisRows = buildDetailRows(mergedResult.sysList||[],mergedResult.plmList||[]).map(stripHiddenKeys).filter(r=>Object.keys(r).length);
+      const bBasisRows = buildDetailRowsPlm(mergedResult.sysList||[],mergedResult.plmList||[]).map(stripHiddenKeys).filter(r=>Object.keys(r).length);
+      addJsonSheet(wb,'照合結果_JSON_A基準',aBasisRows);
+      addJsonSheet(wb,'照合結果_JSON_B基準',bBasisRows);
       // P2-A4 Checkpoint 13 (S30.9B): dedicated Dictionary Resolution
       // Provenance sheet, row-identity-unique (never duplicated per
       // comparison) - built directly from mergedResult.sysList/plmList,
