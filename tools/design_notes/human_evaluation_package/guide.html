@@ -40,7 +40,7 @@
   <h1>Knowledge Matching Suite<br>L3-1 人による評価ガイド</h1>
   <p style="color:#475569; font-size:1.05em; margin-top:20px;">安全な自動照合列選択の確認のために</p>
   <div class="meta">
-    Source: claude/canonical-matching-level3-l3-1 @ 3d2a5fc<br>
+    Source: {{SOURCE_BRANCH}} @ {{SOURCE_SHA}}<br>
     Human Evaluation Build（Production Acceptance ではありません）
   </div>
 </div>
@@ -75,11 +75,18 @@
   <li>PDF・ExcelからJSONを作る一連の操作が問題なく行えるか</li>
   <li>Matchingツールが自動で選ぶ照合列に、内部管理用の技術情報が含まれていないか</li>
   <li>安全に自動推定できない場合、正しく「手動設定してください」と案内されるか</li>
-  <li>実際に4件の設備データを照合した際、正しい組み合わせが見つかるか（誤検出が無いか）</li>
-  <li>辞書Snapshotを設定した場合の効果が確認できるか</li>
+  <li>実際に設備データを照合した際、正しい組み合わせが見つかるか（誤検出が無いか） ―
+    共通見出し（breadcrumb）だけを根拠にした誤対応や、「以上」のような短く汎用的な語
+    だけを根拠にした誤対応が生じていないかを含む</li>
+  <li>照合結果一覧の各行を展開すると、対応先ごとのconfidence・方式・照合根拠が確認でき、
+    それがナレッジグラフの実際のノード・エッジと一致しているか</li>
+  <li>辞書Snapshotを設定した場合の効果が確認できるか ― 個々の対応関係について、辞書が
+    実際にその対応の決め手になったのか、それとも辞書情報はあるが使われていないのかを
+    区別して説明できるか</li>
+  <li>Excel出力のJSON A基準／B基準どちらのシートからも、同じ対応関係が一貫して確認できるか</li>
   <li>画面を見て、結果の理由が自分で説明できるか</li>
 </ul>
-<p>詳しい記録項目は <code>KMS_L3-1_Human_Evaluation_Checklist_JA.csv</code>（HE-01〜HE-20）を
+<p>詳しい記録項目は <code>KMS_L3-1_Human_Evaluation_Checklist_JA.csv</code>（HE-01〜HE-22）を
 ご覧ください。</p>
 
 <h1 class="section">4. PDFからJSONを作る</h1>

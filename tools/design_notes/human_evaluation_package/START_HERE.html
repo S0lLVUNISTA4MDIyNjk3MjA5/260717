@@ -30,9 +30,29 @@
 評価・確認のためのビルドです。</strong></p>
 
 <h2>この評価版で確認すること</h2>
-<p>今回のバージョンでは、「Matching（照合）」ツールが照合に使う項目（列）を自動で選ぶ際に、
-<strong>安全でない項目（内部管理用の技術情報など）を誤って選んでしまう不具合</strong>を修正しました。
-この評価版では、その修正が実際に効いているかを、実データで確認していただくことが主な目的です。</p>
+<p>今回のビルドは、Human Evaluationで見つかった複数の指摘（HE Finding）への対応をまとめた
+Remediation（是正）ビルドです。少なくとも次の点を確認していただくことが目的です。</p>
+<ul>
+  <li><strong>安全な自動列選択</strong> ― 照合に使う項目（列）の自動選択が、内部管理用の技術情報など
+    安全でない項目を誤って選ばないこと</li>
+  <li><strong>HE-09/HE-10の誤対応是正</strong> ― PDF/Excelそれぞれの自己照合で、共通見出し
+    （breadcrumb）だけを根拠にした誤対応が解消されていること</li>
+  <li><strong>共通見出し・短い低識別語による誤対応の抑止</strong> ― 「以上」「以下」のような短く
+    汎用的な語や、複数項目に共通する見出しだけを根拠にした対応が生じないこと</li>
+  <li><strong>照合結果一覧の展開表示（Detail edge expand）</strong> ― 各行を展開すると、対応先ごとの
+    confidence・方式・照合根拠が確認できること</li>
+  <li><strong>Graphとの対応関係</strong> ― 照合結果一覧の行・展開行が、ナレッジグラフの実際の
+    ノード・エッジと同一の対応関係を指していること</li>
+  <li><strong>辞書寄与の行単位の説明（per-edge dictionary explainability）</strong> ― 個々の対応関係
+    について、辞書が実際にその対応の決め手になったのか、それとも辞書情報はあるが使われて
+    いないのかを区別して確認できること</li>
+  <li><strong>HE-14/HE-15（辞書Snapshotなし/ありの比較）</strong> ― 同じ元データのまま、辞書
+    Snapshotの設定前後で対応関係がどう変わるかが明確に確認できること</li>
+  <li><strong>Excel出力のJSON A基準／B基準</strong> ― Excel出力した際、A基準・B基準どちらの
+    シートからも同じ対応関係が一貫して確認できること</li>
+</ul>
+<p>各項目の具体的な確認手順は <code>Manual/KMS_L3-1_Human_Evaluation_Guide_JA.pdf</code> と
+<code>Manual/KMS_L3-1_Human_Evaluation_Checklist_JA.csv</code> に記載しています。</p>
 
 <h2>基本の流れ</h2>
 <div class="flow">
@@ -73,7 +93,7 @@
 
 <footer>
 Knowledge Matching Suite — L3-1 Human Evaluation Build<br>
-Source: claude/canonical-matching-level3-l3-1 @ 3d2a5fc<br>
+Source: {{SOURCE_BRANCH}} @ {{SOURCE_SHA}}<br>
 本ビルドは Human Evaluation（人による評価）専用です。Production Acceptance / Final Release ではありません。
 </footer>
 

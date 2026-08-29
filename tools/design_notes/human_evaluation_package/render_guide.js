@@ -1,15 +1,17 @@
-/* Renders guide.html (in this same directory) to a PDF. Portable: takes an optional output path
- * as argv[2], defaulting to a file named KMS_L3-1_Human_Evaluation_Guide_JA.pdf next to this
- * script. Used standalone or invoked by build_human_evaluation_package.js.
+/* Renders a guide.html source to a PDF. Portable: takes an optional input HTML path as argv[2]
+ * (defaulting to guide.html in this same directory) and an optional output PDF path as argv[3]
+ * (defaulting to a file named KMS_L3-1_Human_Evaluation_Guide_JA.pdf next to this script).
+ * Used standalone or invoked by build_human_evaluation_package.js, which passes a
+ * template-substituted scratch copy of guide.html as the input path.
  *
- * Usage: node render_guide.js [output_pdf_path]
+ * Usage: node render_guide.js [input_html_path] [output_pdf_path]
  */
 const path = require('path');
 const { chromium } = require('playwright');
 
 const HERE = __dirname;
-const GUIDE_HTML = path.join(HERE, 'guide.html');
-const OUT_PDF = process.argv[2] || path.join(HERE, 'KMS_L3-1_Human_Evaluation_Guide_JA.pdf');
+const GUIDE_HTML = process.argv[2] || path.join(HERE, 'guide.html');
+const OUT_PDF = process.argv[3] || path.join(HERE, 'KMS_L3-1_Human_Evaluation_Guide_JA.pdf');
 
 (async () => {
   const browser = await chromium.launch({ args: ['--no-sandbox'] });

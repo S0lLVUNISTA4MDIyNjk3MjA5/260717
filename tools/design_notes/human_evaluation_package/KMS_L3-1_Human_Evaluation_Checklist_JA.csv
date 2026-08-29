@@ -7,7 +7,7 @@ HE-05,Safe auto field mapping,C/D を読み込んだ後、自動選択された�
 HE-06,Metadata field not automatically selected,自動選択された照合ペアに id_scheme_version 等が含まれないか確認する,技術的メタ情報は選ばれない,,,
 HE-07,Fail-closed when no safe mapping exists,E_negative_control_JSON_A / F_negative_control_JSON_B を読み込む,照合ペアが0件になり「手動で設定してください」という案内が表示される,,,
 HE-08,Manual field mapping,「＋ 照合ペアを追加」から手動で列を指定する,指定した列で照合が実行される,,,
-HE-09,PDF↔PDF Ground Truth,C_PDF_matching.json をA側/B側の両方に読み込み照合する,4件が正しく自己対応し、誤対応が0件,,,
+HE-09,PDF↔PDF Ground Truth,C_PDF_matching.json をA側/B側の両方に読み込み照合する,"設備4件（非常停止スイッチ・冷却水ポンプ・主遮断器・温度センサ）が正しく自己対応し、PDF側だけに存在する説明文1件の自己対応を含めて計5 edgeが表示される。異なる設備間の誤対応（例: 非常停止スイッチの行が冷却水ポンプの行と対応する等）は0件。5 edge全体が正解であり、4件しか無いと誤解してFAILと判断しないこと。",,,
 HE-10,Excel↔Excel Ground Truth,D_Excel_matching.json をA側/B側の両方に読み込み照合する,4件が正しく自己対応し、誤対応が0件,,,
 HE-11,PDF↔Excel Ground Truth,C_PDF_matching.json(A)とD_Excel_matching.json(B)を照合する,4件が正しく対応し、誤対応が0件（説明文1件は対応なしでよい）,,,
 HE-12,Excel↔PDF Ground Truth,D_Excel_matching.json(A)とC_PDF_matching.json(B)を照合する,4件が正しく対応し、誤対応が0件（説明文1件は対応なしでよい）,,,
