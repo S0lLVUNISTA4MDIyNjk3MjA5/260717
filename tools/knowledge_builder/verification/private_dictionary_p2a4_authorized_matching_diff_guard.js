@@ -215,14 +215,34 @@ const HUNK_8 = [
  * (breadcrumb/heading segments shared across sibling rows produced flat 0.70
  * 'partial'/'hier' edges between every pair of unrelated rows). HUNK_5 above
  * was updated in place (script src addition merged with the adjacent L3-1
- * insertion); HUNK_9-13 below are new, additional hunks for this checkpoint.
+ * insertion); HUNK_9-13 below were new, additional hunks for that checkpoint.
+ *
+ * Checkpoint 2-A.1 (A-side/B-side boilerplate symmetry + activeBoilerplateContext
+ * lifecycle) revised HUNK_9/HUNK_11/HUNK_12 in place (same re-touched-hunk
+ * convention as HUNK_5 above) and REMOVED HUNK_13 entirely: the plmList-only
+ * assignment it authorized inside matchPlmParts() no longer exists - ownership
+ * of activeBoilerplateContext moved to precomputeMatchesWithProgress() (the
+ * only place both sysList AND plmList are in scope together, wrapped in
+ * try/finally for guaranteed cleanup), authorized as the new HUNK_14 below.
  * See tools/matching_partial_segment_significance_core.js and the Checkpoint
- * 2-A report for the full design/root-cause rationale.
+ * 2-A/2-A.1 reports for the full design/root-cause rationale.
  */
 
-// HUNK_9: new helper functions (segmentsForBoilerplateIndex/
-// boilerplateSegmentIndexForPlmField/segmentIsBoilerplateForPair/
+// HUNK_9 (revised in Checkpoint 2-A.1): new helper functions
+// (segmentsForBoilerplateIndex/boilerplateSegmentIndexForField/
+// segmentIsBoilerplateOnEitherSide/segmentIsBoilerplateForPair/
 // codeHitIsBoilerplateForPair) inserted immediately before calcPairMatch().
+// boilerplateSegmentIndexForPlmField (plm-only) was replaced by the
+// side-generic boilerplateSegmentIndexForField(rows, field); segment/token
+// boilerplate-ness is now checked on EITHER side (segmentIsBoilerplateOnEitherSide,
+// an OR of two independent per-side indices, never merged into one combined
+// population); codeHitIsBoilerplateForPair now re-derives the actual
+// hit-causing token(s) via the same predicate codeTokenHit() itself uses,
+// rather than requiring EVERY extracted token to be boilerplate (a second gap
+// this checkpoint's own adversarial testing found: codeTokenHit() fires on
+// ANY matching token, so the earlier all-tokens formulation missed a
+// boilerplate token's hit whenever an unrelated, non-matching token was also
+// present in the same keyword).
 const HUNK_9 = [
   '     return [...new Set(activeKeyPairs().map(p => p.plmField).filter(Boolean))];',
   '   }',
@@ -244,41 +264,70 @@ const HUNK_9 = [
   '+      .map(e => normalizeForMatch(e.text))',
   '+      .filter(Boolean);',
   '+  }',
-  '+  function boilerplateSegmentIndexForPlmField(plmList, plmField) {',
-  '+    if (!Array.isArray(plmList) || !plmField) return null;',
+  '+  // Generic per-(rows array identity, field name) boilerplate index, usable for EITHER side',
+  '+  // (sysList/sysField or plmList/plmField) - see boilerplateSegmentIndexCache\'s WeakMap-of-Map',
+  '+  // shape declared near invalidateMatchCache(). Checkpoint 2-A.1: a segment must be checked against BOTH',
+  '+  // sides\' own populations separately (never merged into one combined population - see',
+  '+  // segmentIsBoilerplateOnEitherSide() below), because a segment can be near-constant on one side',
+  '+  // while looking discriminative on the other (e.g. a heading shared by every JSON A row but',
+  '+  // present on only one JSON B row would read as "1/4 = discriminative" if only the JSON B',
+  '+  // population were checked, while it is actually a JSON A-side boilerplate collision risk -',
+  '+  // reproduced concretely as the A1..A4 -> B1 many-to-one false-positive risk in the Checkpoint',
+  '+  // 2-A.1 report).',
+  '+  function boilerplateSegmentIndexForField(rows, field) {',
+  '+    if (!Array.isArray(rows) || !field) return null;',
   '+    if (!globalThis.MatchingPartialSegmentSignificance) return null; // fail-open: pre-Checkpoint-2-A behavior',
-  '+    let byField = boilerplateSegmentIndexCache.get(plmList);',
-  '+    if (!byField) { byField = new Map(); boilerplateSegmentIndexCache.set(plmList, byField); }',
-  '+    if (!byField.has(plmField)) {',
-  '+      byField.set(plmField, globalThis.MatchingPartialSegmentSignificance.buildBoilerplateSegmentIndex(',
-  '+        plmList,',
-  '+        row => (row == null ? \'\' : row[plmField]),',
+  '+    let byField = boilerplateSegmentIndexCache.get(rows);',
+  '+    if (!byField) { byField = new Map(); boilerplateSegmentIndexCache.set(rows, byField); }',
+  '+    if (!byField.has(field)) {',
+  '+      byField.set(field, globalThis.MatchingPartialSegmentSignificance.buildBoilerplateSegmentIndex(',
+  '+        rows,',
+  '+        row => (row == null ? \'\' : row[field]),',
   '+        segmentsForBoilerplateIndex',
   '+      ));',
   '+    }',
-  '+    return byField.get(plmField);',
+  '+    return byField.get(field);',
+  '+  }',
+  '+  // True iff normalizedSegment is boilerplate on the JSON A/sys side (activeBoilerplateContext.',
+  '+  // sysList, pair.sysField) OR the JSON B/plm side (activeBoilerplateContext.plmList,',
+  '+  // pair.plmField) - an OR, never a merged/summed population (1/4 on each side must stay 1/4 and',
+  '+  // 1/4, never become 2/8 - see Checkpoint 2-A.1 report §1). Either side alone being near-constant',
+  '+  // is sufficient to make a segment low-discrimination, because the risk it creates (many-to-one on',
+  '+  // whichever side is NOT near-constant) does not require both sides to agree.',
+  '+  function segmentIsBoilerplateOnEitherSide(normalizedSegment, pair) {',
+  '+    if (!normalizedSegment) return false;',
+  '+    const sysIdx = boilerplateSegmentIndexForField(activeBoilerplateContext?.sysList, pair.sysField);',
+  '+    if (sysIdx && sysIdx.isBoilerplateSegment(normalizedSegment)) return true;',
+  '+    const plmIdx = boilerplateSegmentIndexForField(activeBoilerplateContext?.plmList, pair.plmField);',
+  '+    if (plmIdx && plmIdx.isBoilerplateSegment(normalizedSegment)) return true;',
+  '+    return false;',
   '+  }',
   '+  function segmentIsBoilerplateForPair(keyword, pair, keywordMeta) {',
   '+    if (!keywordMeta || keywordMeta.isFullText) return false;',
   '+    if (keywordMeta.source !== \'segment\' && keywordMeta.source !== \'token\' && keywordMeta.source !== \'code\') return false;',
-  '+    const idx = boilerplateSegmentIndexForPlmField(activeBoilerplateContext?.plmList, pair.plmField);',
-  '+    if (!idx) return false;',
-  '+    return idx.isBoilerplateSegment(normalizeForMatch(keyword));',
+  '+    return segmentIsBoilerplateOnEitherSide(normalizeForMatch(keyword), pair);',
   '+  }',
-  '+  // codeHit (used by the \'auto\' mode fallback below) is computed from codeTokensOf(keyword), which',
-  '+  // can find a boilerplate code-like fragment (e.g. a shared source-filename prefix) EMBEDDED inside',
-  '+  // a longer keyword string that is not itself boilerplate as a whole (e.g. a per-row segment that',
-  '+  // happens to start with that shared filename). In that case segmentIsBoilerplateForPair(keyword,...)',
-  '+  // alone would miss it, since it is checking the whole keyword text, not the embedded code',
-  '+  // fragment that actually drove codeHit=true. This checks the same code tokens codeTokenHit() would',
-  '+  // extract from this keyword, and suppresses only when EVERY one of them is boilerplate - i.e. there',
-  '+  // is no non-boilerplate code evidence left to justify the match.',
-  '+  function codeHitIsBoilerplateForPair(keyword, pair) {',
-  '+    const idx = boilerplateSegmentIndexForPlmField(activeBoilerplateContext?.plmList, pair.plmField);',
-  '+    if (!idx) return false;',
-  '+    const tokens = codeTokensOf(keyword).map(normalizeForMatch).filter(Boolean);',
-  '+    if (!tokens.length) return false;',
-  '+    return tokens.every(t => idx.isBoilerplateSegment(t));',
+  '+  // codeHit (used by the \'auto\' mode fallback below) is computed by codeTokenHit(keyword, targetRaw)',
+  '+  // as: ANY code-like token extracted from keyword (via codeTokensOf) that is found in the target -',
+  '+  // an OR across candidate tokens, so a single boilerplate token (e.g. a shared source-filename',
+  '+  // prefix) is sufficient to make codeHit true regardless of how many OTHER, non-matching tokens',
+  '+  // also happen to be present in keyword (Checkpoint 2-A.1 finding: an earlier version of this',
+  '+  // helper required EVERY extracted token to be boilerplate, which missed exactly this case - a',
+  '+  // boilerplate token that actually caused the hit, sitting alongside an unrelated token that never',
+  '+  // matched the target at all and was never real evidence for anything). This re-derives, using the',
+  '+  // IDENTICAL per-token predicate codeTokenHit() itself uses, only the token(s) that actually caused',
+  '+  // the hit (the real evidence), and suppresses iff EVERY one of those hit-causing tokens is',
+  '+  // boilerplate on at least one side - i.e. there is no non-boilerplate code evidence left to',
+  '+  // justify the match. A non-matching token contributes nothing either way and is correctly ignored.',
+  '+  function codeHitIsBoilerplateForPair(keyword, plm, pair) {',
+  '+    const targetRaw = plm?.[pair.plmField];',
+  '+    const bText = normalizeForMatch(targetRaw);',
+  '+    if (!bText) return false;',
+  '+    const bTokens = codeTokensOf(targetRaw).map(normalizeForMatch);',
+  '+    const aTokens = codeTokensOf(keyword).map(normalizeForMatch).filter(t => t.length >= 3 || /\\d/.test(t));',
+  '+    const hitTokens = aTokens.filter(t => bText.includes(t) || bTokens.some(u => u.includes(t) || t.includes(u)));',
+  '+    if (!hitTokens.length) return false;',
+  '+    return hitTokens.every(t => segmentIsBoilerplateOnEitherSide(t, pair));',
   '+  }',
   '+',
   '   // ── 1キーワード × 1JSON B項目 × 1キー指定ペアの照合 ──',
@@ -286,7 +335,7 @@ const HUNK_9 = [
   '     const kw = normalizeForMatch(keyword);'
 ].join('\n');
 
-// HUNK_10: calcPairMatch() 'contains' mode - boilerplate guard on the partial branch.
+// HUNK_10: calcPairMatch() 'contains' mode - boilerplate guard on the partial branch. Unchanged since Checkpoint 2-A.
 const HUNK_10 = [
   '     if (mode === \'exact\') {',
   '       if (exactHit) cand.push([\'exact\', 1.0]);',
@@ -299,13 +348,15 @@ const HUNK_10 = [
   '       if (containsHit || codeHit) cand.push([\'code\', getScore(\'code\')]);'
 ].join('\n');
 
-// HUNK_11: calcPairMatch() 'auto' mode - boilerplate guard on the codeHit fallback and containsHit partial lines.
+// HUNK_11 (revised in Checkpoint 2-A.1): calcPairMatch() 'auto' mode - boilerplate
+// guard on the codeHit fallback and containsHit partial lines. codeHitIsBoilerplateForPair
+// now takes (keyword, plm, pair) - it needs plm/pair.plmField to re-derive the target text.
 const HUNK_11 = [
   '       if (exactHit) cand.push([\'exact\', 1.0]);',
   '       if ((containsHit || codeHit) && fieldLooksLike(pair.plmField, \'code\')) cand.push([\'code\', getScore(\'code\')]);',
   '       if (containsHit && fieldLooksLike(pair.plmField, \'model\')) cand.push([\'model\', getScore(\'model\')]);',
   '-      if (codeHit && !fieldLooksLike(pair.plmField, \'code\')) cand.push([\'partial\', getScore(\'partial\')]);',
-  '+      if (codeHit && !fieldLooksLike(pair.plmField, \'code\') && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !codeHitIsBoilerplateForPair(keyword, pair)) cand.push([\'partial\', getScore(\'partial\')]);',
+  '+      if (codeHit && !fieldLooksLike(pair.plmField, \'code\') && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !codeHitIsBoilerplateForPair(keyword, plm, pair)) cand.push([\'partial\', getScore(\'partial\')]);',
   '       if (f.synonym) cand.push([f.autoSynonym ? \'auto-synonym\' : \'synonym\', getScore(f.autoSynonym ? \'auto-synonym\' : \'synonym\')]);',
   '       if (kw.length >= minLen && f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75) && f.bigramSim < 1) cand.push([\'fuzzy\', getScore(\'fuzzy\')]);',
   '-      if (containsHit && !exactHit) cand.push([\'partial\', getScore(\'partial\')]);',
@@ -315,22 +366,33 @@ const HUNK_11 = [
   '     }'
 ].join('\n');
 
-// HUNK_12: activeBoilerplateContext/boilerplateSegmentIndexCache module state + invalidateMatchCache() reset.
+// HUNK_12 (revised in Checkpoint 2-A.1): activeBoilerplateContext/boilerplateSegmentIndexCache
+// module state + invalidateMatchCache() reset. Comment updated to describe the new
+// precomputeMatchesWithProgress()-owned, try/finally-scoped lifecycle (see HUNK_14) instead
+// of the Checkpoint 2-A per-matchPlmParts-call assignment (removed - see former HUNK_13 note above).
 const HUNK_12 = [
   '   // 同じ読み込みデータに対して SysML生成・サマリ・照合結果一覧・グラフ描画が',
   '   // それぞれ全件照合を繰り返さないようにする。ロジック変更時は clear する。',
   '   let matchCache = new WeakMap();',
   '-  function invalidateMatchCache() { matchCache = new WeakMap(); kwVecCache = new Map(); sysKeywordCache = new WeakMap(); rowChunkCache = new WeakMap(); synonymIndexCache = null; candidateIndexCache = null; tagIndexCache = null; hierarchyIndexCache = new Map(); fieldGateResolutionCache = null; activeKeyPairsCache = null; activeKeyPairsSignature = \'\'; activeKeyPairsKeyCache = \'\'; }',
-  '+  // HE-1 Remediation Checkpoint 2-A: boilerplate-segment partial-match suppression state.',
-  '+  // activeBoilerplateContext is set at the top of matchPlmParts() (the production per-A-row',
-  '+  // matching entry point) to the plmList of the run currently executing, so calcPairMatch() can',
-  '+  // consult boilerplateSegmentIndexForPlmField() without threading plmList through every',
-  '+  // intermediate call (bestMatchForPlm/bestDeterministicMatchForPlm), matching this file\'s existing',
-  '+  // convention of module-scope matching context (matchLogic, activeTraceProfile(), etc.). If unset',
-  '+  // (e.g. a caller invokes bestMatchForPlm directly without a prior matchPlmParts in this run),',
-  '+  // boilerplateSegmentIndexForPlmField() returns null and suppression is skipped - fail-open to the',
-  '+  // pre-Checkpoint-2-A behavior, never a new failure mode.',
+  '+  // HE-1 Remediation Checkpoint 2-A/2-A.1: boilerplate-segment partial-match suppression state.',
+  '+  // activeBoilerplateContext is set to { sysList, plmList } of the run currently executing by',
+  '+  // precomputeMatchesWithProgress() (the sole production caller of matchPlmParts() across a full',
+  '+  // JSON A batch, and the only place both full row populations are in scope together), wrapped in',
+  '+  // try/finally so the context is always cleared - on normal completion AND on',
+  '+  // cancellation/exception - before control returns to any other code (Checkpoint 2-A.1 §3/§4: a',
+  '+  // stale context from one run must never leak into a later, unrelated direct call). calcPairMatch()',
+  '+  // consults it via segmentIsBoilerplateOnEitherSide() without threading sysList/plmList through',
+  '+  // every intermediate call (bestMatchForPlm/bestDeterministicMatchForPlm), matching this file\'s',
+  '+  // existing convention of module-scope matching context (matchLogic, activeTraceProfile(), etc.).',
+  '+  // If unset (e.g. a caller invokes bestMatchForPlm directly without a matching run in progress),',
+  '+  // boilerplateSegmentIndexForField() returns null and suppression is skipped for that side - fail-',
+  '+  // open to the pre-Checkpoint-2-A behavior, never a new failure mode.',
   '+  let activeBoilerplateContext = null;',
+  '+  // WeakMap<sysList|plmList, Map<fieldName, boilerplateIndex>> - the SAME cache instance serves',
+  '+  // both sides; keys are the row-array object identities themselves (sysList and plmList are always',
+  '+  // distinct array references, even when their contents are equal), so a sys-side and a plm-side',
+  '+  // index for a same-named field never collide.',
   '+  let boilerplateSegmentIndexCache = new WeakMap();',
   '+  function invalidateMatchCache() { matchCache = new WeakMap(); kwVecCache = new Map(); sysKeywordCache = new WeakMap(); rowChunkCache = new WeakMap(); synonymIndexCache = null; candidateIndexCache = null; tagIndexCache = null; hierarchyIndexCache = new Map(); fieldGateResolutionCache = null; activeKeyPairsCache = null; activeKeyPairsSignature = \'\'; activeKeyPairsKeyCache = \'\'; activeBoilerplateContext = null; boilerplateSegmentIndexCache = new WeakMap(); }',
   ' ',
@@ -338,21 +400,49 @@ const HUNK_12 = [
   '   /* ═══════════════════════════════════════════'
 ].join('\n');
 
-// HUNK_13: matchPlmParts() - sets activeBoilerplateContext for the current run.
-const HUNK_13 = [
-  '     const pairsKey = activeKeyPairsKey();',
-  '     if (cached && cached.plmList === plmList && cached.pairsKey === pairsKey) return cached.result;',
-  ' ',
-  '+    // HE-1 Remediation Checkpoint 2-A: make this run\'s plmList available to calcPairMatch\'s',
-  '+    // boilerplate-segment suppression via boilerplateSegmentIndexForPlmField (see above calcPairMatch).',
-  '+    activeBoilerplateContext = { plmList };',
-  '+',
-  '     const useML = mlEnabled();',
-  '     const tagSettings = normalizeTagSettings();',
-  '     const tagIndex = tagSettings.enabled && tagSettings.useForMatching && !traceTagState.dirty ? buildTagIndex(plmList) : null;'
+// HUNK_14 (new in Checkpoint 2-A.1): precomputeMatchesWithProgress() - owns the
+// activeBoilerplateContext lifecycle for a full matching run (set before the loop,
+// cleared in finally on completion or exception). Replaces the removed HUNK_13
+// (the per-matchPlmParts-call, plmList-only assignment from Checkpoint 2-A).
+const HUNK_14 = [
+  '   async function precomputeMatchesWithProgress(sysList, plmList, job, label = \'照合中\') {',
+  '     const total = Math.max(1, (sysList || []).length);',
+  '     let batchStart = (typeof performance !== \'undefined\' ? performance.now() : Date.now());',
+  '-    for (let i = 0; i < (sysList || []).length; i++) {',
+  '-      assertMatchingNotCancelled(job);',
+  '-      matchPlmParts(sysList[i], plmList);',
+  '-      const now = (typeof performance !== \'undefined\' ? performance.now() : Date.now());',
+  '-      if (i === 0 || i === total - 1 || (i + 1) % 50 === 0 || (now - batchStart) >= 50) {',
+  '-        updateMatchingProgress(job, { phase:label, current:i + 1, total, detail:`JSON A ${i + 1}/${total} 件` });',
+  '-        await yieldToUi(0);',
+  '-        batchStart = (typeof performance !== \'undefined\' ? performance.now() : Date.now());',
+  '+    // HE-1 Remediation Checkpoint 2-A.1: this is the sole production caller of matchPlmParts()',
+  '+    // across a full JSON A batch, and the only place both full row populations (sysList AND',
+  '+    // plmList) are in scope together, so the boilerplate-segment-suppression context for this run',
+  '+    // is set here (not inside matchPlmParts() itself, which only sees one sysItem at a time) and',
+  '+    // ALWAYS cleared in finally - on normal completion, on assertMatchingNotCancelled() throwing,',
+  '+    // or on any other exception - so a stale context from this run can never leak into a later,',
+  '+    // unrelated direct call to bestMatchForPlm/calcPairMatch (see report §3/§4).',
+  '+    activeBoilerplateContext = { sysList, plmList };',
+  '+    try {',
+  '+      for (let i = 0; i < (sysList || []).length; i++) {',
+  '+        assertMatchingNotCancelled(job);',
+  '+        matchPlmParts(sysList[i], plmList);',
+  '+        const now = (typeof performance !== \'undefined\' ? performance.now() : Date.now());',
+  '+        if (i === 0 || i === total - 1 || (i + 1) % 50 === 0 || (now - batchStart) >= 50) {',
+  '+          updateMatchingProgress(job, { phase:label, current:i + 1, total, detail:`JSON A ${i + 1}/${total} 件` });',
+  '+          await yieldToUi(0);',
+  '+          batchStart = (typeof performance !== \'undefined\' ? performance.now() : Date.now());',
+  '+        }',
+  '       }',
+  '+    } finally {',
+  '+      activeBoilerplateContext = null;',
+  '     }',
+  '   }',
+  ' '
 ].join('\n');
 
-const AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS = [HUNK_1, HUNK_2, HUNK_3, HUNK_4, HUNK_5, HUNK_6, HUNK_7, HUNK_8, HUNK_9, HUNK_10, HUNK_11, HUNK_12, HUNK_13];
+const AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS = [HUNK_1, HUNK_2, HUNK_3, HUNK_4, HUNK_5, HUNK_6, HUNK_7, HUNK_8, HUNK_9, HUNK_10, HUNK_11, HUNK_12, HUNK_14];
 
 // Parses a `git diff` text into an array of hunk-body strings (everything
 // after each `@@ ... @@` header line, up to the next header or EOF), with
