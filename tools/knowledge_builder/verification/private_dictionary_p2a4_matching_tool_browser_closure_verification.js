@@ -161,23 +161,58 @@ async function main() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cp15-browser-'));
   const sysPath = path.join(tmpDir, 'sys.json');
   const plmPath = path.join(tmpDir, 'plm.json');
+  // P2-A4 Checkpoint 15-A R5 (HE-1 Remediation Checkpoint 2-D.1: Browser
+  // Closure Contract Realignment): `desc` alone is deliberately kept
+  // NON-UNIQUE on REQ-1/REQ-4 (both "Browser Golden Compressor") - this is
+  // the real, intentional shape needed to exercise dictionary EXACT_CANONICAL
+  // resolution consistency across two independent rows sharing one canonical
+  // term (see the `desc` uses in the H/R1 block below). Under the
+  // Checkpoint 2-D RC3 fix ("a non-unique whole-field exact value is
+  // ambiguous identity evidence, not unconditional identity evidence"),
+  // `desc` alone can no longer be trusted to establish MATCHING IDENTITY
+  // (the REQ-1<->PART-1 / REQ-4<->PART-4 relation) for these two rows -
+  // exactly as RC3 intends, since two different real-world items could
+  // legitimately share one description. This is a genuine, correct contract
+  // interaction, not a bug to route around by loosening RC3.
+  //
+  // The fix is fixture-only: `trace_title` is added as a SEPARATE,
+  // population-unique field (a distinct value per row on each side) to
+  // supply matching identity, while `desc` is left completely untouched so
+  // it keeps doing exactly the job it always did - supplying the TERM TEXT
+  // that dictionary resolution (EXACT_CANONICAL/APPROVED_ALIAS) is tested
+  // against. This is a real separation the tool's own architecture already
+  // supports, confirmed by direct inspection before choosing it (not
+  // assumed): CanonicalMatchingFieldRegistry.suggestSafeAutoFieldPairing()
+  // classifies `trace_title` as canonical role SUBJECT_ENTITY_NAME (via the
+  // generic name-pattern fallback, since this fixture matches neither
+  // registered pdf_trace/excel_trace schema) and `desc` as canonical role
+  // DESCRIPTION - two DIFFERENT roles, so suggestSafeAutoFieldPairing()'s own
+  // per-role loop selects BOTH `trace_title<->trace_title` AND `desc<->desc`
+  // as separate, simultaneously-active key pairs (verified empirically
+  // against this real fixture before writing this comment - see the A1-A3
+  // assertion block below, which asserts this directly rather than assuming
+  // it). Because `tagSourceFields()` (the dictionary term-extraction source)
+  // is the UNION of all active key pairs' fields, `desc`'s value keeps being
+  // scanned for dictionary term resolution exactly as before - dictionary
+  // provenance and matching identity are independently verified in-test
+  // (assertion block A1-A3), never assumed to both follow from one edit.
   fs.writeFileSync(sysPath, JSON.stringify([
-    { trace_id: 'REQ-1', desc: 'Browser Golden Compressor' },
-    { trace_id: 'REQ-2', desc: 'Browser Golden Alias' },
-    { trace_id: 'REQ-3', desc: 'Browser Nonexistent Widget' },
+    { trace_id: 'REQ-1', desc: 'Browser Golden Compressor', trace_title: 'Browser Requirement One' },
+    { trace_id: 'REQ-2', desc: 'Browser Golden Alias', trace_title: 'Browser Requirement Two' },
+    { trace_id: 'REQ-3', desc: 'Browser Nonexistent Widget', trace_title: 'Browser Requirement Three' },
     // P2-A4 Checkpoint 15-A R4 (Codex Independent Audit BLOCKING-01): a row
     // that itself carries an own object-valued `source` field (e.g. a
     // PDF-adapter-derived row shape), so the R4-E real-browser check below
     // can confirm this real, unmodified row's own `.source` field never
     // gets confused with the Graph node wrapper's `.source` field by
     // graphNodeProvenanceSourceRow() end to end, in real Chromium.
-    { trace_id: 'REQ-4', desc: 'Browser Golden Compressor', source: { kind: 'PDF', page: 7 } }
+    { trace_id: 'REQ-4', desc: 'Browser Golden Compressor', trace_title: 'Browser Requirement Four', source: { kind: 'PDF', page: 7 } }
   ], null, 2));
   fs.writeFileSync(plmPath, JSON.stringify([
-    { trace_id: 'PART-1', desc: 'Browser Golden Compressor' },
-    { trace_id: 'PART-2', desc: 'Browser Golden Alias' },
-    { trace_id: 'PART-3', desc: 'Browser Nonexistent Widget' },
-    { trace_id: 'PART-4', desc: 'Browser Golden Compressor', source: { kind: 'PDF', page: 7 } }
+    { trace_id: 'PART-1', desc: 'Browser Golden Compressor', trace_title: 'Browser Requirement One' },
+    { trace_id: 'PART-2', desc: 'Browser Golden Alias', trace_title: 'Browser Requirement Two' },
+    { trace_id: 'PART-3', desc: 'Browser Nonexistent Widget', trace_title: 'Browser Requirement Three' },
+    { trace_id: 'PART-4', desc: 'Browser Golden Compressor', trace_title: 'Browser Requirement Four', source: { kind: 'PDF', page: 7 } }
   ], null, 2));
 
   const wrapperA = await buildGoldenWrapper({ canonical_term: 'Browser Golden Compressor', aliases: ['Browser Golden Alias'] });
@@ -213,6 +248,57 @@ async function main() {
   await page.waitForTimeout(2500);
   const statusAfterLoad = await page.$eval('#status', el => el.textContent).catch(() => '');
   assert(/完了/.test(statusAfterLoad), 'A0 real JSON A/B load + baseline matching completes via real button clicks (no dictionary yet)');
+
+  // ==========================================================================
+  // A1-A3 (Checkpoint 2-D.1): active-key-pair evidence, asserted directly
+  // against the real running session - never assumed from reading source.
+  // A1 confirms the real auto-selected key pairs include BOTH the
+  // population-unique relation-producing field (trace_title) AND the
+  // dictionary-provenance field (desc) as simultaneously active. A2 confirms
+  // trace_title actually produced the REQ-1<->PART-1 / REQ-4<->PART-4
+  // relations (not merely that the pair is "active" in name). A3 confirms
+  // desc is still scanned for dictionary term extraction (tagSourceFields),
+  // which is the real mechanism the "dictionary provenance field" claim
+  // rests on (see §13 of this file's own header comment / the tool's
+  // approvedDictionaryTermsForRow()).
+  // ==========================================================================
+  const keyPairInfo = await page.evaluate(() => ({
+    pairs: activeKeyPairs().map(p => ({ sysField: p.sysField, plmField: p.plmField, method: p.method })),
+    tagFieldsSys: tagSourceFields('sys'),
+    tagFieldsPlm: tagSourceFields('plm'),
+  }));
+  const hasTraceTitlePair = keyPairInfo.pairs.some(p => p.sysField === 'trace_title' && p.plmField === 'trace_title');
+  const hasDescPair = keyPairInfo.pairs.some(p => p.sysField === 'desc' && p.plmField === 'desc');
+  assert(hasTraceTitlePair, `A1 the real auto-selected active key pairs genuinely include a population-unique trace_title<->trace_title relation-producing pair (actual: ${JSON.stringify(keyPairInfo.pairs)})`);
+  assert(hasDescPair, `A1 the real auto-selected active key pairs still genuinely include the desc<->desc dictionary-provenance pair alongside trace_title - adding a new matching field never silently dropped the pre-existing one (actual: ${JSON.stringify(keyPairInfo.pairs)})`);
+  assert(keyPairInfo.tagFieldsSys.includes('desc') && keyPairInfo.tagFieldsPlm.includes('desc'), `A3 the real tagSourceFields() (dictionary term-extraction source) still includes desc on both sides - dictionary resolution keeps scanning the exact field the EXACT_CANONICAL/APPROVED_ALIAS assertions below depend on (actual sys: ${JSON.stringify(keyPairInfo.tagFieldsSys)}, plm: ${JSON.stringify(keyPairInfo.tagFieldsPlm)})`);
+
+  // Real relation evidence via the real matchPlmParts() - the same function
+  // getGraphData()/summarize() themselves call to decide whether a row has
+  // any accepted relation at all, never a re-implementation or a guess at
+  // an internal row shape.
+  const relationEvidence = await page.evaluate(() => {
+    const row = mergedResult.sysList.find(r => r.trace_id === 'REQ-1');
+    const matches = row ? matchPlmParts(row, mergedResult.plmList) : [];
+    return {
+      found: !!row, matchCount: matches.length,
+      methods: matches.map(m => m.matchMethod),
+      matchedFields: matches.map(m => m._matchedSysField),
+      targetIds: matches.map(m => m.trace_id),
+    };
+  });
+  assert(relationEvidence.found && relationEvidence.matchCount > 0, `A2 REQ-1 genuinely has at least one accepted relation (via the real matchPlmParts(), the same function getGraphData()/summarize() use) after the fixture realignment (actual: ${JSON.stringify(relationEvidence)})`);
+  assert(relationEvidence.targetIds.includes('PART-1'), `A2 REQ-1's real accepted relation genuinely resolves to PART-1 (its intended trace_title-matched counterpart), not an unrelated row (actual: ${JSON.stringify(relationEvidence)})`);
+  assert(relationEvidence.matchedFields.includes('trace_title'), `A2 REQ-1's real accepted relation is genuinely produced via the trace_title field pair, not desc (actual: ${JSON.stringify(relationEvidence)})`);
+
+  // Same real evidence for REQ-4 (the object-valued .source collision row, §7) - it must remain
+  // relation-bearing (reachable in Graph) after the realignment exactly like REQ-1.
+  const relationEvidenceReq4 = await page.evaluate(() => {
+    const row = mergedResult.sysList.find(r => r.trace_id === 'REQ-4');
+    const matches = row ? matchPlmParts(row, mergedResult.plmList) : [];
+    return { found: !!row, matchCount: matches.length, matchedFields: matches.map(m => m._matchedSysField), targetIds: matches.map(m => m.trace_id) };
+  });
+  assert(relationEvidenceReq4.found && relationEvidenceReq4.matchCount > 0 && relationEvidenceReq4.targetIds.includes('PART-4'), `A2 REQ-4 (the object-valued .source collision row) genuinely has an accepted relation to PART-4 via the real matchPlmParts() after the fixture realignment (actual: ${JSON.stringify(relationEvidenceReq4)})`);
 
   // ==========================================================================
   // B. Snapshot session status display (before any Snapshot is active)
