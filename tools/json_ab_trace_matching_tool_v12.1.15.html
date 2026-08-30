@@ -147,6 +147,20 @@
     button.secondary { background: #475569; }
     button.secondary:hover { background: #334155; }
     button.warn     { background: #f59e0b; }
+    /* HE-1 Remediation Checkpoint 2-F (Human UI defect): the Detail-table expand toggle
+       ([+]/[-]) previously relied on an inline style that overrode only `background:#fff`
+       and never `color`, so it inherited the global `button{color:#fff}` rule above -
+       white text on a white background, invisible to a human reviewer even though the
+       DOM textContent was correct. A dedicated class fixes visibility with an explicit,
+       readable foreground color and its own hover state, so it is never affected by the
+       generic `button:hover` rule either. Matching correctness/behavior is untouched -
+       only the visual presentation of this one control changes. */
+    .detail-expand-toggle {
+      padding: 2px 7px; min-width: 30px; font-size: 12px; font-weight: 700; line-height: 1.2;
+      border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; color: #334155;
+      cursor: pointer;
+    }
+    .detail-expand-toggle:hover { background: #f1f5f9; color: #0f172a; }
     button:disabled { background: #94a3b8; cursor: not-allowed; }
 
     /* ── ステータス ── */
@@ -10533,7 +10547,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       // the expand/collapse behavior, edge count, and Graph mapping below are untouched.
       const toggleLabel = expanded ? '接続先を閉じる' : '接続先を展開';
       const toggleCell = edges.length
-        ? `<button type="button" onclick="toggleDetailRowExpand('${escapeHtml(nodeId)}')" title="${toggleLabel}" aria-label="${toggleLabel}" style="padding:2px 7px;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer;">${expanded ? '[-]' : '[+]'}</button>`
+        ? `<button type="button" class="detail-expand-toggle" onclick="toggleDetailRowExpand('${escapeHtml(nodeId)}')" title="${toggleLabel}" aria-label="${toggleLabel}">${expanded ? '[-]' : '[+]'}</button>`
         : '';
       const graphCell = nodeId
         ? `<button type="button" onclick="highlightGraphFromTable('${escapeHtml(nodeId)}')" title="Graphでこのノードをハイライト" style="padding:1px 5px;font-size:10px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;color:#475569;cursor:pointer;margin-left:2px;">G</button>`
