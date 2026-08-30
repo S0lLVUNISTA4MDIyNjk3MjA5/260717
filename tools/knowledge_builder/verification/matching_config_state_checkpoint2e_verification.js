@@ -159,29 +159,53 @@ function edgeSetKey(edges) { return JSON.stringify(edges); }
   // ==========================================================================
   // Section 2: two-run determinism, fresh page/session each time.
   // ==========================================================================
+  // Each state captures edge set + active pair set + status text (matching S0-S4's own contract
+  // literally, not just edge counts), so Run1/Run2 comparison covers all three per the reviewer's
+  // own requirement.
+  async function stateSnapshot(page) {
+    const s = await currentState(page);
+    const status = await page.$eval('#status', el => el.textContent).catch(() => '');
+    return { edges: s.edges, active: s.active.map(p => ({ sysField: p.sysField, plmField: p.plmField })), status };
+  }
   async function ra02FullRun() {
     const page = await newPage(browser);
     await loadFixture(page, path.join(RA02_DIR, 'RA-02_A.json'), path.join(RA02_DIR, 'RA-02_B.json'));
-    const s0 = await currentState(page);
+    const s0 = await stateSnapshot(page);
     await setKeyPairs(page, [{ enabled: false, sysField: 'trace_title', plmField: 'trace_title', method: 'auto' }]);
-    const s1 = await currentState(page);
+    const s1 = await stateSnapshot(page);
     await setKeyPairs(page, [
       { enabled: false, sysField: 'trace_title', plmField: 'trace_title', method: 'auto' },
       { enabled: false, sysField: 'trace_text', plmField: 'trace_text', method: 'auto' },
     ]);
-    const s2 = await currentState(page);
+    const s2 = await stateSnapshot(page);
     await setKeyPairs(page, [
       { enabled: true, sysField: 'trace_title', plmField: 'trace_title', method: 'auto' },
       { enabled: false, sysField: 'trace_text', plmField: 'trace_text', method: 'auto' },
     ]);
-    const s3 = await currentState(page);
+    const s3 = await stateSnapshot(page);
+    // S4: genuinely invalid/missing configuration after loading a different input - reconcile may
+    // auto-reinfer safely (distinct from S1/S2's explicit-all-disabled).
+    await page.evaluate(() => { matchLogic.keyPairs = [{ enabled: true, sysField: 'nonexistent_field_xyz', plmField: 'nonexistent_field_xyz', method: 'auto' }]; invalidateMatchCache(); });
+    await loadFixture(page, path.join(RA02_DIR, 'RA-02_A.json'), path.join(RA02_DIR, 'RA-02_B.json'));
+    const s4 = await stateSnapshot(page);
     await page.close();
-    return { s0: s0.edges, s1: s1.edges, s2: s2.edges, s3: s3.edges };
+    return { s0, s1, s2, s3, s4 };
   }
   const ra02Run1 = await ra02FullRun();
   const ra02Run2 = await ra02FullRun();
-  assert(JSON.stringify(ra02Run1) === JSON.stringify(ra02Run2),
-    `Two-run determinism: RA-02 S0-S3 edge sets identical across two fresh runs (run1: ${JSON.stringify(ra02Run1)}, run2: ${JSON.stringify(ra02Run2)})`);
+  for (const s of ['s0', 's1', 's2', 's3', 's4']) {
+    assert(JSON.stringify(ra02Run1[s].edges) === JSON.stringify(ra02Run2[s].edges),
+      `Two-run determinism: RA-02 ${s.toUpperCase()} edge set identical across two fresh runs (run1: ${JSON.stringify(ra02Run1[s].edges)}, run2: ${JSON.stringify(ra02Run2[s].edges)})`);
+    assert(JSON.stringify(ra02Run1[s].active) === JSON.stringify(ra02Run2[s].active),
+      `Two-run determinism: RA-02 ${s.toUpperCase()} active pair set identical across two fresh runs (run1: ${JSON.stringify(ra02Run1[s].active)}, run2: ${JSON.stringify(ra02Run2[s].active)})`);
+  }
+  // S4's status text is deterministic in its semantic content (the reconcile notice), but - like
+  // every load-path status in this tool - carries a real per-run performance-timing suffix
+  // ("アノテーション Xms / 照合 Yms / ..."), which genuinely differs run to run and is never meant
+  // to be deterministic. Compare only the portion before that suffix.
+  const stripPerfSuffix = (s) => s.split('アノテーション')[0].trim();
+  assert(stripPerfSuffix(ra02Run1.s4.status) === stripPerfSuffix(ra02Run2.s4.status),
+    `Two-run determinism: RA-02 S4 status text (excluding the per-run performance-timing suffix) identical across two fresh runs (run1: ${JSON.stringify(stripPerfSuffix(ra02Run1.s4.status))}, run2: ${JSON.stringify(stripPerfSuffix(ra02Run2.s4.status))})`);
 
   async function explicitOffRun(sysPath, plmPath) {
     const page = await newPage(browser);
