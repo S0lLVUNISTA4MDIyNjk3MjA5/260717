@@ -1,5 +1,7 @@
-/* canonical-quantity-role-binding/0.1-L3-2-CP1
- * Browser/Node shared. L3-2 Checkpoint 1 (Quantity Canonical Role Binding Contract + Pure Core).
+/* canonical-quantity-role-binding/0.1.1-L3-2-CP1.1
+ * Browser/Node shared. L3-2 Checkpoint 1 (Quantity Canonical Role Binding Contract + Pure Core),
+ * hardened at Checkpoint 1.1 per reviewer findings CQB-01..CQB-04 (see the contract doc's
+ * Checkpoint 1.1 section for the full rationale of each).
  *
  * See tools/knowledge_builder/design/canonical_quantity_role_binding_contract_0.1.md for the full
  * contract. Summary: this module answers exactly one question - "which field(s) on this record does
@@ -9,6 +11,11 @@
  * dimension, a resolved concept, a comparison mode, or a satisfied/not_satisfied verdict. The
  * existing quantity_sidecar_binding_core.js remains the sole authority for all of that, unchanged
  * and unwired to this module this checkpoint.
+ *
+ * A binding status of 'unique' (renamed from 'resolved' at Checkpoint 1.1, CQB-02) means exactly
+ * one structurally eligible field was found for a role - it is never to be read as a Quantity
+ * semantic resolution. The existing Quantity pipeline's own resolution/resolved vocabulary
+ * (generatePropertyResolutions() etc.) is a completely different, unrelated concept.
  *
  * This module deliberately does NOT use canonical_matching_field_registry_core.js's own
  * buildCanonicalProjection() - that function keeps only the FIRST field it finds for a given role
@@ -24,7 +31,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
-  const CONTRACT_VERSION = 'canonical-quantity-role-binding/0.1-L3-2-CP1';
+  const CONTRACT_VERSION = 'canonical-quantity-role-binding/0.1.1-L3-2-CP1.1';
   const DEFAULT_IDENTITY_FIELD = 'trace_id';
   const DEFAULT_CANDIDATE_LIMIT = 8;
 
@@ -56,9 +63,21 @@
     return typeof value === 'string' && value.length > 0;
   }
 
+  // A value that is safe to embed verbatim in output (side, provenance.source, provenance.note):
+  // either absent, or a bare string. Never an object/array - CQB-03/CQB-06: this module rejects a
+  // malformed complex value outright rather than coercing it (no String()) or recursively freezing
+  // an arbitrary caller/registry-supplied object into the output.
+  function isAbsentOrString(value) {
+    return value === null || value === undefined || typeof value === 'string';
+  }
+
   // Defensive validation of classifyField()'s OWN return shape - a future accidental breaking
-  // change to the registry must never silently propagate bad data through this module or crash it;
-  // it must be caught here and reported as a per-field diagnostic instead.
+  // change to the registry (or a deliberately hostile injected registry) must never silently
+  // propagate bad data through this module or crash it; it must be caught here and reported as a
+  // per-field diagnostic instead. CQB-03: also validates provenance.source/provenance.note shape,
+  // not just classification/role - a result whose source/note is an object/array is just as
+  // malformed as one whose classification is bogus, and must be rejected the same way (never
+  // coerced via String(), never allowed to produce a hint).
   function validateClassifyFieldResult(result, registry) {
     if (!isPlainObject(result)) return false;
     if (!isNonEmptyString(result.classification)) return false;
@@ -67,14 +86,19 @@
       if (typeof result.role !== 'string') return false;
       if (!Object.values(registry.ROLE).includes(result.role)) return false;
     }
+    if (!isAbsentOrString(result.source)) return false;
+    if (!isAbsentOrString(result.note)) return false;
     return true;
   }
 
+  // CQB-05: never propagate a native/injected Error.message (or any other caller-controlled
+  // exception detail) into the structured diagnostic contract - only a stable, hardcoded wording
+  // identifying WHICH field failed, never WHY in the exception's own words.
   function safeClassifyField(registry, schemaKind, fieldName) {
     try {
       return { ok: true, result: registry.classifyField(schemaKind, fieldName) };
-    } catch (err) {
-      return { ok: false, error: String(err && err.message || err) };
+    } catch (_err) {
+      return { ok: false };
     }
   }
 
@@ -102,6 +126,22 @@
     return sa < sb ? -1 : sa > sb ? 1 : 0;
   }
 
+  // Shared shape for every batch-level fail-closed response (CQB-01 invalid side, records not an
+  // array, CQB-04 schema detection failure). `side`/`schema_kind` are only ever populated here with
+  // values already proven to be non-empty strings by the caller - never an unvalidated echo of the
+  // raw (possibly invalid/complex) input, so the output is guaranteed primitive-only regardless of
+  // what was actually passed in (CQB-06: rejection instead of recursively freezing an injected
+  // object).
+  function batchFailClosed(code, detail, knownGoodSide, knownGoodSchemaKind) {
+    return Object.freeze({
+      contract_version: CONTRACT_VERSION,
+      schema_kind: knownGoodSchemaKind || null,
+      side: knownGoodSide || null,
+      ready: false, hints: Object.freeze([]), excluded: Object.freeze([]),
+      diagnostics: Object.freeze([{ code, detail }]),
+    });
+  }
+
   function buildCanonicalQuantityRoleHints(options) {
     const opts = options || {};
     const registry = opts.registry || defaultRegistry();
@@ -111,15 +151,38 @@
     const side = opts.side;
     const records = opts.records;
 
-    if (!Array.isArray(records)) {
-      return Object.freeze({
-        contract_version: CONTRACT_VERSION, schema_kind: opts.schemaKind || null, side: side ?? null,
-        ready: false, hints: Object.freeze([]), excluded: Object.freeze([]),
-        diagnostics: Object.freeze([{ code: 'records_not_array', detail: 'records must be an array' }]),
-      });
+    // CQB-01: side must be a non-empty string. An invalid side (missing, null, non-string, object,
+    // ...) is a batch-level fail-closed condition - it must never be silently defaulted to null and
+    // allowed to proceed to ready:true. Any non-empty string remains fully opaque and valid; this
+    // module never invents or requires sys/plm-specific vocabulary.
+    if (!isNonEmptyString(side)) {
+      return batchFailClosed('invalid_side', 'side must be a non-empty string');
     }
 
-    const schemaKind = isNonEmptyString(opts.schemaKind) ? opts.schemaKind : registry.detectRowsSchemaKind(records);
+    if (!Array.isArray(records)) {
+      return batchFailClosed('records_not_array', 'records must be an array', side);
+    }
+
+    // CQB-04: schema detection sits behind the same exception boundary as classifyField() itself -
+    // registry is part of the public API (an injected/hostile registry is an explicitly tested
+    // case), so a throwing or malformed-return detectRowsSchemaKind() must fail closed at the batch
+    // level rather than propagate an uncaught exception or a garbage schemaKind downstream.
+    let schemaKind;
+    if (isNonEmptyString(opts.schemaKind)) {
+      schemaKind = opts.schemaKind;
+    } else {
+      let detected;
+      try {
+        detected = registry.detectRowsSchemaKind(records);
+      } catch (_err) {
+        return batchFailClosed('schema_detection_failed', 'schema detection failed for this records batch', side);
+      }
+      if (!isNonEmptyString(detected)) {
+        return batchFailClosed('schema_detection_failed', 'schema detection returned an invalid result for this records batch', side);
+      }
+      schemaKind = detected;
+    }
+
     const roles = targetRoles(registry);
     const diagnostics = [];
     const excluded = [];
@@ -166,7 +229,7 @@
         if (fieldName.startsWith('_')) return;
         const classified = safeClassifyField(registry, schemaKind, fieldName);
         if (!classified.ok) {
-          excluded.push({ identity, reason_code: 'malformed_classification', detail: `classifyField threw for field "${fieldName}": ${classified.error}` });
+          excluded.push({ identity, reason_code: 'malformed_classification', detail: `classification failed for field "${fieldName}"` });
           return;
         }
         const result = classified.result;
@@ -198,10 +261,14 @@
         const truncated = candidatesForRole.length > candidateLimit;
         const bounded = candidatesForRole.slice(0, candidateLimit).map(c => Object.freeze(c));
         hints.push(Object.freeze({
-          side: side ?? null,
+          side,
           identity,
           canonical_role: role,
-          status: bounded.length > 1 ? 'ambiguous' : 'resolved',
+          // CQB-02: 'unique' (never 'resolved') - a purely structural binding-cardinality status,
+          // never to be confused with the existing Quantity pipeline's own semantic resolution
+          // vocabulary (generatePropertyResolutions()'s 'resolved'/'ambiguous'/'unavailable', an
+          // entirely different concept this module has no relationship to).
+          status: bounded.length > 1 ? 'ambiguous' : 'unique',
           candidates: Object.freeze(bounded),
           truncated,
         }));
@@ -214,7 +281,7 @@
     return Object.freeze({
       contract_version: CONTRACT_VERSION,
       schema_kind: schemaKind,
-      side: side ?? null,
+      side,
       ready: true,
       hints: Object.freeze(hints),
       excluded: Object.freeze(excluded.map(e => Object.freeze(e))),

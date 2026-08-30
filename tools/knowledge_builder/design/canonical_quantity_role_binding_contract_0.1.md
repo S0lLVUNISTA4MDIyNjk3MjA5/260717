@@ -1,10 +1,15 @@
-# Canonical Quantity Role Binding Contract 0.1 (L3-2 Checkpoint 1)
+# Canonical Quantity Role Binding Contract 0.1 (L3-2 Checkpoint 1, hardened at Checkpoint 1.1)
 
 Status: **pure-core only, not wired into any live tool**. This checkpoint introduces exactly one
 new file (`tools/knowledge_builder/core/canonical_quantity_role_binding_core.js`) plus its
 dedicated regression suite. Nothing in `tools/json_ab_trace_matching_tool_v12.1.15.html`,
 `canonical_matching_field_registry_core.js`, or `quantity_sidecar_binding_core.js` was touched.
 Baseline: `a6a2967d16c18caf79c9eb520536aea8aea14afa` (L3-1 closure).
+
+**Checkpoint 1.1 hardening (this revision)**: reviewer findings CQB-01 through CQB-06 tightened the
+input/output contract without changing what the module is *for*. See §15 for the full list. The
+contract text below (§4/§5/§9) already reflects the hardened behavior; §15 documents what changed
+and why.
 
 ## 1. Problem being solved
 
@@ -59,10 +64,12 @@ already carrying a specific behavior visible in this module's output.
 buildCanonicalQuantityRoleHints({ schemaKind, side, records, registry, identityField, candidateLimit })
 ```
 
-- `side` — any non-empty string, opaque to this module. Never branched on internally (see §9,
-  direction symmetry). A future caller might pass `'sys'`/`'plm'` (matching-tool vocabulary) or
-  `'requirement'`/`'actual'` (Quantity Sidecar vocabulary, per `bindInputPair()`'s own parameter
-  names) — both are equally valid; this module has no opinion.
+- `side` — **required**, any non-empty string, opaque to this module. Never branched on internally
+  (see §9, direction symmetry). A future caller might pass `'sys'`/`'plm'` (matching-tool
+  vocabulary) or `'requirement'`/`'actual'` (Quantity Sidecar vocabulary, per `bindInputPair()`'s
+  own parameter names) — both are equally valid; this module has no opinion. Missing, `null`,
+  `undefined`, empty-string, or non-string `side` is a batch-level fail-closed condition (CQB-01,
+  §15) — it is never silently defaulted to `null` and allowed to proceed.
 - `records` — an array of plain objects. Each is the RAW, UNMODIFIED source record (never cloned,
   never mutated, never annotated with hidden properties — see §12).
 - `schemaKind` — optional; auto-detected via the registry's own `detectRowsSchemaKind(records)` if
@@ -84,19 +91,24 @@ buildCanonicalQuantityRoleHints({ schemaKind, side, records, registry, identityF
 
 ```
 {
-  contract_version: 'canonical-quantity-role-binding/0.1-L3-2-CP1',
+  contract_version: 'canonical-quantity-role-binding/0.1.1-L3-2-CP1.1',
   schema_kind, side,
-  ready: boolean,                 // false only for a batch-level input error (records not an array)
+  ready: boolean,                 // false for any batch-level input error - invalid side (CQB-01),
+                                   // records not an array, or schema detection failure (CQB-04)
   hints: [                        // sorted by (identity, canonical_role, source_field) - deterministic
     {
       side, identity,             // identity === record[identityField]
       canonical_role,             // one of: property, value, unit, relation_condition
-      status: 'resolved' | 'ambiguous',
-      candidates: [                // length 1 when resolved; 2..candidateLimit when ambiguous
+      status: 'unique' | 'ambiguous',  // CQB-02: never 'resolved' - a purely structural binding-
+                                        // cardinality status, unrelated to the Quantity Sidecar's
+                                        // own semantic resolution vocabulary (see §2/§15)
+      candidates: [                // length 1 when unique; 2..candidateLimit when ambiguous
         {
           source_field, raw_value,          // raw_value: string | number | boolean | null only
           classification,                    // MATCH_ELIGIBLE | MATCH_ELIGIBLE_WITH_CAUTION
-          provenance: { source, note }       // copied verbatim from classifyField()'s own output
+          provenance: { source, note }       // copied verbatim from classifyField()'s own output,
+                                              // each either absent or a bare string (CQB-03) - never
+                                              // an object/array, never coerced via String()
         }, ...
       ],
       truncated: boolean           // true if more eligible fields existed than candidateLimit
@@ -226,3 +238,63 @@ or is capable of performing an A×B cross product.
   explicitly not authorized this checkpoint, and not addressed at all by this module).
 - Any UI/Human-facing presentation of these hints (Checkpoint 3, if the eventual integration
   produces anything Human-visible at all).
+
+## 15. Checkpoint 1.1 hardening (reviewer findings CQB-01..CQB-06)
+
+Product HTML and existing Quantity semantics remain untouched this revision too — every finding
+below is scoped entirely to this module's own input validation and output sanitization.
+
+- **CQB-01 (side contract mismatch)**: `side` was accepted as `opts.side` with no validation and
+  silently normalized to `null` via `side ?? null` if missing — meaning an invalid `side` could
+  still produce `ready:true` hints carrying a meaningless `side:null`. Fixed: `side` must now be a
+  non-empty string, checked first, before any other validation. Any other value (missing, `null`,
+  `undefined`, empty string, an object, a number, an array, `false`) is a batch-level fail-closed
+  condition — `ready:false`, `hints:[]`, `diagnostics:[{code:'invalid_side', detail:'side must be a
+  non-empty string'}]`. Any non-empty string remains fully opaque and valid; no `sys`/`plm`-specific
+  vocabulary was ever introduced.
+- **CQB-02 (unsafe "resolved" status wording)**: renamed the structural binding-cardinality status
+  from `'resolved'` to `'unique'` (paired with `'ambiguous'`, unchanged) everywhere — core, contract,
+  tests. `'resolved'` was unsafe because the same contract's own §2 states a canonical role hint is
+  never a resolved Quantity semantic result, yet the existing Quantity pipeline's own
+  `generatePropertyResolutions()` independently uses `'resolved'`/`'ambiguous'`/`'unavailable'` as
+  its OWN semantic-resolution vocabulary — a shared word between two genuinely different concepts
+  was exactly the kind of confusion §2 is trying to prevent by design, not just by convention. No
+  behavior changed: `'unique'` means precisely what `'resolved'` used to mean (exactly one
+  structurally eligible field), `'ambiguous'` is untouched.
+- **CQB-03 (malformed provenance shape)**: `validateClassifyFieldResult()` checked `classification`
+  and `role` but not `source`/`note` — a `classifyField()` result whose `source` or `note` was an
+  object/array would have passed validation and had that object embedded directly into
+  `provenance.source`/`provenance.note` in the output (frozen with `Object.freeze()`, but a frozen
+  wrapper around an unfrozen, potentially-mutable-elsewhere object is not a real immutability
+  guarantee, and it's also a semantic-shape violation - provenance is documented as string-shaped).
+  Fixed: `source`/`note` must each be absent (`null`/`undefined`) or a bare string; anything else
+  fails the whole field's classification as `malformed_classification`, excluded, no hint produced,
+  no coercion via `String()`.
+- **CQB-04 (schema detection outside the exception boundary)**: `registry.detectRowsSchemaKind(records)`
+  was called with no `try`/`catch` and no return-shape validation, even though `registry` is a
+  public, caller-injectable parameter (deliberately, so tests can inject a broken stub) — an
+  injected registry whose `detectRowsSchemaKind` throws or returns a non-string would have produced
+  an uncaught exception. Fixed: wrapped in the same fail-closed discipline as `classifyField()` — a
+  throw or a non-string return both produce a batch-level `ready:false` with diagnostic code
+  `schema_detection_failed`, no native exception detail included.
+- **CQB-05 (diagnostic sanitization)**: `safeClassifyField()`'s catch block previously stored
+  `String(err && err.message || err)` and embedded it verbatim into the `excluded[].detail` text for
+  a thrown `classifyField()`. Fixed: the catch block discards the exception entirely; the diagnostic
+  is now always the same stable wording (`classification failed for field "<fieldName>"`), with only
+  the field name — never any part of the exception's own message — ever appearing in output.
+- **CQB-06 (deep-freeze claim under adversarial input)**: rather than adding a second, separate
+  recursive-freeze mechanism, CQB-01 and CQB-03 together already guarantee this: by the time `side`
+  or any `provenance.source`/`provenance.note` value reaches the output, it has already been proven
+  to be a primitive (string) or excluded entirely — there is no code path left where a live,
+  externally-supplied object reference can reach a frozen output structure. Verified directly with
+  an adversarial test that injects a mutable object as `provenance.source` and confirms (a) no hint
+  is produced for that field and (b) the object reference does not appear anywhere in the output
+  tree, walked recursively.
+
+All six were implemented in
+`tools/knowledge_builder/core/canonical_quantity_role_binding_core.js` and covered by dedicated,
+permanent tests in `canonical_quantity_role_binding_core_verification.js` (47 new assertions added
+at Checkpoint 1.1, on top of the 43 from Checkpoint 1 — see that file for the exact list). None of
+Checkpoint 1's own guarantees (positive cases for all four roles, ambiguity/candidateLimit,
+duplicate/conflicting identity, metadata/complex-value exclusion, A/B symmetry, immutability,
+determinism, O(records × fields)) were weakened by this hardening pass.
