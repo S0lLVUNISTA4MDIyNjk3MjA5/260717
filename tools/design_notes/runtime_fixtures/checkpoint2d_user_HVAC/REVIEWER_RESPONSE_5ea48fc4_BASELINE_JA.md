@@ -1,4 +1,15 @@
-# KMS 5ea48fc4 HVAC照合評価 — 独立レビュアー向け回答
+> **⚠️ 修正前baseline評価。現在版の判定資料ではない。**
+> このファイルは commit `5ea48fc4` 時点（HE-1 Remediation Checkpoint 2-D着手前）の評価結果であり、
+> 記載されている `HOLD` 判定・誤対応件数は **この修正前baselineの状態のみ** を指す。
+> Checkpoint 2-D（RC1/RC2/RC3修正）以降、この評価が指摘した誤対応はすべて解消済みであることが
+> `matching_correctness_checkpoint2d_verification.js`（User HVAC A→B 4/4・誤対応0、B→A 4/4・誤対応0）
+> で確認されている。現在版の判定資料としては `Supplemental/User-HVAC/README_JA.md` と
+> `expected_relationships.csv`（現行Ground Truth）を参照すること。本ファイルは歴史的証跡として、
+> 削除せずそのまま保持している。
+>
+> ---
+
+# KMS 5ea48fc4 HVAC照合評価 — 独立レビュアー向け回答（修正前baseline）
 
 ## 総合判定
 

@@ -6779,14 +6779,58 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     return best;
   }
 
+  // HE-1 Remediation Checkpoint 2-E (LOGIC-MAJOR-01 fix): activeKeyPairs() must distinguish two
+  // configuration states that an empty `enabled` list can otherwise collapse into one:
+  //   AUTO / UNINITIALIZED  - matchLogic.keyPairs was never configured (or was reset to []),
+  //                           so safe auto inference (defaultKeyPairs()) is the correct behavior.
+  //   EXPLICIT_ALL_DISABLED - the user configured one or more genuinely valid pairs (both fields
+  //                           present) and explicitly turned every one of them off; matching must
+  //                           stay intentionally empty, never silently fall back to auto pairs.
+  // The single call to sanitizeKeyPairs(matchLogic.keyPairs) below (default opts: allowIncomplete
+  // false, fallback true) is the ONE place that owns the AUTO/UNINITIALIZED -> defaultKeyPairs()
+  // transition: it drops incomplete entries and, only if that leaves zero pairs, replaces the list
+  // with defaultKeyPairs() (whose own entries are always constructed with enabled:true - see
+  // defaultKeyPairs()'s add() helper). This is the SAME reconciliation ownership already
+  // established by reconcileKeyPairsForLoadedInput() on load (traced before this fix, not assumed):
+  // that function's own "current.length===0 || invalid.length>0" reconcile check counts a valid-
+  // but-disabled pair as "current" (it only inspects sysField/plmField presence and existence in
+  // the loaded input's keys, never `enabled`), so it correctly never touches an explicit
+  // all-disabled configuration either.
+  //
+  // Therefore, once matchLogic.keyPairs has passed through sanitizeKeyPairs() here, it is
+  // guaranteed to be a non-empty list of pairs that each have a real sysField and plmField - an
+  // `enabled` filter on THIS list coming back empty can only mean every one of those genuinely
+  // valid pairs was explicitly disabled, never "uninitialized" (uninitialized was already resolved
+  // to defaultKeyPairs()'s all-enabled entries one line above). The previous second fallback
+  // (`enabled.length ? enabled : defaultKeyPairs()`) re-applied auto-inference semantics to that
+  // already-resolved signal and silently restored default pairs whenever a user disabled every
+  // configured pair (reproduced via Reviewer RA-02 S1/S2 before this fix: 1-2 valid pairs, all
+  // enabled:false, produced 4 cross-product edges from defaultKeyPairs() instead of 0). Removing
+  // that second fallback - not adding a new state enum - is the complete, minimal fix; no other
+  // call site needs to change.
   function activeKeyPairs() {
     const rawSig = JSON.stringify(matchLogic.keyPairs || []) + '|' + (matchLogic.traceProfile || 'generic');
     if (activeKeyPairsCache && activeKeyPairsSignature === rawSig) return activeKeyPairsCache;
     matchLogic.keyPairs = sanitizeKeyPairs(matchLogic.keyPairs);
     const enabled = matchLogic.keyPairs.filter(p => p.enabled !== false && p.sysField && p.plmField);
-    activeKeyPairsCache = enabled.length ? enabled : defaultKeyPairs();
+    activeKeyPairsCache = enabled;
     activeKeyPairsSignature = JSON.stringify(matchLogic.keyPairs || []) + '|' + (matchLogic.traceProfile || 'generic');
     return activeKeyPairsCache;
+  }
+
+  // HE-1 Remediation Checkpoint 2-E (§8 UI requirement): a concise, distinct status fragment for
+  // the EXPLICIT_ALL_DISABLED state - genuinely valid pairs exist (matchLogic.keyPairs.length > 0,
+  // checked AFTER activeKeyPairs() has materialized/sanitized the list) but activeKeyPairs()
+  // resolved to none. This is deliberately never conflated with the fail-closed
+  // "安全に自動推定できる照合列が見つかりませんでした" message (that case leaves
+  // matchLogic.keyPairs itself empty too - defaultKeyPairs() returning [] - so the
+  // `matchLogic.keyPairs.length > 0` guard here is false for it) and never implies auto pairs were
+  // restored.
+  function explicitAllDisabledNotice() {
+    const active = activeKeyPairs();
+    return (active.length === 0 && matchLogic.keyPairs.length > 0)
+      ? '有効な照合ペアがありません。照合は実行されません。'
+      : '';
   }
 
   let keyPairReconcileNotice = '';
@@ -8582,7 +8626,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       if (runId !== matchRunSeq || activeMatchingJob !== job) throw new MatchingCancelledError('古い照合結果を破棄しました。');
       traceComparisonReadyRunId = runId;
       traceComparisonInputStale = false;
-      const completedStatus = '再照合が完了しました。グラフ・照合結果一覧・モデルテキストは各タブを開いた時に生成します。' + (formatMatchPerformance() ? ` ${formatMatchPerformance()}` : '');
+      const completedStatus = '再照合が完了しました。グラフ・照合結果一覧・モデルテキストは各タブを開いた時に生成します。' + (explicitAllDisabledNotice() ? ` ${explicitAllDisabledNotice()}` : '') + (formatMatchPerformance() ? ` ${formatMatchPerformance()}` : '');
       finishMatchingJob(job, '再照合完了');
       statusEl.textContent = completedStatus;
     } catch(err) {
@@ -11392,7 +11436,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       if (runId !== matchRunSeq || activeMatchingJob !== job) throw new MatchingCancelledError('古い照合結果を破棄しました。');
       traceComparisonReadyRunId = runId;
       traceComparisonInputStale = false;
-      const completedStatus = '読み込み・照合が完了しました。グラフ・照合結果一覧・モデルテキストは各タブを開いた時に生成します。' + (keyPairReconcileNotice ? ` ${keyPairReconcileNotice}` : '') + (formatMatchPerformance() ? ` ${formatMatchPerformance()}` : '') + (adapterNote ? ` 文書JSON正規化: ${adapterNote}` : '') + (fastNote ? ` ${fastNote}` : '');
+      const completedStatus = '読み込み・照合が完了しました。グラフ・照合結果一覧・モデルテキストは各タブを開いた時に生成します。' + (keyPairReconcileNotice ? ` ${keyPairReconcileNotice}` : '') + (explicitAllDisabledNotice() ? ` ${explicitAllDisabledNotice()}` : '') + (formatMatchPerformance() ? ` ${formatMatchPerformance()}` : '') + (adapterNote ? ` 文書JSON正規化: ${adapterNote}` : '') + (fastNote ? ` ${fastNote}` : '');
       finishMatchingJob(job, '読み込み・照合完了');
       statusEl.textContent = completedStatus;
     } catch(err) {

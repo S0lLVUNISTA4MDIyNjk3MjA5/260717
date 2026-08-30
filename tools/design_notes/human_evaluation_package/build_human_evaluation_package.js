@@ -174,12 +174,13 @@ async function main() {
     copyFile(path.join(FIXTURES_DIR, src), path.join(SAMPLES_DIR, dst));
   }
 
-  // ── Supplemental (Checkpoint 2-D): Reviewer-owned RA-01 adversarial fixture and the
+  // ── Supplemental (Checkpoint 2-D/2-E): Reviewer-owned RA-01/RA-02 adversarial fixtures and the
   //    independently-supplied User HVAC evaluation data, copied verbatim from their own tracked
   //    runtime_fixtures directories - never renumbered against or merged into HE-01~HE-22 above. ──
   const SUPPLEMENTAL_DIR = path.join(PKG_DIR, 'Supplemental');
   copyDir(path.join(FIXTURES_DIR, 'checkpoint2d_reviewer_RA01'), path.join(SUPPLEMENTAL_DIR, 'RA-01'));
   copyDir(path.join(FIXTURES_DIR, 'checkpoint2d_user_HVAC'), path.join(SUPPLEMENTAL_DIR, 'User-HVAC'));
+  copyDir(path.join(FIXTURES_DIR, 'checkpoint2e_reviewer_RA02'), path.join(SUPPLEMENTAL_DIR, 'RA-02'));
 
   // ── Manual (checklist CSV / KNOWN_LIMITATIONS copied directly; guide PDF is BUILT via
   //    render_guide.js from a Source-metadata-substituted temp copy of guide.html) ──

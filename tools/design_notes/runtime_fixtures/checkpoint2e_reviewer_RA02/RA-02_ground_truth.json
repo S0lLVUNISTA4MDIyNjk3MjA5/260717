@@ -1,0 +1,61 @@
+{
+  "fixture_id": "RA-02",
+  "purpose": "Distinguish AUTO/UNINITIALIZED key-pair state from EXPLICITLY_ALL_DISABLED state.",
+  "states": {
+    "S0_auto_uninitialized": {
+      "setup": "No explicit manual key-pair override after load; allow normal safe auto inference.",
+      "expected_edges": [
+        [
+          "RA02-A1",
+          "RA02-B1"
+        ],
+        [
+          "RA02-A2",
+          "RA02-B2"
+        ]
+      ],
+      "expected_edge_count": 2
+    },
+    "S1_explicit_single_disabled": {
+      "setup": "Set exactly one valid pair trace_title<->trace_title with enabled:false.",
+      "expected_edges": [],
+      "expected_edge_count": 0,
+      "must_not_fallback_to_defaultKeyPairs": true
+    },
+    "S2_explicit_multiple_all_disabled": {
+      "setup": "Set multiple valid keyPairs (e.g. trace_title and trace_text), all enabled:false.",
+      "expected_edges": [],
+      "expected_edge_count": 0,
+      "must_not_fallback_to_defaultKeyPairs": true
+    },
+    "S3_explicit_one_enabled_one_disabled": {
+      "setup": "trace_title enabled:true; trace_text enabled:false.",
+      "expected_edges": [
+        [
+          "RA02-A1",
+          "RA02-B1"
+        ],
+        [
+          "RA02-A2",
+          "RA02-B2"
+        ]
+      ],
+      "expected_edge_count": 2,
+      "active_pairs_must_equal": [
+        [
+          "trace_title",
+          "trace_title"
+        ]
+      ]
+    },
+    "S4_invalid_or_missing_configuration_reconcile": {
+      "setup": "Load a new input for which configured fields are genuinely absent/invalid.",
+      "expected_behavior": "Existing reconcile behavior may auto-reinfer safe pairs; this is distinct from the user explicitly disabling valid pairs."
+    }
+  },
+  "contract": {
+    "uninitialized_or_needs_reconcile": "Auto inference is allowed.",
+    "explicit_valid_pairs_all_disabled": "Matching is intentionally disabled; activeKeyPairs must be empty and accepted edge set must be empty.",
+    "explicit_some_enabled": "Only enabled valid pairs participate."
+  }
+}

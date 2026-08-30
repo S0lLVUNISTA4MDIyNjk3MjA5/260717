@@ -1,0 +1,21 @@
+{
+  "file_name": "reviewer_ra02_A.json",
+  "trace_format": "chapter-section-trace-v1",
+  "schema_version": "1.2",
+  "_trace_records": [
+    {
+      "trace_id": "RA02-A1",
+      "trace_title": "Reviewer Pump Alpha",
+      "trace_text": "Reviewer Pump Alpha rated flow 120 L/min",
+      "trace_key_text": "RA02 Pump Alpha",
+      "source_raw_text": "Reviewer Pump Alpha rated flow 120 L/min"
+    },
+    {
+      "trace_id": "RA02-A2",
+      "trace_title": "Reviewer Fan Beta",
+      "trace_text": "Reviewer Fan Beta air volume 850 m3/h",
+      "trace_key_text": "RA02 Fan Beta",
+      "source_raw_text": "Reviewer Fan Beta air volume 850 m3/h"
+    }
+  ]
+}
