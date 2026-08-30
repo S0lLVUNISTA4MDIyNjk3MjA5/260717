@@ -1,0 +1,28 @@
+{
+  "file_name": "08_TAG_B.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "TAG-B1",
+      "display_name": "納入側 冷却系",
+      "trace_text": "納入文B1",
+      "tags": [
+        "冷却系統",
+        "重要機器"
+      ]
+    },
+    {
+      "trace_id": "TAG-B2",
+      "display_name": "納入側 換気系",
+      "trace_text": "納入文B2",
+      "tags": [
+        "換気系統"
+      ]
+    }
+  ]
+}

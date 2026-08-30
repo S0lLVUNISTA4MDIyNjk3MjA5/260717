@@ -1,0 +1,33 @@
+{
+  "case_id": "02_PARTIAL",
+  "title": "包含一致 — 結果method: partial",
+  "manual_key_pairs": [
+    {
+      "sysField": "match_text",
+      "plmField": "match_text",
+      "method": "contains",
+      "enabled": true
+    }
+  ],
+  "expected": {
+    "accepted_edges": [
+      [
+        "PAR-A1",
+        "PAR-B1"
+      ],
+      [
+        "PAR-A2",
+        "PAR-B2"
+      ],
+      [
+        "PAR-A3",
+        "PAR-B3"
+      ]
+    ],
+    "expected_result_method": "partial",
+    "wrong_edges": 0
+  },
+  "notes": [
+    "一般語ではなく各pairに固有なsubstringを使用し、低識別力抑止と競合しない正例。"
+  ]
+}

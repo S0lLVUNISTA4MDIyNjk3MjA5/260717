@@ -412,8 +412,8 @@ const HUNK_16 = [
   "+    return `<tr class=\"detail-expand-row\" data-parent-idx=\"${parentIdx}\" data-target-id=\"${escapeHtml(edge.targetId)}\">",
   "+      <td class=\"detail-expand-cell\" colspan=\"${colCount}\" style=\"background:#f8fafc;border-left:3px solid #93c5fd;padding:8px 14px;font-size:12.5px;line-height:1.7;\">",
   "+        <div><strong>↳ 接続先:</strong> ${escapeHtml(edge.targetLabel)} <span style=\"color:#64748b;\">(${escapeHtml(edge.targetId)})</span>",
-  "+          &nbsp;/&nbsp; <strong>confidence:</strong> ${escapeHtml(formatCell(edge.confidence))}",
-  "+          &nbsp;/&nbsp; <strong>method:</strong> ${escapeHtml(formatCell(edge.method))}",
+  "+          &nbsp;/&nbsp; <strong>信頼度 (confidence):</strong> ${escapeHtml(formatCell(edge.confidence))}",
+  "+          &nbsp;/&nbsp; <strong>照合方法 (method):</strong> ${escapeHtml(matchingMethodDisplayLabel(formatCell(edge.method)))}",
   "+          &nbsp;<button type=\"button\" onclick=\"highlightGraphFromTable('${escapeHtml(edge.targetId)}')\" title=\"Graphで接続先ノードをハイライト\" style=\"padding:1px 6px;font-size:10.5px;border:1px solid #93c5fd;border-radius:4px;background:#fff;color:#1d4ed8;cursor:pointer;\">Graphで表示</button></div>",
   "+        <div><strong>照合根拠:</strong> ${escapeHtml(edge.evidenceLine)}</div>",
   "+        <div><strong>辞書:</strong> ${escapeHtml(edge.dictLine)}</div>",
@@ -465,7 +465,7 @@ const HUNK_16 = [
   "   function renderDetailTableFull() {",
   "     if (!detailRows.length) {",
   "       detailTableHead.innerHTML='';",
-].join('\n');
+].join("\n");
 
 // HUNK_17 (revised in Checkpoint 2-D): the region already covering the leading toggle column
 // (Checkpoint 2-B) now also covers this round's Human UX finding - [+]/[-] symbols and an
@@ -473,7 +473,7 @@ const HUNK_16 = [
 // "展開する"/"折りたたむ" wording. Implemented only after Matching Correctness closure, per the
 // task's own gating - the expand/collapse behavior, edge count, and Graph mapping are unchanged.
 // HUNK_17 (revised in Checkpoint 2-F): the button-toggle markup region (Checkpoint 2-B/2-D/2-D.1) now also covers this round's class="detail-expand-toggle" swap (visual-only, dropping the inline style in favor of the new dedicated CSS class).
-const HUNK_17 = "     }\n     detailHeaders = Object.keys(detailRows[0]).filter(k => !k.startsWith('_'))\n       .filter(h => !isDetailColumnHiddenByDefault(h));\n-    detailTableHead.innerHTML = `<tr>${detailHeaders.map(h=>`<th class=\"${jsonColumnClass(h)}\">${escapeHtml(h)}</th>`).join('')}</tr>`;\n+    // HE-1 Remediation Checkpoint 2-B: one narrow leading column for the per-row edge-expand\n+    // toggle (task §1/§2 - a single added column, not ten extra columns; expand DETAIL renders as\n+    // a full-width row directly under its parent, never as more table columns).\n+    detailTableHead.innerHTML = `<tr><th style=\"width:28px;\"></th>${detailHeaders.map(h=>`<th class=\"${jsonColumnClass(h)}\">${escapeHtml(h)}</th>`).join('')}</tr>`;\n     if (!(detailFiltered instanceof Set)) detailFiltered = new Set(detailRows.map((_,i)=>i));\n     const filteredIndices = [...detailFiltered].filter(i => detailRows[i]).sort((a,b)=>a-b);\n     const showIndices = filteredIndices.slice(0, Math.max(1, detailTableVisibleLimit || PHASE4_TABLE_LIMIT));\n+    const colCount = detailHeaders.length + 1;\n     detailTableBody.innerHTML = showIndices.map(idx=> {\n       const row = detailRows[idx];\n-      return `<tr data-idx=\"${idx}\" data-reqid=\"${escapeHtml(row._reqId||'')}\">\n+      const edges = Array.isArray(row._edgeRows) ? row._edgeRows : [];\n+      const nodeId = row._nodeId || '';\n+      const expanded = edges.length > 0 && detailExpandedKeys.has(nodeId);\n+      // HE-1 Remediation Checkpoint 2-D (Human UX finding, implemented only after Matching\n+      // Correctness closure): [+]/[-] symbols and an explicit \"接続先を展開\"/\"接続先を閉じる\"\n+      // title/aria-label - the prior ▶/▼ + \"展開する\"/\"折りたたむ\" wording read as ambiguous\n+      // (not obviously \"this expands the connected targets\"). Only the label/symbol changed;\n+      // the expand/collapse behavior, edge count, and Graph mapping below are untouched.\n+      const toggleLabel = expanded ? '接続先を閉じる' : '接続先を展開';\n+      const toggleCell = edges.length\n+        ? `<button type=\"button\" class=\"detail-expand-toggle\" onclick=\"toggleDetailRowExpand('${escapeHtml(nodeId)}')\" title=\"${toggleLabel}\" aria-label=\"${toggleLabel}\">${expanded ? '[-]' : '[+]'}</button>`\n+        : '';\n+      const graphCell = nodeId\n+        ? `<button type=\"button\" onclick=\"highlightGraphFromTable('${escapeHtml(nodeId)}')\" title=\"Graphでこのノードをハイライト\" style=\"padding:1px 5px;font-size:10px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;color:#475569;cursor:pointer;margin-left:2px;\">G</button>`\n+        : '';\n+      const parentTr = `<tr data-idx=\"${idx}\" data-reqid=\"${escapeHtml(row._reqId||'')}\" data-nodeid=\"${escapeHtml(nodeId)}\">\n+        <td style=\"text-align:center;white-space:nowrap;\">${toggleCell}${graphCell}</td>\n         ${detailHeaders.map(h=>{ const val = formatCellMultiline(row[h]); return `<td class=\"${jsonColumnClass(h)}\" data-key=\"${escapeHtml(h)}\" title=\"${escapeHtml(val)}\"><div class=\"cell-text\">${escapeHtml(val)}</div></td>`; }).join('')}\n       </tr>`;\n-    }).join('') + (filteredIndices.length > showIndices.length ? `<tr class=\"phase4-more-row\"><td colspan=\"${detailHeaders.length || 1}\">${showIndices.length.toLocaleString()} / ${filteredIndices.length.toLocaleString()} 件を表示中 <button type=\"button\" class=\"secondary\" onclick=\"loadMoreDetailRows()\" style=\"padding:4px 10px;font-size:12px;margin-left:8px;\">さらに表示</button></td></tr>` : '');\n+      if (!expanded) return parentTr;\n+      // Count invariant (task §3): exactly one expand row per element of row._edgeRows, the same\n+      // array 照合JSON B件数/照合JSON A件数 was already computed from - never a re-derived count.\n+      return parentTr + edges.map(edge => renderDetailExpandRow(idx, edge, colCount)).join('');\n+    }).join('') + (filteredIndices.length > showIndices.length ? `<tr class=\"phase4-more-row\"><td colspan=\"${colCount}\">${showIndices.length.toLocaleString()} / ${filteredIndices.length.toLocaleString()} 件を表示中 <button type=\"button\" class=\"secondary\" onclick=\"loadMoreDetailRows()\" style=\"padding:4px 10px;font-size:12px;margin-left:8px;\">さらに表示</button></td></tr>` : '');\n     detailCountEl.textContent = filteredIndices.length > showIndices.length ? `${showIndices.length} / ${filteredIndices.length}` : filteredIndices.length;\n     attachDetailExpandListeners();\n     updateDetailFilterBadge();";
+const HUNK_17 = "     }\n     detailHeaders = Object.keys(detailRows[0]).filter(k => !k.startsWith('_'))\n       .filter(h => !isDetailColumnHiddenByDefault(h));\n-    detailTableHead.innerHTML = `<tr>${detailHeaders.map(h=>`<th class=\"${jsonColumnClass(h)}\">${escapeHtml(h)}</th>`).join('')}</tr>`;\n+    // HE-1 Remediation Checkpoint 2-B: one narrow leading column for the per-row edge-expand\n+    // toggle (task §1/§2 - a single added column, not ten extra columns; expand DETAIL renders as\n+    // a full-width row directly under its parent, never as more table columns).\n+    detailTableHead.innerHTML = `<tr><th style=\"width:28px;\"></th>${detailHeaders.map(h=>`<th class=\"${jsonColumnClass(h)}\">${escapeHtml(h)}</th>`).join('')}</tr>`;\n     if (!(detailFiltered instanceof Set)) detailFiltered = new Set(detailRows.map((_,i)=>i));\n     const filteredIndices = [...detailFiltered].filter(i => detailRows[i]).sort((a,b)=>a-b);\n     const showIndices = filteredIndices.slice(0, Math.max(1, detailTableVisibleLimit || PHASE4_TABLE_LIMIT));\n+    const colCount = detailHeaders.length + 1;\n     detailTableBody.innerHTML = showIndices.map(idx=> {\n       const row = detailRows[idx];\n-      return `<tr data-idx=\"${idx}\" data-reqid=\"${escapeHtml(row._reqId||'')}\">\n-        ${detailHeaders.map(h=>{ const val = formatCellMultiline(row[h]); return `<td class=\"${jsonColumnClass(h)}\" data-key=\"${escapeHtml(h)}\" title=\"${escapeHtml(val)}\"><div class=\"cell-text\">${escapeHtml(val)}</div></td>`; }).join('')}\n+      const edges = Array.isArray(row._edgeRows) ? row._edgeRows : [];\n+      const nodeId = row._nodeId || '';\n+      const expanded = edges.length > 0 && detailExpandedKeys.has(nodeId);\n+      // HE-1 Remediation Checkpoint 2-D (Human UX finding, implemented only after Matching\n+      // Correctness closure): [+]/[-] symbols and an explicit \"接続先を展開\"/\"接続先を閉じる\"\n+      // title/aria-label - the prior ▶/▼ + \"展開する\"/\"折りたたむ\" wording read as ambiguous\n+      // (not obviously \"this expands the connected targets\"). Only the label/symbol changed;\n+      // the expand/collapse behavior, edge count, and Graph mapping below are untouched.\n+      const toggleLabel = expanded ? '接続先を閉じる' : '接続先を展開';\n+      const toggleCell = edges.length\n+        ? `<button type=\"button\" class=\"detail-expand-toggle\" onclick=\"toggleDetailRowExpand('${escapeHtml(nodeId)}')\" title=\"${toggleLabel}\" aria-label=\"${toggleLabel}\">${expanded ? '[-]' : '[+]'}</button>`\n+        : '';\n+      const graphCell = nodeId\n+        ? `<button type=\"button\" onclick=\"highlightGraphFromTable('${escapeHtml(nodeId)}')\" title=\"Graphでこのノードをハイライト\" style=\"padding:1px 5px;font-size:10px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;color:#475569;cursor:pointer;margin-left:2px;\">G</button>`\n+        : '';\n+      const parentTr = `<tr data-idx=\"${idx}\" data-reqid=\"${escapeHtml(row._reqId||'')}\" data-nodeid=\"${escapeHtml(nodeId)}\">\n+        <td style=\"text-align:center;white-space:nowrap;\">${toggleCell}${graphCell}</td>\n+        ${detailHeaders.map(h=>{\n+          // Checkpoint 2-G: the 照合根拠 column's underlying row['照合根拠'] string (built by\n+          // buildDetailRows()) is never mutated - Excel export re-reads that exact same object via\n+          // a plain spread (see exportData above), so it must keep the raw method enum. Only the\n+          // ON-SCREEN cell text/tooltip for this one column gets the Japanese(enum) display label,\n+          // applied here at render time.\n+          const raw = formatCellMultiline(row[h]);\n+          const val = h === '照合根拠' ? matchingReasonTextDisplay(raw) : raw;\n+          return `<td class=\"${jsonColumnClass(h)}\" data-key=\"${escapeHtml(h)}\" title=\"${escapeHtml(val)}\"><div class=\"cell-text\">${escapeHtml(val)}</div></td>`;\n+        }).join('')}\n       </tr>`;\n-    }).join('') + (filteredIndices.length > showIndices.length ? `<tr class=\"phase4-more-row\"><td colspan=\"${detailHeaders.length || 1}\">${showIndices.length.toLocaleString()} / ${filteredIndices.length.toLocaleString()} 件を表示中 <button type=\"button\" class=\"secondary\" onclick=\"loadMoreDetailRows()\" style=\"padding:4px 10px;font-size:12px;margin-left:8px;\">さらに表示</button></td></tr>` : '');\n+      if (!expanded) return parentTr;\n+      // Count invariant (task §3): exactly one expand row per element of row._edgeRows, the same\n+      // array 照合JSON B件数/照合JSON A件数 was already computed from - never a re-derived count.\n+      return parentTr + edges.map(edge => renderDetailExpandRow(idx, edge, colCount)).join('');\n+    }).join('') + (filteredIndices.length > showIndices.length ? `<tr class=\"phase4-more-row\"><td colspan=\"${colCount}\">${showIndices.length.toLocaleString()} / ${filteredIndices.length.toLocaleString()} 件を表示中 <button type=\"button\" class=\"secondary\" onclick=\"loadMoreDetailRows()\" style=\"padding:4px 10px;font-size:12px;margin-left:8px;\">さらに表示</button></td></tr>` : '');\n     detailCountEl.textContent = filteredIndices.length > showIndices.length ? `${showIndices.length} / ${filteredIndices.length}` : filteredIndices.length;\n     attachDetailExpandListeners();\n     updateDetailFilterBadge();";
 
 const HUNK_18 = [
   "       '_bGranularityRule': base._bGranularityRule || overrides._bGranularityRule || '',",
@@ -554,7 +554,11 @@ const HUNK_19 = [
   "+      targetId: otherSideIsB ? ('PARTC-' + ncName(r['B_ID'] || '')) : (r['A_ID'] || ''),",
   "+      confidence: r['信頼度'],",
   "+      method: r['方式'],",
-  "+      evidenceLine: presentationEvidenceLine(r),",
+  "+      // Checkpoint 2-G: display-only Japanese(enum) label on the leading method token - this",
+  "+      // `edge.evidenceLine` field is consumed ONLY by renderDetailExpandRow()'s Human-facing",
+  "+      // Detail-table expand row (never by Excel export, which re-reads presentationEvidenceLine()",
+  "+      // directly for the B基準 sheet - see matchingReasonLineDisplay()'s own doc comment).",
+  "+      evidenceLine: matchingReasonLineDisplay(presentationEvidenceLine(r)),",
   "+      dictLine: dictionaryContributionLine(r)",
   "+    }));",
   "+  }",
@@ -562,7 +566,7 @@ const HUNK_19 = [
   "   buildDetailRows = function(sysList, plmList) {",
   "     ensureEffectiveCache();",
   "     const sourceFields = selectedDetailSourceFields('A', sysList);",
-].join('\n');
+].join("\n");
 
 const HUNK_20 = [
   "       const maxC = current.length ? Math.max(...current.map(r => Number(r['信頼度']) || 0)) : 0;",
@@ -681,7 +685,216 @@ const HUNK_29 = "       if (runId !== matchRunSeq || activeMatchingJob !== job) 
 // visual-only, no matching-logic change).
 const HUNK_30 = "     button.secondary { background: #475569; }\n     button.secondary:hover { background: #334155; }\n     button.warn     { background: #f59e0b; }\n+    /* HE-1 Remediation Checkpoint 2-F (Human UI defect): the Detail-table expand toggle\n+       ([+]/[-]) previously relied on an inline style that overrode only `background:#fff`\n+       and never `color`, so it inherited the global `button{color:#fff}` rule above -\n+       white text on a white background, invisible to a human reviewer even though the\n+       DOM textContent was correct. A dedicated class fixes visibility with an explicit,\n+       readable foreground color and its own hover state, so it is never affected by the\n+       generic `button:hover` rule either. Matching correctness/behavior is untouched -\n+       only the visual presentation of this one control changes. */\n+    .detail-expand-toggle {\n+      padding: 2px 7px; min-width: 30px; font-size: 12px; font-weight: 700; line-height: 1.2;\n+      border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; color: #334155;\n+      cursor: pointer;\n+    }\n+    .detail-expand-toggle:hover { background: #f1f5f9; color: #0f172a; }\n     button:disabled { background: #94a3b8; cursor: not-allowed; }\n \n     /* ── ステータス ── */";
 
-const AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS = [HUNK_1, HUNK_2, HUNK_3, HUNK_4, HUNK_5, HUNK_6, HUNK_7, HUNK_8, HUNK_9, HUNK_10, HUNK_12, HUNK_14, HUNK_15, HUNK_16, HUNK_17, HUNK_18, HUNK_19, HUNK_20, HUNK_21, HUNK_22, HUNK_23, HUNK_24, HUNK_25, HUNK_26, HUNK_27, HUNK_28, HUNK_29, HUNK_30];
+
+/* HE-1 Remediation Checkpoint 2-G (Japanese Method Labels / Comprehensive Matching Samples):
+ * presentation-only terminology unification - a central matchingMethodDisplayLabel()/
+ * matchingReasonLineDisplay()/matchingReasonTextDisplay() mapping from the internal matching-
+ * method enum to a Human-facing "日本語 (英語enum)" label, wired into every Human-facing surface
+ * that previously showed the raw enum alone: the confidenceRules legend table, the Detail-table
+ * expand row's confidence/method labels and 照合根拠 line, the Detail-table parent row's own
+ * 照合根拠 cell (display-only - the underlying row object read by Excel export is never mutated),
+ * the Graph edge detail panel, both ML pair table renderers (the initially-declared one and the
+ * later reassignment that is actually reachable at runtime), the static help/legend table, and the
+ * HELP_MARKDOWN guide text (which also gained a previously-missing タグ一致 (tag) line). The
+ * key-pair selector dropdown (KEY_MATCH_METHODS) also gained the (enum) suffix on every option,
+ * including auto/contains, without renaming contains itself. No internal method value, matchMethod,
+ * confidenceRules[].method, Graph edge data method value, or Excel raw method column was touched -
+ * confirmed both by direct source inspection and by a dedicated real-Chromium regression asserting
+ * Excel's raw 照合根拠/method fields are byte-identical before and after.
+ *
+ * HUNK_16/HUNK_17/HUNK_19 above were updated in place (re-touched regions - HUNK_16 for the
+ * renderDetailExpandRow() confidence/method labels and matchingMethodDisplayLabel() call, HUNK_17
+ * for the Detail-table parent row's per-cell 照合根拠 display-only rewrite via
+ * matchingReasonTextDisplay(), HUNK_19 for buildEdgeExpandEntries()'s evidenceLine field wrapped in
+ * matchingReasonLineDisplay()), per this guard's own stated convention. HUNK_31-HUNK_37 below are
+ * genuinely NEW regions never previously touched by any authorized hunk:
+ *   HUNK_31: the static help/legend <table> (9 method rows, Japanese(enum) format).
+ *   HUNK_32: HELP_MARKDOWN's "## 3. 照合方式" bullet list (Japanese(enum) format, plus the
+ *            previously-missing タグ一致 (tag) line).
+ *   HUNK_33: the MATCHING_METHOD_DISPLAY_LABELS frozen map, matchingMethodDisplayLabel()/
+ *            matchingReasonLineDisplay()/matchingReasonTextDisplay(), and the KEY_MATCH_METHODS
+ *            key-pair selector dropdown labels, inserted immediately after getScore().
+ *   HUNK_34: the confidenceRules legend table (#confRulesBody) method cell.
+ *   HUNK_35: the ML pair table's initially-declared renderMlPairs() method column (not the
+ *            actually-reachable runtime version - see HUNK_37 - but corrected for consistency).
+ *   HUNK_36: the Graph edge detail panel's formatEdgeDetail() 方式 line.
+ *   HUNK_37: the ML pair table's REASSIGNED renderMlPairs() (the actually-reachable version at
+ *            runtime, per the layered function-reassignment pattern already documented for
+ *            buildGraphElements/runAsyncMatchPipeline) method column.
+ * Hunk count is now 35 (28 - 0 removed + 7 new [HUNK_31-37]; HUNK_16/17/19 updated in place, all
+ * other hunks unchanged). Verified against both PRE_HEAD_SHA references exactly as in every prior
+ * round. */
+
+const HUNK_31 = [
+  "         <table>",
+  "           <thead><tr><th>方式</th><th>意味</th><th>扱い</th></tr></thead>",
+  "           <tbody>",
+  "-            <tr><td>exact</td><td>正規化後の完全一致</td><td>原則「対応あり」</td></tr>",
+  "-            <tr><td>code</td><td>本文中コード、コード、略称コードの一致</td><td>原則「対応あり」</td></tr>",
+  "-            <tr><td>tag</td><td>統制語彙タグ共有（Dice係数）</td><td>要確認</td></tr>",
+  "-            <tr><td>synonym</td><td>手動辞書・業務辞書による同義語一致</td><td>内容により要確認</td></tr>",
+  "-            <tr><td>auto-synonym</td><td>JSONから自動生成した同義語候補</td><td>要確認</td></tr>",
+  "-            <tr><td>hier</td><td>親子ゲートにより降格された候補</td><td>要確認。元方式と関連項目は根拠列に表示</td></tr>",
+  "-            <tr><td>partial</td><td>包含・部分一致</td><td>要確認。親子項目の誤照合に注意</td></tr>",
+  "-            <tr><td>fuzzy</td><td>bigram類似度による表記ゆれ一致</td><td>要確認</td></tr>",
+  "-            <tr><td>vector</td><td>TF-IDF/特徴語ベースの文脈類似</td><td>要確認</td></tr>",
+  "+            <tr><td>完全一致 (exact)</td><td>正規化後の完全一致</td><td>原則「対応あり」</td></tr>",
+  "+            <tr><td>コード一致 (code)</td><td>本文中コード、コード、略称コードの一致</td><td>原則「対応あり」</td></tr>",
+  "+            <tr><td>タグ一致 (tag)</td><td>統制語彙タグ共有（Dice係数）</td><td>要確認</td></tr>",
+  "+            <tr><td>同義語一致 (synonym)</td><td>手動辞書・業務辞書による同義語一致</td><td>内容により要確認</td></tr>",
+  "+            <tr><td>自動同義語一致 (auto-synonym)</td><td>JSONから自動生成した同義語候補</td><td>要確認</td></tr>",
+  "+            <tr><td>階層判定 (hier)</td><td>親子ゲートにより降格された候補</td><td>要確認。元方式と関連項目は根拠列に表示</td></tr>",
+  "+            <tr><td>部分一致 (partial)</td><td>包含・部分一致</td><td>要確認。親子項目の誤照合に注意</td></tr>",
+  "+            <tr><td>類似一致 (fuzzy)</td><td>bigram類似度による表記ゆれ一致</td><td>要確認</td></tr>",
+  "+            <tr><td>ベクトル類似 (vector)</td><td>TF-IDF/特徴語ベースの文脈類似</td><td>要確認</td></tr>",
+  "           </tbody>",
+  "         </table>",
+  "         <div class=\"help-warn\">vector/fuzzy/auto-synonymは、正解の可能性がある候補を拾うための方式です。自動確定ではなく、人間レビュー前提で扱ってください。</div>",
+].join("\n");
+
+const HUNK_32 = [
+  " - 必要な場合はユーザー定義プロファイルをJSONから読み込めます。",
+  " ",
+  " ## 3. 照合方式",
+  "-- exact: 完全一致。原則、対応あり。",
+  "-- code: コード、要求ID、略称コードなどの一致。原則、対応あり。",
+  "-- synonym: 手動辞書・業務辞書による同義語一致。",
+  "-- auto-synonym: JSONから自動生成した同義語候補。要確認。",
+  "-- hier: 親子ゲートにより降格された候補。要確認。",
+  "-- partial: 部分一致。親子項目の誤照合に注意。",
+  "-- fuzzy: bigram類似度による表記ゆれ一致。要確認。",
+  "-- vector: TF-IDF/特徴語ベースの文脈類似。要確認。",
+  "+- 完全一致 (exact): 完全一致。原則、対応あり。",
+  "+- コード一致 (code): コード、要求ID、略称コードなどの一致。原則、対応あり。",
+  "+- タグ一致 (tag): 統制語彙タグ共有（Dice係数）。要確認。",
+  "+- 同義語一致 (synonym): 手動辞書・業務辞書による同義語一致。",
+  "+- 自動同義語一致 (auto-synonym): JSONから自動生成した同義語候補。要確認。",
+  "+- 階層判定 (hier): 親子ゲートにより降格された候補。要確認。",
+  "+- 部分一致 (partial): 部分一致。親子項目の誤照合に注意。",
+  "+- 類似一致 (fuzzy): bigram類似度による表記ゆれ一致。要確認。",
+  "+- ベクトル類似 (vector): TF-IDF/特徴語ベースの文脈類似。要確認。",
+  " ",
+  " ## 4. トレースマトリクス",
+  " - 対応あり: 強い根拠で対応しています。",
+].join("\n");
+
+const HUNK_33 = [
+  "     return matchLogic.confidenceRules.find(r=>r.method===method)?.score ?? 0;",
+  "   }",
+  " ",
+  "+  // HE-1 Remediation Checkpoint 2-G (Human terminology request): SOLE presentation-only mapping",
+  "+  // from an internal matching-method enum to its Human-facing \"日本語 (英語enum)\" display label.",
+  "+  // Internal enums (matchMethod, confidenceRules[].method, Graph edge data.matchMethod, Excel",
+  "+  // machine-contract raw method columns, test assertions) are NEVER touched by this function or",
+  "+  // its callers - it only ever produces a STRING for on-screen text, never mutates the method",
+  "+  // value itself. Deliberately conservative on 'tag': shown as \"タグ一致 (tag)\", never a",
+  "+  // dictionary-flavored label like \"辞書一致\"/\"辞書・タグ一致\" - method:'tag' can originate from",
+  "+  // plain explicit row tags (see evaluateTagMatch()) as well as from Approved Dictionary-derived",
+  "+  // tags, and the dictionary's own separate contribution is already explained via the existing,",
+  "+  // untouched 辞書寄与あり/辞書解決あり・この照合には未使用/辞書寄与なし presentation",
+  "+  // (dictionaryContributionLine()) - conflating the two here would misrepresent the former case.",
+  "+  const MATCHING_METHOD_DISPLAY_LABELS = Object.freeze({",
+  "+    'exact':        '完全一致 (exact)',",
+  "+    'partial':      '部分一致 (partial)',",
+  "+    'code':         'コード一致 (code)',",
+  "+    'model':        'モデル名一致 (model)',",
+  "+    'synonym':      '同義語一致 (synonym)',",
+  "+    'auto-synonym': '自動同義語一致 (auto-synonym)',",
+  "+    'fuzzy':        '類似一致 (fuzzy)',",
+  "+    'vector':       'ベクトル類似 (vector)',",
+  "+    'tag':          'タグ一致 (tag)',",
+  "+    'hier':         '階層判定 (hier)',",
+  "+    'none':         '一致なし (none)',",
+  "+  });",
+  "+  function matchingMethodDisplayLabel(method) {",
+  "+    const key = typeof method === 'string' ? method : normalizeText(method ?? '');",
+  "+    return MATCHING_METHOD_DISPLAY_LABELS[key] || key;",
+  "+  }",
+  "+  // Display-only rewrite of ONE line whose text begins with \"<raw-method-enum>: \" (the exact shape",
+  "+  // buildDetailRows()'s 照合根拠 lines and presentationEvidenceLine() both produce) - replaces just",
+  "+  // that leading token with its Japanese(enum) label, leaving everything after the first \": \"",
+  "+  // (and the line entirely, if it doesn't start with a bare enum token) untouched. Used ONLY at",
+  "+  // DOM-render time for genuinely Human-facing surfaces; the underlying data strings this reads",
+  "+  // from are never mutated, so Excel export (which re-reads the same underlying row/edge objects,",
+  "+  // not this rendered text) keeps the exact raw method value - see Checkpoint 2-G design note.",
+  "+  function matchingReasonLineDisplay(rawLine) {",
+  "+    const s = typeof rawLine === 'string' ? rawLine : normalizeText(rawLine ?? '');",
+  "+    const m = /^([A-Za-z][A-Za-z-]*): /.exec(s);",
+  "+    if (!m || !(m[1] in MATCHING_METHOD_DISPLAY_LABELS)) return s;",
+  "+    return MATCHING_METHOD_DISPLAY_LABELS[m[1]] + s.slice(m[1].length);",
+  "+  }",
+  "+  function matchingReasonTextDisplay(rawText) {",
+  "+    const s = typeof rawText === 'string' ? rawText : normalizeText(rawText ?? '');",
+  "+    return s.split('\\n').map(matchingReasonLineDisplay).join('\\n');",
+  "+  }",
+  "+",
+  "   const KEY_MATCH_METHODS = [",
+  "-    { value:'auto',    label:'自動（推奨）' },",
+  "-    { value:'exact',   label:'完全一致' },",
+  "-    { value:'contains',label:'包含一致' },",
+  "-    { value:'code',    label:'コード一致' },",
+  "-    { value:'model',   label:'モデル名一致' },",
+  "-    { value:'synonym', label:'同義語一致' },",
+  "-    { value:'fuzzy',   label:'fuzzy一致' },",
+  "-    { value:'vector',  label:'vector一致' }",
+  "+    { value:'auto',    label:'自動（推奨） (auto)' },",
+  "+    { value:'exact',   label:'完全一致 (exact)' },",
+  "+    { value:'contains',label:'包含一致 (contains)' },",
+  "+    { value:'code',    label:'コード一致 (code)' },",
+  "+    { value:'model',   label:'モデル名一致 (model)' },",
+  "+    { value:'synonym', label:'同義語一致 (synonym)' },",
+  "+    { value:'fuzzy',   label:'類似一致 (fuzzy)' },",
+  "+    { value:'vector',  label:'ベクトル類似 (vector)' }",
+  "   ];",
+  " ",
+  " ",
+].join("\n");
+
+const HUNK_34 = [
+  "     const tbody = $('confRulesBody');",
+  "     tbody.innerHTML = matchLogic.confidenceRules.map((r,i) => `",
+  "       <tr>",
+  "-        <td><strong>${escapeHtml(r.method)}</strong></td>",
+  "+        <td><strong>${escapeHtml(matchingMethodDisplayLabel(r.method))}</strong></td>",
+  "         <td style=\"font-size:12px; color:var(--muted);\">${escapeHtml(r.description)}</td>",
+  "         <td>",
+  "           ${r.editable",
+].join("\n");
+
+const HUNK_35 = [
+  "         <td>${escapeHtml(p.keyword)}</td>",
+  "         <td>${escapeHtml(p.partName)}</td>",
+  "         <td>${escapeHtml(p.partCode)}</td>",
+  "-        <td>${escapeHtml(p.method)}</td>",
+  "+        <td>${escapeHtml(matchingMethodDisplayLabel(p.method))}</td>",
+  "         <td>${p.ruleScore.toFixed(2)}</td>",
+  "         <td>${prob==null?'-':prob.toFixed(2)}</td>",
+  "         <td style=\"white-space:nowrap;\">",
+].join("\n");
+
+const HUNK_36 = [
+  "     if (data.effectiveJudgement) lines.push(`有効判定: ${data.effectiveJudgement}`);",
+  "     if (data.autoJudgement) lines.push(`機械判定: ${data.autoJudgement}`);",
+  "     if (Number.isFinite(data.confidence)) lines.push(`信頼度: ${Number(data.confidence).toFixed(2)}`);",
+  "-    if (data.matchMethod) lines.push(`方式: ${data.matchMethod}`);",
+  "+    if (data.matchMethod) lines.push(`方式: ${matchingMethodDisplayLabel(data.matchMethod)}`);",
+  "     if (data.sharedTags) lines.push(`共有タグ: ${data.sharedTags}`);",
+  "     if (data.decisionReason) lines.push(`判定理由: ${data.decisionReason}`);",
+  "     if (data.reviewComment) lines.push(`レビューコメント: ${data.reviewComment}`);",
+].join("\n");
+
+const HUNK_37 = [
+  "       const sourceClass = escapeHtml(source);",
+  "       return `<tr data-ml-idx=\"${i}\" style=\"${label===1?'background:#dcfce7;':label===0?'background:#fee2e2;':''}\">",
+  "         <td>${escapeHtml(p.reqId)}</td><td>${escapeHtml(p.specName)}</td><td>${escapeHtml(p.keyword)}</td>",
+  "-        <td>${escapeHtml(p.partName)}</td><td>${escapeHtml(p.partCode)}</td><td>${escapeHtml(p.method)}</td>",
+  "+        <td>${escapeHtml(p.partName)}</td><td>${escapeHtml(p.partCode)}</td><td>${escapeHtml(matchingMethodDisplayLabel(p.method))}</td>",
+  "         <td>${Number(p.ruleScore||0).toFixed(2)}</td><td>${prob==null?'-':prob.toFixed(2)}</td>",
+  "         <td><span class=\"ml-source-badge ${sourceClass}\">${escapeHtml(trainingSourceLabel(source))}</span></td>",
+  "         <td>${escapeHtml(judgement || '-')}</td><td>${escapeHtml(use)}</td>",
+].join("\n");
+
+const AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS = [HUNK_1, HUNK_2, HUNK_3, HUNK_4, HUNK_5, HUNK_6, HUNK_7, HUNK_8, HUNK_9, HUNK_10, HUNK_12, HUNK_14, HUNK_15, HUNK_16, HUNK_17, HUNK_18, HUNK_19, HUNK_20, HUNK_21, HUNK_22, HUNK_23, HUNK_24, HUNK_25, HUNK_26, HUNK_27, HUNK_28, HUNK_29, HUNK_30, HUNK_31, HUNK_32, HUNK_33, HUNK_34, HUNK_35, HUNK_36, HUNK_37];
 
 // Parses a `git diff` text into an array of hunk-body strings (everything
 // after each `@@ ... @@` header line, up to the next header or EOF), with

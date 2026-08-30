@@ -1,0 +1,21 @@
+{
+  "file_name": "03_CODE_B.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "CODE-B1",
+      "code_and_name": "Primary pump PMP-101",
+      "display_name": "納入側 PMP-101"
+    },
+    {
+      "trace_id": "CODE-B2",
+      "code_and_name": "Exhaust fan FAN-202",
+      "display_name": "納入側 FAN-202"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "file_name": "15_LONG_TEXT_CHUNK_A.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "2.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "CH-A1",
+      "trace_text": "冷却水ポンプP-401の運転状態を中央監視装置へ送信する。ポンプ停止時には停止状態を通知する。異常発生時には故障警報を監視装置へ送信し、運転指令とは区別して表示する。",
+      "display_name": "要求側 長文P-401"
+    }
+  ]
+}

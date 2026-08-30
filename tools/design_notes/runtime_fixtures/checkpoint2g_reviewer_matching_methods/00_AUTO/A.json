@@ -1,0 +1,21 @@
+{
+  "file_name": "00_AUTO_A.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "AUTO-A1",
+      "trace_title": "給気ファン SAF-101",
+      "trace_text": "給気ファン SAF-101 風量 1200 m3/h"
+    },
+    {
+      "trace_id": "AUTO-A2",
+      "trace_title": "排気ファン EAF-201",
+      "trace_text": "排気ファン EAF-201 風量 900 m3/h"
+    }
+  ]
+}

@@ -182,6 +182,13 @@ async function main() {
   copyDir(path.join(FIXTURES_DIR, 'checkpoint2d_user_HVAC'), path.join(SUPPLEMENTAL_DIR, 'User-HVAC'));
   copyDir(path.join(FIXTURES_DIR, 'checkpoint2e_reviewer_RA02'), path.join(SUPPLEMENTAL_DIR, 'RA-02'));
 
+  // ── Samples/Matching-Methods (Checkpoint 2-G): the 16-sample, per-method reviewer sample set
+  //    (originally Reviewer_Matching_Method_Samples_v2.zip), real-Chromium-validated against Ground
+  //    Truth and copied verbatim from its own tracked runtime_fixtures directory - additive only,
+  //    never replacing or renumbering Samples/L3-1-Human-Evaluation (A-K) or Supplemental
+  //    (RA-01/RA-02/User-HVAC) above, which remain separate adversarial-regression evidence. ──
+  copyDir(path.join(FIXTURES_DIR, 'checkpoint2g_reviewer_matching_methods'), path.join(PKG_DIR, 'Samples', 'Matching-Methods'));
+
   // ── Manual (checklist CSV / KNOWN_LIMITATIONS copied directly; guide PDF is BUILT via
   //    render_guide.js from a Source-metadata-substituted temp copy of guide.html) ──
   copyFile(path.join(HERE, 'KMS_L3-1_Human_Evaluation_Checklist_JA.csv'), path.join(PKG_DIR, 'Manual', 'KMS_L3-1_Human_Evaluation_Checklist_JA.csv'));

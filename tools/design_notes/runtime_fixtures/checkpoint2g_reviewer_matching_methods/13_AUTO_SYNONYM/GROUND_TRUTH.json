@@ -1,0 +1,16 @@
+{
+  "case_id": "13_AUTO_SYNONYM",
+  "title": "JSONから自動生成する同義語候補 (auto-synonym)",
+  "setup": [
+    "term↔termを選択",
+    "同義語設定で「JSONから候補生成」を実行",
+    "auto-generated候補を確認して再照合"
+  ],
+  "expected": {
+    "required_validation": "auto-synonym候補/結果が実際の現行生成アルゴリズムで発生すること",
+    "wrong_edges": 0
+  },
+  "notes": [
+    "auto-synonymは生成アルゴリズム依存が強いため、repo同梱前にreal Chromiumで候補生成から検証する。"
+  ]
+}

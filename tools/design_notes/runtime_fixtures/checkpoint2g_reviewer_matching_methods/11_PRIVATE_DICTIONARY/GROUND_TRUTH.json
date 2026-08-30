@@ -1,0 +1,22 @@
+{
+  "case_id": "11_PRIVATE_DICTIONARY",
+  "title": "Approved Dictionary Snapshot 有無によるtag edge",
+  "expected": {
+    "without_snapshot": {
+      "accepted_edge_total": 5,
+      "EMO_edge": false
+    },
+    "with_K_snapshot": {
+      "accepted_edge_total": 6,
+      "added_edge": [
+        "非常停止スイッチ",
+        "EMO"
+      ],
+      "method": "tag",
+      "confidence": 0.88
+    }
+  },
+  "notes": [
+    "既存Human Evaluationでruntime検証済みのI/J/Kをそのまま再利用。"
+  ]
+}

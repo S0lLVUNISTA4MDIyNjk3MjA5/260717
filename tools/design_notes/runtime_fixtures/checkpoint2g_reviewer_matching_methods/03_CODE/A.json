@@ -1,0 +1,21 @@
+{
+  "file_name": "03_CODE_A.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "CODE-A1",
+      "code_and_name": "PMP-101 冷却水ポンプ",
+      "display_name": "要求側 PMP-101"
+    },
+    {
+      "trace_id": "CODE-A2",
+      "code_and_name": "FAN-202 排気ファン",
+      "display_name": "要求側 FAN-202"
+    }
+  ]
+}

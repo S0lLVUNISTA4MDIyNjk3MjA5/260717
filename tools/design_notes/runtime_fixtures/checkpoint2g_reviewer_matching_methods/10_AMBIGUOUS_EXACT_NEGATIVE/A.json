@@ -1,0 +1,19 @@
+{
+  "file_name": "10_AMBIGUOUS_EXACT_NEGATIVE_A.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "AMB-A1",
+      "match_name": "共通制御盤"
+    },
+    {
+      "trace_id": "AMB-A2",
+      "match_name": "共通制御盤"
+    }
+  ]
+}

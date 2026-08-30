@@ -1,0 +1,16 @@
+{
+  "case_id": "15_LONG_TEXT_CHUNK",
+  "title": "長文チャンク照合",
+  "setup": [
+    "trace_text↔trace_text",
+    "chunkSettings.enabled=falseでbaseline確認",
+    "chunkSettings.enabled=trueで再照合"
+  ],
+  "expected": {
+    "intended_behavior": "文単位評価を有効化しても正しいP-401 pairを維持し、無関係edgeを増やさない",
+    "wrong_edges": 0
+  },
+  "notes": [
+    "長文チャンクは既定OFF。結果methodは基礎methodに依存するため、method enumの固定を目的としない。"
+  ]
+}

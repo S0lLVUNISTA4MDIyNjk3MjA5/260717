@@ -1,0 +1,21 @@
+{
+  "file_name": "04_MODEL_B.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "MODEL-B1",
+      "model_name": "ZX-400 High Efficiency",
+      "display_name": "納入側 ZX-400"
+    },
+    {
+      "trace_id": "MODEL-B2",
+      "model_name": "QF-88 Outdoor Type",
+      "display_name": "納入側 QF-88"
+    }
+  ]
+}

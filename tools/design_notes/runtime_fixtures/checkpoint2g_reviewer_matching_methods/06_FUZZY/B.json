@@ -1,0 +1,26 @@
+{
+  "file_name": "06_FUZZY_B.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "FUZ-B1",
+      "fuzzy_text": "温度センサ異常警報",
+      "display_name": "納入側 温度センサ異常警報"
+    },
+    {
+      "trace_id": "FUZ-B2",
+      "fuzzy_text": "圧力トランスミッター故障警報",
+      "display_name": "納入側 圧力警報"
+    },
+    {
+      "trace_id": "FUZ-B3",
+      "fuzzy_text": "差圧監視スイッチ作動信号検出",
+      "display_name": "納入側 差圧監視"
+    }
+  ]
+}

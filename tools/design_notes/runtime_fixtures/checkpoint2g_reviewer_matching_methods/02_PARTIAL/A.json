@@ -1,0 +1,26 @@
+{
+  "file_name": "02_PARTIAL_A.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "PAR-A1",
+      "match_text": "独自グリズリー式弁",
+      "display_name": "要求側 グリズリー式弁"
+    },
+    {
+      "trace_id": "PAR-A2",
+      "match_text": "耐熱セラミック支持台",
+      "display_name": "要求側 支持台"
+    },
+    {
+      "trace_id": "PAR-A3",
+      "match_text": "遠隔監視変換器",
+      "display_name": "要求側 変換器"
+    }
+  ]
+}

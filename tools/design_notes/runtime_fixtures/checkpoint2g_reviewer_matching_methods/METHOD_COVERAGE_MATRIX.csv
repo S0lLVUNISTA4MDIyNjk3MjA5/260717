@@ -1,0 +1,17 @@
+﻿case,日本語表示,期待される内部method/状態,操作,主目的
+00_AUTO,自動（推奨）,auto,通常自動推定,自動キー推定と基本edge
+01_EXACT,完全一致,exact,exact,完全一致
+02_PARTIAL,包含一致,contains → partial,contains,固有substringの部分一致
+03_CODE,コード一致,code,code,構造化identifier
+04_MODEL,モデル名一致,model,model,モデル名の包含
+05_SYNONYM,同義語一致,synonym,synonym,業務辞書synonymMap
+06_FUZZY,類似一致,fuzzy,fuzzy,表記ゆれ/bigram
+07_VECTOR,ベクトル類似,vector,vector,TF-IDF/特徴語文脈
+08_TAG,タグ一致,tag,tag matching ON,明示タグ共有
+09_HIERARCHY,階層判定,hier,contains + hierarchy gate,親子候補の降格/説明
+10_AMBIGUOUS_EXACT_NEGATIVE,非一意完全一致の負例,exact suppressed,exact,RC3 fail-closed
+11_PRIVATE_DICTIONARY,辞書・タグ一致,tag,Snapshot有/無,Approved Aliasによる追加edge
+12_CONFIG_ALL_OFF,全照合ペアOFF,no active method,enabled:false,設定意思を保持しedge 0
+13_AUTO_SYNONYM,自動同義語候補,auto-synonym,JSONから候補生成,自動生成synonym workflow
+14_ML_FEEDBACK,フィードバック学習,ML scoring,MLタブ,Human label→train→apply
+15_LONG_TEXT_CHUNK,長文チャンク,base method + chunk,chunkSettings ON,長文の文単位評価

@@ -1,0 +1,79 @@
+{
+  "wrapper_schema_version": "private-dictionary-snapshot-wrapper/0.1",
+  "snapshot_id": "dsnap-a6ba162dc06b199d8ecdb23a8de62ae8",
+  "dictionary_payload": {
+    "schema_version": "private-dictionary-overlay/1.0",
+    "dictionary_id": "pdict-fc0e26afe060b3191068980e34e831ce",
+    "version": "1",
+    "scope": "PROJECT",
+    "entries": [
+      {
+        "entry_id": "pde-48c154177b7956a70875d2d64fdf063a",
+        "canonical_term": "非常停止スイッチ",
+        "aliases": [
+          "非常停止ボタン",
+          "EMO"
+        ],
+        "status": "ACTIVE",
+        "source": {
+          "kind": "IMPORTED",
+          "content_included": false
+        },
+        "utility": {
+          "exposure_count": 0,
+          "match_opportunity_count": 0,
+          "candidate_gain": 0,
+          "ranking_gain": 0,
+          "candidate_noise_increase": 0,
+          "alias_conflict_count": 0,
+          "document_support_count": 0
+        }
+      },
+      {
+        "entry_id": "pde-b46e868728a685edc806d3ebdc70e70d",
+        "canonical_term": "冷却水ポンプ",
+        "aliases": [
+          "冷却ポンプ",
+          "CWP"
+        ],
+        "status": "ACTIVE",
+        "source": {
+          "kind": "IMPORTED",
+          "content_included": false
+        },
+        "utility": {
+          "exposure_count": 0,
+          "match_opportunity_count": 0,
+          "candidate_gain": 0,
+          "ranking_gain": 0,
+          "candidate_noise_increase": 0,
+          "alias_conflict_count": 0,
+          "document_support_count": 0
+        }
+      }
+    ]
+  },
+  "dictionary_payload_sha256": "f724f6b9839c38bbf821d3ad63da3501968f9e6b94aad50fc46d956ffdbee5be",
+  "wrapper_integrity_sha256": "13c740687becbbda7c80640bc159a07662fd3fb73c7a45ae43121722aa95992d",
+  "snapshot_version": 1,
+  "scope": "PROJECT",
+  "provenance": {
+    "generated_at": "2026-08-26T07:04:39.836Z",
+    "generator": {
+      "tool": "HE-1-packaging-sample",
+      "version": "0.1.0"
+    }
+  },
+  "source_review_artifact_identity": {
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "promotion_record_identity": {
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "conflict_state": {
+    "unresolved_count": 0
+  },
+  "supersedes": null,
+  "rollback_target": null
+}

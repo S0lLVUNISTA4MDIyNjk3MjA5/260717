@@ -1,0 +1,33 @@
+{
+  "case_id": "07_VECTOR",
+  "title": "ベクトル類似 (vector)",
+  "manual_key_pairs": [
+    {
+      "sysField": "vector_text",
+      "plmField": "vector_text",
+      "method": "vector",
+      "enabled": true
+    }
+  ],
+  "expected": {
+    "accepted_edges": [
+      [
+        "VEC-A1",
+        "VEC-B1"
+      ],
+      [
+        "VEC-A2",
+        "VEC-B2"
+      ],
+      [
+        "VEC-A3",
+        "VEC-B3"
+      ]
+    ],
+    "expected_result_method": "vector",
+    "wrong_edges": 0
+  },
+  "notes": [
+    "TF-IDF/特徴語ベースの文脈類似を狙う。開発者側でconfidence/methodのruntime固定が必要。"
+  ]
+}

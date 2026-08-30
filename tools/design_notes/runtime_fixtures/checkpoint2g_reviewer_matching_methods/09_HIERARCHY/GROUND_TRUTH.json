@@ -1,0 +1,36 @@
+{
+  "case_id": "09_HIERARCHY",
+  "title": "階層ゲート — 結果method: hierを観察",
+  "manual_key_pairs": [
+    {
+      "sysField": "match_text",
+      "plmField": "match_text",
+      "method": "contains",
+      "enabled": true
+    },
+    {
+      "setup": "汎用profileのuseHierarchyGate=trueを維持"
+    }
+  ],
+  "expected": {
+    "intended_behavior": "子側のより具体的な候補を優先し、親側候補がhierとして降格/説明されることを確認",
+    "must_not_wrongly_prefer_parent": true,
+    "accepted_edges": [
+      ["HIER-A1", "HIER-B-CHILD"],
+      ["HIER-A1", "HIER-B-PARENT"]
+    ],
+    "edge_methods": {
+      "HIER-A1|HIER-B-CHILD": "exact",
+      "HIER-A1|HIER-B-PARENT": "hier"
+    },
+    "edge_confidence": {
+      "HIER-A1|HIER-B-CHILD": 1,
+      "HIER-A1|HIER-B-PARENT": 0.72
+    },
+    "wrong_edges": 0
+  },
+  "notes": [
+    "hierはユーザーが直接選ぶmethodではなく、親子ゲートにより既存候補へ付与される派生結果。開発者runtime検証で最終期待score/edgeを固定する。",
+    "開発者runtime検証で確定: B側の親子関係はJSON直書きの_parentKey/_granularityRuleでは成立しない（このツールのJSONローダーはannotateGranularity()で毎回_parentKey等を再計算し、直書き値は上書きされる）。実際に親子として認識されるのは、CHILD側にparent_codeのような『parent_』命名のフィールドを持たせ、その値がPARENT側の識別コード（このサンプルではpart_code）と一致する場合のみ。A/Bのmatch_textも、PARENT側が単独では『部分一致(partial)』にしかならない一般名詞（例: 冷却水ポンプ）のままだと、CHILD側の完全一致で既にrow単位の構造化identityが確定しているため（RC1: per-row構造化identity dominance、Checkpoint 2-Dで導入・保護済み）、PARENT側の弱いpartial候補はhier降格の機会を得る前に抑制される。PARENT側の照合キーワード自体がcode形状（例: P-101）でexact/code扱いとなり、かつCHILDのmatched keywordがPARENTのkeywordを包含する場合にのみ、既存のG1階層ゲート（downgradeByHierarchy）が正しく発火してPARENT候補をmethod=hierへ降格する。この整理はサンプルのJSON構造（フィールド命名）のみの調整であり、calcPairMatch/activeKeyPairs/RC1/RC2/RC3/confidenceRules/applyHierarchyGateのロジックは一切変更していない。"
+  ]
+}

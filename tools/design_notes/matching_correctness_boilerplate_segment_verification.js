@@ -52,9 +52,15 @@ const EQUIP = ['非常停止スイッチ', '冷却水ポンプ', '主遮断器',
 function parseEdgesFromRow(row) {
   const evid = row['照合根拠'] || '';
   return evid.split('\n').filter(Boolean).map(line => {
-    const m = line.match(/^(?:\d+\.\s*)?([a-zA-Z\-]+):\s*(\S+)→(\S+)\s*\/\s*(.*)\s*\(([\d.]+)\)\s*\[(.*)\]$/);
+    // HE-1 Remediation Checkpoint 2-G: this reads the RENDERED DOM cell text (td.textContent),
+    // which for the 照合根拠 column now shows the Japanese(enum) display label ("完全一致
+    // (exact): ..." instead of the bare "exact: ..." this regex originally expected) - a display-
+    // only change (see matchingReasonTextDisplay() in the matching tool; the underlying row
+    // object/Excel export are untouched). Accept EITHER the bare-enum prefix or a
+    // "<japanese...> (<enum>): " prefix, extracting the same raw enum either way.
+    const m = line.match(/^(?:\d+\.\s*)?(?:.*?\(([a-zA-Z\-]+)\)|([a-zA-Z\-]+)):\s*(\S+)→(\S+)\s*\/\s*(.*)\s*\(([\d.]+)\)\s*\[(.*)\]$/);
     if (!m) return { raw: line };
-    return { method: m[1], sysField: m[2], plmField: m[3], snippet: m[4], score: Number(m[5]), tag: m[6] };
+    return { method: m[1] || m[2], sysField: m[3], plmField: m[4], snippet: m[5], score: Number(m[6]), tag: m[7] };
   });
 }
 

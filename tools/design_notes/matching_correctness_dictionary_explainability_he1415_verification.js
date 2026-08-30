@@ -166,8 +166,13 @@ async function main() {
     const safety = await rowBCountAndExpand(page, 5);
     assert(safety.bCount === '1', `HE-15: 非常停止スイッチ(A)/EMO(B) row has exactly ONE matched edge with the Snapshot loaded (bCount=${safety.bCount})`);
     const safetyText = (safety.expand[0] || '');
-    assert(safetyText.includes('method: tag'), 'HE-15: the edge method is real tag-based matching (method: tag)', safetyText);
-    assert(safetyText.includes('confidence: 0.88'), 'HE-15: confidence is exactly what the real tag-match contract produces (0.88) - never artificially inflated', safetyText);
+    // HE-1 Remediation Checkpoint 2-G: renderDetailExpandRow()'s confidence/method labels changed
+    // from plain "confidence: X"/"method: Y" to "信頼度 (confidence): X"/"照合方法 (method): 日本語
+    // (enum)" (Japanese Method Labels terminology unification - presentation-only, the underlying
+    // method/confidence VALUES are unchanged). Updated to the new label text; still asserts the
+    // same real tag-based method and the same real 0.88 confidence, never a looser check.
+    assert(safetyText.includes('照合方法 (method): タグ一致 (tag)'), 'HE-15: the edge method is real tag-based matching (method: tag)', safetyText);
+    assert(safetyText.includes('信頼度 (confidence): 0.88'), 'HE-15: confidence is exactly what the real tag-match contract produces (0.88) - never artificially inflated', safetyText);
     assert(safetyText.includes('辞書寄与あり'), 'HE-15: dictionary line shows 辞書寄与あり (used, not merely present)', safetyText);
     assert(safetyText.includes('EMO'), 'HE-15: dictionary line shows the real original term (EMO)', safetyText);
     assert(safetyText.includes('APPROVED_ALIAS'), 'HE-15: dictionary line shows the real resolution_type (APPROVED_ALIAS)', safetyText);
@@ -176,7 +181,8 @@ async function main() {
     const pump = await rowBCountAndExpand(page, 0); // 冷却水ポンプ - present-but-unused demo
     assert(pump.bCount === '1', `Present-but-unused demo: 冷却水ポンプ row has exactly ONE matched edge (bCount=${pump.bCount})`);
     const pumpText = (pump.expand[0] || '');
-    assert(pumpText.includes('method: exact'), 'Present-but-unused demo: edge method is exact (title match), NOT tag', pumpText);
+    // Checkpoint 2-G: same label-text update as above (照合方法 (method): 完全一致 (exact)).
+    assert(pumpText.includes('照合方法 (method): 完全一致 (exact)'), 'Present-but-unused demo: edge method is exact (title match), NOT tag', pumpText);
     assert(pumpText.includes('辞書解決あり・この照合には未使用'), 'Present-but-unused demo: dictionary line correctly shows 辞書解決あり・この照合には未使用 (present but unused), never 辞書寄与あり', pumpText);
 
     // Detail/Graph/Excel consistency (task requirement §9/§19-22): the SAME accepted-edge count

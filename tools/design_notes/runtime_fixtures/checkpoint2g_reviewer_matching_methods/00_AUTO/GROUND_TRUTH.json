@@ -1,0 +1,25 @@
+{
+  "case_id": "00_AUTO",
+  "title": "自動（推奨）— 安全な自動キー推定と基本edge",
+  "manual_key_pairs": [
+    {
+      "setup": "明示ペアを作らず通常の安全な自動推定を使用"
+    }
+  ],
+  "expected": {
+    "accepted_edges": [
+      [
+        "AUTO-A1",
+        "AUTO-B1"
+      ],
+      [
+        "AUTO-A2",
+        "AUTO-B2"
+      ]
+    ],
+    "wrong_edges": 0
+  },
+  "notes": [
+    "自動推定の入口確認用。methodの個別確認は01以降を使用。"
+  ]
+}

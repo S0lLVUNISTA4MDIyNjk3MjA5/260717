@@ -1,0 +1,27 @@
+{
+  "case_id": "01_EXACT",
+  "title": "完全一致 (exact)",
+  "manual_key_pairs": [
+    {
+      "sysField": "match_name",
+      "plmField": "match_name",
+      "method": "exact",
+      "enabled": true
+    }
+  ],
+  "expected": {
+    "accepted_edges": [
+      [
+        "EX-A1",
+        "EX-B1"
+      ],
+      [
+        "EX-A2",
+        "EX-B2"
+      ]
+    ],
+    "expected_method": "exact",
+    "wrong_edges": 0
+  },
+  "notes": []
+}

@@ -1,0 +1,21 @@
+{
+  "file_name": "04_MODEL_A.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "MODEL-A1",
+      "model_name": "ZX-400",
+      "display_name": "要求側 ZX-400"
+    },
+    {
+      "trace_id": "MODEL-A2",
+      "model_name": "QF-88",
+      "display_name": "要求側 QF-88"
+    }
+  ]
+}

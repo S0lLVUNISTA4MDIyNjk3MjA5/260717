@@ -1,0 +1,33 @@
+{
+  "case_id": "06_FUZZY",
+  "title": "類似一致 (fuzzy)",
+  "manual_key_pairs": [
+    {
+      "sysField": "fuzzy_text",
+      "plmField": "fuzzy_text",
+      "method": "fuzzy",
+      "enabled": true
+    }
+  ],
+  "expected": {
+    "accepted_edges": [
+      [
+        "FUZ-A1",
+        "FUZ-B1"
+      ],
+      [
+        "FUZ-A2",
+        "FUZ-B2"
+      ],
+      [
+        "FUZ-A3",
+        "FUZ-B3"
+      ]
+    ],
+    "expected_result_method": "fuzzy",
+    "wrong_edges": 0
+  },
+  "notes": [
+    "表記ゆれを狙う。実装のbigram/boilerplate guardにより、開発者側で最終runtime検証必須。"
+  ]
+}
