@@ -118,7 +118,7 @@ check('a genuinely unique short token is NOT flagged low-discrimination (no fals
   assert.strictEqual(idx.isLowDiscriminationSegment('ABC'), false, 'a short token occurring on exactly 1 row must stay trusted');
 });
 
-check('a LONG segment (over shortSegmentMaxLength) recurring on a small minority of rows is NOT flagged low-discrimination (only short segments get the stricter bar)', () => {
+check('HE-1 Remediation Checkpoint 2-D: a LONG segment recurring on a small minority of rows IS NOW flagged low-discrimination (length ceiling removed - occurrence count, not character count, is the actual signal; see RA-01/"ユニット"/"電源単相"/"冷房能力定格容量" reproduction)', () => {
   const rows = [
     { v: '共有フレーズという長い部分文字列 unique1' }, { v: '共有フレーズという長い部分文字列 unique2' },
     { v: 'other3' }, { v: 'other4' }, { v: 'other5' }, { v: 'other6' },
@@ -126,8 +126,31 @@ check('a LONG segment (over shortSegmentMaxLength) recurring on a small minority
   const seg = (raw) => [String(raw).slice(0, 15), String(raw).slice(15)].filter(Boolean);
   const idx = Sig.buildBoilerplateSegmentIndex(rows, r => r.v, seg);
   const longShared = rows[0].v.slice(0, 15);
-  assert.ok(longShared.length > Sig.DEFAULT_SHORT_SEGMENT_MAX_LENGTH, 'test setup: the shared segment must actually be longer than the short-segment threshold');
-  assert.strictEqual(idx.isLowDiscriminationSegment(longShared), false, 'a long segment repeating on only 2/6 rows is governed solely by the unchanged ratio rule, not the new short-token rule');
+  assert.ok(longShared.length > 3, 'test setup: the shared segment must be longer than the OLD (pre-2-D) 3-char cap, to prove length no longer exempts it');
+  assert.strictEqual(idx.isLowDiscriminationSegment(longShared), true, 'a long segment repeating on only 2/6 rows is exactly as non-discriminative as a short one and must be flagged (Checkpoint 2-D generalization)');
+});
+
+check('a genuinely long UNIQUE segment (occurs on exactly 1 row) is still NOT flagged, however long it is - the fix is occurrence-based, not a blanket suppression of long segments', () => {
+  const rows = [
+    { v: '共有フレーズという長い部分文字列 unique1' }, { v: 'completely different heading unique2' },
+    { v: 'other3' }, { v: 'other4' }, { v: 'other5' }, { v: 'other6' },
+  ];
+  const seg = (raw) => [String(raw).slice(0, 15), String(raw).slice(15)].filter(Boolean);
+  const idx = Sig.buildBoilerplateSegmentIndex(rows, r => r.v, seg);
+  const uniqueLong = rows[0].v.slice(0, 15);
+  assert.strictEqual(idx.isLowDiscriminationSegment(uniqueLong), false, 'a long segment occurring on only its own row must stay trusted regardless of length');
+});
+
+check('backward-compatible opt-in: an explicit finite shortSegmentMaxLength restores the OLD length-gated behavior for a caller that still wants it', () => {
+  const rows = [
+    { v: '共有フレーズという長い部分文字列 unique1' }, { v: '共有フレーズという長い部分文字列 unique2' },
+    { v: 'other3' }, { v: 'other4' }, { v: 'other5' }, { v: 'other6' },
+  ];
+  const seg = (raw) => [String(raw).slice(0, 15), String(raw).slice(15)].filter(Boolean);
+  const idx = Sig.buildBoilerplateSegmentIndex(rows, r => r.v, seg, { shortSegmentMaxLength: 3 });
+  const longShared = rows[0].v.slice(0, 15);
+  assert.ok(longShared.length > 3);
+  assert.strictEqual(idx.isLowDiscriminationSegment(longShared), false, 'an explicit shortSegmentMaxLength option must still exempt segments over that length, for any caller that opts into the old semantics');
 });
 
 check('a short segment recurring below minRowsForShortSegmentDetection (degenerate 1-row population) is not flagged', () => {
@@ -174,6 +197,31 @@ check('containment-based counting catches a short token whose SEGMENTATION BOUND
 
   const containmentIdx = Sig.buildBoilerplateSegmentIndex(rows, r => r.v, seg, { normalizeFieldValue: s => s });
   assert.strictEqual(containmentIdx.isLowDiscriminationSegment('以上'), true, 'containment-based counting correctly sees "以上" present as a raw substring in BOTH rows, regardless of extraction-boundary fusion, and flags it low-discrimination');
+});
+
+// ── HE-1 Remediation Checkpoint 2-D (RC3): buildValueUniquenessIndex (whole-field-value dedup) ──
+
+check('a whole-field value shared by 2+ distinct rows is ambiguous (RA-01 OU-1/OU-2 sharing one trace_title)', () => {
+  const rows = [
+    { title: 'ビル用マルチ室外機' }, { title: 'ビル用マルチ室外機' }, { title: '天井カセット型室内機' },
+  ];
+  const idx = Sig.buildValueUniquenessIndex(rows, r => r.title, { normalizeFieldValue: s => s });
+  assert.strictEqual(idx.isAmbiguousValue('ビル用マルチ室外機'), true);
+});
+
+check('a whole-field value occurring on exactly 1 row is unique, not ambiguous (legitimate exact match must be preserved)', () => {
+  const rows = [
+    { title: 'ビル用マルチ室外機' }, { title: 'ビル用マルチ室外機' }, { title: '天井カセット型室内機' },
+  ];
+  const idx = Sig.buildValueUniquenessIndex(rows, r => r.title, { normalizeFieldValue: s => s });
+  assert.strictEqual(idx.isAmbiguousValue('天井カセット型室内機'), false);
+});
+
+check('buildValueUniquenessIndex ignores empty/null values the same way document-frequency counting does', () => {
+  const rows = [{ v: 'a' }, { v: '' }, { v: null }, { v: 'a' }];
+  const idx = Sig.buildValueUniquenessIndex(rows, r => r.v, { normalizeFieldValue: s => s });
+  assert.strictEqual(idx.totalRows, 2);
+  assert.strictEqual(idx.isAmbiguousValue('a'), true);
 });
 
 console.log(`\n${pass} PASS / ${fail} FAIL`);

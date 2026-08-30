@@ -45,7 +45,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
-  const CONTRACT_VERSION = 'matching-partial-segment-significance/1.0-L3-1-HE1-REM';
+  const CONTRACT_VERSION = 'matching-partial-segment-significance/1.1-L3-1-HE1-REM';
 
   // Reuses the same ratio already established and reviewed for "near-constant across records" in
   // canonical_matching_field_registry_core.js's field-level NEAR_CONSTANT_THRESHOLD, applied here at
@@ -74,14 +74,30 @@
   // driven entirely by the shared 2-character token "以上", occurring on only 2 of 6 candidate
   // rows (see the Checkpoint 2-C.1 report).
   //
-  // This is a LENGTH-SCALED discriminativeness requirement, never a blacklist of specific words:
-  // ANY segment at or under shortSegmentMaxLength characters is held to a stricter standard - it
-  // must be (very close to) UNIQUE in the candidate population, not merely non-majority - whatever
-  // its literal text happens to be, in any language. A genuinely discriminative short token (e.g. a
-  // real short product code that happens not to repeat elsewhere) is completely unaffected, because
-  // it will not exceed shortSegmentMaxOccurrence. A LONGER segment/phrase is governed exclusively
-  // by the ratio rule above, unchanged from Checkpoint 2-A/2-A.1 - this module does not reduce the
-  // ratio rule's threshold or its 3-row floor for longer content.
+  // HE-1 Remediation Checkpoint 2-D (Matching Correctness generalization): the length ceiling
+  // this rule originally shipped with (shortSegmentMaxLength, formerly hard-capped at 3
+  // characters) is REMOVED as a gating condition. The Reviewer RA-01 adversarial fixture and an
+  // independent user-supplied HVAC dataset both reproduced the exact same failure mode on
+  // ordinary-length words - "ユニット" (4 chars), "200V"/"200v" (4 chars), "電源単相" (4 chars),
+  // "室外機" (3 chars used inconsistently with 4-char variants) - that occur on a MINORITY of
+  // candidate rows (never near the 0.8 ratio-rule threshold) yet are exactly as non-discriminative
+  // as "以上" is: containment on 2+ rows means, by definition, this text alone cannot tell the
+  // matcher which specific row is meant. Character count was never the actual discriminating
+  // factor - occurrence count against the real candidate population always was, for a token of
+  // any length; the length cap was an artifact of the narrower "以上"-shaped case this rule was
+  // first written to catch, not a deliberate boundary on the underlying principle. Options
+  // shortSegmentMaxLength / DEFAULT_SHORT_SEGMENT_MAX_LENGTH are kept ONLY for backward-compatible
+  // callers who explicitly still want a length-gated variant (default now effectively unbounded -
+  // see Number.POSITIVE_INFINITY below); no current caller in this repository sets them.
+  //
+  // This does not become "any repeated word rejects the whole edge": the matching tool evaluates
+  // every extracted keyword entry for a field, and every configured field pair, independently, and
+  // keeps only the single highest-scoring result per (JSON A row, JSON B row) pair (see
+  // bestMatchForPlm() in json_ab_trace_matching_tool_v12.1.15.html). Vetoing ONE non-discriminative
+  // entry's own candidate never prevents the SAME row pair from being accepted through a DIFFERENT,
+  // genuinely discriminative entry or field (e.g. an actual equipment code) scoring higher for that
+  // same pair - it only removes that one weak entry's ability to manufacture an edge with no such
+  // corroboration at all, which is the actual failure mode this generalization closes.
   //
   // Deliberately measured by RAW SUBSTRING CONTAINMENT across candidate field values, NOT by
   // segmentFn's own extraction-boundary frequency (unlike the ratio rule above). A first
@@ -92,11 +108,18 @@
   // "…100L/分以上" (preceded by a kanji "分") fuses it into one combined "分以上" entry - so the two
   // occurrences of the SAME semantic token never landed on the same map key, undercounting it as
   // "occurs on only 1 row" even though the literal substring "以上" is genuinely present in both
-  // rows' text. calcPairMatch()'s own containsHit (what a 'partial'/'code' credit actually rests
-  // on) is a raw substring test against the target's WHOLE field text, independent of how that
-  // target's own keywords happen to be segmented - so the short-segment rule must count occurrences
-  // the same way containsHit does, not via segmentFn's extraction boundaries.
-  const DEFAULT_SHORT_SEGMENT_MAX_LENGTH = 3;
+  // rows' text. The SAME instability was independently reproduced at ordinary word length in
+  // Checkpoint 2-D: the matching tool's tokenize() normalizes (strips whitespace from) a field's
+  // text BEFORE running the word segmenter, so two adjacent-but-separately-boilerplate words like
+  // "冷房能力" + "定格容量" (space-separated in the source text, each independently near-100%
+  // frequent) can fuse into a single combined token whose exact fusion boundary drifts row-to-row
+  // depending on neighbouring characters, undercounting it via extraction-frequency the same way
+  // "以上"/"分以上" did. calcPairMatch()'s own containsHit (what a 'partial'/'code' credit actually
+  // rests on) is a raw substring test against the target's WHOLE field text, independent of how
+  // that target's own keywords happen to be segmented - so this rule must count occurrences the
+  // same way containsHit does, not via segmentFn's extraction boundaries, for a token of ANY
+  // length, not only short ones.
+  const DEFAULT_SHORT_SEGMENT_MAX_LENGTH = Number.POSITIVE_INFINITY;
   const DEFAULT_SHORT_SEGMENT_MAX_OCCURRENCE = 1;
 
   // Occurrence-count-based detection (unlike the ratio rule) is statistically meaningful starting
@@ -236,6 +259,45 @@
     };
   }
 
+  /**
+   * HE-1 Remediation Checkpoint 2-D (RC3): builds a whole-field-VALUE uniqueness index for one
+   * field across a candidate row population - a DIFFERENT granularity from
+   * buildBoilerplateSegmentIndex() above (which operates on caller-EXTRACTED sub-segments of a
+   * field's text) and intentionally kept as an independent entry point (see the Checkpoint 2-D
+   * design note's "do not combine RC1/RC2/RC3 into one heuristic" constraint). Here the "segment"
+   * is simply the row's entire normalized field value - i.e. "how many distinct rows in this
+   * population share this exact whole value," which is exactly what a full-string exactHit
+   * (kw === target) needs to know before it can be trusted as unique identity evidence. Reuses
+   * computeSegmentDocumentFrequency() unchanged by passing a trivial single-value "segmentFn".
+   * @param {Array} rows
+   * @param {(row:any)=>string} getFieldValue - raw (pre-normalization) field value
+   * @param {{normalizeFieldValue?:(raw:string)=>string}} [options]
+   * @returns {{ contractVersion:string, totalRows:number,
+   *   isAmbiguousValue:(normalizedValue:string)=>boolean,
+   *   detail:Map<string,{occurrenceRowCount:number,totalRows:number}> }}
+   */
+  function buildValueUniquenessIndex(rows, getFieldValue, options) {
+    const opts = options || {};
+    const normalizeFieldValue = typeof opts.normalizeFieldValue === 'function' ? opts.normalizeFieldValue : (s => s);
+    const segmentFn = raw => {
+      const v = normalizeFieldValue(String(raw));
+      return v ? [v] : [];
+    };
+    const { totalRows, frequency } = computeSegmentDocumentFrequency(rows, getFieldValue, segmentFn);
+    const detail = new Map();
+    for (const [val, count] of frequency.entries()) detail.set(val, { occurrenceRowCount: count, totalRows });
+    return {
+      contractVersion: CONTRACT_VERSION,
+      totalRows,
+      isAmbiguousValue: (normalizedValue) => {
+        if (!normalizedValue) return false;
+        const count = frequency.get(normalizedValue) || 0;
+        return count > 1;
+      },
+      detail,
+    };
+  }
+
   return {
     CONTRACT_VERSION,
     DEFAULT_BOILERPLATE_FREQUENCY_RATIO,
@@ -246,5 +308,6 @@
     computeSegmentDocumentFrequency,
     countRowsContainingSegment,
     buildBoilerplateSegmentIndex,
+    buildValueUniquenessIndex,
   };
 });

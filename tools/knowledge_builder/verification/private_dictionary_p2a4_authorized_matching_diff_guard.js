@@ -253,149 +253,38 @@ const HUNK_8 = [
 // isLowDiscriminationSegment()'s containment-based short-token check (2-C.1, the "以上" false-
 // positive fix) - see the Checkpoint 2-C/2-C.1 addenda near AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS
 // below for the full rationale.
-const HUNK_9 = [
-  "     return [...new Set(activeKeyPairs().map(p => p.plmField).filter(Boolean))];",
-  "   }",
-  " ",
-  "+  // ── HE-1 Remediation Checkpoint 2-A: boilerplate-segment partial-match suppression ──",
-  "+  // A sub-entry (from extractKeywordEntries - 'segment'/'token', and also 'code' since",
-  "+  // extractLegacyKeywordEntries' codeTokensOf() classifies plain alphanumeric fragments like a",
-  "+  // shared source-filename prefix as 'code' even when they are not a real business code) that",
-  "+  // recurs across most/all of the current run's candidate JSON B rows for a field cannot",
-  "+  // discriminate which specific row is the right match, so it must not grant 'partial' containment",
-  "+  // credit via either the containsHit path or the codeHit fallback path below. The whole-field entry",
-  "+  // (isFullText) is never affected - exact matching is untouched by construction (see",
-  "+  // calcPairMatch's exactHit-gated branches). An explicit human-configured 'code' PAIR METHOD (the",
-  "+  // human deliberately marking a field as a business code) is untouched - only the 'auto' mode",
-  "+  // fallback that grants ad-hoc partial credit from an incidental code-shaped token is in scope.",
-  "+  function segmentsForBoilerplateIndex(raw) {",
-  "+    return extractKeywordEntries(raw)",
-  "+      .filter(e => !e.isFullText && (e.source === 'segment' || e.source === 'token' || e.source === 'code'))",
-  "+      .map(e => normalizeForMatch(e.text))",
-  "+      .filter(Boolean);",
-  "+  }",
-  "+  // Generic per-(rows array identity, field name) boilerplate index, usable for EITHER side",
-  "+  // (sysList/sysField or plmList/plmField) - see boilerplateSegmentIndexCache's WeakMap-of-Map",
-  "+  // shape declared near invalidateMatchCache(). Checkpoint 2-A.1: a segment must be checked against BOTH",
-  "+  // sides' own populations separately (never merged into one combined population - see",
-  "+  // segmentIsBoilerplateOnEitherSide() below), because a segment can be near-constant on one side",
-  "+  // while looking discriminative on the other (e.g. a heading shared by every JSON A row but",
-  "+  // present on only one JSON B row would read as \"1/4 = discriminative\" if only the JSON B",
-  "+  // population were checked, while it is actually a JSON A-side boilerplate collision risk -",
-  "+  // reproduced concretely as the A1..A4 -> B1 many-to-one false-positive risk in the Checkpoint",
-  "+  // 2-A.1 report).",
-  "+  function boilerplateSegmentIndexForField(rows, field) {",
-  "+    if (!Array.isArray(rows) || !field) return null;",
-  "+    if (!globalThis.MatchingPartialSegmentSignificance) return null; // fail-open: pre-Checkpoint-2-A behavior",
-  "+    let byField = boilerplateSegmentIndexCache.get(rows);",
-  "+    if (!byField) { byField = new Map(); boilerplateSegmentIndexCache.set(rows, byField); }",
-  "+    if (!byField.has(field)) {",
-  "+      // HE-1 Remediation Checkpoint 2-C.1: normalizeFieldValue:normalizeForMatch makes the",
-  "+      // isLowDiscriminationSegment short-token containment check use the SAME text normalization",
-  "+      // calcPairMatch's own containsHit test applies - required for containment counting to be a",
-  "+      // faithful proxy for \"would containsHit actually see this substring here.\"",
-  "+      byField.set(field, globalThis.MatchingPartialSegmentSignificance.buildBoilerplateSegmentIndex(",
-  "+        rows,",
-  "+        row => (row == null ? '' : row[field]),",
-  "+        segmentsForBoilerplateIndex,",
-  "+        { normalizeFieldValue: normalizeForMatch }",
-  "+      ));",
-  "+    }",
-  "+    return byField.get(field);",
-  "+  }",
-  "+  // True iff normalizedSegment is low-discrimination on the JSON A/sys side (activeBoilerplateContext.",
-  "+  // sysList, pair.sysField) OR the JSON B/plm side (activeBoilerplateContext.plmList,",
-  "+  // pair.plmField) - an OR, never a merged/summed population (1/4 on each side must stay 1/4 and",
-  "+  // 1/4, never become 2/8 - see Checkpoint 2-A.1 report §1). Either side alone being near-constant",
-  "+  // is sufficient to make a segment low-discrimination, because the risk it creates (many-to-one on",
-  "+  // whichever side is NOT near-constant) does not require both sides to agree.",
-  "+  // HE-1 Remediation Checkpoint 2-C.1: uses isLowDiscriminationSegment() (the superset of the",
-  "+  // original majority-boilerplate rule, ALSO catching a short generic token that merely recurs at",
-  "+  // all on a small minority of rows - e.g. Japanese \"以上\"/\"以下\" - see",
-  "+  // matching_partial_segment_significance_core.js for the full rationale). Every existing caller of",
-  "+  // this function (partial/code/fuzzy/vector, both explicit-mode and 'auto' mode) inherits the",
-  "+  // stricter check automatically through this single point.",
-  "+  function segmentIsBoilerplateOnEitherSide(normalizedSegment, pair) {",
-  "+    if (!normalizedSegment) return false;",
-  "+    const sysIdx = boilerplateSegmentIndexForField(activeBoilerplateContext?.sysList, pair.sysField);",
-  "+    if (sysIdx && sysIdx.isLowDiscriminationSegment(normalizedSegment)) return true;",
-  "+    const plmIdx = boilerplateSegmentIndexForField(activeBoilerplateContext?.plmList, pair.plmField);",
-  "+    if (plmIdx && plmIdx.isLowDiscriminationSegment(normalizedSegment)) return true;",
-  "+    return false;",
-  "+  }",
-  "+  function segmentIsBoilerplateForPair(keyword, pair, keywordMeta) {",
-  "+    if (!keywordMeta || keywordMeta.isFullText) return false;",
-  "+    if (keywordMeta.source !== 'segment' && keywordMeta.source !== 'token' && keywordMeta.source !== 'code') return false;",
-  "+    return segmentIsBoilerplateOnEitherSide(normalizeForMatch(keyword), pair);",
-  "+  }",
-  "+  // codeHit (used by the 'auto' mode fallback below) is computed by codeTokenHit(keyword, targetRaw)",
-  "+  // as: ANY code-like token extracted from keyword (via codeTokensOf) that is found in the target -",
-  "+  // an OR across candidate tokens, so a single boilerplate token (e.g. a shared source-filename",
-  "+  // prefix) is sufficient to make codeHit true regardless of how many OTHER, non-matching tokens",
-  "+  // also happen to be present in keyword (Checkpoint 2-A.1 finding: an earlier version of this",
-  "+  // helper required EVERY extracted token to be boilerplate, which missed exactly this case - a",
-  "+  // boilerplate token that actually caused the hit, sitting alongside an unrelated token that never",
-  "+  // matched the target at all and was never real evidence for anything). This re-derives, using the",
-  "+  // IDENTICAL per-token predicate codeTokenHit() itself uses, only the token(s) that actually caused",
-  "+  // the hit (the real evidence), and suppresses iff EVERY one of those hit-causing tokens is",
-  "+  // boilerplate on at least one side - i.e. there is no non-boilerplate code evidence left to",
-  "+  // justify the match. A non-matching token contributes nothing either way and is correctly ignored.",
-  "+  function codeHitIsBoilerplateForPair(keyword, plm, pair) {",
-  "+    const targetRaw = plm?.[pair.plmField];",
-  "+    const bText = normalizeForMatch(targetRaw);",
-  "+    if (!bText) return false;",
-  "+    const bTokens = codeTokensOf(targetRaw).map(normalizeForMatch);",
-  "+    const aTokens = codeTokensOf(keyword).map(normalizeForMatch).filter(t => t.length >= 3 || /\\d/.test(t));",
-  "+    const hitTokens = aTokens.filter(t => bText.includes(t) || bTokens.some(u => u.includes(t) || t.includes(u)));",
-  "+    if (!hitTokens.length) return false;",
-  "+    return hitTokens.every(t => segmentIsBoilerplateOnEitherSide(t, pair));",
-  "+  }",
-  "+",
-  "+  // RISK-FUZZY-01 remediation (Checkpoint 2-C): a shared, non-repeated LEADING SUBSTRING (a report",
-  "+  // heading, item-name prefix, etc.) between exactly ONE keyword/target pair can single-handedly",
-  "+  // inflate whole-string bigram/vector similarity even when the DISCRIMINATIVE remainder (the text",
-  "+  // AFTER that shared prefix) shares nothing at all between the two sides - reproduced concretely:",
-  "+  // \"確認結果一覧 温度\" vs \"確認結果一覧 圧力\" (remainder \"温度\" vs \"圧力\" share zero bigrams, yet the",
-  "+  // whole-string bigram similarity alone reaches 0.71-0.75, and the 'vector' boost formula's",
-  "+  // bigram/token-Jaccard rescue can push a weak tfidfCos match above minConfidence). This is",
-  "+  // DIFFERENT from segmentIsBoilerplateForPair()'s population-frequency check just above (which",
-  "+  // only catches a REPEATED, separately-EXTRACTED keyword segment) - a single-occurrence shared",
-  "+  // prefix inside one undivided text field is never extracted as its own segment, so it needs this",
-  "+  // direct, pairwise, structural discriminator instead. Genuine fuzzy/vector positives keep HIGH",
-  "+  // remainder similarity even after the same prefix is stripped - confirmed against the real",
-  "+  // HE-11/HE-12 regression fixtures: PDF \"非常停止スイッチ 応答時間0.5秒以内 0.4秒\" vs Excel",
-  "+  // \"非常停止スイッチ / 応答時間0.5秒以内 / 0.4秒\" keeps remainder bigram similarity ~0.90 (there",
-  "+  // genuinely IS shared content beyond the shared item-name prefix, not just a coincidental",
-  "+  // heading) - so this check only suppresses the narrow case where the shared prefix is doing",
-  "+  // ALL of the work and the remainder is completely unrelated (remainder bigramSim <= 0), never a",
-  "+  // pair whose similarity is genuinely distributed across the whole string.",
-  "+  function sharedPrefixDominatesSimilarity(kwNorm, targetNorm) {",
-  "+    if (!kwNorm || !targetNorm) return false;",
-  "+    let lcp = 0;",
-  "+    const maxLcp = Math.min(kwNorm.length, targetNorm.length);",
-  "+    while (lcp < maxLcp && kwNorm[lcp] === targetNorm[lcp]) lcp++;",
-  "+    if (lcp < 2) return false; // no meaningful shared prefix to be concerned about",
-  "+    const remA = kwNorm.slice(lcp), remB = targetNorm.slice(lcp);",
-  "+    return bigramSimilarity(remA, remB) <= 0;",
-  "+  }",
-  "+",
-  "   // ── 1キーワード × 1JSON B項目 × 1キー指定ペアの照合 ──",
-  "   function calcPairMatch(keyword, plm, pair, keywordMeta = null) {",
-  "     const kw = normalizeForMatch(keyword);",
-].join('\n');
+// HUNK_9 (revised in Checkpoint 2-D): the region already covering
+// segmentsForBoilerplateIndex()/boilerplateSegmentIndexForField()/
+// segmentIsBoilerplateOnEitherSide() (Checkpoint 2-A/2-A.1, unchanged) now also covers, in the
+// SAME contiguous region, Checkpoint 2-D's additions: valueUniquenessIndexForField()/
+// exactValueIsAmbiguousOnEitherSide() (RC3, non-unique whole-field-value ambiguity),
+// codeHitIsBoilerplateForPair() fixed to test the actually-shared (shorter) token on a
+// prefix-inclusion hit rather than always keyword's own (possibly longer, coincidentally-
+// unique-looking) token (RC1 - the "excel_row"/"excel_row4" false positive), and two new
+// fuzzy/vector eligibility checks alongside the existing sharedPrefixDominatesSimilarity():
+// boilerplateContentDominatesSimilarity() (strips every one of a field's own already-known
+// low-discrimination segments, not just a single shared leading run) and
+// similarityIsAmbiguousAcrossCandidates() (a template-field generalization: does this SAME
+// keyword's raw bigram similarity come out roughly tied against more than one distinct real
+// candidate in this run's own population, regardless of how the tokenizer segmented it). See
+// tools/design_notes/checkpoint2d_matching_correctness_generalization_design.md for the full
+// RC1/RC2/RC3 design rationale.
+const HUNK_9 = "     return [...new Set(activeKeyPairs().map(p => p.plmField).filter(Boolean))];\n   }\n \n+  // ── HE-1 Remediation Checkpoint 2-A: boilerplate-segment partial-match suppression ──\n+  // A sub-entry (from extractKeywordEntries - 'segment'/'token', and also 'code' since\n+  // extractLegacyKeywordEntries' codeTokensOf() classifies plain alphanumeric fragments like a\n+  // shared source-filename prefix as 'code' even when they are not a real business code) that\n+  // recurs across most/all of the current run's candidate JSON B rows for a field cannot\n+  // discriminate which specific row is the right match, so it must not grant 'partial' containment\n+  // credit via either the containsHit path or the codeHit fallback path below. The whole-field entry\n+  // (isFullText) is never affected - exact matching is untouched by construction (see\n+  // calcPairMatch's exactHit-gated branches). An explicit human-configured 'code' PAIR METHOD (the\n+  // human deliberately marking a field as a business code) is untouched - only the 'auto' mode\n+  // fallback that grants ad-hoc partial credit from an incidental code-shaped token is in scope.\n+  function segmentsForBoilerplateIndex(raw) {\n+    return extractKeywordEntries(raw)\n+      .filter(e => !e.isFullText && (e.source === 'segment' || e.source === 'token' || e.source === 'code'))\n+      .map(e => normalizeForMatch(e.text))\n+      .filter(Boolean);\n+  }\n+  // Generic per-(rows array identity, field name) boilerplate index, usable for EITHER side\n+  // (sysList/sysField or plmList/plmField) - see boilerplateSegmentIndexCache's WeakMap-of-Map\n+  // shape declared near invalidateMatchCache(). Checkpoint 2-A.1: a segment must be checked against BOTH\n+  // sides' own populations separately (never merged into one combined population - see\n+  // segmentIsBoilerplateOnEitherSide() below), because a segment can be near-constant on one side\n+  // while looking discriminative on the other (e.g. a heading shared by every JSON A row but\n+  // present on only one JSON B row would read as \"1/4 = discriminative\" if only the JSON B\n+  // population were checked, while it is actually a JSON A-side boilerplate collision risk -\n+  // reproduced concretely as the A1..A4 -> B1 many-to-one false-positive risk in the Checkpoint\n+  // 2-A.1 report).\n+  function boilerplateSegmentIndexForField(rows, field) {\n+    if (!Array.isArray(rows) || !field) return null;\n+    if (!globalThis.MatchingPartialSegmentSignificance) return null; // fail-open: pre-Checkpoint-2-A behavior\n+    let byField = boilerplateSegmentIndexCache.get(rows);\n+    if (!byField) { byField = new Map(); boilerplateSegmentIndexCache.set(rows, byField); }\n+    if (!byField.has(field)) {\n+      // HE-1 Remediation Checkpoint 2-C.1: normalizeFieldValue:normalizeForMatch makes the\n+      // isLowDiscriminationSegment short-token containment check use the SAME text normalization\n+      // calcPairMatch's own containsHit test applies - required for containment counting to be a\n+      // faithful proxy for \"would containsHit actually see this substring here.\"\n+      byField.set(field, globalThis.MatchingPartialSegmentSignificance.buildBoilerplateSegmentIndex(\n+        rows,\n+        row => (row == null ? '' : row[field]),\n+        segmentsForBoilerplateIndex,\n+        { normalizeFieldValue: normalizeForMatch }\n+      ));\n+    }\n+    return byField.get(field);\n+  }\n+  // True iff normalizedSegment is low-discrimination on the JSON A/sys side (activeBoilerplateContext.\n+  // sysList, pair.sysField) OR the JSON B/plm side (activeBoilerplateContext.plmList,\n+  // pair.plmField) - an OR, never a merged/summed population (1/4 on each side must stay 1/4 and\n+  // 1/4, never become 2/8 - see Checkpoint 2-A.1 report §1). Either side alone being near-constant\n+  // is sufficient to make a segment low-discrimination, because the risk it creates (many-to-one on\n+  // whichever side is NOT near-constant) does not require both sides to agree.\n+  // HE-1 Remediation Checkpoint 2-C.1: uses isLowDiscriminationSegment() (the superset of the\n+  // original majority-boilerplate rule, ALSO catching a short generic token that merely recurs at\n+  // all on a small minority of rows - e.g. Japanese \"以上\"/\"以下\" - see\n+  // matching_partial_segment_significance_core.js for the full rationale). Every existing caller of\n+  // this function (partial/code/fuzzy/vector, both explicit-mode and 'auto' mode) inherits the\n+  // stricter check automatically through this single point.\n+  function segmentIsBoilerplateOnEitherSide(normalizedSegment, pair) {\n+    if (!normalizedSegment) return false;\n+    const sysIdx = boilerplateSegmentIndexForField(activeBoilerplateContext?.sysList, pair.sysField);\n+    if (sysIdx && sysIdx.isLowDiscriminationSegment(normalizedSegment)) return true;\n+    const plmIdx = boilerplateSegmentIndexForField(activeBoilerplateContext?.plmList, pair.plmField);\n+    if (plmIdx && plmIdx.isLowDiscriminationSegment(normalizedSegment)) return true;\n+    return false;\n+  }\n+\n+  // HE-1 Remediation Checkpoint 2-D (RC3): per-(rows array identity, field name) WHOLE-VALUE\n+  // uniqueness index, independent of boilerplateSegmentIndexForField() above (which indexes\n+  // caller-extracted SUB-segments, not whole field values) - see the Checkpoint 2-D design note.\n+  function valueUniquenessIndexForField(rows, field) {\n+    if (!Array.isArray(rows) || !field) return null;\n+    if (!globalThis.MatchingPartialSegmentSignificance) return null; // fail-open, same posture as RC1\n+    let byField = valueUniquenessIndexCache.get(rows);\n+    if (!byField) { byField = new Map(); valueUniquenessIndexCache.set(rows, byField); }\n+    if (!byField.has(field)) {\n+      byField.set(field, globalThis.MatchingPartialSegmentSignificance.buildValueUniquenessIndex(\n+        rows,\n+        row => (row == null ? '' : row[field]),\n+        { normalizeFieldValue: normalizeForMatch }\n+      ));\n+    }\n+    return byField.get(field);\n+  }\n+\n+  // True iff the full-string exact-equality value (kw/target, already normalizeForMatch'd) is\n+  // shared by 2+ DISTINCT rows on the JSON A/sys side (activeBoilerplateContext.sysList,\n+  // pair.sysField) OR the JSON B/plm side (activeBoilerplateContext.plmList, pair.plmField) - an\n+  // OR, mirroring segmentIsBoilerplateOnEitherSide()'s same either-side rationale: ambiguity on\n+  // either side alone is sufficient, because either side not being able to tell rows apart by\n+  // this value is enough to make the exact match untrustworthy as sole evidence. RA-01's OU-1/\n+  // OU-2 sharing one trace_title is exactly this case.\n+  function exactValueIsAmbiguousOnEitherSide(normalizedValue, pair) {\n+    if (!normalizedValue) return false;\n+    const sysIdx = valueUniquenessIndexForField(activeBoilerplateContext?.sysList, pair.sysField);\n+    if (sysIdx && sysIdx.isAmbiguousValue(normalizedValue)) return true;\n+    const plmIdx = valueUniquenessIndexForField(activeBoilerplateContext?.plmList, pair.plmField);\n+    if (plmIdx && plmIdx.isAmbiguousValue(normalizedValue)) return true;\n+    return false;\n+  }\n+  function segmentIsBoilerplateForPair(keyword, pair, keywordMeta) {\n+    if (!keywordMeta || keywordMeta.isFullText) return false;\n+    if (keywordMeta.source !== 'segment' && keywordMeta.source !== 'token' && keywordMeta.source !== 'code') return false;\n+    return segmentIsBoilerplateOnEitherSide(normalizeForMatch(keyword), pair);\n+  }\n+  // codeHit (used by the 'auto' mode fallback below) is computed by codeTokenHit(keyword, targetRaw)\n+  // as: ANY code-like token extracted from keyword (via codeTokensOf) that is found in the target -\n+  // an OR across candidate tokens, so a single boilerplate token (e.g. a shared source-filename\n+  // prefix) is sufficient to make codeHit true regardless of how many OTHER, non-matching tokens\n+  // also happen to be present in keyword (Checkpoint 2-A.1 finding: an earlier version of this\n+  // helper required EVERY extracted token to be boilerplate, which missed exactly this case - a\n+  // boilerplate token that actually caused the hit, sitting alongside an unrelated token that never\n+  // matched the target at all and was never real evidence for anything). This re-derives, using the\n+  // IDENTICAL per-token predicate codeTokenHit() itself uses, only the token(s) that actually caused\n+  // the hit (the real evidence), and suppresses iff EVERY one of those hit-causing tokens is\n+  // boilerplate on at least one side - i.e. there is no non-boilerplate code evidence left to\n+  // justify the match. A non-matching token contributes nothing either way and is correctly ignored.\n+  function codeHitIsBoilerplateForPair(keyword, plm, pair) {\n+    const targetRaw = plm?.[pair.plmField];\n+    const bText = normalizeForMatch(targetRaw);\n+    if (!bText) return false;\n+    const bTokens = codeTokensOf(targetRaw).map(normalizeForMatch);\n+    const aTokens = codeTokensOf(keyword).map(normalizeForMatch).filter(t => t.length >= 3 || /\\d/.test(t));\n+    // HE-1 Remediation Checkpoint 2-D (RC1): when the hit comes from ONE code token containing the\n+    // OTHER (codeTokenHit's own u.includes(t)||t.includes(u) prefix-inclusion rule - e.g. a common\n+    // boilerplate label like \"excel_row\" fused, by the SAME whitespace-collapsed-tokenization\n+    // instability documented elsewhere in this remediation, with a per-row-varying leading digit\n+    // into \"excel_row4\"), the token that must be tested for boilerplate-ness is the SHORTER/actually-\n+    // shared one, not always keyword's own (possibly longer, coincidentally-unique-looking) token -\n+    // \"excel_row4\" itself occurs on only 1 row (looks unique), but the \"excel_row\" substring it\n+    // contains - the ACTUAL shared evidence causing the hit - recurs on every row and IS boilerplate.\n+    // Testing the wrong (longer) token let this false positive through even though the existing\n+    // boilerplate check itself was working correctly on whatever it was actually asked about.\n+    const hitEvidence = [];\n+    aTokens.forEach(t => {\n+      if (bText.includes(t)) { hitEvidence.push(t); return; }\n+      const u = bTokens.find(u => u.includes(t) || t.includes(u));\n+      if (u) hitEvidence.push(u.length <= t.length ? u : t);\n+    });\n+    if (!hitEvidence.length) return false;\n+    return hitEvidence.every(t => segmentIsBoilerplateOnEitherSide(t, pair));\n+  }\n+\n+  // RISK-FUZZY-01 remediation (Checkpoint 2-C): a shared, non-repeated LEADING SUBSTRING (a report\n+  // heading, item-name prefix, etc.) between exactly ONE keyword/target pair can single-handedly\n+  // inflate whole-string bigram/vector similarity even when the DISCRIMINATIVE remainder (the text\n+  // AFTER that shared prefix) shares nothing at all between the two sides - reproduced concretely:\n+  // \"確認結果一覧 温度\" vs \"確認結果一覧 圧力\" (remainder \"温度\" vs \"圧力\" share zero bigrams, yet the\n+  // whole-string bigram similarity alone reaches 0.71-0.75, and the 'vector' boost formula's\n+  // bigram/token-Jaccard rescue can push a weak tfidfCos match above minConfidence). This is\n+  // DIFFERENT from segmentIsBoilerplateForPair()'s population-frequency check just above (which\n+  // only catches a REPEATED, separately-EXTRACTED keyword segment) - a single-occurrence shared\n+  // prefix inside one undivided text field is never extracted as its own segment, so it needs this\n+  // direct, pairwise, structural discriminator instead. Genuine fuzzy/vector positives keep HIGH\n+  // remainder similarity even after the same prefix is stripped - confirmed against the real\n+  // HE-11/HE-12 regression fixtures: PDF \"非常停止スイッチ 応答時間0.5秒以内 0.4秒\" vs Excel\n+  // \"非常停止スイッチ / 応答時間0.5秒以内 / 0.4秒\" keeps remainder bigram similarity ~0.90 (there\n+  // genuinely IS shared content beyond the shared item-name prefix, not just a coincidental\n+  // heading) - so this check only suppresses the narrow case where the shared prefix is doing\n+  // ALL of the work and the remainder is completely unrelated (remainder bigramSim <= 0), never a\n+  // pair whose similarity is genuinely distributed across the whole string.\n+  function sharedPrefixDominatesSimilarity(kwNorm, targetNorm) {\n+    if (!kwNorm || !targetNorm) return false;\n+    let lcp = 0;\n+    const maxLcp = Math.min(kwNorm.length, targetNorm.length);\n+    while (lcp < maxLcp && kwNorm[lcp] === targetNorm[lcp]) lcp++;\n+    if (lcp < 2) return false; // no meaningful shared prefix to be concerned about\n+    const remA = kwNorm.slice(lcp), remB = targetNorm.slice(lcp);\n+    return bigramSimilarity(remA, remB) <= 0;\n+  }\n+\n+  // HE-1 Remediation Checkpoint 2-D (RC1, whole-field/'full'-source vector-fuzzy generalization):\n+  // sharedPrefixDominatesSimilarity() above only catches boilerplate confined to a single LEADING\n+  // run. RA-01's trace_key_text/trace_text fields instead share population-boilerplate CONTENT\n+  // scattered across the whole field (\"機器要求仕様 空調設備 <class> ユニット <code> 冷房能力\n+  // 定格容量 200V\" - only <class>/<code> vary, everything else recurs on every row), which the\n+  // per-token isLowDiscriminationSegment() check (RC1's main fix, applied to individual extracted\n+  // entries above) cannot see when the WINNING candidate is the field's OWN whole-text ('full'\n+  // source) entry rather than one of its sub-segments - a 'full' entry is deliberately never\n+  // itself tested against the boilerplate index (see segmentsForBoilerplateIndex's `!e.isFullText`\n+  // filter - a unique whole-field value must stay eligible for exact matching, RC3's concern, not\n+  // this one). This generalizes sharedPrefixDominatesSimilarity's OWN \"does removing the boilerplate\n+  // leave a discriminative remainder\" principle from \"boilerplate = a shared leading run\" to\n+  // \"boilerplate = any of this field's own already-known low-discrimination segments, wherever\n+  // they occur in the string\" - reusing isLowDiscriminationSegment (now length-independent, see the\n+  // Checkpoint 2-D design note) as the sole authority on what counts as boilerplate, never a new\n+  // definition. Only fires when at least one boilerplate segment was actually found and stripped;\n+  // a pair whose similarity has no boilerplate contribution at all is completely unaffected, exactly\n+  // like sharedPrefixDominatesSimilarity's own \"lcp < 2 => not concerned\" escape hatch.\n+  function boilerplateContentDominatesSimilarity(rawKeyword, rawTarget, pair) {\n+    const kwNorm = normalizeForMatch(rawKeyword), targetNorm = normalizeForMatch(rawTarget);\n+    if (!kwNorm || !targetNorm) return false;\n+    const sysIdx = boilerplateSegmentIndexForField(activeBoilerplateContext?.sysList, pair.sysField);\n+    const plmIdx = boilerplateSegmentIndexForField(activeBoilerplateContext?.plmList, pair.plmField);\n+    if (!sysIdx && !plmIdx) return false;\n+    const isBoilerplate = (seg) => !!seg && ((sysIdx && sysIdx.isLowDiscriminationSegment(seg)) || (plmIdx && plmIdx.isLowDiscriminationSegment(seg)));\n+    const candidateSegs = new Set();\n+    extractKeywordEntries(rawKeyword).forEach(e => { if (!e.isFullText) candidateSegs.add(normalizeForMatch(e.text)); });\n+    extractKeywordEntries(rawTarget).forEach(e => { if (!e.isFullText) candidateSegs.add(normalizeForMatch(e.text)); });\n+    let remA = kwNorm, remB = targetNorm, strippedAny = false;\n+    candidateSegs.forEach(seg => {\n+      if (!isBoilerplate(seg)) return;\n+      if (remA.includes(seg) || remB.includes(seg)) strippedAny = true;\n+      remA = remA.split(seg).join('');\n+      remB = remB.split(seg).join('');\n+    });\n+    if (!strippedAny) return false; // nothing boilerplate present in this specific pair's text\n+    return bigramSimilarity(remA, remB) <= 0;\n+  }\n+\n+  // HE-1 Remediation Checkpoint 2-D (RC1, template-field generalization): a NEAR-DUPLICATE\n+  // TEMPLATE field - e.g. trace_key_text values that only differ in an equipment-class word and a\n+  // code, everything else (\"機器要求仕様 空調設備 ... ユニット ... 冷房能力 定格容量 200V\")\n+  // identical - can defeat BOTH segmentIsBoilerplateForPair (the class-word/code end up FUSED\n+  // with the surrounding boilerplate into one per-row-unique token, by the same whitespace-\n+  // collapsed-tokenization instability documented in matching_partial_segment_significance_core.js)\n+  // and boilerplateContentDominatesSimilarity above (which can only strip segments that were\n+  // actually extracted as their own entries - a boilerplate prefix fused into a longer per-row-\n+  // varying token was never extracted standalone, so there is nothing in candidateSegs to strip).\n+  // This is the most general form of \"does this evidence, alone, explain multiple candidate rows\n+  // about equally\" (Checkpoint 2-D direction 3's core principle): rather than trying to identify\n+  // and strip WHICH substrings are boilerplate, it directly asks whether the SAME keyword's raw\n+  // bigram similarity - a cheap, formula-agnostic STRUCTURAL proxy, never the actual acceptance\n+  // score used for either 'fuzzy' or 'vector' - comes out roughly tied against more than one\n+  // DISTINCT candidate in the actual population being matched against. A genuinely discriminative\n+  // keyword (its real match stands out clearly above every other candidate) is unaffected; a\n+  // template-shared keyword (near-identical similarity to several unrelated candidates) is caught\n+  // regardless of how the tokenizer happened to segment it.\n+  function similarityIsAmbiguousAcrossCandidates(rawKeyword, pair, currentBigramSim) {\n+    if (!(currentBigramSim > 0)) return false;\n+    const plmList = activeBoilerplateContext?.plmList;\n+    if (!Array.isArray(plmList) || plmList.length < 2) return false;\n+    const kwNorm = normalizeForMatch(rawKeyword);\n+    if (!kwNorm) return false;\n+    const NEAR_TIE_MARGIN = 0.03;\n+    let nearBestCount = 0;\n+    for (const row of plmList) {\n+      const val = normalizeForMatch(row?.[pair.plmField]);\n+      if (!val) continue;\n+      const sim = bigramSimilarity(kwNorm, val);\n+      if (sim >= currentBigramSim - NEAR_TIE_MARGIN) {\n+        nearBestCount++;\n+        if (nearBestCount > 1) return true;\n+      }\n+    }\n+    return false;\n+  }\n+\n   // ── 1キーワード × 1JSON B項目 × 1キー指定ペアの照合 ──\n   function calcPairMatch(keyword, plm, pair, keywordMeta = null) {\n     const kw = normalizeForMatch(keyword);";
 
 // HUNK_10: calcPairMatch() 'contains' mode - boilerplate guard on the partial branch. Unchanged since Checkpoint 2-A.
-const HUNK_10 = [
-  '     if (mode === \'exact\') {',
-  '       if (exactHit) cand.push([\'exact\', 1.0]);',
-  '     } else if (mode === \'contains\') {',
-  '-      if (containsHit) cand.push([exactHit ? \'exact\' : \'partial\', exactHit ? 1.0 : getScore(\'partial\')]);',
-  '+      if (exactHit) cand.push([\'exact\', 1.0]);',
-  '+      else if (containsHit && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta)) cand.push([\'partial\', getScore(\'partial\')]);',
-  '     } else if (mode === \'code\') {',
-  '       if (exactHit) cand.push([\'exact\', 1.0]);',
-  '       if (containsHit || codeHit) cand.push([\'code\', getScore(\'code\')]);'
-].join('\n');
+// HUNK_10 (revised in Checkpoint 2-D): this round's calcPairMatch() changes span the region
+// from the explicit 'exact' mode branch through the 'auto' mode's closing vector line without a
+// large enough unchanged gap left in the middle, so git now reports the former HUNK_10 (mode
+// 'exact'/'contains'/'code' region) and former HUNK_11 (mode 'fuzzy'/'vector'/'auto' region) as
+// ONE merged hunk - HUNK_10 is updated in place to that full merged body (mirroring exactly how
+// Checkpoint 2-C already merged HUNK_9/HUNK_11 in place); HUNK_11's own definition is REMOVED
+// below (its content lives inside this HUNK_10 now), the same "remove a hunk once its content is
+// absorbed elsewhere" convention already used for the former HUNK_13 (removed at Checkpoint
+// 2-A.1). Adds: exactAmbiguous gating on every 'exact' push (RC3), isStructuredCodeEvidence()
+// gating on every 'code' push (RC2), and boilerplateContentDominatesSimilarity()/
+// similarityIsAmbiguousAcrossCandidates() alongside the existing guards on every 'fuzzy'/'vector'
+// push (RC1) - see the Checkpoint 2-D design note.
+const HUNK_10 = "       return best;\n     }\n     if (mode === 'exact') {\n-      if (exactHit) cand.push(['exact', 1.0]);\n+      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);\n     } else if (mode === 'contains') {\n-      if (containsHit) cand.push([exactHit ? 'exact' : 'partial', exactHit ? 1.0 : getScore('partial')]);\n+      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);\n+      // HE-1 Remediation Checkpoint 2-D (RC3): an exactHit that IS ambiguous must not fall through\n+      // to a 'partial' consolation credit either - that would just re-admit the same non-unique\n+      // full-value evidence under a different method label. containsHit is guaranteed true here\n+      // whenever exactHit is true, so this branch is only reached for a genuine non-exact partial\n+      // containment, OR for the (exactHit && exactAmbiguous) case which must stay unaccepted.\n+      else if (containsHit && !exactHit && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta)) cand.push(['partial', getScore('partial')]);\n     } else if (mode === 'code') {\n-      if (exactHit) cand.push(['exact', 1.0]);\n-      if (containsHit || codeHit) cand.push(['code', getScore('code')]);\n+      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);\n+      if ((containsHit || codeHit) && isStructuredCodeEvidence(keyword, keywordMeta)) cand.push(['code', getScore('code')]);\n     } else if (mode === 'model') {\n-      if (exactHit) cand.push(['exact', 1.0]);\n+      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);\n       if (containsHit) cand.push(['model', getScore('model')]);\n     } else if (mode === 'synonym') {\n       if (f.synonym) cand.push([f.autoSynonym ? 'auto-synonym' : 'synonym', getScore(f.autoSynonym ? 'auto-synonym' : 'synonym')]);\n     } else if (mode === 'fuzzy') {\n-      if (exactHit) cand.push(['exact', 1.0]);\n-      if (f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75)) cand.push(['fuzzy', getScore('fuzzy')]);\n+      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);\n+      // RISK-FUZZY-01 remediation (Checkpoint 2-C): 'fuzzy'/'vector' previously had NO\n+      // boilerplate-segment guard at all, unlike 'partial'/'code' (Checkpoint 2-A/2-A.1) - a\n+      // near-constant heading shared across most/all rows on either side could single-handedly\n+      // drive bigramSim/tokenJaccard high enough to cross fuzzyThreshold or the vector boost gate,\n+      // producing an accepted edge between two otherwise-unrelated items (reproduced concretely:\n+      // \"確認結果一覧 温度\" vs \"確認結果一覧 圧力\"). Extends the SAME existing, already-tested\n+      // segmentIsBoilerplateForPair() population-frequency check (never a new mechanism) so the\n+      // governing keyword must not itself be a near-constant segment on either side - a pure\n+      // eligibility gate, never a change to any score formula, so genuine fuzzy/vector positives\n+      // (whose keyword is NOT population-boilerplate) are completely unaffected.\n+      if (f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75) && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target) && !boilerplateContentDominatesSimilarity(keyword, targetRaw, pair) && !similarityIsAmbiguousAcrossCandidates(keyword, pair, f.bigramSim)) cand.push(['fuzzy', getScore('fuzzy')]);\n     } else if (mode === 'vector') {\n       const vs = vectorConfidenceFromFeatures(f);\n-      if (vs > 0) cand.push(['vector', vs]);\n+      if (vs > 0 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target) && !boilerplateContentDominatesSimilarity(keyword, targetRaw, pair) && !similarityIsAmbiguousAcrossCandidates(keyword, pair, f.bigramSim)) cand.push(['vector', vs]);\n     } else { // auto\n-      if (exactHit) cand.push(['exact', 1.0]);\n-      if ((containsHit || codeHit) && fieldLooksLike(pair.plmField, 'code')) cand.push(['code', getScore('code')]);\n+      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);\n+      if ((containsHit || codeHit) && fieldLooksLike(pair.plmField, 'code') && isStructuredCodeEvidence(keyword, keywordMeta)) cand.push(['code', getScore('code')]);\n       if (containsHit && fieldLooksLike(pair.plmField, 'model')) cand.push(['model', getScore('model')]);\n-      if (codeHit && !fieldLooksLike(pair.plmField, 'code')) cand.push(['partial', getScore('partial')]);\n+      if (codeHit && !fieldLooksLike(pair.plmField, 'code') && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !codeHitIsBoilerplateForPair(keyword, plm, pair)) cand.push(['partial', getScore('partial')]);\n       if (f.synonym) cand.push([f.autoSynonym ? 'auto-synonym' : 'synonym', getScore(f.autoSynonym ? 'auto-synonym' : 'synonym')]);\n-      if (kw.length >= minLen && f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75) && f.bigramSim < 1) cand.push(['fuzzy', getScore('fuzzy')]);\n-      if (containsHit && !exactHit) cand.push(['partial', getScore('partial')]);\n+      // RISK-FUZZY-01 remediation (Checkpoint 2-C): same boilerplate-segment gate as the explicit\n+      // 'fuzzy'/'vector' modes above, PLUS sharedPrefixDominatesSimilarity() (defined above\n+      // codeHitIsBoilerplateForPair()) for the single-occurrence shared-prefix case that a\n+      // population-frequency check alone cannot see - applied to auto mode's own fuzzy/vector\n+      // candidates identically to the explicit-mode branches.\n+      if (kw.length >= minLen && f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75) && f.bigramSim < 1 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target) && !boilerplateContentDominatesSimilarity(keyword, targetRaw, pair) && !similarityIsAmbiguousAcrossCandidates(keyword, pair, f.bigramSim)) cand.push(['fuzzy', getScore('fuzzy')]);\n+      if (containsHit && !exactHit && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta)) cand.push(['partial', getScore('partial')]);\n       const vs = vectorConfidenceFromFeatures(f);\n-      if (vs > 0) cand.push(['vector', vs]);\n+      if (vs > 0 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target) && !boilerplateContentDominatesSimilarity(keyword, targetRaw, pair) && !similarityIsAmbiguousAcrossCandidates(keyword, pair, f.bigramSim)) cand.push(['vector', vs]);\n     }\n \n     for (const [m, s] of cand) {";
 
 // HUNK_11 (revised in Checkpoint 2-A.1): calcPairMatch() 'auto' mode - boilerplate
 // guard on the codeHit fallback and containsHit partial lines. codeHitIsBoilerplateForPair
@@ -404,83 +293,23 @@ const HUNK_10 = [
 // mode branches and 'auto' mode's fuzzy/partial/vector candidates in calcPairMatch(), now also
 // gated by segmentIsBoilerplateForPair() and sharedPrefixDominatesSimilarity() (RISK-FUZZY-01
 // remediation, Checkpoint 2-C) alongside the pre-existing 'code'/'partial' boilerplate guards.
-const HUNK_11 = [
-  "       if (f.synonym) cand.push([f.autoSynonym ? 'auto-synonym' : 'synonym', getScore(f.autoSynonym ? 'auto-synonym' : 'synonym')]);",
-  "     } else if (mode === 'fuzzy') {",
-  "       if (exactHit) cand.push(['exact', 1.0]);",
-  "-      if (f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75)) cand.push(['fuzzy', getScore('fuzzy')]);",
-  "+      // RISK-FUZZY-01 remediation (Checkpoint 2-C): 'fuzzy'/'vector' previously had NO",
-  "+      // boilerplate-segment guard at all, unlike 'partial'/'code' (Checkpoint 2-A/2-A.1) - a",
-  "+      // near-constant heading shared across most/all rows on either side could single-handedly",
-  "+      // drive bigramSim/tokenJaccard high enough to cross fuzzyThreshold or the vector boost gate,",
-  "+      // producing an accepted edge between two otherwise-unrelated items (reproduced concretely:",
-  "+      // \"確認結果一覧 温度\" vs \"確認結果一覧 圧力\"). Extends the SAME existing, already-tested",
-  "+      // segmentIsBoilerplateForPair() population-frequency check (never a new mechanism) so the",
-  "+      // governing keyword must not itself be a near-constant segment on either side - a pure",
-  "+      // eligibility gate, never a change to any score formula, so genuine fuzzy/vector positives",
-  "+      // (whose keyword is NOT population-boilerplate) are completely unaffected.",
-  "+      if (f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75) && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target)) cand.push(['fuzzy', getScore('fuzzy')]);",
-  "     } else if (mode === 'vector') {",
-  "       const vs = vectorConfidenceFromFeatures(f);",
-  "-      if (vs > 0) cand.push(['vector', vs]);",
-  "+      if (vs > 0 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target)) cand.push(['vector', vs]);",
-  "     } else { // auto",
-  "       if (exactHit) cand.push(['exact', 1.0]);",
-  "       if ((containsHit || codeHit) && fieldLooksLike(pair.plmField, 'code')) cand.push(['code', getScore('code')]);",
-  "       if (containsHit && fieldLooksLike(pair.plmField, 'model')) cand.push(['model', getScore('model')]);",
-  "-      if (codeHit && !fieldLooksLike(pair.plmField, 'code')) cand.push(['partial', getScore('partial')]);",
-  "+      if (codeHit && !fieldLooksLike(pair.plmField, 'code') && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !codeHitIsBoilerplateForPair(keyword, plm, pair)) cand.push(['partial', getScore('partial')]);",
-  "       if (f.synonym) cand.push([f.autoSynonym ? 'auto-synonym' : 'synonym', getScore(f.autoSynonym ? 'auto-synonym' : 'synonym')]);",
-  "-      if (kw.length >= minLen && f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75) && f.bigramSim < 1) cand.push(['fuzzy', getScore('fuzzy')]);",
-  "-      if (containsHit && !exactHit) cand.push(['partial', getScore('partial')]);",
-  "+      // RISK-FUZZY-01 remediation (Checkpoint 2-C): same boilerplate-segment gate as the explicit",
-  "+      // 'fuzzy'/'vector' modes above, PLUS sharedPrefixDominatesSimilarity() (defined above",
-  "+      // codeHitIsBoilerplateForPair()) for the single-occurrence shared-prefix case that a",
-  "+      // population-frequency check alone cannot see - applied to auto mode's own fuzzy/vector",
-  "+      // candidates identically to the explicit-mode branches.",
-  "+      if (kw.length >= minLen && f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75) && f.bigramSim < 1 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target)) cand.push(['fuzzy', getScore('fuzzy')]);",
-  "+      if (containsHit && !exactHit && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta)) cand.push(['partial', getScore('partial')]);",
-  "       const vs = vectorConfidenceFromFeatures(f);",
-  "-      if (vs > 0) cand.push(['vector', vs]);",
-  "+      if (vs > 0 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target)) cand.push(['vector', vs]);",
-  "     }",
-  " ",
-  "     for (const [m, s] of cand) {",
-].join('\n');
+// HUNK_11 REMOVED at Checkpoint 2-D: its content now lives inside the updated HUNK_10 above (see
+// HUNK_10's own comment) - git's hunk-splitting merged what were two separate hunks into one once
+// this round's edits closed the previously-large unchanged gap between them. This mirrors the
+// same "remove a hunk once absorbed elsewhere" convention already used for the former HUNK_13
+// (removed at Checkpoint 2-A.1) - never a broadening of authorization, the total covered region
+// is identical, just expressed as one hunk instead of two.
 
 // HUNK_12 (revised in Checkpoint 2-A.1): activeBoilerplateContext/boilerplateSegmentIndexCache
 // module state + invalidateMatchCache() reset. Comment updated to describe the new
 // precomputeMatchesWithProgress()-owned, try/finally-scoped lifecycle (see HUNK_14) instead
 // of the Checkpoint 2-A per-matchPlmParts-call assignment (removed - see former HUNK_13 note above).
-const HUNK_12 = [
-  '   // 同じ読み込みデータに対して SysML生成・サマリ・照合結果一覧・グラフ描画が',
-  '   // それぞれ全件照合を繰り返さないようにする。ロジック変更時は clear する。',
-  '   let matchCache = new WeakMap();',
-  '-  function invalidateMatchCache() { matchCache = new WeakMap(); kwVecCache = new Map(); sysKeywordCache = new WeakMap(); rowChunkCache = new WeakMap(); synonymIndexCache = null; candidateIndexCache = null; tagIndexCache = null; hierarchyIndexCache = new Map(); fieldGateResolutionCache = null; activeKeyPairsCache = null; activeKeyPairsSignature = \'\'; activeKeyPairsKeyCache = \'\'; }',
-  '+  // HE-1 Remediation Checkpoint 2-A/2-A.1: boilerplate-segment partial-match suppression state.',
-  '+  // activeBoilerplateContext is set to { sysList, plmList } of the run currently executing by',
-  '+  // precomputeMatchesWithProgress() (the sole production caller of matchPlmParts() across a full',
-  '+  // JSON A batch, and the only place both full row populations are in scope together), wrapped in',
-  '+  // try/finally so the context is always cleared - on normal completion AND on',
-  '+  // cancellation/exception - before control returns to any other code (Checkpoint 2-A.1 §3/§4: a',
-  '+  // stale context from one run must never leak into a later, unrelated direct call). calcPairMatch()',
-  '+  // consults it via segmentIsBoilerplateOnEitherSide() without threading sysList/plmList through',
-  '+  // every intermediate call (bestMatchForPlm/bestDeterministicMatchForPlm), matching this file\'s',
-  '+  // existing convention of module-scope matching context (matchLogic, activeTraceProfile(), etc.).',
-  '+  // If unset (e.g. a caller invokes bestMatchForPlm directly without a matching run in progress),',
-  '+  // boilerplateSegmentIndexForField() returns null and suppression is skipped for that side - fail-',
-  '+  // open to the pre-Checkpoint-2-A behavior, never a new failure mode.',
-  '+  let activeBoilerplateContext = null;',
-  '+  // WeakMap<sysList|plmList, Map<fieldName, boilerplateIndex>> - the SAME cache instance serves',
-  '+  // both sides; keys are the row-array object identities themselves (sysList and plmList are always',
-  '+  // distinct array references, even when their contents are equal), so a sys-side and a plm-side',
-  '+  // index for a same-named field never collide.',
-  '+  let boilerplateSegmentIndexCache = new WeakMap();',
-  '+  function invalidateMatchCache() { matchCache = new WeakMap(); kwVecCache = new Map(); sysKeywordCache = new WeakMap(); rowChunkCache = new WeakMap(); synonymIndexCache = null; candidateIndexCache = null; tagIndexCache = null; hierarchyIndexCache = new Map(); fieldGateResolutionCache = null; activeKeyPairsCache = null; activeKeyPairsSignature = \'\'; activeKeyPairsKeyCache = \'\'; activeBoilerplateContext = null; boilerplateSegmentIndexCache = new WeakMap(); }',
-  ' ',
-  ' ',
-  '   /* ═══════════════════════════════════════════'
-].join('\n');
+// HUNK_12 (revised in Checkpoint 2-D): activeBoilerplateContext/boilerplateSegmentIndexCache
+// module state (Checkpoint 2-A/2-A.1, unchanged) now also declares valueUniquenessIndexCache (RC3)
+// as an independent WeakMap alongside boilerplateSegmentIndexCache - both reset together in
+// invalidateMatchCache(), never merged into one shared cache/one helper (see the Checkpoint 2-D
+// design note's "keep RC1/RC2/RC3 independent" constraint).
+const HUNK_12 = "   // 同じ読み込みデータに対して SysML生成・サマリ・照合結果一覧・グラフ描画が\n   // それぞれ全件照合を繰り返さないようにする。ロジック変更時は clear する。\n   let matchCache = new WeakMap();\n-  function invalidateMatchCache() { matchCache = new WeakMap(); kwVecCache = new Map(); sysKeywordCache = new WeakMap(); rowChunkCache = new WeakMap(); synonymIndexCache = null; candidateIndexCache = null; tagIndexCache = null; hierarchyIndexCache = new Map(); fieldGateResolutionCache = null; activeKeyPairsCache = null; activeKeyPairsSignature = ''; activeKeyPairsKeyCache = ''; }\n+  // HE-1 Remediation Checkpoint 2-A/2-A.1: boilerplate-segment partial-match suppression state.\n+  // activeBoilerplateContext is set to { sysList, plmList } of the run currently executing by\n+  // precomputeMatchesWithProgress() (the sole production caller of matchPlmParts() across a full\n+  // JSON A batch, and the only place both full row populations are in scope together), wrapped in\n+  // try/finally so the context is always cleared - on normal completion AND on\n+  // cancellation/exception - before control returns to any other code (Checkpoint 2-A.1 §3/§4: a\n+  // stale context from one run must never leak into a later, unrelated direct call). calcPairMatch()\n+  // consults it via segmentIsBoilerplateOnEitherSide() without threading sysList/plmList through\n+  // every intermediate call (bestMatchForPlm/bestDeterministicMatchForPlm), matching this file's\n+  // existing convention of module-scope matching context (matchLogic, activeTraceProfile(), etc.).\n+  // If unset (e.g. a caller invokes bestMatchForPlm directly without a matching run in progress),\n+  // boilerplateSegmentIndexForField() returns null and suppression is skipped for that side - fail-\n+  // open to the pre-Checkpoint-2-A behavior, never a new failure mode.\n+  let activeBoilerplateContext = null;\n+  // WeakMap<sysList|plmList, Map<fieldName, boilerplateIndex>> - the SAME cache instance serves\n+  // both sides; keys are the row-array object identities themselves (sysList and plmList are always\n+  // distinct array references, even when their contents are equal), so a sys-side and a plm-side\n+  // index for a same-named field never collide.\n+  let boilerplateSegmentIndexCache = new WeakMap();\n+  // HE-1 Remediation Checkpoint 2-D (RC3): independent cache for whole-field-VALUE uniqueness\n+  // indexes (buildValueUniquenessIndex) - deliberately a SEPARATE WeakMap from\n+  // boilerplateSegmentIndexCache (RC1's per-segment index), never merged into one cache/one\n+  // helper, per the Checkpoint 2-D design note's \"keep RC1/RC2/RC3 independent\" constraint.\n+  let valueUniquenessIndexCache = new WeakMap();\n+  function invalidateMatchCache() { matchCache = new WeakMap(); kwVecCache = new Map(); sysKeywordCache = new WeakMap(); rowChunkCache = new WeakMap(); synonymIndexCache = null; candidateIndexCache = null; tagIndexCache = null; hierarchyIndexCache = new Map(); fieldGateResolutionCache = null; activeKeyPairsCache = null; activeKeyPairsSignature = ''; activeKeyPairsKeyCache = ''; activeBoilerplateContext = null; boilerplateSegmentIndexCache = new WeakMap(); valueUniquenessIndexCache = new WeakMap(); }\n \n \n   /* ═══════════════════════════════════════════";
 
 // HUNK_14 (new in Checkpoint 2-A.1): precomputeMatchesWithProgress() - owns the
 // activeBoilerplateContext lifecycle for a full matching run (set before the loop,
@@ -638,45 +467,12 @@ const HUNK_16 = [
   "       detailTableHead.innerHTML='';",
 ].join('\n');
 
-const HUNK_17 = [
-  "     }",
-  "     detailHeaders = Object.keys(detailRows[0]).filter(k => !k.startsWith('_'))",
-  "       .filter(h => !isDetailColumnHiddenByDefault(h));",
-  "-    detailTableHead.innerHTML = `<tr>${detailHeaders.map(h=>`<th class=\"${jsonColumnClass(h)}\">${escapeHtml(h)}</th>`).join('')}</tr>`;",
-  "+    // HE-1 Remediation Checkpoint 2-B: one narrow leading column for the per-row edge-expand",
-  "+    // toggle (task §1/§2 - a single added column, not ten extra columns; expand DETAIL renders as",
-  "+    // a full-width row directly under its parent, never as more table columns).",
-  "+    detailTableHead.innerHTML = `<tr><th style=\"width:28px;\"></th>${detailHeaders.map(h=>`<th class=\"${jsonColumnClass(h)}\">${escapeHtml(h)}</th>`).join('')}</tr>`;",
-  "     if (!(detailFiltered instanceof Set)) detailFiltered = new Set(detailRows.map((_,i)=>i));",
-  "     const filteredIndices = [...detailFiltered].filter(i => detailRows[i]).sort((a,b)=>a-b);",
-  "     const showIndices = filteredIndices.slice(0, Math.max(1, detailTableVisibleLimit || PHASE4_TABLE_LIMIT));",
-  "+    const colCount = detailHeaders.length + 1;",
-  "     detailTableBody.innerHTML = showIndices.map(idx=> {",
-  "       const row = detailRows[idx];",
-  "-      return `<tr data-idx=\"${idx}\" data-reqid=\"${escapeHtml(row._reqId||'')}\">",
-  "+      const edges = Array.isArray(row._edgeRows) ? row._edgeRows : [];",
-  "+      const nodeId = row._nodeId || '';",
-  "+      const expanded = edges.length > 0 && detailExpandedKeys.has(nodeId);",
-  "+      const toggleCell = edges.length",
-  "+        ? `<button type=\"button\" onclick=\"toggleDetailRowExpand('${escapeHtml(nodeId)}')\" title=\"接続先を${expanded ? '折りたたむ' : '展開する'}\" style=\"padding:2px 7px;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer;\">${expanded ? '▼' : '▶'}</button>`",
-  "+        : '';",
-  "+      const graphCell = nodeId",
-  "+        ? `<button type=\"button\" onclick=\"highlightGraphFromTable('${escapeHtml(nodeId)}')\" title=\"Graphでこのノードをハイライト\" style=\"padding:1px 5px;font-size:10px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;color:#475569;cursor:pointer;margin-left:2px;\">G</button>`",
-  "+        : '';",
-  "+      const parentTr = `<tr data-idx=\"${idx}\" data-reqid=\"${escapeHtml(row._reqId||'')}\" data-nodeid=\"${escapeHtml(nodeId)}\">",
-  "+        <td style=\"text-align:center;white-space:nowrap;\">${toggleCell}${graphCell}</td>",
-  "         ${detailHeaders.map(h=>{ const val = formatCellMultiline(row[h]); return `<td class=\"${jsonColumnClass(h)}\" data-key=\"${escapeHtml(h)}\" title=\"${escapeHtml(val)}\"><div class=\"cell-text\">${escapeHtml(val)}</div></td>`; }).join('')}",
-  "       </tr>`;",
-  "-    }).join('') + (filteredIndices.length > showIndices.length ? `<tr class=\"phase4-more-row\"><td colspan=\"${detailHeaders.length || 1}\">${showIndices.length.toLocaleString()} / ${filteredIndices.length.toLocaleString()} 件を表示中 <button type=\"button\" class=\"secondary\" onclick=\"loadMoreDetailRows()\" style=\"padding:4px 10px;font-size:12px;margin-left:8px;\">さらに表示</button></td></tr>` : '');",
-  "+      if (!expanded) return parentTr;",
-  "+      // Count invariant (task §3): exactly one expand row per element of row._edgeRows, the same",
-  "+      // array 照合JSON B件数/照合JSON A件数 was already computed from - never a re-derived count.",
-  "+      return parentTr + edges.map(edge => renderDetailExpandRow(idx, edge, colCount)).join('');",
-  "+    }).join('') + (filteredIndices.length > showIndices.length ? `<tr class=\"phase4-more-row\"><td colspan=\"${colCount}\">${showIndices.length.toLocaleString()} / ${filteredIndices.length.toLocaleString()} 件を表示中 <button type=\"button\" class=\"secondary\" onclick=\"loadMoreDetailRows()\" style=\"padding:4px 10px;font-size:12px;margin-left:8px;\">さらに表示</button></td></tr>` : '');",
-  "     detailCountEl.textContent = filteredIndices.length > showIndices.length ? `${showIndices.length} / ${filteredIndices.length}` : filteredIndices.length;",
-  "     attachDetailExpandListeners();",
-  "     updateDetailFilterBadge();",
-].join('\n');
+// HUNK_17 (revised in Checkpoint 2-D): the region already covering the leading toggle column
+// (Checkpoint 2-B) now also covers this round's Human UX finding - [+]/[-] symbols and an
+// explicit "接続先を展開"/"接続先を閉じる" title/aria-label, replacing the prior ▶/▼ +
+// "展開する"/"折りたたむ" wording. Implemented only after Matching Correctness closure, per the
+// task's own gating - the expand/collapse behavior, edge count, and Graph mapping are unchanged.
+const HUNK_17 = "     }\n     detailHeaders = Object.keys(detailRows[0]).filter(k => !k.startsWith('_'))\n       .filter(h => !isDetailColumnHiddenByDefault(h));\n-    detailTableHead.innerHTML = `<tr>${detailHeaders.map(h=>`<th class=\"${jsonColumnClass(h)}\">${escapeHtml(h)}</th>`).join('')}</tr>`;\n+    // HE-1 Remediation Checkpoint 2-B: one narrow leading column for the per-row edge-expand\n+    // toggle (task §1/§2 - a single added column, not ten extra columns; expand DETAIL renders as\n+    // a full-width row directly under its parent, never as more table columns).\n+    detailTableHead.innerHTML = `<tr><th style=\"width:28px;\"></th>${detailHeaders.map(h=>`<th class=\"${jsonColumnClass(h)}\">${escapeHtml(h)}</th>`).join('')}</tr>`;\n     if (!(detailFiltered instanceof Set)) detailFiltered = new Set(detailRows.map((_,i)=>i));\n     const filteredIndices = [...detailFiltered].filter(i => detailRows[i]).sort((a,b)=>a-b);\n     const showIndices = filteredIndices.slice(0, Math.max(1, detailTableVisibleLimit || PHASE4_TABLE_LIMIT));\n+    const colCount = detailHeaders.length + 1;\n     detailTableBody.innerHTML = showIndices.map(idx=> {\n       const row = detailRows[idx];\n-      return `<tr data-idx=\"${idx}\" data-reqid=\"${escapeHtml(row._reqId||'')}\">\n+      const edges = Array.isArray(row._edgeRows) ? row._edgeRows : [];\n+      const nodeId = row._nodeId || '';\n+      const expanded = edges.length > 0 && detailExpandedKeys.has(nodeId);\n+      // HE-1 Remediation Checkpoint 2-D (Human UX finding, implemented only after Matching\n+      // Correctness closure): [+]/[-] symbols and an explicit \"接続先を展開\"/\"接続先を閉じる\"\n+      // title/aria-label - the prior ▶/▼ + \"展開する\"/\"折りたたむ\" wording read as ambiguous\n+      // (not obviously \"this expands the connected targets\"). Only the label/symbol changed;\n+      // the expand/collapse behavior, edge count, and Graph mapping below are untouched.\n+      const toggleLabel = expanded ? '接続先を閉じる' : '接続先を展開';\n+      const toggleCell = edges.length\n+        ? `<button type=\"button\" onclick=\"toggleDetailRowExpand('${escapeHtml(nodeId)}')\" title=\"${toggleLabel}\" aria-label=\"${toggleLabel}\" style=\"padding:2px 7px;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer;\">${expanded ? '[-]' : '[+]'}</button>`\n+        : '';\n+      const graphCell = nodeId\n+        ? `<button type=\"button\" onclick=\"highlightGraphFromTable('${escapeHtml(nodeId)}')\" title=\"Graphでこのノードをハイライト\" style=\"padding:1px 5px;font-size:10px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;color:#475569;cursor:pointer;margin-left:2px;\">G</button>`\n+        : '';\n+      const parentTr = `<tr data-idx=\"${idx}\" data-reqid=\"${escapeHtml(row._reqId||'')}\" data-nodeid=\"${escapeHtml(nodeId)}\">\n+        <td style=\"text-align:center;white-space:nowrap;\">${toggleCell}${graphCell}</td>\n         ${detailHeaders.map(h=>{ const val = formatCellMultiline(row[h]); return `<td class=\"${jsonColumnClass(h)}\" data-key=\"${escapeHtml(h)}\" title=\"${escapeHtml(val)}\"><div class=\"cell-text\">${escapeHtml(val)}</div></td>`; }).join('')}\n       </tr>`;\n-    }).join('') + (filteredIndices.length > showIndices.length ? `<tr class=\"phase4-more-row\"><td colspan=\"${detailHeaders.length || 1}\">${showIndices.length.toLocaleString()} / ${filteredIndices.length.toLocaleString()} 件を表示中 <button type=\"button\" class=\"secondary\" onclick=\"loadMoreDetailRows()\" style=\"padding:4px 10px;font-size:12px;margin-left:8px;\">さらに表示</button></td></tr>` : '');\n+      if (!expanded) return parentTr;\n+      // Count invariant (task §3): exactly one expand row per element of row._edgeRows, the same\n+      // array 照合JSON B件数/照合JSON A件数 was already computed from - never a re-derived count.\n+      return parentTr + edges.map(edge => renderDetailExpandRow(idx, edge, colCount)).join('');\n+    }).join('') + (filteredIndices.length > showIndices.length ? `<tr class=\"phase4-more-row\"><td colspan=\"${colCount}\">${showIndices.length.toLocaleString()} / ${filteredIndices.length.toLocaleString()} 件を表示中 <button type=\"button\" class=\"secondary\" onclick=\"loadMoreDetailRows()\" style=\"padding:4px 10px;font-size:12px;margin-left:8px;\">さらに表示</button></td></tr>` : '');\n     detailCountEl.textContent = filteredIndices.length > showIndices.length ? `${showIndices.length} / ${filteredIndices.length}` : filteredIndices.length;\n     attachDetailExpandListeners();\n     updateDetailFilterBadge();";
 
 const HUNK_18 = [
   "       '_bGranularityRule': base._bGranularityRule || overrides._bGranularityRule || '',",
@@ -836,7 +632,38 @@ const HUNK_22 = [
  * was introduced by this same HE-1 Remediation lineage at Checkpoint 2-A, not a pre-existing
  * P2-A4 production file), so ordinary git history is its only change record. Verified against both
  * PRE_HEAD_SHA references exactly as in every prior round. */
-const AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS = [HUNK_1, HUNK_2, HUNK_3, HUNK_4, HUNK_5, HUNK_6, HUNK_7, HUNK_8, HUNK_9, HUNK_10, HUNK_11, HUNK_12, HUNK_14, HUNK_15, HUNK_16, HUNK_17, HUNK_18, HUNK_19, HUNK_20, HUNK_21, HUNK_22];
+
+/* HE-1 Remediation Checkpoint 2-D (Matching Correctness generalization: RC1/RC2/RC3) - new,
+ * previously-uncovered regions of tools/json_ab_trace_matching_tool_v12.1.15.html. HUNK_9/
+ * HUNK_10 above were updated in place (re-touched regions, per this guard's own stated
+ * convention); HUNK_11 was removed (absorbed into the updated HUNK_10); HUNK_12 above was updated
+ * in place (new cache declaration in the same region). HUNK_23-HUNK_26 below are genuinely NEW
+ * regions never previously touched by any authorized hunk:
+ *   HUNK_23: isStructuredCodeEvidence() (RC2), inserted immediately after codeTokenHit() - well
+ *            upstream of calcPairMatch(), a location no prior hunk covered.
+ *   HUNK_24: exactAmbiguous computed once near the top of calcPairMatch(), immediately after
+ *            const exactHit = kw === target; (RC3) - consumed by every method branch via the
+ *            updated HUNK_10.
+ *   HUNK_25: the keywordMeta?.source === 'full' fast path's two cand.push() lines, gated the same
+ *            way as the rest of calcPairMatch() (RC2/RC3) - a location no prior hunk covered
+ *            (HUNK_9 ended just before it; the old HUNK_10 started just after it).
+ *   HUNK_26: matchPlmParts()'s matches-building loop - rowHasStructuredIdentityMatch computed once
+ *            per sys row and consulted in the per-candidate filter (RC1, per-row structured-
+ *            identity dominance) - a location no prior hunk covered.
+ * See tools/design_notes/checkpoint2d_matching_correctness_generalization_design.md for the full
+ * RC1/RC2/RC3 design rationale and tools/design_notes/checkpoint2d_matching_correctness_generalization_design.md's
+ * companion Phase A/B reports for the reproduction evidence. Verified against both PRE_HEAD_SHA
+ * references exactly as in every prior round; hunk count is now 24 (21 - 1 removed [HUNK_11] + 4
+ * new [HUNK_23-26]). */
+const HUNK_23 = "     return a.some(t => bText.includes(t) || b.some(u => u.includes(t) || t.includes(u)));\n   }\n \n+  // HE-1 Remediation Checkpoint 2-D (RC2): 'code'-method credit must rest on evidence that is\n+  // ITSELF code-shaped, not merely on the FIELD being configured/detected as code-like. Reuses\n+  // the EXISTING codeTokensOf()/extractCodesFromText() contract unchanged - no new code grammar,\n+  // no HVAC-specific pattern, no requirement that a code contain a digit or hyphen (that contract\n+  // already supports bare uppercase acronyms, P/N, REQ/CR/SYS/PLM/... prefixes, and structured\n+  // alphanumeric-hyphen identifiers on its own).\n+  //   - keywordMeta.source === 'code': extractLegacyKeywordEntries() already classified this exact\n+  //     entry as a code token via codeTokensOf() - eligible, no further check needed.\n+  //   - keywordMeta.source is 'segment' or 'token': extracted by delimiter-splitting or the word\n+  //     tokenizer, i.e. natural-language-shaped by construction - NEVER eligible on its own. This\n+  //     is what stops \"ビル\"/\"ユニット\"/\"室外\"/\"室内\" (RA-01 C2's reproduction) from earning\n+  //     method:'code' credit merely because the FIELD they came from is a mixed code+name field.\n+  //   - no keywordMeta (the keywordMeta?.source === 'full' fast path in calcPairMatch, used for\n+  //     dedicated code fields where the whole value already equals a code): the text must itself\n+  //     equal one of its OWN codeTokensOf() extractions - true only when the field's ENTIRE value\n+  //     is a bare code (e.g. a dedicated equipment_code field containing just \"OU-1\"); a longer\n+  //     free-text value can never satisfy this by construction.\n+  function isStructuredCodeEvidence(text, keywordMeta) {\n+    if (keywordMeta && keywordMeta.source === 'code') return true;\n+    if (keywordMeta && (keywordMeta.source === 'segment' || keywordMeta.source === 'token')) return false;\n+    const t = normalizeForMatch(text);\n+    if (!t) return false;\n+    return codeTokensOf(text).some(tok => normalizeForMatch(tok) === t);\n+  }\n+\n   function vectorConfidenceFromFeatures(f) {\n     if (!f || f.tfidfCos < (matchLogic.vectorThreshold ?? 0.40)) return 0;\n     let score = getScore('vector') * f.tfidfCos;";
+
+const HUNK_24 = " \n     const minLen = Math.max(1, matchLogic.minKeywordLength ?? 2);\n     const exactHit = kw === target;\n+    // HE-1 Remediation Checkpoint 2-D (RC3): a full-string equality is only trustworthy as\n+    // identity evidence when that exact value is not itself shared by another distinct row on\n+    // either side (see exactValueIsAmbiguousOnEitherSide() and the Checkpoint 2-D design note).\n+    // Computed unconditionally (cheap - index is built once per run and cached) so every method\n+    // branch below gets the SAME answer without recomputing it per branch.\n+    const exactAmbiguous = exactHit && exactValueIsAmbiguousOnEitherSide(kw, pair);\n     const targetHasKw = kw.length >= minLen && target.includes(kw);\n     const kwHasTarget = target.length >= minLen && kw.includes(target);\n     const containsHit = exactHit || targetHasKw || kwHasTarget;";
+
+const HUNK_25 = "     const mode = pair.method || 'auto';\n     // source:\"full\" はexactと明示的なcodeペアだけに使い、長文全文のfuzzy/vector/partial計算を避ける。\n     if (keywordMeta?.source === 'full') {\n-      if (exactHit) cand.push(['exact', 1.0]);\n-      if (mode === 'code' && (containsHit || codeHit)) cand.push(['code', getScore('code')]);\n+      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);\n+      if (mode === 'code' && (containsHit || codeHit) && isStructuredCodeEvidence(keyword, keywordMeta)) cand.push(['code', getScore('code')]);\n       for (const [m, s] of cand) {\n         if (s > best.score) { best.score = s; best.method = m; }\n       }";
+
+const HUNK_26 = "       }\n     }\n \n+    // HE-1 Remediation Checkpoint 2-D (RC1, per-row structured-identity dominance): once THIS sys\n+    // row's true identity is already confirmed by structured evidence (an exact/code match, or any\n+    // candidate whose own winning keyword is itself code-shaped per isStructuredCodeEvidence - the\n+    // SAME reused RC2 definition, never a new one), a DIFFERENT candidate for the SAME row reached\n+    // only through a generic natural-language 'partial' word (e.g. \"室外機\"/\"outdoor unit\" -\n+    // population-unique in a small fixture by pure coincidence, so RC1's population-frequency check\n+    // cannot see it, yet it is exactly as non-identifying as a population-common word) is suspect\n+    // and must not stand as an independent accepted edge. 'exact'/'code'/'tag' methods are always\n+    // exempt (a genuine self/dictionary match must never be suppressed by this rule - 'tag' in\n+    // particular is the deliberately-separate HE-14/15 dictionary-edge mechanism, which is allowed\n+    // to add an edge ALONGSIDE a row's own exact self-match by design and must not interact with\n+    // this check at all). This does not touch a row with NO structured-identity match at all - a\n+    // genuine one-to-many relationship resting entirely on descriptive text (no code field on\n+    // either side) is completely unaffected, since nothing here is \"confirmed\" for it to compete\n+    // against.\n+    const rowHasStructuredIdentityMatch = candidates.some(c =>\n+      c.conf >= matchLogic.minConfidence && c.best.score > 0 &&\n+      (c.best.method === 'exact' || c.best.method === 'code' || isStructuredCodeEvidence(c.best.keyword, null)));\n+\n     const matches = [];\n     for (const c of candidates) {\n       const nk = normalizeForMatch(c.best.keyword);\n       if (nk && exactKeywords.has(nk) && !(c.best.method === 'exact' || c.best.method === 'code')) continue;\n+      if (rowHasStructuredIdentityMatch && !(c.best.method === 'exact' || c.best.method === 'code' || c.best.method === 'tag') && !isStructuredCodeEvidence(c.best.keyword, null)) continue;\n       if (c.conf >= matchLogic.minConfidence && c.best.score > 0) {\n         const m = { ...c.plm, matchedKeyword:c.best.keyword, confidence:c.conf,\n           matchMethod:c.best.method, _features:c.best.features,";
+
+const AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS = [HUNK_1, HUNK_2, HUNK_3, HUNK_4, HUNK_5, HUNK_6, HUNK_7, HUNK_8, HUNK_9, HUNK_10, HUNK_12, HUNK_14, HUNK_15, HUNK_16, HUNK_17, HUNK_18, HUNK_19, HUNK_20, HUNK_21, HUNK_22, HUNK_23, HUNK_24, HUNK_25, HUNK_26];
 
 // Parses a `git diff` text into an array of hunk-body strings (everything
 // after each `@@ ... @@` header line, up to the next header or EOF), with

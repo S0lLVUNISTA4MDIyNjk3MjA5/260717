@@ -5460,6 +5460,31 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     return a.some(t => bText.includes(t) || b.some(u => u.includes(t) || t.includes(u)));
   }
 
+  // HE-1 Remediation Checkpoint 2-D (RC2): 'code'-method credit must rest on evidence that is
+  // ITSELF code-shaped, not merely on the FIELD being configured/detected as code-like. Reuses
+  // the EXISTING codeTokensOf()/extractCodesFromText() contract unchanged - no new code grammar,
+  // no HVAC-specific pattern, no requirement that a code contain a digit or hyphen (that contract
+  // already supports bare uppercase acronyms, P/N, REQ/CR/SYS/PLM/... prefixes, and structured
+  // alphanumeric-hyphen identifiers on its own).
+  //   - keywordMeta.source === 'code': extractLegacyKeywordEntries() already classified this exact
+  //     entry as a code token via codeTokensOf() - eligible, no further check needed.
+  //   - keywordMeta.source is 'segment' or 'token': extracted by delimiter-splitting or the word
+  //     tokenizer, i.e. natural-language-shaped by construction - NEVER eligible on its own. This
+  //     is what stops "ビル"/"ユニット"/"室外"/"室内" (RA-01 C2's reproduction) from earning
+  //     method:'code' credit merely because the FIELD they came from is a mixed code+name field.
+  //   - no keywordMeta (the keywordMeta?.source === 'full' fast path in calcPairMatch, used for
+  //     dedicated code fields where the whole value already equals a code): the text must itself
+  //     equal one of its OWN codeTokensOf() extractions - true only when the field's ENTIRE value
+  //     is a bare code (e.g. a dedicated equipment_code field containing just "OU-1"); a longer
+  //     free-text value can never satisfy this by construction.
+  function isStructuredCodeEvidence(text, keywordMeta) {
+    if (keywordMeta && keywordMeta.source === 'code') return true;
+    if (keywordMeta && (keywordMeta.source === 'segment' || keywordMeta.source === 'token')) return false;
+    const t = normalizeForMatch(text);
+    if (!t) return false;
+    return codeTokensOf(text).some(tok => normalizeForMatch(tok) === t);
+  }
+
   function vectorConfidenceFromFeatures(f) {
     if (!f || f.tfidfCos < (matchLogic.vectorThreshold ?? 0.40)) return 0;
     let score = getScore('vector') * f.tfidfCos;
@@ -6468,6 +6493,40 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     if (plmIdx && plmIdx.isLowDiscriminationSegment(normalizedSegment)) return true;
     return false;
   }
+
+  // HE-1 Remediation Checkpoint 2-D (RC3): per-(rows array identity, field name) WHOLE-VALUE
+  // uniqueness index, independent of boilerplateSegmentIndexForField() above (which indexes
+  // caller-extracted SUB-segments, not whole field values) - see the Checkpoint 2-D design note.
+  function valueUniquenessIndexForField(rows, field) {
+    if (!Array.isArray(rows) || !field) return null;
+    if (!globalThis.MatchingPartialSegmentSignificance) return null; // fail-open, same posture as RC1
+    let byField = valueUniquenessIndexCache.get(rows);
+    if (!byField) { byField = new Map(); valueUniquenessIndexCache.set(rows, byField); }
+    if (!byField.has(field)) {
+      byField.set(field, globalThis.MatchingPartialSegmentSignificance.buildValueUniquenessIndex(
+        rows,
+        row => (row == null ? '' : row[field]),
+        { normalizeFieldValue: normalizeForMatch }
+      ));
+    }
+    return byField.get(field);
+  }
+
+  // True iff the full-string exact-equality value (kw/target, already normalizeForMatch'd) is
+  // shared by 2+ DISTINCT rows on the JSON A/sys side (activeBoilerplateContext.sysList,
+  // pair.sysField) OR the JSON B/plm side (activeBoilerplateContext.plmList, pair.plmField) - an
+  // OR, mirroring segmentIsBoilerplateOnEitherSide()'s same either-side rationale: ambiguity on
+  // either side alone is sufficient, because either side not being able to tell rows apart by
+  // this value is enough to make the exact match untrustworthy as sole evidence. RA-01's OU-1/
+  // OU-2 sharing one trace_title is exactly this case.
+  function exactValueIsAmbiguousOnEitherSide(normalizedValue, pair) {
+    if (!normalizedValue) return false;
+    const sysIdx = valueUniquenessIndexForField(activeBoilerplateContext?.sysList, pair.sysField);
+    if (sysIdx && sysIdx.isAmbiguousValue(normalizedValue)) return true;
+    const plmIdx = valueUniquenessIndexForField(activeBoilerplateContext?.plmList, pair.plmField);
+    if (plmIdx && plmIdx.isAmbiguousValue(normalizedValue)) return true;
+    return false;
+  }
   function segmentIsBoilerplateForPair(keyword, pair, keywordMeta) {
     if (!keywordMeta || keywordMeta.isFullText) return false;
     if (keywordMeta.source !== 'segment' && keywordMeta.source !== 'token' && keywordMeta.source !== 'code') return false;
@@ -6491,9 +6550,24 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     if (!bText) return false;
     const bTokens = codeTokensOf(targetRaw).map(normalizeForMatch);
     const aTokens = codeTokensOf(keyword).map(normalizeForMatch).filter(t => t.length >= 3 || /\d/.test(t));
-    const hitTokens = aTokens.filter(t => bText.includes(t) || bTokens.some(u => u.includes(t) || t.includes(u)));
-    if (!hitTokens.length) return false;
-    return hitTokens.every(t => segmentIsBoilerplateOnEitherSide(t, pair));
+    // HE-1 Remediation Checkpoint 2-D (RC1): when the hit comes from ONE code token containing the
+    // OTHER (codeTokenHit's own u.includes(t)||t.includes(u) prefix-inclusion rule - e.g. a common
+    // boilerplate label like "excel_row" fused, by the SAME whitespace-collapsed-tokenization
+    // instability documented elsewhere in this remediation, with a per-row-varying leading digit
+    // into "excel_row4"), the token that must be tested for boilerplate-ness is the SHORTER/actually-
+    // shared one, not always keyword's own (possibly longer, coincidentally-unique-looking) token -
+    // "excel_row4" itself occurs on only 1 row (looks unique), but the "excel_row" substring it
+    // contains - the ACTUAL shared evidence causing the hit - recurs on every row and IS boilerplate.
+    // Testing the wrong (longer) token let this false positive through even though the existing
+    // boilerplate check itself was working correctly on whatever it was actually asked about.
+    const hitEvidence = [];
+    aTokens.forEach(t => {
+      if (bText.includes(t)) { hitEvidence.push(t); return; }
+      const u = bTokens.find(u => u.includes(t) || t.includes(u));
+      if (u) hitEvidence.push(u.length <= t.length ? u : t);
+    });
+    if (!hitEvidence.length) return false;
+    return hitEvidence.every(t => segmentIsBoilerplateOnEitherSide(t, pair));
   }
 
   // RISK-FUZZY-01 remediation (Checkpoint 2-C): a shared, non-repeated LEADING SUBSTRING (a report
@@ -6524,6 +6598,83 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     return bigramSimilarity(remA, remB) <= 0;
   }
 
+  // HE-1 Remediation Checkpoint 2-D (RC1, whole-field/'full'-source vector-fuzzy generalization):
+  // sharedPrefixDominatesSimilarity() above only catches boilerplate confined to a single LEADING
+  // run. RA-01's trace_key_text/trace_text fields instead share population-boilerplate CONTENT
+  // scattered across the whole field ("機器要求仕様 空調設備 <class> ユニット <code> 冷房能力
+  // 定格容量 200V" - only <class>/<code> vary, everything else recurs on every row), which the
+  // per-token isLowDiscriminationSegment() check (RC1's main fix, applied to individual extracted
+  // entries above) cannot see when the WINNING candidate is the field's OWN whole-text ('full'
+  // source) entry rather than one of its sub-segments - a 'full' entry is deliberately never
+  // itself tested against the boilerplate index (see segmentsForBoilerplateIndex's `!e.isFullText`
+  // filter - a unique whole-field value must stay eligible for exact matching, RC3's concern, not
+  // this one). This generalizes sharedPrefixDominatesSimilarity's OWN "does removing the boilerplate
+  // leave a discriminative remainder" principle from "boilerplate = a shared leading run" to
+  // "boilerplate = any of this field's own already-known low-discrimination segments, wherever
+  // they occur in the string" - reusing isLowDiscriminationSegment (now length-independent, see the
+  // Checkpoint 2-D design note) as the sole authority on what counts as boilerplate, never a new
+  // definition. Only fires when at least one boilerplate segment was actually found and stripped;
+  // a pair whose similarity has no boilerplate contribution at all is completely unaffected, exactly
+  // like sharedPrefixDominatesSimilarity's own "lcp < 2 => not concerned" escape hatch.
+  function boilerplateContentDominatesSimilarity(rawKeyword, rawTarget, pair) {
+    const kwNorm = normalizeForMatch(rawKeyword), targetNorm = normalizeForMatch(rawTarget);
+    if (!kwNorm || !targetNorm) return false;
+    const sysIdx = boilerplateSegmentIndexForField(activeBoilerplateContext?.sysList, pair.sysField);
+    const plmIdx = boilerplateSegmentIndexForField(activeBoilerplateContext?.plmList, pair.plmField);
+    if (!sysIdx && !plmIdx) return false;
+    const isBoilerplate = (seg) => !!seg && ((sysIdx && sysIdx.isLowDiscriminationSegment(seg)) || (plmIdx && plmIdx.isLowDiscriminationSegment(seg)));
+    const candidateSegs = new Set();
+    extractKeywordEntries(rawKeyword).forEach(e => { if (!e.isFullText) candidateSegs.add(normalizeForMatch(e.text)); });
+    extractKeywordEntries(rawTarget).forEach(e => { if (!e.isFullText) candidateSegs.add(normalizeForMatch(e.text)); });
+    let remA = kwNorm, remB = targetNorm, strippedAny = false;
+    candidateSegs.forEach(seg => {
+      if (!isBoilerplate(seg)) return;
+      if (remA.includes(seg) || remB.includes(seg)) strippedAny = true;
+      remA = remA.split(seg).join('');
+      remB = remB.split(seg).join('');
+    });
+    if (!strippedAny) return false; // nothing boilerplate present in this specific pair's text
+    return bigramSimilarity(remA, remB) <= 0;
+  }
+
+  // HE-1 Remediation Checkpoint 2-D (RC1, template-field generalization): a NEAR-DUPLICATE
+  // TEMPLATE field - e.g. trace_key_text values that only differ in an equipment-class word and a
+  // code, everything else ("機器要求仕様 空調設備 ... ユニット ... 冷房能力 定格容量 200V")
+  // identical - can defeat BOTH segmentIsBoilerplateForPair (the class-word/code end up FUSED
+  // with the surrounding boilerplate into one per-row-unique token, by the same whitespace-
+  // collapsed-tokenization instability documented in matching_partial_segment_significance_core.js)
+  // and boilerplateContentDominatesSimilarity above (which can only strip segments that were
+  // actually extracted as their own entries - a boilerplate prefix fused into a longer per-row-
+  // varying token was never extracted standalone, so there is nothing in candidateSegs to strip).
+  // This is the most general form of "does this evidence, alone, explain multiple candidate rows
+  // about equally" (Checkpoint 2-D direction 3's core principle): rather than trying to identify
+  // and strip WHICH substrings are boilerplate, it directly asks whether the SAME keyword's raw
+  // bigram similarity - a cheap, formula-agnostic STRUCTURAL proxy, never the actual acceptance
+  // score used for either 'fuzzy' or 'vector' - comes out roughly tied against more than one
+  // DISTINCT candidate in the actual population being matched against. A genuinely discriminative
+  // keyword (its real match stands out clearly above every other candidate) is unaffected; a
+  // template-shared keyword (near-identical similarity to several unrelated candidates) is caught
+  // regardless of how the tokenizer happened to segment it.
+  function similarityIsAmbiguousAcrossCandidates(rawKeyword, pair, currentBigramSim) {
+    if (!(currentBigramSim > 0)) return false;
+    const plmList = activeBoilerplateContext?.plmList;
+    if (!Array.isArray(plmList) || plmList.length < 2) return false;
+    const kwNorm = normalizeForMatch(rawKeyword);
+    if (!kwNorm) return false;
+    const NEAR_TIE_MARGIN = 0.03;
+    let nearBestCount = 0;
+    for (const row of plmList) {
+      const val = normalizeForMatch(row?.[pair.plmField]);
+      if (!val) continue;
+      const sim = bigramSimilarity(kwNorm, val);
+      if (sim >= currentBigramSim - NEAR_TIE_MARGIN) {
+        nearBestCount++;
+        if (nearBestCount > 1) return true;
+      }
+    }
+    return false;
+  }
+
   // ── 1キーワード × 1JSON B項目 × 1キー指定ペアの照合 ──
   function calcPairMatch(keyword, plm, pair, keywordMeta = null) {
     const kw = normalizeForMatch(keyword);
@@ -6534,6 +6685,12 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
 
     const minLen = Math.max(1, matchLogic.minKeywordLength ?? 2);
     const exactHit = kw === target;
+    // HE-1 Remediation Checkpoint 2-D (RC3): a full-string equality is only trustworthy as
+    // identity evidence when that exact value is not itself shared by another distinct row on
+    // either side (see exactValueIsAmbiguousOnEitherSide() and the Checkpoint 2-D design note).
+    // Computed unconditionally (cheap - index is built once per run and cached) so every method
+    // branch below gets the SAME answer without recomputing it per branch.
+    const exactAmbiguous = exactHit && exactValueIsAmbiguousOnEitherSide(kw, pair);
     const targetHasKw = kw.length >= minLen && target.includes(kw);
     const kwHasTarget = target.length >= minLen && kw.includes(target);
     const containsHit = exactHit || targetHasKw || kwHasTarget;
@@ -6556,8 +6713,8 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     const mode = pair.method || 'auto';
     // source:"full" はexactと明示的なcodeペアだけに使い、長文全文のfuzzy/vector/partial計算を避ける。
     if (keywordMeta?.source === 'full') {
-      if (exactHit) cand.push(['exact', 1.0]);
-      if (mode === 'code' && (containsHit || codeHit)) cand.push(['code', getScore('code')]);
+      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);
+      if (mode === 'code' && (containsHit || codeHit) && isStructuredCodeEvidence(keyword, keywordMeta)) cand.push(['code', getScore('code')]);
       for (const [m, s] of cand) {
         if (s > best.score) { best.score = s; best.method = m; }
       }
@@ -6565,20 +6722,25 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       return best;
     }
     if (mode === 'exact') {
-      if (exactHit) cand.push(['exact', 1.0]);
+      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);
     } else if (mode === 'contains') {
-      if (exactHit) cand.push(['exact', 1.0]);
-      else if (containsHit && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta)) cand.push(['partial', getScore('partial')]);
+      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);
+      // HE-1 Remediation Checkpoint 2-D (RC3): an exactHit that IS ambiguous must not fall through
+      // to a 'partial' consolation credit either - that would just re-admit the same non-unique
+      // full-value evidence under a different method label. containsHit is guaranteed true here
+      // whenever exactHit is true, so this branch is only reached for a genuine non-exact partial
+      // containment, OR for the (exactHit && exactAmbiguous) case which must stay unaccepted.
+      else if (containsHit && !exactHit && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta)) cand.push(['partial', getScore('partial')]);
     } else if (mode === 'code') {
-      if (exactHit) cand.push(['exact', 1.0]);
-      if (containsHit || codeHit) cand.push(['code', getScore('code')]);
+      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);
+      if ((containsHit || codeHit) && isStructuredCodeEvidence(keyword, keywordMeta)) cand.push(['code', getScore('code')]);
     } else if (mode === 'model') {
-      if (exactHit) cand.push(['exact', 1.0]);
+      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);
       if (containsHit) cand.push(['model', getScore('model')]);
     } else if (mode === 'synonym') {
       if (f.synonym) cand.push([f.autoSynonym ? 'auto-synonym' : 'synonym', getScore(f.autoSynonym ? 'auto-synonym' : 'synonym')]);
     } else if (mode === 'fuzzy') {
-      if (exactHit) cand.push(['exact', 1.0]);
+      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);
       // RISK-FUZZY-01 remediation (Checkpoint 2-C): 'fuzzy'/'vector' previously had NO
       // boilerplate-segment guard at all, unlike 'partial'/'code' (Checkpoint 2-A/2-A.1) - a
       // near-constant heading shared across most/all rows on either side could single-handedly
@@ -6589,13 +6751,13 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       // governing keyword must not itself be a near-constant segment on either side - a pure
       // eligibility gate, never a change to any score formula, so genuine fuzzy/vector positives
       // (whose keyword is NOT population-boilerplate) are completely unaffected.
-      if (f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75) && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target)) cand.push(['fuzzy', getScore('fuzzy')]);
+      if (f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75) && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target) && !boilerplateContentDominatesSimilarity(keyword, targetRaw, pair) && !similarityIsAmbiguousAcrossCandidates(keyword, pair, f.bigramSim)) cand.push(['fuzzy', getScore('fuzzy')]);
     } else if (mode === 'vector') {
       const vs = vectorConfidenceFromFeatures(f);
-      if (vs > 0 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target)) cand.push(['vector', vs]);
+      if (vs > 0 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target) && !boilerplateContentDominatesSimilarity(keyword, targetRaw, pair) && !similarityIsAmbiguousAcrossCandidates(keyword, pair, f.bigramSim)) cand.push(['vector', vs]);
     } else { // auto
-      if (exactHit) cand.push(['exact', 1.0]);
-      if ((containsHit || codeHit) && fieldLooksLike(pair.plmField, 'code')) cand.push(['code', getScore('code')]);
+      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);
+      if ((containsHit || codeHit) && fieldLooksLike(pair.plmField, 'code') && isStructuredCodeEvidence(keyword, keywordMeta)) cand.push(['code', getScore('code')]);
       if (containsHit && fieldLooksLike(pair.plmField, 'model')) cand.push(['model', getScore('model')]);
       if (codeHit && !fieldLooksLike(pair.plmField, 'code') && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !codeHitIsBoilerplateForPair(keyword, plm, pair)) cand.push(['partial', getScore('partial')]);
       if (f.synonym) cand.push([f.autoSynonym ? 'auto-synonym' : 'synonym', getScore(f.autoSynonym ? 'auto-synonym' : 'synonym')]);
@@ -6604,10 +6766,10 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       // codeHitIsBoilerplateForPair()) for the single-occurrence shared-prefix case that a
       // population-frequency check alone cannot see - applied to auto mode's own fuzzy/vector
       // candidates identically to the explicit-mode branches.
-      if (kw.length >= minLen && f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75) && f.bigramSim < 1 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target)) cand.push(['fuzzy', getScore('fuzzy')]);
+      if (kw.length >= minLen && f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75) && f.bigramSim < 1 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target) && !boilerplateContentDominatesSimilarity(keyword, targetRaw, pair) && !similarityIsAmbiguousAcrossCandidates(keyword, pair, f.bigramSim)) cand.push(['fuzzy', getScore('fuzzy')]);
       if (containsHit && !exactHit && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta)) cand.push(['partial', getScore('partial')]);
       const vs = vectorConfidenceFromFeatures(f);
-      if (vs > 0 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target)) cand.push(['vector', vs]);
+      if (vs > 0 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target) && !boilerplateContentDominatesSimilarity(keyword, targetRaw, pair) && !similarityIsAmbiguousAcrossCandidates(keyword, pair, f.bigramSim)) cand.push(['vector', vs]);
     }
 
     for (const [m, s] of cand) {
@@ -7079,7 +7241,12 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   // distinct array references, even when their contents are equal), so a sys-side and a plm-side
   // index for a same-named field never collide.
   let boilerplateSegmentIndexCache = new WeakMap();
-  function invalidateMatchCache() { matchCache = new WeakMap(); kwVecCache = new Map(); sysKeywordCache = new WeakMap(); rowChunkCache = new WeakMap(); synonymIndexCache = null; candidateIndexCache = null; tagIndexCache = null; hierarchyIndexCache = new Map(); fieldGateResolutionCache = null; activeKeyPairsCache = null; activeKeyPairsSignature = ''; activeKeyPairsKeyCache = ''; activeBoilerplateContext = null; boilerplateSegmentIndexCache = new WeakMap(); }
+  // HE-1 Remediation Checkpoint 2-D (RC3): independent cache for whole-field-VALUE uniqueness
+  // indexes (buildValueUniquenessIndex) - deliberately a SEPARATE WeakMap from
+  // boilerplateSegmentIndexCache (RC1's per-segment index), never merged into one cache/one
+  // helper, per the Checkpoint 2-D design note's "keep RC1/RC2/RC3 independent" constraint.
+  let valueUniquenessIndexCache = new WeakMap();
+  function invalidateMatchCache() { matchCache = new WeakMap(); kwVecCache = new Map(); sysKeywordCache = new WeakMap(); rowChunkCache = new WeakMap(); synonymIndexCache = null; candidateIndexCache = null; tagIndexCache = null; hierarchyIndexCache = new Map(); fieldGateResolutionCache = null; activeKeyPairsCache = null; activeKeyPairsSignature = ''; activeKeyPairsKeyCache = ''; activeBoilerplateContext = null; boilerplateSegmentIndexCache = new WeakMap(); valueUniquenessIndexCache = new WeakMap(); }
 
 
   /* ═══════════════════════════════════════════
@@ -7476,10 +7643,30 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       }
     }
 
+    // HE-1 Remediation Checkpoint 2-D (RC1, per-row structured-identity dominance): once THIS sys
+    // row's true identity is already confirmed by structured evidence (an exact/code match, or any
+    // candidate whose own winning keyword is itself code-shaped per isStructuredCodeEvidence - the
+    // SAME reused RC2 definition, never a new one), a DIFFERENT candidate for the SAME row reached
+    // only through a generic natural-language 'partial' word (e.g. "室外機"/"outdoor unit" -
+    // population-unique in a small fixture by pure coincidence, so RC1's population-frequency check
+    // cannot see it, yet it is exactly as non-identifying as a population-common word) is suspect
+    // and must not stand as an independent accepted edge. 'exact'/'code'/'tag' methods are always
+    // exempt (a genuine self/dictionary match must never be suppressed by this rule - 'tag' in
+    // particular is the deliberately-separate HE-14/15 dictionary-edge mechanism, which is allowed
+    // to add an edge ALONGSIDE a row's own exact self-match by design and must not interact with
+    // this check at all). This does not touch a row with NO structured-identity match at all - a
+    // genuine one-to-many relationship resting entirely on descriptive text (no code field on
+    // either side) is completely unaffected, since nothing here is "confirmed" for it to compete
+    // against.
+    const rowHasStructuredIdentityMatch = candidates.some(c =>
+      c.conf >= matchLogic.minConfidence && c.best.score > 0 &&
+      (c.best.method === 'exact' || c.best.method === 'code' || isStructuredCodeEvidence(c.best.keyword, null)));
+
     const matches = [];
     for (const c of candidates) {
       const nk = normalizeForMatch(c.best.keyword);
       if (nk && exactKeywords.has(nk) && !(c.best.method === 'exact' || c.best.method === 'code')) continue;
+      if (rowHasStructuredIdentityMatch && !(c.best.method === 'exact' || c.best.method === 'code' || c.best.method === 'tag') && !isStructuredCodeEvidence(c.best.keyword, null)) continue;
       if (c.conf >= matchLogic.minConfidence && c.best.score > 0) {
         const m = { ...c.plm, matchedKeyword:c.best.keyword, confidence:c.conf,
           matchMethod:c.best.method, _features:c.best.features,
@@ -10295,8 +10482,14 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       const edges = Array.isArray(row._edgeRows) ? row._edgeRows : [];
       const nodeId = row._nodeId || '';
       const expanded = edges.length > 0 && detailExpandedKeys.has(nodeId);
+      // HE-1 Remediation Checkpoint 2-D (Human UX finding, implemented only after Matching
+      // Correctness closure): [+]/[-] symbols and an explicit "接続先を展開"/"接続先を閉じる"
+      // title/aria-label - the prior ▶/▼ + "展開する"/"折りたたむ" wording read as ambiguous
+      // (not obviously "this expands the connected targets"). Only the label/symbol changed;
+      // the expand/collapse behavior, edge count, and Graph mapping below are untouched.
+      const toggleLabel = expanded ? '接続先を閉じる' : '接続先を展開';
       const toggleCell = edges.length
-        ? `<button type="button" onclick="toggleDetailRowExpand('${escapeHtml(nodeId)}')" title="接続先を${expanded ? '折りたたむ' : '展開する'}" style="padding:2px 7px;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer;">${expanded ? '▼' : '▶'}</button>`
+        ? `<button type="button" onclick="toggleDetailRowExpand('${escapeHtml(nodeId)}')" title="${toggleLabel}" aria-label="${toggleLabel}" style="padding:2px 7px;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer;">${expanded ? '[-]' : '[+]'}</button>`
         : '';
       const graphCell = nodeId
         ? `<button type="button" onclick="highlightGraphFromTable('${escapeHtml(nodeId)}')" title="Graphでこのノードをハイライト" style="padding:1px 5px;font-size:10px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;color:#475569;cursor:pointer;margin-left:2px;">G</button>`

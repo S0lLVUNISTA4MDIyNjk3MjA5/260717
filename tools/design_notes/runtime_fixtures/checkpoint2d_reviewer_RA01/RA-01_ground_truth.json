@@ -1,0 +1,244 @@
+{
+  "fixture_id": "RA-01",
+  "author_role": "independent_reviewer",
+  "purpose": [
+    "generic noun collision: ユニット / 室内機 / 室外機",
+    "common numeric token collision: 200V",
+    "generic engineering phrase collision: 冷房能力 / 定格容量",
+    "structured-code prefix collision: OU-1 vs OU-2",
+    "short comparator collision: 以上",
+    "unmatched-node preservation"
+  ],
+  "auto_matching": {
+    "A_to_B": {
+      "expected_edges": [
+        [
+          "A-FCU1",
+          "B-FCU1"
+        ],
+        [
+          "A-OU1",
+          "B-OU1"
+        ],
+        [
+          "A-OU2",
+          "B-OU2"
+        ],
+        [
+          "A-IU2",
+          "B-IU2"
+        ],
+        [
+          "A-VEU1",
+          "B-VEU1"
+        ],
+        [
+          "A-CP1",
+          "B-CP1"
+        ]
+      ],
+      "expected_wrong_edges": 0,
+      "expected_unmatched_source": [
+        "A-HU1"
+      ],
+      "expected_unmatched_target": [
+        "B-DP1"
+      ]
+    },
+    "B_to_A": {
+      "expected_edges": [
+        [
+          "B-FCU1",
+          "A-FCU1"
+        ],
+        [
+          "B-OU1",
+          "A-OU1"
+        ],
+        [
+          "B-OU2",
+          "A-OU2"
+        ],
+        [
+          "B-IU2",
+          "A-IU2"
+        ],
+        [
+          "B-VEU1",
+          "A-VEU1"
+        ],
+        [
+          "B-CP1",
+          "A-CP1"
+        ]
+      ],
+      "expected_wrong_edges": 0,
+      "expected_unmatched_source": [
+        "B-DP1"
+      ],
+      "expected_unmatched_target": [
+        "A-HU1"
+      ]
+    },
+    "A_to_A": {
+      "expected_edges": [
+        [
+          "A-FCU1",
+          "A-FCU1"
+        ],
+        [
+          "A-OU1",
+          "A-OU1"
+        ],
+        [
+          "A-OU2",
+          "A-OU2"
+        ],
+        [
+          "A-IU2",
+          "A-IU2"
+        ],
+        [
+          "A-VEU1",
+          "A-VEU1"
+        ],
+        [
+          "A-CP1",
+          "A-CP1"
+        ],
+        [
+          "A-HU1",
+          "A-HU1"
+        ]
+      ],
+      "expected_wrong_edges": 0
+    },
+    "B_to_B": {
+      "expected_edges": [
+        [
+          "B-FCU1",
+          "B-FCU1"
+        ],
+        [
+          "B-OU1",
+          "B-OU1"
+        ],
+        [
+          "B-OU2",
+          "B-OU2"
+        ],
+        [
+          "B-IU2",
+          "B-IU2"
+        ],
+        [
+          "B-VEU1",
+          "B-VEU1"
+        ],
+        [
+          "B-CP1",
+          "B-CP1"
+        ],
+        [
+          "B-DP1",
+          "B-DP1"
+        ]
+      ],
+      "expected_wrong_edges": 0
+    }
+  },
+  "manual_code_tests": [
+    {
+      "name": "strict equipment_code",
+      "field_pair": "equipment_code -> equipment_code",
+      "method": "code",
+      "expected_edges": [
+        [
+          "A-FCU1",
+          "B-FCU1"
+        ],
+        [
+          "A-OU1",
+          "B-OU1"
+        ],
+        [
+          "A-OU2",
+          "B-OU2"
+        ],
+        [
+          "A-IU2",
+          "B-IU2"
+        ],
+        [
+          "A-VEU1",
+          "B-VEU1"
+        ],
+        [
+          "A-CP1",
+          "B-CP1"
+        ]
+      ],
+      "expected_wrong_edges": 0
+    },
+    {
+      "name": "mixed equipment_code_name",
+      "field_pair": "equipment_code_name -> equipment_code_name",
+      "method": "code",
+      "expected_edges": [
+        [
+          "A-FCU1",
+          "B-FCU1"
+        ],
+        [
+          "A-OU1",
+          "B-OU1"
+        ],
+        [
+          "A-OU2",
+          "B-OU2"
+        ],
+        [
+          "A-IU2",
+          "B-IU2"
+        ],
+        [
+          "A-VEU1",
+          "B-VEU1"
+        ],
+        [
+          "A-CP1",
+          "B-CP1"
+        ]
+      ],
+      "expected_wrong_edges": 0,
+      "safety_requirement": "自然語の共通部分（ユニット、室外、室内等）だけでcode edgeを作らない。OU-1とOU-2を同一code扱いしない。"
+    }
+  ],
+  "forbidden_false_positive_examples": [
+    [
+      "A-OU1",
+      "B-OU2",
+      "OU prefix/common 室外ユニット"
+    ],
+    [
+      "A-OU2",
+      "B-OU1",
+      "OU prefix/common 室外ユニット"
+    ],
+    [
+      "A-FCU1",
+      "B-IU2",
+      "室内/ユニット/200V"
+    ],
+    [
+      "A-HU1",
+      "B-DP1",
+      "ユニット/定格容量/200V"
+    ],
+    [
+      "A-CP1",
+      "B-VEU1",
+      "200V only"
+    ]
+  ]
+}
