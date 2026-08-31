@@ -138,17 +138,26 @@ const HUNK_4 = "     });\n   }\n \n+  /* P2-A4 Checkpoint 15-A MAJOR-01 (Human A
 // L3-1-FINAL checkpoint reports for the full rationale and test evidence.
 
 // HUNK_5: script src addition for canonical_matching_field_registry_core.js
-// (L3-1) AND matching_partial_segment_significance_core.js (HE-1 Remediation
-// Checkpoint 2-A) - both insertions land adjacent to each other, so `git
-// diff` reports them as one merged hunk against the shared pre-head; this
-// replaces the L3-1-only version of HUNK_5 with the current combined text,
-// exactly as the module doc above requires when this hunk is re-touched.
+// (L3-1), the L3-2 Checkpoint 2-C canonical role-binding/sidecar-context
+// bridge script tags, AND matching_partial_segment_significance_core.js (HE-1
+// Remediation Checkpoint 2-A) - all these insertions land adjacent to each
+// other, so `git diff` reports them as one merged hunk against the shared
+// pre-head; this replaces the pre-Checkpoint-2-C version of HUNK_5 with the
+// current combined text, exactly as the module doc above requires when this
+// hunk is re-touched (same convention as HUNK_16/17/19 in the Checkpoint 2-G
+// round).
 const HUNK_5 = [
   '   <script src="https://unpkg.com/tiny-segmenter@0.2.0/dist/tiny-segmenter-0.2.0.js" onerror="window.__tsLoadFailed=true"></script>',
   '   <script src="./generated/quantity_annotation_schema_v1.browser.js"></script>',
   '   <script src="./quantity_sidecar_binding_core.js"></script>',
   '+  <!-- L3-1 (staged, not yet applied to the tracked protected file - see checkpoint report) -->',
   '+  <script src="./canonical_matching_field_registry_core.js"></script>',
+  '+  <!-- L3-2 Checkpoint 2-C: canonical quantity role binding + sidecar-context bridge (Checkpoint',
+  '+       1.1/2-A/2-A.1/2-B, unmodified). generatePropertyResolutions() resolves these globals lazily',
+  '+       when it runs, so loading them after quantity_sidecar_binding_core.js is safe as long as both',
+  '+       exist before Quantity evaluation - see canonical_quantity_sidecar_context_contract_0.1.md. -->',
+  '+  <script src="./knowledge_builder/core/canonical_quantity_role_binding_core.js"></script>',
+  '+  <script src="./knowledge_builder/core/canonical_quantity_sidecar_context_core.js"></script>',
   '+  <!-- HE-1 Remediation Checkpoint 2-A: boilerplate-segment partial-match suppression -->',
   '+  <script src="./matching_partial_segment_significance_core.js"></script>',
   '   <script src="./generated/trace_comparison_schema_v2.browser.js"></script>',
@@ -723,7 +732,36 @@ const HUNK_30 = "     button.secondary { background: #475569; }\n     button.sec
  *            buildGraphElements/runAsyncMatchPipeline) method column.
  * Hunk count is now 35 (28 - 0 removed + 7 new [HUNK_31-37]; HUNK_16/17/19 updated in place, all
  * other hunks unchanged). Verified against both PRE_HEAD_SHA references exactly as in every prior
- * round. */
+ * round.
+ *
+ * L3-2 Checkpoint 2-C re-authorization: the first hunks in this file's history that wire the L3-2
+ * canonical quantity modules into the live browser tool (Checkpoints 1.1/2-A/2-A.1/2-B were
+ * pure-core-only, never touching this HTML). Narrow by design - dependency script tags and an
+ * aggregate, additive explainability summary only, no matching algorithm change, no Graph/Excel
+ * change, no new UI panel:
+ *   HUNK_5 (RE-TOUCHED IN PLACE): the two new L3-2 <script> tags (canonical_quantity_role_binding
+ *            _core.js, canonical_quantity_sidecar_context_core.js) land adjacent, in the diff-hunk
+ *            sense, to HUNK_5's existing canonical_matching_field_registry_core.js/matching_
+ *            partial_segment_significance_core.js script-tag additions - `git diff` against the
+ *            shared pre-head merges them into one hunk, exactly the HUNK_16/17/19-style re-touch
+ *            convention this guard already documents above.
+ *   HUNK_39 (new): currentQuantityPropertyState()/quantityPropertyContextSummary()/
+ *            PROPERTY_CONTEXT_REASON_LABELS_JA, inserted immediately before
+ *            renderQuantityBindingStatus() (mirrors the existing
+ *            currentQuantityDimensionState()/quantityDimensionSummary() pattern one function
+ *            group above).
+ *   HUNK_40 (new): a single additive Property-context aggregate summary line appended inside
+ *            renderQuantityBindingStatus() (the existing #quantityBindingStatus text surface -
+ *            no new DOM element, no new panel).
+ *   HUNK_41 (new): window.__quantityBindingDiagnostics extended with propertyState()/
+ *            propertySummary() (mirrors the existing dimensionState()/dimensionSummary() accessor
+ *            pattern).
+ * Hunk count is now 38 (35 + 3 new [HUNK_39-41]; HUNK_5 updated in place, all other hunks
+ * unchanged). This HTML file has been byte-identical since the L3-1 closure SHA
+ * a6a2967d16c18caf79c9eb520536aea8aea14afa through this checkpoint's own starting HEAD
+ * 5a0f8bf70b6499d8035d7cb2638c28c807aba070 (Checkpoints 1.1/2-A/2-A.1/2-B never touched it), so
+ * the same PRE_HEAD_SHAS bases already used by the Checkpoint 2-G selftest remain valid pre-heads
+ * for this round too - see private_dictionary_p2a4_authorized_matching_diff_guard_selftest_checkpoint2c.js. */
 
 const HUNK_31 = [
   "         <table>",
@@ -894,7 +932,16 @@ const HUNK_37 = [
   "         <td>${escapeHtml(judgement || '-')}</td><td>${escapeHtml(use)}</td>",
 ].join("\n");
 
-const AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS = [HUNK_1, HUNK_2, HUNK_3, HUNK_4, HUNK_5, HUNK_6, HUNK_7, HUNK_8, HUNK_9, HUNK_10, HUNK_12, HUNK_14, HUNK_15, HUNK_16, HUNK_17, HUNK_18, HUNK_19, HUNK_20, HUNK_21, HUNK_22, HUNK_23, HUNK_24, HUNK_25, HUNK_26, HUNK_27, HUNK_28, HUNK_29, HUNK_30, HUNK_31, HUNK_32, HUNK_33, HUNK_34, HUNK_35, HUNK_36, HUNK_37];
+// HUNK_39 (new, Checkpoint 2-C): currentQuantityPropertyState()/quantityPropertyContextSummary()/PROPERTY_CONTEXT_REASON_LABELS_JA, inserted before renderQuantityBindingStatus().
+const HUNK_39 = "     };\n   }\n \n+  // L3-2 Checkpoint 2-C: property候補の生成にnearbyTextForRecord()以外(traceMatrixRows等)は\n+  // 不要なため、currentQuantityDimensionState()と異なりtraceMatrixRows確定を待つ必要はない。\n+  // quantityBindingStateがready:trueになった時点でいつでも再計算できる(キャッシュしない -\n+  // currentQuantityDimensionState()と同じ理由、stale化した中間状態の使い回しを避ける)。\n+  function currentQuantityPropertyState() {\n+    if (!quantityBindingState || !quantityBindingState.ready || !globalThis.QuantitySidecarBinding) return null;\n+    return globalThis.QuantitySidecarBinding.generatePropertyResolutions({ binding:quantityBindingState });\n+  }\n+\n+  // property_context_source/property_context_reason(生の機械可読値、checkpoint task §17)を\n+  // 件数集計のみ行う。個々のresolutionそのものは変更しない - Human向け表示は\n+  // renderQuantityBindingStatus()側でこの集計結果からラベル文字列を組み立てるだけで、\n+  // 生の値をローカライズ文字列で置き換えることはしない。\n+  function quantityPropertyContextSummary(state = currentQuantityPropertyState()) {\n+    if (!state || !state.ready) return { phase:'not_generated', ready:false, canonicalCount:0, legacyCount:0, reasonCounts:{} };\n+    const resolutions = state.resolutions || [];\n+    const reasonCounts = {};\n+    let canonicalCount = 0, legacyCount = 0;\n+    resolutions.forEach(r => {\n+      if (r.property_context_source === 'canonical_property') canonicalCount++;\n+      else legacyCount++;\n+      if (r.property_context_reason) reasonCounts[r.property_context_reason] = (reasonCounts[r.property_context_reason] || 0) + 1;\n+    });\n+    return { phase:'property_stage', ready:true, canonicalCount, legacyCount, reasonCounts };\n+  }\n+\n+  // Human向けラベル(表示専用、checkpoint task §9/§17)。property_context_source/\n+  // property_context_reasonという生の機械可読値そのものは一切変更・置換しない。\n+  const PROPERTY_CONTEXT_REASON_LABELS_JA = Object.freeze({\n+    canonical_property_not_classified:'canonical propertyが未検出',\n+    canonical_property_ambiguous:'canonical property候補が曖昧',\n+    canonical_property_blank:'canonical propertyが空欄',\n+    canonical_bridge_unavailable:'canonical bridgeを利用できない',\n+  });\n+\n   function renderQuantityBindingStatus() {\n     const el = $('quantityBindingStatus');\n     if (!el) return;";
+
+// HUNK_40 (new, Checkpoint 2-C): the Property-context aggregate summary line appended inside renderQuantityBindingStatus().
+const HUNK_40 = "     } else {\n       text += ` Phase B-1では比較候補・数値比較・充足判定を生成しません。`;\n     }\n+    // L3-2 Checkpoint 2-C: Property文脈(canonical/legacy)の集約サマリを既存のこの1行へ追記する\n+    // (checkpoint task §16: 新しいダッシュボード・大きなパネルは作らない。既存の最小の詳細面へ)。\n+    const ps = quantityPropertyContextSummary();\n+    if (ps.phase === 'property_stage') {\n+      text += ` Property文脈: Canonical propertyを使用 ${ps.canonicalCount}件`;\n+      if (ps.legacyCount) {\n+        const reasonDetail = Object.entries(ps.reasonCounts)\n+          .filter(([code]) => code !== 'canonical_unique_property')\n+          .map(([code, count]) => `${PROPERTY_CONTEXT_REASON_LABELS_JA[code] || code} ${count}件`)\n+          .join(' / ');\n+        text += ` / 従来の周辺文脈を使用 ${ps.legacyCount}件` + (reasonDetail ? `（理由: ${reasonDetail}）` : '') + '。';\n+      } else {\n+        text += '。';\n+      }\n+    }\n     el.textContent = text;\n   }\n ";
+
+// HUNK_41 (new, Checkpoint 2-C): window.__quantityBindingDiagnostics extended with propertyState()/propertySummary().
+const HUNK_41 = "     summary:() => quantityBindingSummary(),\n     dimensionState:() => { const s = currentQuantityDimensionState(); return s ? JSON.parse(JSON.stringify(s)) : null; },\n     dimensionSummary:() => quantityDimensionSummary(),\n+    // L3-2 Checkpoint 2-C: dimensionState()/dimensionSummary()と同じ診断アクセサパターン。\n+    // property_context_source/property_context_reasonを含む生のresolutions[]をそのまま返す\n+    // (Human表示用ラベルへの変換はrenderQuantityBindingStatus()側のみで行い、ここでは行わない)。\n+    propertyState:() => { const s = currentQuantityPropertyState(); return s ? JSON.parse(JSON.stringify(s)) : null; },\n+    propertySummary:() => quantityPropertyContextSummary(),\n     relationRows:() => (traceMatrixRows || []).filter(row => row?.requirement_trace_id && row?.actual_trace_id && row?.matcher_a_id && row?.matcher_b_id).map(row => ({\n       ...globalThis.QuantitySidecarBinding.relationRefs(row),\n       ...(traceComparisonRelationship(row) || {})";
+
+const AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS = [HUNK_1, HUNK_2, HUNK_3, HUNK_4, HUNK_5, HUNK_6, HUNK_7, HUNK_8, HUNK_9, HUNK_10, HUNK_12, HUNK_14, HUNK_15, HUNK_16, HUNK_17, HUNK_18, HUNK_19, HUNK_20, HUNK_21, HUNK_22, HUNK_23, HUNK_24, HUNK_25, HUNK_26, HUNK_27, HUNK_28, HUNK_29, HUNK_30, HUNK_31, HUNK_32, HUNK_33, HUNK_34, HUNK_35, HUNK_36, HUNK_37, HUNK_39, HUNK_40, HUNK_41];
 
 // Parses a `git diff` text into an array of hunk-body strings (everything
 // after each `@@ ... @@` header line, up to the next header or EOF), with

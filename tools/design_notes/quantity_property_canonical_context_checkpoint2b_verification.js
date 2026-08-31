@@ -68,6 +68,17 @@ async function buildExcelBinding(sourceRecord, { side = 'actual', tags = [], qua
   return core.bindInputPair(opts);
 }
 
+// Compares two resolutions on their semantic output only (status/concept_id/candidates/
+// property_context_source) - excludes property_context_reason, which (as of L3-2 Checkpoint 2-C)
+// legitimately differs between "canonical bridge available but found nothing eligible" (reason:
+// canonical_property_not_classified/ambiguous/blank) and "canonical bridge module not loaded at
+// all" (reason: canonical_bridge_unavailable), even though both fall back to the exact same
+// legacy_nearby_text semantic behavior.
+function semanticEquivalent(a, b) {
+  const strip = r => { const { property_context_reason, ...rest } = r; return rest; };
+  return JSON.stringify(strip(a)) === JSON.stringify(strip(b));
+}
+
 function resolutionFor(propertyResult, side) {
   return propertyResult.resolutions.find(r => r.side === side);
 }
@@ -108,7 +119,7 @@ function resolutionFor(propertyResult, side) {
   // result_equals_legacy: compare against a binding built the exact same way but through the raw
   // legacy call path (canonical bridge module hidden), proving byte-identical resolutions.
   const legacyOnly = withoutCanonicalBridge(() => core.generatePropertyResolutions({ binding }));
-  assert(JSON.stringify(r) === JSON.stringify(resolutionFor(legacyOnly, 'actual')), 'QB03-02: result_equals_legacy (identical whether or not the canonical bridge module is even loaded)', { canonicalAware: r, legacyOnly: resolutionFor(legacyOnly, 'actual') });
+  assert(semanticEquivalent(r, resolutionFor(legacyOnly, 'actual')), 'QB03-02: result_equals_legacy (identical whether or not the canonical bridge module is even loaded, ignoring the reason-code granularity)', { canonicalAware: r, legacyOnly: resolutionFor(legacyOnly, 'actual') });
 }
 
 // ── ambiguous fallback (QB03-03-AMBIGUOUS-FALLBACK) ─────────────────────────────────────────────
@@ -119,7 +130,7 @@ function resolutionFor(propertyResult, side) {
   const r = resolutionFor(result, 'actual');
   assert(r.property_context_source === 'legacy_nearby_text', 'QB03-03: two property-role fields (ambiguous canonical status) -> falls back to legacy, never adopts the first candidate', r);
   const legacyOnly = withoutCanonicalBridge(() => core.generatePropertyResolutions({ binding }));
-  assert(JSON.stringify(r) === JSON.stringify(resolutionFor(legacyOnly, 'actual')), 'QB03-03: result_equals_legacy', { canonicalAware: r, legacyOnly: resolutionFor(legacyOnly, 'actual') });
+  assert(semanticEquivalent(r, resolutionFor(legacyOnly, 'actual')), 'QB03-03: result_equals_legacy', { canonicalAware: r, legacyOnly: resolutionFor(legacyOnly, 'actual') });
 }
 
 // ── non-string fallback (QB03-04-NONSTRING-FALLBACK) ────────────────────────────────────────────
@@ -189,7 +200,7 @@ function resolutionFor(propertyResult, side) {
   const r = resolutionFor(result, 'actual');
   assert(r.property_context_source === 'legacy_nearby_text', 'QB03-08: value/unit/relation_condition-eligible fields never populate property canonical context', r);
   const legacyOnly = withoutCanonicalBridge(() => core.generatePropertyResolutions({ binding }));
-  assert(JSON.stringify(r) === JSON.stringify(resolutionFor(legacyOnly, 'actual')), 'QB03-08: result_equals_legacy', { canonicalAware: r, legacyOnly: resolutionFor(legacyOnly, 'actual') });
+  assert(semanticEquivalent(r, resolutionFor(legacyOnly, 'actual')), 'QB03-08: result_equals_legacy', { canonicalAware: r, legacyOnly: resolutionFor(legacyOnly, 'actual') });
 }
 
 // ── tags preserved (QB03-09-TAGS-PRESERVED) ─────────────────────────────────────────────────────

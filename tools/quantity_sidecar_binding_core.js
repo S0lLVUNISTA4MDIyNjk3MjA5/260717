@@ -678,42 +678,68 @@
     throw new Error('CanonicalQuantitySidecarContextを読み込めません。');
   }
 
+  // 【L3-2 Checkpoint 2-C】explainability用の bounded reason code。property_context_source
+  // ('canonical_property'/'legacy_nearby_text')だけでは、legacy fallbackになった「理由」が
+  // Human reviewerから見えない。ここで定義する5種類のみを使い、任意の生セル値・例外文言を
+  // 理由コードへ混入させない(checkpoint task §7)。
+  const PROPERTY_CONTEXT_REASON = Object.freeze({
+    UNIQUE_PROPERTY: 'canonical_unique_property',
+    NOT_CLASSIFIED: 'canonical_property_not_classified',
+    AMBIGUOUS: 'canonical_property_ambiguous',
+    BLANK: 'canonical_property_blank',
+    BRIDGE_UNAVAILABLE: 'canonical_bridge_unavailable',
+  });
+
   // binding(既にこの関数が受け取っているものと同一のbindInputPair()結果)だけから、
-  // side::trace_idごとの「適格な一意canonical property文字列」を計算する。呼び出し元から
+  // side::trace_idごとの「canonical property文脈の使用可否とその理由」を計算する。呼び出し元から
   // canonical hintを別引数として受け取ることは一切ない(Checkpoint 2-A設計原則の継承 -
   // キャッシュされた/手組みの/古い/独立したtrace由来のcanonical contextが本番のQuantity property
-  // scoringへ直接影響することを防ぐ)。適格条件(checkpoint task §5、すべて満たす場合のみ):
-  // bridge ready===true、context.usable===true、canonical_role==='property'、status==='unique'、
-  // candidatesがちょうど1件、その候補のraw_valueが非空文字列。いずれか一つでも欠ける場合、その
-  // side・trace_idはMapへ入らない(=呼び出し側は従来通りnearbyTextForRecord()へフォールバックする)。
-  // value/unit/relation_conditionロールのcontextは、canonical_role==='property'以外を単純に無視する
-  // ことで構造的にscoringへ一切影響しない(checkpoint task §4)。
+  // scoringへ直接影響することを防ぐ)。適格条件(checkpoint task §5、すべて満たす場合のみ
+  // eligible:true, reason:UNIQUE_PROPERTY):bridge ready===true、context.usable===true、
+  // canonical_role==='property'、status==='unique'、candidatesがちょうど1件、その候補の
+  // raw_valueが「空白のみでない」文字列(§6: 判定にはtrim()を使うが、返す値そのものは
+  // 元のrawValueのまま - 有効な非空白propertyを事前にtrim/正規化しない)。
+  // value/unit/relation_conditionロールのcontextは、canonical_role==='property'以外を単純に
+  // 無視することで構造的にscoringへ一切影響しない(checkpoint task §4)。
   // 例外は一切外へ伝播させない(bridgeモジュール自体が読み込めない場合も、個別sideの
-  // buildCanonicalQuantityContext()呼び出しが何らかの理由で例外を投げた場合も、空/部分的なMapへ
-  // 静かにフォールバックする - 壊れたoptionalな拡張が既存の有効なQuantity結果を破壊してはならない、
-  // というcheckpoint task §7の要求)。
+  // buildCanonicalQuantityContext()呼び出しが何らかの理由で例外を投げた場合も、
+  // BRIDGE_UNAVAILABLEへ静かにフォールバックする - 壊れたoptionalな拡張が既存の有効な
+  // Quantity結果を破壊してはならない、というcheckpoint task §7の要求)。
   function computeCanonicalPropertyContext(binding) {
-    const map = new Map();
+    const bySideTraceId = new Map(); // side::trace_id -> { eligible, value, reason }
+    const sideAvailable = { requirement:false, actual:false }; // trueのみ「bridgeがこのsideをready:trueで返した」
     let bridge;
     try { bridge = defaultCanonicalContextBridge(); }
-    catch (_err) { return map; }
+    catch (_err) { return { bySideTraceId, sideAvailable }; } // モジュール自体が無い -> 全side BRIDGE_UNAVAILABLE扱い
     for (const side of ['requirement', 'actual']) {
       let ctx;
       try { ctx = bridge.buildCanonicalQuantityContext({ binding, side }); }
-      catch (_err) { continue; }
-      if (!ctx || ctx.ready !== true || !Array.isArray(ctx.contexts)) continue;
+      catch (_err) { continue; } // このside分は入らない -> BRIDGE_UNAVAILABLE扱い
+      if (!ctx || ctx.ready !== true || !Array.isArray(ctx.contexts)) continue; // 同上
+      sideAvailable[side] = true;
       ctx.contexts.forEach(c => {
         if (!c || c.usable !== true) return;
-        if (c.canonical_role !== 'property') return;
-        if (c.status !== 'unique') return;
-        if (!Array.isArray(c.candidates) || c.candidates.length !== 1) return;
-        const rawValue = c.candidates[0]?.raw_value;
-        if (typeof rawValue !== 'string' || rawValue.length === 0) return;
+        if (c.canonical_role !== 'property') return; // 他ロールは無視(scoringへ影響させない)
         if (c.side !== side || typeof c.trace_id !== 'string' || !c.trace_id) return;
-        map.set(`${side}::${c.trace_id}`, rawValue);
+        const key = `${side}::${c.trace_id}`;
+        if (c.status === 'ambiguous') {
+          bySideTraceId.set(key, { eligible:false, value:null, reason:PROPERTY_CONTEXT_REASON.AMBIGUOUS });
+          return;
+        }
+        if (c.status !== 'unique' || !Array.isArray(c.candidates) || c.candidates.length !== 1) return;
+        const rawValue = c.candidates[0]?.raw_value;
+        // 【CQSC-2C-01】非文字列、または空白のみの文字列は「空欄」として扱う(String()による
+        // 強制変換は行わない)。判定にはtrim()を使うが、Map.set()するのは常に元のrawValueであり、
+        // 有効な非空白propertyをtrim済みの値へ書き換えることは一切ない。
+        const isUsableString = typeof rawValue === 'string' && rawValue.trim().length > 0;
+        if (!isUsableString) {
+          bySideTraceId.set(key, { eligible:false, value:null, reason:PROPERTY_CONTEXT_REASON.BLANK });
+          return;
+        }
+        bySideTraceId.set(key, { eligible:true, value:rawValue, reason:PROPERTY_CONTEXT_REASON.UNIQUE_PROPERTY });
       });
     }
-    return map;
+    return { bySideTraceId, sideAvailable };
   }
 
   function generatePropertyResolutions({ binding }) {
@@ -765,11 +791,11 @@
     checkMissingRecords(actAnalysesByTrace, actRecordsByTrace, 'actual');
     if (missingRecordDiagnostics.length) return blockedPropertyResult(missingRecordDiagnostics, binding);
 
-    // 【L3-2 Checkpoint 2-B】この関数自身が既に受け取っているbindingだけから計算する
+    // 【L3-2 Checkpoint 2-B/2-C】この関数自身が既に受け取っているbindingだけから計算する
     // (別引数としてcanonical hintを受け取らない - checkpoint task §3)。bridgeが未ロード、または
-    // 適格なcanonical property contextが1件もない場合は空のMapになり、以下は完全に従来通り
-    // nearbyTextForRecord()へフォールバックする。
-    const canonicalPropertyBySideTraceId = computeCanonicalPropertyContext(binding);
+    // 適格なcanonical property contextが1件もない場合はbySideTraceIdが空/部分的になり、以下は
+    // 完全に従来通りnearbyTextForRecord()へフォールバックする(reasonコードで理由を区別する)。
+    const { bySideTraceId:canonicalPropertyBySideTraceId, sideAvailable:canonicalSideAvailable } = computeCanonicalPropertyContext(binding);
 
     const resolutions = [];
     const process = (analysesByTrace, recordsByTrace, side) => {
@@ -778,15 +804,19 @@
         // 【必須修正】その行(trace)に存在する全analysisのsource_fieldを、対象数量自身の列だけで
         // なく丸ごと除外集合にする(1行に複数の数量があるケースでの数量間の文脈漏れ込み防止)。
         const quantitySourceFields = new Set(analyses.map(a => a?.source_field).filter(Boolean));
-        // 【L3-2 Checkpoint 2-B】適格な一意canonical property文字列が存在する場合、それを
+        // 【L3-2 Checkpoint 2-B/2-C】適格な一意canonical property文字列が存在する場合、それを
         // nearbyTextとして「置換」する(連結ではない - checkpoint task §8: 同じキーワードが
         // legacy nearbyTextとcanonical文字列の両方から二重加点されてはならない)。存在しない場合
-        // (hint無し・ambiguous・非文字列・bridge not-ready等、理由を問わず)は、
-        // nearbyTextForRecord()による従来のnearbyText生成へそのままフォールバックする。
-        const canonicalPropertyText = canonicalPropertyBySideTraceId.get(`${side}::${traceId}`);
-        const usingCanonicalProperty = typeof canonicalPropertyText === 'string' && canonicalPropertyText.length > 0;
+        // (bridge unavailable・未分類・ambiguous・空白のみ、理由を問わず)は、
+        // nearbyTextForRecord()による従来のnearbyText生成へそのままフォールバックし、
+        // 具体的な理由をproperty_context_reasonへ記録する。
+        const canonicalEntry = canonicalPropertyBySideTraceId.get(`${side}::${traceId}`);
+        const usingCanonicalProperty = !!canonicalEntry?.eligible;
+        const propertyContextReason = usingCanonicalProperty
+          ? canonicalEntry.reason
+          : (canonicalEntry?.reason || (canonicalSideAvailable[side] ? PROPERTY_CONTEXT_REASON.NOT_CLASSIFIED : PROPERTY_CONTEXT_REASON.BRIDGE_UNAVAILABLE));
         const ctx = {
-          nearbyText: usingCanonicalProperty ? canonicalPropertyText : nearbyTextForRecord(record, quantitySourceFields),
+          nearbyText: usingCanonicalProperty ? canonicalEntry.value : nearbyTextForRecord(record, quantitySourceFields),
           tags: record?.tags || [],
         };
         for (const analysis of [...analyses].sort((a, b) => String(a?.quantity_id || '').localeCompare(String(b?.quantity_id || '')))) {
@@ -796,9 +826,10 @@
             side, trace_id:traceId, quantity_id:analysis.quantity_id, status,
             concept_id: status === 'resolved' ? candidates[0].concept_id : null,
             candidates,
-            // 【L3-2 Checkpoint 2-B】explainability用の provenance マーカー(checkpoint task §16)。
-            // Human UIはまだ変更しない - 構造化データとしてのみ追加する。
+            // 【L3-2 Checkpoint 2-B/2-C】explainability用の provenance マーカー(checkpoint task §7)。
+            // Human UIは既存の数量注釈状態表示(#quantityBindingStatus)へ集約サマリのみ追加する。
             property_context_source: usingCanonicalProperty ? 'canonical_property' : 'legacy_nearby_text',
+            property_context_reason: propertyContextReason,
           });
         }
       }
@@ -2918,7 +2949,7 @@
     canonicalValue, canonicalJson, normalize, hashParts, rawSha256Utf8:sha256,
     computeDatasetSignature, computeRecordContentHash,
     traceRecords, bindSide, bindInputPair, relationRefs, generateDimensionCandidates,
-    CONCEPT_DICTIONARY, generatePropertyCandidates, generatePropertyResolutions,
+    CONCEPT_DICTIONARY, generatePropertyCandidates, generatePropertyResolutions, PROPERTY_CONTEXT_REASON,
     DEFAULT_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_COMPARISON_CANDIDATE_LIMIT, DEFAULT_TOTAL_POTENTIAL_PAIR_LIMIT,
     generateComparisonCandidates, generateConditionResolutions, generateConditionAnnotatedComparisonCandidates,
     COMPARISON_MODE_DERIVATION_TABLE, generateComparisonModeCandidates,

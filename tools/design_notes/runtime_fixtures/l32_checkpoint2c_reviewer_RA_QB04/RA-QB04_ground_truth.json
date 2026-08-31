@@ -1,0 +1,82 @@
+{
+  "fixture_id": "RA-QB04",
+  "purpose": "L3-2 live-browser activation and Human explainability Ground Truth.",
+  "cases": [
+    {
+      "id": "QB04-01-LIVE-CANONICAL",
+      "expected": {
+        "browser_bridge_loaded": true,
+        "property_context_source": "canonical_property",
+        "property_status": "resolved",
+        "concept_id": "performance.cooling_capacity",
+        "confidence": 0.75
+      }
+    },
+    {
+      "id": "QB04-02-WHITESPACE-PROPERTY",
+      "expected": {
+        "canonical_property_eligible": false,
+        "must_not_replace_legacy_with_whitespace": true,
+        "property_context_source": "legacy_nearby_text",
+        "reason_code": "canonical_property_blank"
+      }
+    },
+    {
+      "id": "QB04-03-AMBIGUOUS",
+      "expected": {
+        "property_context_source": "legacy_nearby_text",
+        "reason_code": "canonical_property_ambiguous",
+        "must_not_adopt_first": true
+      }
+    },
+    {
+      "id": "QB04-04-JAPANESE-HEADER",
+      "expected": {
+        "property_context_source": "legacy_nearby_text",
+        "reason_code": "canonical_property_not_classified",
+        "note": "Current conservative generic registry does not infer property from arbitrary Japanese business headers."
+      }
+    },
+    {
+      "id": "QB04-05-CONFLICT-ISOLATION",
+      "expected": {
+        "property_context_source": "canonical_property",
+        "property_status": "ambiguous",
+        "must_not_use_unrelated_note_as_property_keyword": true
+      }
+    },
+    {
+      "id": "QB04-06-BRIDGE-UNAVAILABLE",
+      "expected": {
+        "property_context_source": "legacy_nearby_text",
+        "reason_code": "canonical_bridge_unavailable",
+        "quantity_semantics_remain_available": true
+      }
+    },
+    {
+      "id": "QB04-07-LIVE-SCRIPT-ORDER",
+      "expected": {
+        "globals_available_before_quantity_evaluation": [
+          "CanonicalMatchingFieldRegistry",
+          "CanonicalQuantityRoleBinding",
+          "CanonicalQuantitySidecarContext",
+          "QuantitySidecarBinding"
+        ],
+        "no_console_reference_error": true
+      }
+    },
+    {
+      "id": "QB04-08-HUMAN-LABELS",
+      "expected": {
+        "canonical_label_ja": "Canonical propertyを使用",
+        "legacy_label_ja": "従来の周辺文脈を使用",
+        "raw_internal_value_preserved": true
+      }
+    }
+  ],
+  "prohibitions": [
+    "Do not broaden GENERIC_BUSINESS_NAME_PATTERNS merely to make QB04-04 pass.",
+    "Do not classify arbitrary Japanese headers heuristically in this checkpoint.",
+    "Do not change Quantity weights, thresholds, dictionary, unit, condition, dimension, or judgement semantics."
+  ]
+}

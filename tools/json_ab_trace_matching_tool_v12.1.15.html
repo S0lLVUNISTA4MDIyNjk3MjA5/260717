@@ -59,6 +59,12 @@
   <script src="./quantity_sidecar_binding_core.js"></script>
   <!-- L3-1 (staged, not yet applied to the tracked protected file - see checkpoint report) -->
   <script src="./canonical_matching_field_registry_core.js"></script>
+  <!-- L3-2 Checkpoint 2-C: canonical quantity role binding + sidecar-context bridge (Checkpoint
+       1.1/2-A/2-A.1/2-B, unmodified). generatePropertyResolutions() resolves these globals lazily
+       when it runs, so loading them after quantity_sidecar_binding_core.js is safe as long as both
+       exist before Quantity evaluation - see canonical_quantity_sidecar_context_contract_0.1.md. -->
+  <script src="./knowledge_builder/core/canonical_quantity_role_binding_core.js"></script>
+  <script src="./knowledge_builder/core/canonical_quantity_sidecar_context_core.js"></script>
   <!-- HE-1 Remediation Checkpoint 2-A: boilerplate-segment partial-match suppression -->
   <script src="./matching_partial_segment_significance_core.js"></script>
   <script src="./generated/trace_comparison_schema_v2.browser.js"></script>
@@ -1847,6 +1853,41 @@
     };
   }
 
+  // L3-2 Checkpoint 2-C: property候補の生成にnearbyTextForRecord()以外(traceMatrixRows等)は
+  // 不要なため、currentQuantityDimensionState()と異なりtraceMatrixRows確定を待つ必要はない。
+  // quantityBindingStateがready:trueになった時点でいつでも再計算できる(キャッシュしない -
+  // currentQuantityDimensionState()と同じ理由、stale化した中間状態の使い回しを避ける)。
+  function currentQuantityPropertyState() {
+    if (!quantityBindingState || !quantityBindingState.ready || !globalThis.QuantitySidecarBinding) return null;
+    return globalThis.QuantitySidecarBinding.generatePropertyResolutions({ binding:quantityBindingState });
+  }
+
+  // property_context_source/property_context_reason(生の機械可読値、checkpoint task §17)を
+  // 件数集計のみ行う。個々のresolutionそのものは変更しない - Human向け表示は
+  // renderQuantityBindingStatus()側でこの集計結果からラベル文字列を組み立てるだけで、
+  // 生の値をローカライズ文字列で置き換えることはしない。
+  function quantityPropertyContextSummary(state = currentQuantityPropertyState()) {
+    if (!state || !state.ready) return { phase:'not_generated', ready:false, canonicalCount:0, legacyCount:0, reasonCounts:{} };
+    const resolutions = state.resolutions || [];
+    const reasonCounts = {};
+    let canonicalCount = 0, legacyCount = 0;
+    resolutions.forEach(r => {
+      if (r.property_context_source === 'canonical_property') canonicalCount++;
+      else legacyCount++;
+      if (r.property_context_reason) reasonCounts[r.property_context_reason] = (reasonCounts[r.property_context_reason] || 0) + 1;
+    });
+    return { phase:'property_stage', ready:true, canonicalCount, legacyCount, reasonCounts };
+  }
+
+  // Human向けラベル(表示専用、checkpoint task §9/§17)。property_context_source/
+  // property_context_reasonという生の機械可読値そのものは一切変更・置換しない。
+  const PROPERTY_CONTEXT_REASON_LABELS_JA = Object.freeze({
+    canonical_property_not_classified:'canonical propertyが未検出',
+    canonical_property_ambiguous:'canonical property候補が曖昧',
+    canonical_property_blank:'canonical propertyが空欄',
+    canonical_bridge_unavailable:'canonical bridgeを利用できない',
+  });
+
   function renderQuantityBindingStatus() {
     const el = $('quantityBindingStatus');
     if (!el) return;
@@ -1881,6 +1922,21 @@
     } else {
       text += ` Phase B-1では比較候補・数値比較・充足判定を生成しません。`;
     }
+    // L3-2 Checkpoint 2-C: Property文脈(canonical/legacy)の集約サマリを既存のこの1行へ追記する
+    // (checkpoint task §16: 新しいダッシュボード・大きなパネルは作らない。既存の最小の詳細面へ)。
+    const ps = quantityPropertyContextSummary();
+    if (ps.phase === 'property_stage') {
+      text += ` Property文脈: Canonical propertyを使用 ${ps.canonicalCount}件`;
+      if (ps.legacyCount) {
+        const reasonDetail = Object.entries(ps.reasonCounts)
+          .filter(([code]) => code !== 'canonical_unique_property')
+          .map(([code, count]) => `${PROPERTY_CONTEXT_REASON_LABELS_JA[code] || code} ${count}件`)
+          .join(' / ');
+        text += ` / 従来の周辺文脈を使用 ${ps.legacyCount}件` + (reasonDetail ? `（理由: ${reasonDetail}）` : '') + '。';
+      } else {
+        text += '。';
+      }
+    }
     el.textContent = text;
   }
 
@@ -1911,6 +1967,11 @@
     summary:() => quantityBindingSummary(),
     dimensionState:() => { const s = currentQuantityDimensionState(); return s ? JSON.parse(JSON.stringify(s)) : null; },
     dimensionSummary:() => quantityDimensionSummary(),
+    // L3-2 Checkpoint 2-C: dimensionState()/dimensionSummary()と同じ診断アクセサパターン。
+    // property_context_source/property_context_reasonを含む生のresolutions[]をそのまま返す
+    // (Human表示用ラベルへの変換はrenderQuantityBindingStatus()側のみで行い、ここでは行わない)。
+    propertyState:() => { const s = currentQuantityPropertyState(); return s ? JSON.parse(JSON.stringify(s)) : null; },
+    propertySummary:() => quantityPropertyContextSummary(),
     relationRows:() => (traceMatrixRows || []).filter(row => row?.requirement_trace_id && row?.actual_trace_id && row?.matcher_a_id && row?.matcher_b_id).map(row => ({
       ...globalThis.QuantitySidecarBinding.relationRefs(row),
       ...(traceComparisonRelationship(row) || {})
