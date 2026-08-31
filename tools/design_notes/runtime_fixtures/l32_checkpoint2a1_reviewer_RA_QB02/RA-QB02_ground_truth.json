@@ -1,0 +1,54 @@
+{
+  "fixture_id": "RA-QB02",
+  "purpose": "L3-2 Checkpoint 2-A reviewer adversarial validation hardening",
+  "cases": [
+    {
+      "id": "SIDE_BINDING_NOT_READY",
+      "expected": {
+        "bridge_ready": false,
+        "diagnostic_code": "canonical_binding_invalid"
+      },
+      "reason": "binding[side] exists but ready:false must not be misclassified as normal no-hints state"
+    },
+    {
+      "id": "SIDE_BINDINGS_NOT_ARRAY",
+      "expected": {
+        "bridge_ready": false,
+        "diagnostic_code": "canonical_binding_invalid"
+      }
+    },
+    {
+      "id": "ROLE_TAMPER",
+      "tamper": "change genuine unit hint canonical_role to property while preserving candidate source_field/raw_value",
+      "expected": "reject; zero usable_hints for tampered hint"
+    },
+    {
+      "id": "STATUS_TAMPER",
+      "tamper": "change genuine unique hint status to ambiguous without changing candidate cardinality",
+      "expected": "reject"
+    },
+    {
+      "id": "CANDIDATE_INJECTION",
+      "tamper": "append another verified projection field as candidate although classifier did not include it for that role",
+      "expected": "reject"
+    },
+    {
+      "id": "CLASSIFICATION_TAMPER",
+      "tamper": "change candidate.classification while source_field/raw_value remain valid",
+      "expected": "reject"
+    },
+    {
+      "id": "PROVENANCE_TAMPER",
+      "tamper": "change provenance.source/note while source_field/raw_value remain valid",
+      "expected": "reject"
+    },
+    {
+      "id": "COMPLEX_SIDE_DIAGNOSTIC",
+      "side": {
+        "secret": "DO_NOT_ECHO"
+      },
+      "expected": "unsupported_side diagnostic must not echo serialized side object"
+    }
+  ],
+  "required_invariant": "validateHintsAgainstBinding must validate semantic integrity of the structural hint itself against a freshly recomputed trusted hint set or equivalent authoritative reclassification, not only identity/value membership."
+}

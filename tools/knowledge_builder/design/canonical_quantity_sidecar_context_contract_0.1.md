@@ -1,4 +1,4 @@
-# Canonical Quantity Sidecar Context Contract 0.1 (L3-2 Checkpoint 2-A)
+# Canonical Quantity Sidecar Context Contract 0.1 (L3-2 Checkpoint 2-A, hardened at Checkpoint 2-A.1)
 
 Status: **pure-core bridge only, not wired into any live tool**. This checkpoint introduces exactly
 one new file (`tools/knowledge_builder/core/canonical_quantity_sidecar_context_core.js`) plus its
@@ -6,6 +6,10 @@ dedicated regression suite. Nothing in `tools/json_ab_trace_matching_tool_v12.1.
 `canonical_matching_field_registry_core.js`, `quantity_sidecar_binding_core.js`, or
 `canonical_quantity_role_binding_core.js` was modified. Baseline (start-of-checkpoint HEAD):
 `a6ef4e709af780295ff3924ed3853433e86c60d4` (L3-2 Checkpoint 1.1 close).
+
+**Checkpoint 2-A.1 hardening (this revision)**: reviewer findings CQSC-01 through CQSC-03 tightened
+the bridge's validation without changing what it is *for*. See §15 for the full list. `CONTRACT_VERSION`
+bumped to `canonical-quantity-sidecar-context/0.1.1-L3-2-CP2A1`.
 
 ## 1. Problem being solved
 
@@ -241,3 +245,51 @@ called once per side, independently, and produces no `comparison_candidates`-sha
   Quantity semantic function.
 - Any live-tool (`json_ab_trace_matching_tool_v12.1.15.html`) integration.
 - Thread B (Dictionary/Candidate Review parser) — untouched, still HOLD.
+
+## 15. Checkpoint 2-A.1 hardening (reviewer findings CQSC-01..CQSC-03)
+
+**CQSC-01 (not-ready side conflated with valid-empty)**: `buildProjectionsForSide()` previously
+returned the identical shape (`records: []`) whether `binding[side]` was a genuinely valid, ready
+side with nothing classifiable on it, or itself invalid/not-ready (`ready !== true`, or `bindings`
+not an array — e.g. because every record on that side is `stale_annotation`, which makes
+`bindSide()`'s own `isReady()` report `ready:false` for the whole side). `buildCanonicalQuantityContext()`
+collapsed both into the same `ready:true, contexts:[]` response, silently treating a broken/tampered
+Quantity binding source as if it were simply empty. Fixed: `buildProjectionsForSide()` now returns
+an explicit `sideReady` flag; `buildCanonicalQuantityContext()` fails the bridge closed
+(`ready:false`, diagnostic code `canonical_binding_invalid`) whenever `sideReady` is false, and only
+falls through to the normal `ready:true, contexts:[]` empty state when the side is genuinely ready
+with zero bound/classifiable records. A `missing`-status entry (annotation-less trace record, a
+per-record *warning*, not an error) does not flip the side's own `ready` and is unaffected by this
+change — it remains invisible to the bridge exactly as before.
+
+**CQSC-02 (incomplete hint validation)**: the original `validateHintsAgainstBinding()` verified that
+every candidate's `source_field`/`raw_value` genuinely existed in the verified projection
+(`canonical_hint_value_mismatch` on failure), but never checked whether the *hint's own structure*
+(which role it claims, its unique/ambiguous status, its exact candidate set, each candidate's
+`classification`/`provenance`) was what the classifier actually produced. A hint reassembled from
+individually-genuine parts (a real `source_field`/`raw_value` pair, relabeled to a different role;
+a flipped status with the same candidate; an extra genuine-but-wrongly-attributed candidate;
+altered `classification`/`provenance` on an otherwise-real candidate) passed membership checks
+while being semantically false. Fixed via **trusted recomputation**: `validateHintsAgainstBinding()`
+now independently recomputes the full trusted hint set for the side from the *same* verified
+projection, the *same* role-binding core, and the *same* registry (`computeTrustedHints()`), keyed
+by `identity::canonical_role`, and requires an exact structural match — `side`, `canonical_role`,
+`status`, `truncated`, and the full candidate set (`source_field`, `raw_value`, `classification`,
+`provenance.source`, `provenance.note`, order-independent, exact count) — before a hint is usable
+(`hintMatchesTrusted()`/`candidatesStructurallyEqual()`). Mismatches here use the new diagnostic
+code `canonical_hint_semantic_mismatch`, layered *after* the pre-existing membership check (which
+keeps its own `canonical_hint_value_mismatch` code for the narrower case it already covered).
+
+**CQSC-03 (diagnostic echoes caller-controlled value)**: the `unsupported_side` diagnostic detail
+previously embedded `JSON.stringify(side)`, letting an arbitrary caller-supplied value (including an
+injected object) flow into the diagnostic text. Fixed: the detail is now the fixed string `"side
+must be requirement or actual"` regardless of what was actually passed; the invalid `side` value is
+never echoed anywhere in the response (verified by an adversarial test injecting a marker string
+inside a side object and confirming it never appears in the serialized output).
+
+**Reviewer fixture RA-QB02** (`tools/design_notes/runtime_fixtures/l32_checkpoint2a1_reviewer_RA_QB02/`,
+ZIP SHA-256 `37b82f2f4f4369bf5627438aa5344c44de77eb1dcca1db932824275a15906487`, internal
+`SHA256SUMS.txt` also verified): 8 cases — `SIDE_BINDING_NOT_READY`, `SIDE_BINDINGS_NOT_ARRAY`,
+`ROLE_TAMPER`, `STATUS_TAMPER`, `CANDIDATE_INJECTION`, `CLASSIFICATION_TAMPER`,
+`PROVENANCE_TAMPER`, `COMPLEX_SIDE_DIAGNOSTIC` — all pass against the implementation above with the
+Ground Truth file unmodified.

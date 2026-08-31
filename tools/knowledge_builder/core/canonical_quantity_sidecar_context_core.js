@@ -25,7 +25,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
-  const CONTRACT_VERSION = 'canonical-quantity-sidecar-context/0.1-L3-2-CP2A';
+  const CONTRACT_VERSION = 'canonical-quantity-sidecar-context/0.1.1-L3-2-CP2A1';
   // The Quantity pipeline's own side vocabulary (bindInputPair()'s own parameter/return names) -
   // never sys/plm. This is the integration boundary that commits to that vocabulary; Checkpoint
   // 1.1's own core stays fully side-agnostic.
@@ -100,12 +100,19 @@
   // too, but their content_hash was never successfully verified against an annotation, so they are
   // not treated as part of the "content-hash / dataset-signature verified immutable binding
   // snapshot" this bridge is built on top of).
+  // CQSC-01 (Checkpoint 2-A.1): the return value now distinguishes "binding[side] is itself
+  // invalid/not-ready" (sideReady:false - a structural problem with the binding the bridge was
+  // handed) from "binding[side] is valid and ready but has zero bound/classifiable records"
+  // (sideReady:true, records:[] - a completely normal outcome, e.g. a PDF-only side). The caller
+  // (buildCanonicalQuantityContext) must never collapse these into the same "ready:true, empty
+  // contexts" response - a binding side that is ready:false (for example because every record on
+  // it is stale_annotation) is not a valid source for the canonical bridge at all.
   function buildProjectionsForSide(binding, side) {
     const sideBinding = binding && binding[side];
     const projectionsByTraceId = new Map();
     const excluded = [];
     if (!isPlainObject(sideBinding) || sideBinding.ready !== true || !Array.isArray(sideBinding.bindings)) {
-      return { projectionsByTraceId, excluded, records: [] };
+      return { projectionsByTraceId, excluded, records: [], sideReady: false };
     }
     const records = [];
     sideBinding.bindings.forEach(entry => {
@@ -118,7 +125,7 @@
       projectionsByTraceId.set(entry.trace_id, { projection: built.projection, origin: built.origin });
       records.push(built.projection);
     });
-    return { projectionsByTraceId, excluded, records };
+    return { projectionsByTraceId, excluded, records, sideReady: true };
   }
 
   // Cross-checks a hint-set RESPONSE (the full object CanonicalQuantityRoleBinding.
@@ -126,9 +133,62 @@
   // just a bare hints array) against the SAME verified projections this module itself would have
   // produced for `side`. A hint is never trusted merely because it has the right shape - every
   // field is cross-checked against the trusted projection, not merely type-checked.
+  // Compares two candidate arrays for exact structural equality (order-independent, matched by
+  // source_field): same count, and for every candidate - source_field, raw_value, classification,
+  // provenance.source, provenance.note all equal. Used only to compare a submitted hint's
+  // candidates against the SAME role's freshly recomputed trusted candidates - not to validate a
+  // single candidate against the raw projection (that is the separate, narrower membership check
+  // below, which stays in place as defense in depth).
+  function candidatesStructurallyEqual(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    const key = c => String(c && c.source_field);
+    const as = [...a].sort((x, y) => (key(x) < key(y) ? -1 : key(x) > key(y) ? 1 : 0));
+    const bs = [...b].sort((x, y) => (key(x) < key(y) ? -1 : key(x) > key(y) ? 1 : 0));
+    return as.every((c, i) => {
+      const d = bs[i];
+      if (!isPlainObject(c) || !isPlainObject(d)) return false;
+      const cp = c.provenance || {};
+      const dp = d.provenance || {};
+      return c.source_field === d.source_field
+        && c.raw_value === d.raw_value
+        && c.classification === d.classification
+        && cp.source === dp.source
+        && cp.note === dp.note;
+    });
+  }
+
+  // CQSC-02 (Checkpoint 2-A.1): a hint that passes the membership check below (its candidates'
+  // source_field/raw_value genuinely exist in the verified projection) can still be tampered in a
+  // way membership alone never catches - a re-labeled canonical_role, a flipped unique/ambiguous
+  // status, an injected extra candidate that IS a real projection field but was never actually
+  // emitted by the classifier for that role, or an altered classification/provenance on an
+  // otherwise-genuine candidate. Membership/value-matching alone cannot distinguish "this hint is
+  // exactly what the classifier produced" from "this hint was reassembled from genuine parts into a
+  // false structure". This module therefore never trusts a submitted hint on shape/membership
+  // alone: it independently recomputes the FULL trusted hint set for `side` from the SAME verified
+  // projection, using the SAME role-binding core and registry, and requires an EXACT structural
+  // match (identity+role as the lookup key; side/canonical_role/status/truncated/candidate-set all
+  // compared) before a hint is ever considered usable.
+  function computeTrustedHints(side, projectionsByTraceId, registry, roleBindingCore) {
+    const records = [...projectionsByTraceId.values()].map(v => v.projection);
+    return roleBindingCore.buildCanonicalQuantityRoleHints({
+      side, records, registry, schemaKind: PROJECTION_SCHEMA_KIND, identityField: 'trace_id',
+    });
+  }
+
+  function hintMatchesTrusted(hint, trusted) {
+    if (!trusted) return false;
+    return hint.side === trusted.side
+      && hint.canonical_role === trusted.canonical_role
+      && hint.status === trusted.status
+      && hint.truncated === trusted.truncated
+      && candidatesStructurallyEqual(hint.candidates, trusted.candidates);
+  }
+
   function validateHintsAgainstBinding(options) {
     const opts = options || {};
     const roleBindingCore = opts.roleBindingCore || defaultRoleBindingCore();
+    const registry = opts.registry || defaultRegistry();
     const side = opts.side;
     const hintsResponse = opts.hintsResponse;
     const projectionsByTraceId = opts.projectionsByTraceId
@@ -146,6 +206,13 @@
     if (hintsResponse.ready !== true || !Array.isArray(hintsResponse.hints)) {
       return { usable_hints: [], rejected: [{ identity: null, reason_code: 'canonical_hint_invalid', detail: 'hint response is not ready, or hints is not an array' }] };
     }
+
+    // CQSC-02: computed once per call (not per hint) - the FULL trusted hint set for this side,
+    // freshly derived from the SAME verified projection map, the SAME role-binding core, and the
+    // SAME registry. Never derived from `hintsResponse` itself - a tampered/stale response must
+    // never get to author its own trusted comparison target.
+    const trusted = computeTrustedHints(side, projectionsByTraceId, registry, roleBindingCore);
+    const trustedByKey = new Map(trusted.hints.map(h => [`${h.identity}::${h.canonical_role}`, h]));
 
     const usable = [];
     const rejected = [];
@@ -165,6 +232,17 @@
         rejected.push({ identity: hint.identity, reason_code: 'canonical_hint_value_mismatch', detail: `candidate source_field/raw_value does not match the verified projection for role "${hint.canonical_role}"` });
         return;
       }
+      // CQSC-02: membership above only proves every candidate's source_field/raw_value is a real,
+      // verified projection entry - it says nothing about whether THIS role/status/candidate-SET is
+      // what the classifier actually produced. A relabeled role, a flipped status, an injected
+      // (but individually genuine) extra candidate, or an altered classification/provenance would
+      // all still pass the membership check above. Only an exact match against the freshly
+      // recomputed trusted hint for this exact (identity, canonical_role) pair closes that gap.
+      const trustedHint = trustedByKey.get(`${hint.identity}::${hint.canonical_role}`);
+      if (!hintMatchesTrusted(hint, trustedHint)) {
+        rejected.push({ identity: hint.identity, reason_code: 'canonical_hint_semantic_mismatch', detail: `hint for role "${hint.canonical_role}" does not match the freshly recomputed trusted canonical hint set` });
+        return;
+      }
       usable.push(hint);
     });
     return { usable_hints: usable, rejected };
@@ -182,16 +260,29 @@
     const registry = opts.registry || defaultRegistry();
 
     if (!ALLOWED_SIDES.includes(side)) {
-      return failClosedContext('unsupported_side', `side must be exactly "requirement" or "actual" (got ${JSON.stringify(side)})`, null);
+      // CQSC-03: never echo the caller-supplied `side` value (JSON.stringify or otherwise) into a
+      // diagnostic - stable wording only, regardless of what was actually passed (string, object,
+      // array, ...).
+      return failClosedContext('unsupported_side', 'side must be requirement or actual', null);
     }
     if (!isPlainObject(binding) || !isPlainObject(binding[side])) {
       return failClosedContext('canonical_binding_invalid', 'binding must be a bindInputPair() result containing the requested side', side);
     }
 
-    const { projectionsByTraceId, excluded: projectionExcluded, records } = buildProjectionsForSide(binding, side);
+    const { projectionsByTraceId, excluded: projectionExcluded, records, sideReady } = buildProjectionsForSide(binding, side);
 
-    // Case A (§13): no bound records / nothing classifiable is a completely normal state (e.g. no
-    // Snapshot loaded yet) - ready:true, empty context, never a failure.
+    // CQSC-01: binding[side] itself being invalid/not-ready (ready !== true, or bindings not an
+    // array) is a structural problem with the bridge's input, NOT the normal "nothing classifiable"
+    // outcome - it must never be collapsed into the same ready:true/empty-contexts response. A side
+    // that failed its own content-hash/dataset-signature verification (e.g. every record on it is
+    // stale_annotation, so QuantitySidecarBinding itself reports ready:false for that side) is not
+    // a valid source for the canonical bridge at all.
+    if (!sideReady) {
+      return failClosedContext('canonical_binding_invalid', 'binding[side] is not ready (ready !== true) or binding[side].bindings is not an array', side);
+    }
+
+    // Case A (§13): binding[side] IS ready, but has zero bound/classifiable records - a completely
+    // normal state (e.g. a PDF-only side with no source_record columns at all), never a failure.
     if (!records.length) {
       return Object.freeze({
         contract_version: CONTRACT_VERSION, side, ready: true,
@@ -205,7 +296,7 @@
       side, records, registry, schemaKind: PROJECTION_SCHEMA_KIND, identityField: 'trace_id',
     });
 
-    const validation = validateHintsAgainstBinding({ side, hintsResponse, projectionsByTraceId, roleBindingCore });
+    const validation = validateHintsAgainstBinding({ side, hintsResponse, projectionsByTraceId, roleBindingCore, registry });
 
     const contexts = validation.usable_hints.map(hint => Object.freeze({
       side: hint.side,
@@ -240,6 +331,9 @@
     RESERVED_PROJECTION_KEYS,
     buildProjectionForRecord,
     buildProjectionsForSide,
+    computeTrustedHints,
+    candidatesStructurallyEqual,
+    hintMatchesTrusted,
     validateHintsAgainstBinding,
     buildCanonicalQuantityContext,
   };

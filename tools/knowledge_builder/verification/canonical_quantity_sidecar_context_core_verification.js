@@ -11,11 +11,15 @@
  * Run: node canonical_quantity_sidecar_context_core_verification.js
  */
 'use strict';
+const fs = require('fs');
 const path = require('path');
 const quantityCore = require('../../quantity_sidecar_binding_core.js');
 const roleBindingCore = require('../core/canonical_quantity_role_binding_core.js');
 const registry = require(path.join(__dirname, '..', '..', 'canonical_matching_field_registry_core.js'));
 const bridge = require('../core/canonical_quantity_sidecar_context_core.js');
+
+const RA_QB02_DIR = path.join(__dirname, '..', '..', 'design_notes', 'runtime_fixtures', 'l32_checkpoint2a1_reviewer_RA_QB02');
+const raQb02GroundTruth = JSON.parse(fs.readFileSync(path.join(RA_QB02_DIR, 'RA-QB02_ground_truth.json'), 'utf8'));
 
 let passed = 0, failed = 0;
 const failedLabels = [];
@@ -334,19 +338,167 @@ async function genuineHintsSetup() {
   }
 }
 
-// ── 23. Non-'bound' statuses are invisible to the bridge (missing/unparsed/stale_annotation) ────
+// ── 23. Non-'bound' entries are invisible to the bridge, but ONLY within a side that is itself
+//    still ready:true. A 'missing' entry (an annotation-less trace record) is a per-record warning
+//    that does not affect the side's overall ready state (QuantitySidecarBinding.bindSide()'s own
+//    isReady() only looks at error-severity diagnostics). A 'stale_annotation'/'unparsed' entry is
+//    an ERROR-severity diagnostic that makes bindSide() report ready:false for the WHOLE side - see
+//    Checkpoint 2-A.1 CQSC-01 test group below for that corrected case; this test only covers the
+//    still-ready, per-record-invisible 'missing' case. ─────────────────────────────────────────────
 {
-  // A record with a genuinely mismatched content_hash yields status 'stale_annotation', not 'bound'.
   const requirementTrace = { _trace_records: [{ trace_id: 'REQ-23', source_raw_text: 'x', tags: [], property: 'p' }] };
-  const actualTrace = { _trace_records: [{ trace_id: 'ACT-23', source_record: { property: 'p' }, tags: [] }] };
+  const actualTrace = { _trace_records: [
+    { trace_id: 'ACT-23-BOUND', source_record: { property: 'p' }, tags: [] },
+    { trace_id: 'ACT-23-MISSING', source_record: { property: 'q' }, tags: [] },
+  ] };
+  const requirementAnnotation = await sidecarFor(requirementTrace, 'requirement');
+  const fullActualAnnotation = await sidecarFor(actualTrace, 'actual');
+  // Drop the ACT-23-MISSING record from the sidecar annotation only (not from the trace) so it
+  // binds with status 'missing' (warning-severity) rather than 'bound', while ACT-23-BOUND stays
+  // genuinely bound and the side overall stays ready:true.
+  const actualAnnotation = { ...fullActualAnnotation, records: fullActualAnnotation.records.filter(r => r.trace_id !== 'ACT-23-MISSING') };
+  const binding = await quantityCore.bindInputPair({ requirementTrace, requirementAnnotation, actualTrace, actualAnnotation });
+  assert(binding.actual.ready === true, '23 setup sanity: a lone "missing" entry does not flip the whole side to ready:false', binding.actual);
+  assert(binding.actual.bindings.find(b => b.trace_id === 'ACT-23-MISSING')?.status === 'missing', '23 setup sanity: ACT-23-MISSING binds with status "missing"', binding.actual.bindings);
+  assert(binding.actual.bindings.find(b => b.trace_id === 'ACT-23-BOUND')?.status === 'bound', '23 setup sanity: ACT-23-BOUND binds with status "bound"', binding.actual.bindings);
+  const ctx = bridge.buildCanonicalQuantityContext({ binding, side: 'actual', roleBindingCore, registry });
+  assert(ctx.ready === true, '23 a still-ready side with one "missing" entry bridges normally (ready:true)', ctx);
+  assert(ctx.contexts.every(c => c.trace_id === 'ACT-23-BOUND'), '23 the "missing" entry contributes no context; only the genuinely bound record is bridged', ctx.contexts);
+}
+
+// ── CQSC-01 (Checkpoint 2-A.1): a binding side that is itself ready:false (e.g. because a
+//    stale_annotation/content-hash mismatch made QuantitySidecarBinding.bindSide() report the whole
+//    side as not ready) must fail closed at the bridge level - NEVER be silently collapsed into the
+//    same "ready:true, empty contexts" response as a genuinely valid side with nothing classifiable
+//    on it. This is the exact defect the reviewer's SIDE_BINDING_NOT_READY case targets. ──────────
+{
+  const requirementTrace = { _trace_records: [{ trace_id: 'REQ-CQSC01', source_raw_text: 'x', tags: [], property: 'p' }] };
+  const actualTrace = { _trace_records: [{ trace_id: 'ACT-CQSC01', source_record: { property: 'p' }, tags: [] }] };
   const requirementAnnotation = await sidecarFor(requirementTrace, 'requirement');
   const actualAnnotation = await sidecarFor(actualTrace, 'actual');
   const staleAnnotation = structuredClone(actualAnnotation);
   staleAnnotation.records[0].content_hash = 'f'.repeat(64);
   const binding = await quantityCore.bindInputPair({ requirementTrace, requirementAnnotation, actualTrace, actualAnnotation: staleAnnotation });
-  assert(binding.actual.bindings[0].status === 'stale_annotation', '23 setup sanity: stale content_hash yields status stale_annotation', binding.actual.bindings[0]);
+  assert(binding.actual.ready === false, 'CQSC-01 setup sanity: a stale content_hash makes the whole side ready:false (bindSide()\'s own isReady())', binding.actual);
+  assert(binding.actual.bindings[0].status === 'stale_annotation', 'CQSC-01 setup sanity: the record itself binds with status stale_annotation', binding.actual.bindings[0]);
   const ctx = bridge.buildCanonicalQuantityContext({ binding, side: 'actual', roleBindingCore, registry });
-  assert(ctx.ready === true && ctx.contexts.length === 0, '23 a stale_annotation (non-bound) record produces no canonical context at all', ctx);
+  assert(ctx.ready === false, 'CQSC-01 a not-ready binding side fails the bridge closed (ready:false), never collapsed into empty-but-ready', ctx);
+  assert(ctx.contexts.length === 0, 'CQSC-01 no context is produced from a not-ready side', ctx.contexts);
+  assert(ctx.diagnostics.some(d => d.code === 'canonical_binding_invalid'), 'CQSC-01 stable diagnostic code canonical_binding_invalid is present', ctx.diagnostics);
+}
+
+// ── CQSC-01: binding[side].bindings not an array is the same class of structural problem and must
+//    fail closed the same way, never treated as "zero records". ───────────────────────────────────
+{
+  const binding = await buildBinding(
+    [{ trace_id: 'REQ-CQSC01B', source_raw_text: 'x', tags: [] }],
+    [{ trace_id: 'ACT-CQSC01B', source_record: { foo: 1 } }],
+  );
+  const tamperedBinding = { ...binding, actual: { ...binding.actual, bindings: 'not-an-array' } };
+  const ctx = bridge.buildCanonicalQuantityContext({ binding: tamperedBinding, side: 'actual', roleBindingCore, registry });
+  assert(ctx.ready === false, 'CQSC-01 binding[side].bindings not an array fails the bridge closed', ctx);
+  assert(ctx.diagnostics.some(d => d.code === 'canonical_binding_invalid'), 'CQSC-01 stable diagnostic code canonical_binding_invalid is present (bindings not array)', ctx.diagnostics);
+}
+
+// ── CQSC-03: the unsupported_side diagnostic must never echo the caller-supplied side value ─────
+{
+  const binding = await buildBinding(
+    [{ trace_id: 'REQ-CQSC03', source_raw_text: 'x', tags: [] }],
+    [{ trace_id: 'ACT-CQSC03', source_record: { foo: 1 } }],
+  );
+  const complexSide = { secret: 'DO_NOT_ECHO' };
+  const ctx = bridge.buildCanonicalQuantityContext({ binding, side: complexSide, roleBindingCore, registry });
+  assert(ctx.ready === false && ctx.diagnostics.some(d => d.code === 'unsupported_side'), 'CQSC-03 a complex (object) side is still batch-level fail-closed with unsupported_side', ctx);
+  const serialized = JSON.stringify(ctx);
+  assert(serialized.indexOf('DO_NOT_ECHO') === -1, 'CQSC-03 the caller-supplied side value is never echoed into any diagnostic', serialized);
+  assert(ctx.diagnostics[0].detail === 'side must be requirement or actual', 'CQSC-03 unsupported_side detail is stable, fixed wording only', ctx.diagnostics[0]);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// CQSC-02 (Checkpoint 2-A.1): trusted-recomputation tamper cases. A malformed-shape hint is caught
+// by the earlier structural checks (tests 12-16); these five specifically exercise hints that are
+// structurally well-formed and individually membership-valid (every candidate's source_field/
+// raw_value is a real, verified projection entry) yet semantically false - only comparison against
+// a freshly recomputed trusted hint set can catch them.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+async function genuineTwoRoleHintsSetup() {
+  const binding = await buildBinding(
+    [{ trace_id: 'REQ-CQSC02', source_raw_text: 'x', tags: [] }],
+    [{ trace_id: 'ACT-CQSC02', source_record: { property: 'p', unit: 'kW' }, tags: [] }],
+  );
+  const { projectionsByTraceId } = bridge.buildProjectionsForSide(binding, 'actual');
+  const records = [...projectionsByTraceId.values()].map(v => v.projection);
+  const hintsResponse = roleBindingCore.buildCanonicalQuantityRoleHints({ side: 'actual', records, registry, schemaKind: 'generic_trace_like', identityField: 'trace_id' });
+  return { binding, projectionsByTraceId, hintsResponse };
+}
+
+// ── ROLE_TAMPER: genuine unit hint (source_field=unit, raw_value=kW) relabeled canonical_role
+//    "property" - candidates are individually genuine, but they were never emitted for that role ──
+{
+  const { hintsResponse, projectionsByTraceId } = await genuineTwoRoleHintsSetup();
+  const unitHint = hintsResponse.hints.find(h => h.canonical_role === 'unit');
+  assert(!!unitHint, 'ROLE_TAMPER setup sanity: a genuine unit hint exists', hintsResponse.hints);
+  const tampered = { ...hintsResponse, hints: hintsResponse.hints.map(h => (h === unitHint ? { ...h, canonical_role: 'property' } : h)) };
+  const v = bridge.validateHintsAgainstBinding({ side: 'actual', hintsResponse: tampered, projectionsByTraceId, roleBindingCore, registry });
+  assert(!v.usable_hints.some(h => h.canonical_role === 'property' && h.candidates.some(c => c.source_field === 'unit')),
+    'ROLE_TAMPER: a role-relabeled hint is never usable', v);
+  assert(v.rejected.some(r => r.reason_code === 'canonical_hint_semantic_mismatch'), 'ROLE_TAMPER: rejected with canonical_hint_semantic_mismatch', v.rejected);
+}
+
+// ── STATUS_TAMPER: genuine unique status flipped to ambiguous, same single candidate ─────────────
+{
+  const { hintsResponse, projectionsByTraceId } = await genuineTwoRoleHintsSetup();
+  const unitHint = hintsResponse.hints.find(h => h.canonical_role === 'unit');
+  assert(unitHint && unitHint.status === 'unique', 'STATUS_TAMPER setup sanity: genuine unit hint status is "unique"', unitHint);
+  const tampered = { ...hintsResponse, hints: hintsResponse.hints.map(h => (h === unitHint ? { ...h, status: 'ambiguous' } : h)) };
+  const v = bridge.validateHintsAgainstBinding({ side: 'actual', hintsResponse: tampered, projectionsByTraceId, roleBindingCore, registry });
+  assert(!v.usable_hints.some(h => h.canonical_role === 'unit'), 'STATUS_TAMPER: a status-flipped hint is never usable', v);
+  assert(v.rejected.some(r => r.reason_code === 'canonical_hint_semantic_mismatch'), 'STATUS_TAMPER: rejected with canonical_hint_semantic_mismatch', v.rejected);
+}
+
+// ── CANDIDATE_INJECTION: a genuinely-verified projection field ("property") appended as an extra
+//    candidate on the unit hint, although the classifier never emitted it for that role ──────────
+{
+  const { hintsResponse, projectionsByTraceId } = await genuineTwoRoleHintsSetup();
+  const unitHint = hintsResponse.hints.find(h => h.canonical_role === 'unit');
+  const propertyHint = hintsResponse.hints.find(h => h.canonical_role === 'property');
+  assert(unitHint && propertyHint, 'CANDIDATE_INJECTION setup sanity: both genuine unit and property hints exist', hintsResponse.hints);
+  const injected = { ...unitHint, candidates: [...unitHint.candidates, propertyHint.candidates[0]] };
+  const tampered = { ...hintsResponse, hints: hintsResponse.hints.map(h => (h === unitHint ? injected : h)) };
+  const v = bridge.validateHintsAgainstBinding({ side: 'actual', hintsResponse: tampered, projectionsByTraceId, roleBindingCore, registry });
+  assert(!v.usable_hints.some(h => h.canonical_role === 'unit'), 'CANDIDATE_INJECTION: a hint with an injected extra (individually genuine) candidate is never usable', v);
+  assert(v.rejected.some(r => r.reason_code === 'canonical_hint_semantic_mismatch'), 'CANDIDATE_INJECTION: rejected with canonical_hint_semantic_mismatch', v.rejected);
+}
+
+// ── CLASSIFICATION_TAMPER: candidate.classification changed while source_field/raw_value valid ──
+{
+  const { hintsResponse, projectionsByTraceId } = await genuineTwoRoleHintsSetup();
+  const unitHint = hintsResponse.hints.find(h => h.canonical_role === 'unit');
+  const tamperedCandidates = unitHint.candidates.map(c => ({ ...c, classification: 'MATCH_ELIGIBLE' }));
+  assert(tamperedCandidates[0].classification !== unitHint.candidates[0].classification, 'CLASSIFICATION_TAMPER setup sanity: classification actually differs from genuine', { before: unitHint.candidates[0].classification, after: tamperedCandidates[0].classification });
+  const tampered = { ...hintsResponse, hints: hintsResponse.hints.map(h => (h === unitHint ? { ...h, candidates: tamperedCandidates } : h)) };
+  const v = bridge.validateHintsAgainstBinding({ side: 'actual', hintsResponse: tampered, projectionsByTraceId, roleBindingCore, registry });
+  assert(!v.usable_hints.some(h => h.canonical_role === 'unit'), 'CLASSIFICATION_TAMPER: a hint with tampered candidate.classification is never usable', v);
+  assert(v.rejected.some(r => r.reason_code === 'canonical_hint_semantic_mismatch'), 'CLASSIFICATION_TAMPER: rejected with canonical_hint_semantic_mismatch', v.rejected);
+}
+
+// ── PROVENANCE_TAMPER: candidate.provenance.source/note changed while source_field/raw_value valid ─
+{
+  const { hintsResponse, projectionsByTraceId } = await genuineTwoRoleHintsSetup();
+  const unitHint = hintsResponse.hints.find(h => h.canonical_role === 'unit');
+  const tamperedCandidates = unitHint.candidates.map(c => ({ ...c, provenance: { source: 'FORGED_SOURCE', note: 'forged note' } }));
+  const tampered = { ...hintsResponse, hints: hintsResponse.hints.map(h => (h === unitHint ? { ...h, candidates: tamperedCandidates } : h)) };
+  const v = bridge.validateHintsAgainstBinding({ side: 'actual', hintsResponse: tampered, projectionsByTraceId, roleBindingCore, registry });
+  assert(!v.usable_hints.some(h => h.canonical_role === 'unit'), 'PROVENANCE_TAMPER: a hint with tampered candidate.provenance is never usable', v);
+  assert(v.rejected.some(r => r.reason_code === 'canonical_hint_semantic_mismatch'), 'PROVENANCE_TAMPER: rejected with canonical_hint_semantic_mismatch', v.rejected);
+}
+
+// ── Genuine (untampered) two-role hint set must still fully validate as usable ───────────────────
+{
+  const { hintsResponse, projectionsByTraceId } = await genuineTwoRoleHintsSetup();
+  const v = bridge.validateHintsAgainstBinding({ side: 'actual', hintsResponse, projectionsByTraceId, roleBindingCore, registry });
+  assert(v.usable_hints.length === hintsResponse.hints.length, 'CQSC-02 genuine, untampered hints remain fully usable after trusted recomputation', v);
+  assert(v.rejected.length === 0, 'CQSC-02 no false-positive rejection on genuine hints', v.rejected);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -410,6 +562,104 @@ async function genuineHintsSetup() {
   const ctx = bridge.buildCanonicalQuantityContext({ binding, side: 'requirement', roleBindingCore, registry });
   assert(ctx.ready === true, 'Case E: PDF-like side with no classifiable field remains ready:true (not a failure)');
   assert(ctx.contexts.length === 0, 'Case E: no fabricated canonical-role hint is produced from free text', ctx.contexts);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// Reviewer RA-QB02 (Checkpoint 2-A.1): loaded directly from the tracked fixture at
+// tools/design_notes/runtime_fixtures/l32_checkpoint2a1_reviewer_RA_QB02/ (ZIP SHA-256 and internal
+// SHA256SUMS.txt verified before tracking; Ground Truth never edited to fit the implementation).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+{
+  const caseById = Object.fromEntries(raQb02GroundTruth.cases.map(c => [c.id, c]));
+
+  // SIDE_BINDING_NOT_READY: binding[side].ready !== true must fail closed, never collapse into
+  // the normal empty-context state (this is the reviewer's own framing of CQSC-01).
+  {
+    const c = caseById.SIDE_BINDING_NOT_READY;
+    const binding = await buildBinding(
+      [{ trace_id: 'REQ-QB02-1', source_raw_text: 'x', tags: [], property: 'p' }],
+      [{ trace_id: 'ACT-QB02-1', source_record: { property: 'p' }, tags: [] }],
+    );
+    const notReadyBinding = { ...binding, actual: { ...binding.actual, ready: false } };
+    const ctx = bridge.buildCanonicalQuantityContext({ binding: notReadyBinding, side: 'actual', roleBindingCore, registry });
+    assert(ctx.ready === c.expected.bridge_ready, `RA-QB02 SIDE_BINDING_NOT_READY: bridge_ready === ${c.expected.bridge_ready}`, ctx);
+    assert(ctx.diagnostics.some(d => d.code === c.expected.diagnostic_code), `RA-QB02 SIDE_BINDING_NOT_READY: diagnostic_code === "${c.expected.diagnostic_code}"`, ctx.diagnostics);
+  }
+
+  // SIDE_BINDINGS_NOT_ARRAY: binding[side].bindings not an array must fail closed the same way.
+  {
+    const c = caseById.SIDE_BINDINGS_NOT_ARRAY;
+    const binding = await buildBinding(
+      [{ trace_id: 'REQ-QB02-2', source_raw_text: 'x', tags: [], property: 'p' }],
+      [{ trace_id: 'ACT-QB02-2', source_record: { property: 'p' }, tags: [] }],
+    );
+    const notArrayBinding = { ...binding, actual: { ...binding.actual, bindings: null } };
+    const ctx = bridge.buildCanonicalQuantityContext({ binding: notArrayBinding, side: 'actual', roleBindingCore, registry });
+    assert(ctx.ready === c.expected.bridge_ready, `RA-QB02 SIDE_BINDINGS_NOT_ARRAY: bridge_ready === ${c.expected.bridge_ready}`, ctx);
+    assert(ctx.diagnostics.some(d => d.code === c.expected.diagnostic_code), `RA-QB02 SIDE_BINDINGS_NOT_ARRAY: diagnostic_code === "${c.expected.diagnostic_code}"`, ctx.diagnostics);
+  }
+
+  // Shared genuine hint-set setup for the five semantic-tamper cases below.
+  const { hintsResponse: qb02Genuine, projectionsByTraceId: qb02Projections } = await genuineTwoRoleHintsSetup();
+  const qb02UnitHint = qb02Genuine.hints.find(h => h.canonical_role === 'unit');
+  const qb02PropertyHint = qb02Genuine.hints.find(h => h.canonical_role === 'property');
+
+  // ROLE_TAMPER
+  {
+    const c = caseById.ROLE_TAMPER;
+    const tampered = { ...qb02Genuine, hints: qb02Genuine.hints.map(h => (h === qb02UnitHint ? { ...h, canonical_role: 'property' } : h)) };
+    const v = bridge.validateHintsAgainstBinding({ side: 'actual', hintsResponse: tampered, projectionsByTraceId: qb02Projections, roleBindingCore, registry });
+    assert(!v.usable_hints.some(h => h.candidates.some(cand => cand.source_field === 'unit') && h.canonical_role === 'property'),
+      `RA-QB02 ROLE_TAMPER: ${c.expected}`, v);
+  }
+
+  // STATUS_TAMPER
+  {
+    const c = caseById.STATUS_TAMPER;
+    const tampered = { ...qb02Genuine, hints: qb02Genuine.hints.map(h => (h === qb02UnitHint ? { ...h, status: 'ambiguous' } : h)) };
+    const v = bridge.validateHintsAgainstBinding({ side: 'actual', hintsResponse: tampered, projectionsByTraceId: qb02Projections, roleBindingCore, registry });
+    assert(!v.usable_hints.some(h => h.canonical_role === 'unit' && h.status === 'ambiguous'), `RA-QB02 STATUS_TAMPER: ${c.expected}`, v);
+  }
+
+  // CANDIDATE_INJECTION
+  {
+    const c = caseById.CANDIDATE_INJECTION;
+    const injected = { ...qb02UnitHint, candidates: [...qb02UnitHint.candidates, qb02PropertyHint.candidates[0]] };
+    const tampered = { ...qb02Genuine, hints: qb02Genuine.hints.map(h => (h === qb02UnitHint ? injected : h)) };
+    const v = bridge.validateHintsAgainstBinding({ side: 'actual', hintsResponse: tampered, projectionsByTraceId: qb02Projections, roleBindingCore, registry });
+    assert(!v.usable_hints.some(h => h.canonical_role === 'unit' && h.candidates.length === 2), `RA-QB02 CANDIDATE_INJECTION: ${c.expected}`, v);
+  }
+
+  // CLASSIFICATION_TAMPER
+  {
+    const c = caseById.CLASSIFICATION_TAMPER;
+    const tamperedCandidates = qb02UnitHint.candidates.map(cand => ({ ...cand, classification: 'MATCH_ELIGIBLE' }));
+    const tampered = { ...qb02Genuine, hints: qb02Genuine.hints.map(h => (h === qb02UnitHint ? { ...h, candidates: tamperedCandidates } : h)) };
+    const v = bridge.validateHintsAgainstBinding({ side: 'actual', hintsResponse: tampered, projectionsByTraceId: qb02Projections, roleBindingCore, registry });
+    assert(!v.usable_hints.some(h => h.canonical_role === 'unit' && h.candidates[0].classification === 'MATCH_ELIGIBLE'), `RA-QB02 CLASSIFICATION_TAMPER: ${c.expected}`, v);
+  }
+
+  // PROVENANCE_TAMPER
+  {
+    const c = caseById.PROVENANCE_TAMPER;
+    const tamperedCandidates = qb02UnitHint.candidates.map(cand => ({ ...cand, provenance: { source: 'FORGED', note: 'forged' } }));
+    const tampered = { ...qb02Genuine, hints: qb02Genuine.hints.map(h => (h === qb02UnitHint ? { ...h, candidates: tamperedCandidates } : h)) };
+    const v = bridge.validateHintsAgainstBinding({ side: 'actual', hintsResponse: tampered, projectionsByTraceId: qb02Projections, roleBindingCore, registry });
+    assert(!v.usable_hints.some(h => h.canonical_role === 'unit' && h.candidates[0].provenance.source === 'FORGED'), `RA-QB02 PROVENANCE_TAMPER: ${c.expected}`, v);
+  }
+
+  // COMPLEX_SIDE_DIAGNOSTIC: side taken directly from the reviewer's own fixture object.
+  {
+    const c = caseById.COMPLEX_SIDE_DIAGNOSTIC;
+    const binding = await buildBinding(
+      [{ trace_id: 'REQ-QB02-8', source_raw_text: 'x', tags: [] }],
+      [{ trace_id: 'ACT-QB02-8', source_record: { foo: 1 } }],
+    );
+    const ctx = bridge.buildCanonicalQuantityContext({ binding, side: c.side, roleBindingCore, registry });
+    const serialized = JSON.stringify(ctx);
+    assert(serialized.indexOf('DO_NOT_ECHO') === -1, `RA-QB02 COMPLEX_SIDE_DIAGNOSTIC: ${c.expected}`, serialized);
+    assert(ctx.ready === false && ctx.diagnostics.some(d => d.code === 'unsupported_side'), 'RA-QB02 COMPLEX_SIDE_DIAGNOSTIC: still batch-level fail-closed with unsupported_side', ctx);
+  }
 }
 
 console.log(`\n${passed} PASS / ${failed} FAIL`);
