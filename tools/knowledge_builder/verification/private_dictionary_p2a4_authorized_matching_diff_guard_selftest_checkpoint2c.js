@@ -1,20 +1,16 @@
 #!/usr/bin/env node
-/* L3-2 Checkpoint 2-C: adversarial self-tests for this round's re-authorization of
- * private_dictionary_p2a4_authorized_matching_diff_guard.js - the live-browser activation of the
- * L3-2 canonical quantity role-binding/sidecar-context bridge modules, plus a minimal, additive
- * Property-context explainability summary on the existing #quantityBindingStatus surface.
- * HUNK_5 is updated in place (re-touched - the two new <script> tags land adjacent to its existing
- * canonical_matching_field_registry_core.js/matching_partial_segment_significance_core.js
- * additions in the diff against the shared pre-head, so `git diff` merges them into one hunk).
- * HUNK_39-HUNK_41 are new (currentQuantityPropertyState()/quantityPropertyContextSummary()/
- * PROPERTY_CONTEXT_REASON_LABELS_JA; the aggregate summary line inside
- * renderQuantityBindingStatus(); window.__quantityBindingDiagnostics.propertyState()/
- * propertySummary()). All other hunks are unchanged.
+/* HE-1 Remediation Checkpoint 2-C: adversarial self-tests for this round's re-authorization of
+ * HUNK_9 and HUNK_11 in private_dictionary_p2a4_authorized_matching_diff_guard.js - the
+ * RISK-FUZZY-01 remediation (sharedPrefixDominatesSimilarity() + extending the existing
+ * boilerplate-segment guard to 'fuzzy'/'vector' candidates in calcPairMatch()).
+ *
+ * Extends (never replaces) private_dictionary_p2a4_authorized_matching_diff_guard_selftest.js
+ * and its Checkpoint 2-B counterpart, exactly as those already extend the original R4 selftest.
  *
  * Run: node private_dictionary_p2a4_authorized_matching_diff_guard_selftest_checkpoint2c.js
  */
 'use strict';
-const { execFileSync } = require('child_process');
+const { execSync } = require('child_process');
 const path = require('path');
 const {
   AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS,
@@ -37,86 +33,65 @@ function assert(cond, label) {
 }
 
 function realDiff(sha) {
-  return execFileSync('git', ['diff', sha, '--', MATCHING_TOOL_REL], { cwd: REPO_ROOT, maxBuffer: 1024 * 1024 * 20 }).toString();
+  return execSync(`git diff ${sha} -- ${MATCHING_TOOL_REL}`, { cwd: REPO_ROOT, maxBuffer: 1024 * 1024 * 20 }).toString();
 }
 
-// A. Both real PRE_HEAD_SHA bases: the actual, real diff (38 hunks after this round's +3 new
-// HUNK_39-41, HUNK_5 updated in place) is accepted exactly.
+// A. Both real PRE_HEAD_SHA bases: the actual, real Checkpoint 2-C diff (hunk count unchanged at
+// 21 - HUNK_9/HUNK_11 grew larger in place rather than adding a new hunk) is accepted exactly.
 for (const sha of PRE_HEAD_SHAS) {
   const diff = realDiff(sha);
   const hunkCount = parseUnifiedDiffHunks(diff).length;
-  assert(hunkCount === 38, `A[${sha.slice(0, 8)}] real diff hunk count is 38 (was 35 before Checkpoint 2-C: +3 new HUNK_39-41, HUNK_5 updated in place) (actual: ${hunkCount})`);
   assert(hunkCount === AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS.length,
-    `A[${sha.slice(0, 8)}] real diff hunk count (${hunkCount}) equals AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS length (${AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS.length})`);
+    `A[${sha.slice(0,8)}] real diff hunk count (${hunkCount}) equals AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS length (${AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS.length})`);
   assert(matchingToolDiffIsExactlyAuthorized(diff),
-    `A[${sha.slice(0, 8)}] the real Checkpoint 2-C diff is accepted exactly`);
+    `A[${sha.slice(0,8)}] the real Checkpoint 2-C diff is accepted exactly`);
 }
 
-// B. Dropping one of the two new dependency <script> tags is REJECTED.
-{
-  const diff = realDiff(PRE_HEAD_SHAS[0]);
-  const tampered = diff.replace('+  <script src="./knowledge_builder/core/canonical_quantity_sidecar_context_core.js"></script>\n', '');
-  assert(tampered !== diff, 'B setup: tamper replacement actually matched something in the real diff');
-  assert(!matchingToolDiffIsExactlyAuthorized(tampered),
-    'B dropping the canonical_quantity_sidecar_context_core.js <script> tag is REJECTED');
-}
-
-// C. Reordering the two new <script> tags (sidecar-context before role-binding, violating the
-// documented dependency order) is REJECTED - the guard is an exact hunk-BODY match, so any
-// reordering changes the hunk text and must fail closed.
+// B. A single-token mutation inside sharedPrefixDominatesSimilarity() itself (the new function
+// this round added) is REJECTED - e.g. flipping the "remainder shares nothing" comparison from
+// <= 0 to < 0 would silently defeat the whole guard for the exact-zero-overlap case it targets.
 {
   const diff = realDiff(PRE_HEAD_SHAS[0]);
   const tampered = diff.replace(
-    '+  <script src="./knowledge_builder/core/canonical_quantity_role_binding_core.js"></script>\n+  <script src="./knowledge_builder/core/canonical_quantity_sidecar_context_core.js"></script>',
-    '+  <script src="./knowledge_builder/core/canonical_quantity_sidecar_context_core.js"></script>\n+  <script src="./knowledge_builder/core/canonical_quantity_role_binding_core.js"></script>'
+    'return bigramSimilarity(remA, remB) <= 0;',
+    'return bigramSimilarity(remA, remB) < 0;'
+  );
+  assert(tampered !== diff, 'B setup: tamper replacement actually matched something in the real diff');
+  assert(!matchingToolDiffIsExactlyAuthorized(tampered),
+    'B a single-token mutation inside sharedPrefixDominatesSimilarity() (<=0 -> <0, silently defeating the guard) is REJECTED');
+}
+
+// C. Removing the sharedPrefixDominatesSimilarity() guard call from just the 'vector' explicit
+// mode branch (leaving 'fuzzy' and auto-mode guarded) is REJECTED - a partial rollback of the fix
+// must not slip through as "close enough".
+{
+  const diff = realDiff(PRE_HEAD_SHAS[0]);
+  const tampered = diff.replace(
+    "     } else if (mode === 'vector') {\n       const vs = vectorConfidenceFromFeatures(f);\n-      if (vs > 0) cand.push(['vector', vs]);\n+      if (vs > 0 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target)) cand.push(['vector', vs]);",
+    "     } else if (mode === 'vector') {\n       const vs = vectorConfidenceFromFeatures(f);\n-      if (vs > 0) cand.push(['vector', vs]);\n+      if (vs > 0 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta)) cand.push(['vector', vs]);"
   );
   assert(tampered !== diff, 'C setup: tamper replacement actually matched something in the real diff');
   assert(!matchingToolDiffIsExactlyAuthorized(tampered),
-    'C reordering the two new dependency <script> tags is REJECTED');
+    'C removing the sharedPrefixDominatesSimilarity() guard from just the explicit \'vector\' mode branch (partial rollback) is REJECTED');
 }
 
-// D. Replacing the raw property_context_source aggregation with a hidden localized-string
-// comparison (i.e. tampering the machine/raw-value preservation guarantee) is REJECTED.
+// D. An unrelated extra one-line change alongside the real, correct diff is REJECTED - the
+// count-exact requirement still holds after this round's HUNK_9/HUNK_11 re-authorization.
 {
   const diff = realDiff(PRE_HEAD_SHAS[0]);
-  const tampered = diff.replace(
-    "if (r.property_context_source === 'canonical_property') canonicalCount++;",
-    "if (r.property_context_source === 'Canonical propertyを使用') canonicalCount++;"
-  );
-  assert(tampered !== diff, 'D setup: tamper replacement actually matched something in the real diff');
+  const extraHunk = [
+    '@@ -88888,1 +88888,1 @@ unrelated',
+    '-old unrelated line',
+    '+new unrelated line',
+    ''
+  ].join('\n');
+  const tampered = diff + '\n' + extraHunk;
   assert(!matchingToolDiffIsExactlyAuthorized(tampered),
-    'D tampering the raw property_context_source comparison (localized string instead of the stable machine value) is REJECTED');
+    'D an unrelated extra hunk appended alongside the real 21 authorized hunks is REJECTED');
 }
 
-// E. Removing the Human label for canonical_property usage ("Canonical propertyを使用") from the
-// summary text is REJECTED.
-{
-  const diff = realDiff(PRE_HEAD_SHAS[0]);
-  const tampered = diff.replace('Canonical propertyを使用', 'Canonicalを使用');
-  assert(tampered !== diff, 'E setup: tamper replacement actually matched something in the real diff');
-  assert(!matchingToolDiffIsExactlyAuthorized(tampered),
-    'E altering the required Human label "Canonical propertyを使用" is REJECTED');
-}
-
-// F. An unrelated extra hunk alongside the real diff is REJECTED.
-{
-  const diff = realDiff(PRE_HEAD_SHAS[0]);
-  const extraHunk = ['@@ -88888,1 +88888,1 @@ unrelated', '-old', '+new', ''].join('\n');
-  assert(!matchingToolDiffIsExactlyAuthorized(diff + '\n' + extraHunk),
-    'F an unrelated extra hunk appended alongside the real 38 authorized hunks is REJECTED');
-}
-
-// G. A diff missing one authorized hunk is REJECTED.
-{
-  const diff = realDiff(PRE_HEAD_SHAS[0]);
-  const hunks = parseUnifiedDiffHunks(diff);
-  const withoutOne = hunks.slice(0, -1);
-  const synthetic = withoutOne.map(h => '@@ -1,1 +1,1 @@\n' + h).join('\n');
-  assert(!matchingToolDiffIsExactlyAuthorized(synthetic),
-    'G a diff missing one of the 38 authorized hunks is REJECTED');
-}
-
-assert(matchingToolDiffIsExactlyAuthorized(''), 'H an empty diff is still accepted after the Checkpoint 2-C re-authorization');
+// E. An empty diff (no exception in use at all) is still accepted, unchanged by this round.
+assert(matchingToolDiffIsExactlyAuthorized(''), 'E an empty diff is still accepted after the Checkpoint 2-C re-authorization');
 
 console.log(`\n${passed} PASS / ${failed} FAIL`);
 if (failed) { console.log('Failed:', failedLabels.join(' | ')); process.exit(1); }

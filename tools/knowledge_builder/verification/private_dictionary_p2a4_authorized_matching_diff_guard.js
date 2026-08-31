@@ -761,7 +761,11 @@ const HUNK_30 = "     button.secondary { background: #475569; }\n     button.sec
  * a6a2967d16c18caf79c9eb520536aea8aea14afa through this checkpoint's own starting HEAD
  * 5a0f8bf70b6499d8035d7cb2638c28c807aba070 (Checkpoints 1.1/2-A/2-A.1/2-B never touched it), so
  * the same PRE_HEAD_SHAS bases already used by the Checkpoint 2-G selftest remain valid pre-heads
- * for this round too - see private_dictionary_p2a4_authorized_matching_diff_guard_selftest_checkpoint2c.js. */
+ * for this round too - see private_dictionary_p2a4_authorized_matching_diff_guard_selftest_l32_checkpoint2c.js
+ * (Checkpoint 2-C.1, AUDIT-2C-01: named with an "_l32_" infix, distinct from the pre-existing,
+ * unrelated private_dictionary_p2a4_authorized_matching_diff_guard_selftest_checkpoint2c.js - HE-1
+ * Remediation's own, earlier, same-named-but-unrelated Checkpoint 2-C/RISK-FUZZY-01 round - which
+ * this comment incorrectly referenced before being corrected). */
 
 const HUNK_31 = [
   "         <table>",
