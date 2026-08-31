@@ -663,6 +663,59 @@
       not_analyzed:[...(binding?.not_analyzed || [])] };
   }
 
+  // ── L3-2 Checkpoint 2-B: controlled canonical property-context consumption ──────────────────────
+  // canonical_quantity_sidecar_context_core.js(Checkpoint 2-A/2-A.1)は任意の依存であり、この
+  // ファイル単体で読み込まれる現行のHTML実行環境(まだ2-Bはwireしていない)では単に存在しない。
+  // globalThisにもrequire()にも見つからない場合は例外を投げず、空のMapへ静かにフォールバックする
+  // (下のcomputeCanonicalPropertyContext()がtry/catchで包む)。これにより、canonical bridgeが
+  // 一切ロードされていない環境でもgeneratePropertyResolutions()の挙動は従来と完全に同一のまま
+  // 安全に動作し続ける。
+  function defaultCanonicalContextBridge() {
+    if (typeof globalThis !== 'undefined' && globalThis.CanonicalQuantitySidecarContext) return globalThis.CanonicalQuantitySidecarContext;
+    if (typeof module === 'object' && module.exports && typeof require === 'function') {
+      return require('./knowledge_builder/core/canonical_quantity_sidecar_context_core.js');
+    }
+    throw new Error('CanonicalQuantitySidecarContextを読み込めません。');
+  }
+
+  // binding(既にこの関数が受け取っているものと同一のbindInputPair()結果)だけから、
+  // side::trace_idごとの「適格な一意canonical property文字列」を計算する。呼び出し元から
+  // canonical hintを別引数として受け取ることは一切ない(Checkpoint 2-A設計原則の継承 -
+  // キャッシュされた/手組みの/古い/独立したtrace由来のcanonical contextが本番のQuantity property
+  // scoringへ直接影響することを防ぐ)。適格条件(checkpoint task §5、すべて満たす場合のみ):
+  // bridge ready===true、context.usable===true、canonical_role==='property'、status==='unique'、
+  // candidatesがちょうど1件、その候補のraw_valueが非空文字列。いずれか一つでも欠ける場合、その
+  // side・trace_idはMapへ入らない(=呼び出し側は従来通りnearbyTextForRecord()へフォールバックする)。
+  // value/unit/relation_conditionロールのcontextは、canonical_role==='property'以外を単純に無視する
+  // ことで構造的にscoringへ一切影響しない(checkpoint task §4)。
+  // 例外は一切外へ伝播させない(bridgeモジュール自体が読み込めない場合も、個別sideの
+  // buildCanonicalQuantityContext()呼び出しが何らかの理由で例外を投げた場合も、空/部分的なMapへ
+  // 静かにフォールバックする - 壊れたoptionalな拡張が既存の有効なQuantity結果を破壊してはならない、
+  // というcheckpoint task §7の要求)。
+  function computeCanonicalPropertyContext(binding) {
+    const map = new Map();
+    let bridge;
+    try { bridge = defaultCanonicalContextBridge(); }
+    catch (_err) { return map; }
+    for (const side of ['requirement', 'actual']) {
+      let ctx;
+      try { ctx = bridge.buildCanonicalQuantityContext({ binding, side }); }
+      catch (_err) { continue; }
+      if (!ctx || ctx.ready !== true || !Array.isArray(ctx.contexts)) continue;
+      ctx.contexts.forEach(c => {
+        if (!c || c.usable !== true) return;
+        if (c.canonical_role !== 'property') return;
+        if (c.status !== 'unique') return;
+        if (!Array.isArray(c.candidates) || c.candidates.length !== 1) return;
+        const rawValue = c.candidates[0]?.raw_value;
+        if (typeof rawValue !== 'string' || rawValue.length === 0) return;
+        if (c.side !== side || typeof c.trace_id !== 'string' || !c.trace_id) return;
+        map.set(`${side}::${c.trace_id}`, rawValue);
+      });
+    }
+    return map;
+  }
+
   function generatePropertyResolutions({ binding }) {
     if (!binding || !binding.ready) {
       return blockedPropertyResult([{ code:'binding_not_ready', severity:'error',
@@ -712,6 +765,12 @@
     checkMissingRecords(actAnalysesByTrace, actRecordsByTrace, 'actual');
     if (missingRecordDiagnostics.length) return blockedPropertyResult(missingRecordDiagnostics, binding);
 
+    // 【L3-2 Checkpoint 2-B】この関数自身が既に受け取っているbindingだけから計算する
+    // (別引数としてcanonical hintを受け取らない - checkpoint task §3)。bridgeが未ロード、または
+    // 適格なcanonical property contextが1件もない場合は空のMapになり、以下は完全に従来通り
+    // nearbyTextForRecord()へフォールバックする。
+    const canonicalPropertyBySideTraceId = computeCanonicalPropertyContext(binding);
+
     const resolutions = [];
     const process = (analysesByTrace, recordsByTrace, side) => {
       for (const [traceId, analyses] of [...analysesByTrace.entries()].sort(([a], [b]) => String(a).localeCompare(String(b)))) {
@@ -719,7 +778,17 @@
         // 【必須修正】その行(trace)に存在する全analysisのsource_fieldを、対象数量自身の列だけで
         // なく丸ごと除外集合にする(1行に複数の数量があるケースでの数量間の文脈漏れ込み防止)。
         const quantitySourceFields = new Set(analyses.map(a => a?.source_field).filter(Boolean));
-        const ctx = { nearbyText:nearbyTextForRecord(record, quantitySourceFields), tags:record?.tags || [] };
+        // 【L3-2 Checkpoint 2-B】適格な一意canonical property文字列が存在する場合、それを
+        // nearbyTextとして「置換」する(連結ではない - checkpoint task §8: 同じキーワードが
+        // legacy nearbyTextとcanonical文字列の両方から二重加点されてはならない)。存在しない場合
+        // (hint無し・ambiguous・非文字列・bridge not-ready等、理由を問わず)は、
+        // nearbyTextForRecord()による従来のnearbyText生成へそのままフォールバックする。
+        const canonicalPropertyText = canonicalPropertyBySideTraceId.get(`${side}::${traceId}`);
+        const usingCanonicalProperty = typeof canonicalPropertyText === 'string' && canonicalPropertyText.length > 0;
+        const ctx = {
+          nearbyText: usingCanonicalProperty ? canonicalPropertyText : nearbyTextForRecord(record, quantitySourceFields),
+          tags: record?.tags || [],
+        };
         for (const analysis of [...analyses].sort((a, b) => String(a?.quantity_id || '').localeCompare(String(b?.quantity_id || '')))) {
           const candidates = generatePropertyCandidates(analysis.quantity, ctx);
           const status = resolvePropertyStatus(candidates, thresholds);
@@ -727,6 +796,9 @@
             side, trace_id:traceId, quantity_id:analysis.quantity_id, status,
             concept_id: status === 'resolved' ? candidates[0].concept_id : null,
             candidates,
+            // 【L3-2 Checkpoint 2-B】explainability用の provenance マーカー(checkpoint task §16)。
+            // Human UIはまだ変更しない - 構造化データとしてのみ追加する。
+            property_context_source: usingCanonicalProperty ? 'canonical_property' : 'legacy_nearby_text',
           });
         }
       }
