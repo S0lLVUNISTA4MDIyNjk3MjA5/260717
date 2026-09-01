@@ -598,6 +598,12 @@
         <button id="loadBtn" class="primary-action" disabled>読み込み・照合</button>
       </div>
       <div id="quantityBindingStatus" class="field-hint" role="status">数量注釈sidecarは未選択です。</div>
+      <!-- L3-2 Checkpoint 2-D: Human-visible per-record Property detail (side / property_context_source
+           / property_context_reason / status / concept / top candidate confidence), so a Human reviewer
+           can evaluate QH-01..QH-06 from normal UI text alone - no DevTools/console/
+           window.__quantityBindingDiagnostics/Node/source inspection required. Additive only, next to
+           the existing aggregate summary line above; not a new panel/dashboard. -->
+      <div id="quantityPropertyDetail" class="field-hint" role="status"></div>
     </section>
 
     <section class="workflow-section secondary" aria-label="出力・保存">
@@ -1882,17 +1888,64 @@
   // Human向けラベル(表示専用、checkpoint task §9/§17)。property_context_source/
   // property_context_reasonという生の機械可読値そのものは一切変更・置換しない。
   const PROPERTY_CONTEXT_REASON_LABELS_JA = Object.freeze({
+    canonical_unique_property:'検証済み一意property',
     canonical_property_not_classified:'canonical propertyが未検出',
     canonical_property_ambiguous:'canonical property候補が曖昧',
     canonical_property_blank:'canonical propertyが空欄',
     canonical_bridge_unavailable:'canonical bridgeを利用できない',
   });
+  // L3-2 Checkpoint 2-D: 表示専用ラベル(生のstatus値は一切変更・置換しない、checkpoint task §4)。
+  const PROPERTY_STATUS_LABELS_JA = Object.freeze({
+    resolved:'解決済み (resolved)',
+    ambiguous:'曖昧 (ambiguous)',
+    unavailable:'利用不可 (unavailable)',
+  });
+  const PROPERTY_SIDE_LABELS_JA = Object.freeze({ requirement:'要求側 (requirement)', actual:'実仕様側 (actual)' });
+  const PROPERTY_SOURCE_LABELS_JA = Object.freeze({ canonical_property:'Canonical propertyを使用', legacy_nearby_text:'従来の周辺文脈を使用' });
+
+  // L3-2 Checkpoint 2-D (UX/DOC-MAJOR-01 remediation): a Human reviewer must be able to confirm
+  // every field the Human Ground Truth requires (side / property context source / fallback reason
+  // / status / resolved concept / top candidate confidence) from normal, visible UI text alone -
+  // no DevTools/console/window.__quantityBindingDiagnostics/Node/source inspection. This renders
+  // one compact block per property resolution (both sides), additive next to the existing
+  // aggregate summary line - not a new dashboard/panel. concept_id/status/property_context_source/
+  // property_context_reason/side are all bounded enum values from this module's own fixed
+  // vocabularies (never raw customer cell text), so no HTML-escaping is required for them.
+  function renderQuantityPropertyDetail(state) {
+    const el = $('quantityPropertyDetail');
+    if (!el) return;
+    if (!state || !state.ready || !Array.isArray(state.resolutions) || !state.resolutions.length) {
+      el.innerHTML = '';
+      return;
+    }
+    const fmtConfidence = c => (typeof c === 'number' && Number.isFinite(c)) ? c.toFixed(2) : '—';
+    const blocks = state.resolutions.map(r => {
+      const sideLabel = PROPERTY_SIDE_LABELS_JA[r.side] || r.side;
+      const sourceLabel = PROPERTY_SOURCE_LABELS_JA[r.property_context_source] || r.property_context_source;
+      const reasonLabel = PROPERTY_CONTEXT_REASON_LABELS_JA[r.property_context_reason] || r.property_context_reason;
+      const statusLabel = PROPERTY_STATUS_LABELS_JA[r.status] || r.status;
+      const top = Array.isArray(r.candidates) && r.candidates.length ? r.candidates[0] : null;
+      const conceptLine = r.status === 'resolved'
+        ? `判定concept: ${r.concept_id}`
+        : `判定concept: なし` + (top ? `（参考・最大候補concept: ${top.concept_id}）` : '');
+      return [
+        `${sideLabel}`,
+        `Property文脈: ${sourceLabel} [${r.property_context_source}]`,
+        `理由: ${reasonLabel} [${r.property_context_reason}]`,
+        `状態: ${statusLabel}`,
+        conceptLine,
+        `最大候補信頼度: ${fmtConfidence(top?.confidence)}`,
+      ].join('<br>');
+    });
+    el.innerHTML = blocks.map(b => `<div style="margin-top:6px;">${b}</div>`).join('');
+  }
 
   function renderQuantityBindingStatus() {
     const el = $('quantityBindingStatus');
     if (!el) return;
     if (!quantityBindingState) {
       el.textContent = '数量注釈sidecarは未選択です。既存のトレース照合だけを実行します。';
+      renderQuantityPropertyDetail(null);
       return;
     }
     const s = quantityBindingSummary();
@@ -1901,6 +1954,7 @@
       s.diagnostics.forEach(d => { counts[d.code] = (counts[d.code] || 0) + 1; });
       const detail = Object.entries(counts).map(([code, count]) => `${code}:${count}`).join(' / ');
       el.textContent = `数量注釈を結合できません（${detail || '診断なし'}）。不整合データから比較候補・充足判定は生成しません。`;
+      renderQuantityPropertyDetail(null);
       return;
     }
     const ds = quantityDimensionSummary();
@@ -1924,7 +1978,10 @@
     }
     // L3-2 Checkpoint 2-C: Property文脈(canonical/legacy)の集約サマリを既存のこの1行へ追記する
     // (checkpoint task §16: 新しいダッシュボード・大きなパネルは作らない。既存の最小の詳細面へ)。
-    const ps = quantityPropertyContextSummary();
+    // L3-2 Checkpoint 2-D: 集約サマリとper-record detailの両方が同じcurrentQuantityPropertyState()
+    // の1回の計算結果を共有する(二重計算しない)。
+    const propState = currentQuantityPropertyState();
+    const ps = quantityPropertyContextSummary(propState);
     if (ps.phase === 'property_stage') {
       text += ` Property文脈: Canonical propertyを使用 ${ps.canonicalCount}件`;
       if (ps.legacyCount) {
@@ -1938,6 +1995,7 @@
       }
     }
     el.textContent = text;
+    renderQuantityPropertyDetail(propState);
   }
 
   async function loadQuantityBindings() {
@@ -11460,6 +11518,7 @@ ${h.name}`, type:'requirement', detail:srcA };
     quantityBindingState = null;
     const el = $('quantityBindingStatus');
     if (el) el.textContent = '入力選択が変更されました。「読み込み・照合」で数量注釈を再検証してください。';
+    renderQuantityPropertyDetail(null); // L3-2 Checkpoint 2-D: stale per-record detailを残さない
   };
   plmFile.addEventListener('change', invalidateQuantityBindingSelection);
   sysFile.addEventListener('change', invalidateQuantityBindingSelection);
