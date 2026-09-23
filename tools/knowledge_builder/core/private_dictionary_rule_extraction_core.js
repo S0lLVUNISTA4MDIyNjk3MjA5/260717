@@ -95,10 +95,26 @@
   // S6: normalization
   // ============================================================================================
 
+  // 是正Checkpoint 2.1 (Excel Direct Adapter Timezone Determinism Remediation, P2-A2残存分の
+  // 是正): EXCEL VALUEのdisplayCandidateがraw値にフォールバックする場合(§11、表示値が空の列)、
+  // `raw`はExcel Direct Adapter側の日付セル正規化処理が生成した`Date`オブジェクトで
+  // ありうる。従来の汎用`String(raw)`はDate.prototype.toString()を呼び出し、これは実行環境の
+  // ローカルタイムゾーンに依存する文字列を返すため、同一の入力バイト列でもnormalized_text(延いては
+  // それを元に生成されるterm/alias candidateとcandidate_id)が実行環境ごとに変わってしまう
+  // (Checkpoint 2.1のタイムゾーン回帰テストで実測・確認済み: ALIAS_EXPLICIT_PARENTHETICAL規則が
+  // 文字列内の`GMT+0900 (Japan Standard Time)`のような部分を偶発的に「用語(alias)」として拾って
+  // しまい、タイムゾーンごとに異なるcandidate_idを生成していた)。RawがDateの場合のみ
+  // toISOString()(常にUTC、環境非依存)を経由させ、それ以外の入力型(string/number/boolean/null)は
+  // 従来どおり無条件で`String()`する(candidate ID namespace・ID hashアルゴリズム・抽出規則・
+  // 閾値・term/alias規則ロジック・provenance構造のいずれも変更しない、正規化対象の文字列の
+  // 生成経路だけを変える変更)。無効なDate(`NaN`時刻)は`toISOString()`がRangeErrorを投げるため、
+  // 既存のtry/catchがそのまま`EXTRACTION_INPUT_NORMALIZATION_FAILED`へfail-closedする(無言で
+  // "Invalid Date"という文字列を生成することはない)。
   function safeNormalizeUnitText(raw) {
     let s;
     try {
-      s = String(raw == null ? '' : raw).normalize('NFKC').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+      const text = (raw instanceof Date) ? raw.toISOString() : (raw == null ? '' : raw);
+      s = String(text).normalize('NFKC').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
     } catch (e) {
       throwErr('EXTRACTION_INPUT_NORMALIZATION_FAILED', '$');
     }

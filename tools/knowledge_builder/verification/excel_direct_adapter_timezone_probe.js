@@ -10,7 +10,7 @@
  * modifying that file or its existing assertions.
  *
  * Usage: node excel_direct_adapter_timezone_probe.js <mode>
- *   mode: 'basic' | 'datetime' | 'blank_display'
+ *   mode: 'basic' | 'datetime' | 'blank_display' | 'blank_display_repeated'
  */
 'use strict';
 const path = require('path');
@@ -41,6 +41,13 @@ const MODES = {
     file: 'excel_direct_fixture_date_blank_display.xlsx', sheet: '日付表示なし', headerRow: 1, dataStartRow: 2,
     dateHeader: '納期', fileName: 'excel_direct_fixture_date_blank_display.xlsx', contentDigest: 'b'.repeat(64),
   },
+  // Two rows sharing the same blank-display date value, so TERM_REPEATED_VALUE candidacy's
+  // ">=2 distinct row occurrences" gate is actually reached and a real term candidate IS produced
+  // from the date VALUE (unlike 'blank_display' above, which is single-row and never produces one).
+  blank_display_repeated: {
+    file: 'excel_direct_fixture_date_blank_display_repeated.xlsx', sheet: '日付表示なし繰返', headerRow: 1, dataStartRow: 2,
+    dateHeader: '納期', fileName: 'excel_direct_fixture_date_blank_display_repeated.xlsx', contentDigest: 'c'.repeat(64),
+  },
 };
 
 (async () => {
@@ -70,20 +77,48 @@ const MODES = {
   };
 
   // P2-A2 projection: the VALUE unit's normalized_text for the date column (Checkpoint 1 §5
-  // conditional-risk item, Checkpoint 2 §7). Only meaningful when the raw value can end up used
-  // (blank_display mode); computed unconditionally for all modes for a full before/after picture.
+  // conditional-risk item, Checkpoint 2 §7 / Checkpoint 2.1). Only meaningful when the raw value
+  // can end up used (blank_display* modes); computed unconditionally for all modes for a full
+  // before/after picture. out.p2a2ValueNormalizedText reflects the FIRST matching row (there is
+  // only one row in every mode except blank_display_repeated, where both rows share the same
+  // value by construction, so "first" is representative there too).
   const projection = await RuleExtraction.buildExtractionInputProjectionFromExcelAdapterResult(result);
   // KEY/VALUE units for the same column are pushed as a pair with consecutive occurrence_ordinal
   // values (KEY first, then VALUE - see buildExtractionInputProjectionFromExcelAdapterResult()),
-  // so the reliable way to find "the VALUE unit paired with the 納期 KEY unit" is by ordinal
+  // so the reliable way to find "the VALUE unit paired with a given 納期 KEY unit" is by ordinal
   // adjacency, not by shared parent_source_unit_id (every KEY/VALUE pair in the same row shares
-  // the same ROW_RECORD parent, so that alone does not disambiguate columns).
-  const dateKeyUnit = projection.units.find(u => u.structural_role === 'KEY' && u.normalized_text === cfg.dateHeader);
-  const dateValueUnit = dateKeyUnit
-    ? projection.units.find(u => u.structural_role === 'VALUE' && u.parent_source_unit_id === dateKeyUnit.parent_source_unit_id
-        && u.occurrence_ordinal === dateKeyUnit.occurrence_ordinal + 1)
-    : null;
-  out.p2a2ValueNormalizedText = dateValueUnit ? dateValueUnit.normalized_text : null;
+  // the same ROW_RECORD parent, so that alone does not disambiguate columns). A fixture can have
+  // more than one row (blank_display_repeated), so this collects every KEY/VALUE pair for the
+  // date column across all rows, not just the first.
+  const dateKeyUnits = projection.units.filter(u => u.structural_role === 'KEY' && u.normalized_text === cfg.dateHeader);
+  const dateValueUnits = dateKeyUnits.map(k => projection.units.find(u => u.structural_role === 'VALUE'
+    && u.parent_source_unit_id === k.parent_source_unit_id && u.occurrence_ordinal === k.occurrence_ordinal + 1)).filter(Boolean);
+  out.p2a2ValueNormalizedText = dateValueUnits.length > 0 ? dateValueUnits[0].normalized_text : null;
+
+  // Checkpoint 2.1: measure the ACTUAL candidate/candidate_id impact rather than inferring it
+  // from normalized_text alone. Run the real extractLocalDictionaryCandidates() pipeline and
+  // check whether any produced term candidate OR alias candidate has an evidence_ref pointing at
+  // ANY of the date column's VALUE units. If none does, candidate-ID impact is genuinely N/A for
+  // this fixture (report that explicitly, do not claim invariance/fix for something never produced).
+  out.candidateForDateValue = null; // { kind: 'term'|'alias', candidate_id, canonical_term|alias_term }
+  if (dateValueUnits.length > 0) {
+    const evaluation = await RuleExtraction.extractLocalDictionaryCandidates([projection]);
+    const dateValueUnitIds = new Set(dateValueUnits.map(u => u.source_unit_id));
+    const termHit = evaluation.candidates.find(c =>
+      c.evidence_refs.some(ev => dateValueUnitIds.has(ev.source_unit_id)));
+    if (termHit) {
+      out.candidateForDateValue = { kind: 'term', candidate_id: termHit.candidate_id, canonical_term: termHit.canonical_term };
+    } else {
+      const aliasHit = evaluation.alias_candidates.find(a =>
+        a.evidence_refs.some(ev => dateValueUnitIds.has(ev.source_unit_id)));
+      if (aliasHit) {
+        out.candidateForDateValue = {
+          kind: 'alias', alias_candidate_id: aliasHit.alias_candidate_id,
+          canonical_candidate_id: aliasHit.canonical_candidate_id, alias_term: aliasHit.alias_term,
+        };
+      }
+    }
+  }
 
   process.stdout.write(JSON.stringify(out) + '\n');
 })().catch(e => { console.error('PROBE_FATAL', e); process.exit(1); });

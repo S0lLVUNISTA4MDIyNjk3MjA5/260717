@@ -87,37 +87,81 @@ function allEqual(results, field) {
   // --- mode 'blank_display': date-formatted cell whose positive-value display is blank ---
   // (format ';yyyy/mm/dd;;'), while the raw Excel serial is still present and
   // XLSX.SSF.is_date() recognizes it as a date. This is the Checkpoint 1 Sec.5 / Checkpoint 2
-  // item 7 "conditional P2-A2 risk": before this fix, cellTextValue()'s raw-value fallback
-  // called String(cell.raw) on a Date object, and Date.prototype.toString() is inherently
-  // host-timezone-dependent even for a correctly-fixed, UTC-based Date instant. The
-  // excel_direct_adapter.js-level fix (cellTextValue() now uses cell.raw.toISOString() for
-  // Date raw values - see "是正Checkpoint 2a.2" comment there) closes this for
-  // provenance.verbatim.source_record, display, Node.text, Node.title, source_document_id,
-  // node_id and knowledge_hash - all asserted invariant below.
+  // item 7 "conditional P2-A2 risk", closed in Checkpoint 2.1.
   //
-  // It does NOT close it for the separate P2-A2 rule-extraction projection
-  // (private_dictionary_rule_extraction_core.js's safeNormalizeUnitText(), which calls
-  // String(raw) directly on the same Date object via its own, independent code path). That
-  // file's candidate-ID-affecting normalization logic is explicitly out of scope for this
-  // remediation ("do not change candidate-ID rules themselves"). The assertion below measures
-  // and documents the TRUE, current behavior (still variant) rather than asserting a false
-  // invariance - this is a confirmed, reported, out-of-scope residual finding, not a silent gap.
+  // Checkpoint 2 fixed excel_direct_adapter.js's cellTextValue() (String(Date) -> toISOString()),
+  // closing the gap for provenance.verbatim.source_record, display, Node.text, Node.title,
+  // source_document_id, node_id and knowledge_hash - all asserted invariant below.
+  //
+  // Checkpoint 2 left a separate residual open: private_dictionary_rule_extraction_core.js's
+  // safeNormalizeUnitText() independently called String(raw) on the same Date object via its own
+  // code path, so the P2-A2 VALUE unit's normalized_text was still timezone-variant. Measuring
+  // the ACTUAL candidate/candidate_id impact (not inferring it from normalized_text alone) showed
+  // this was not merely cosmetic: the timezone-variant string (e.g.
+  // "Sun Aug 02 2026 00:00:00 GMT+0000 (Coordinated Universal Time)") was spuriously matched by
+  // the ALIAS_EXPLICIT_PARENTHETICAL rule (a token immediately before "(...)" is treated as a
+  // candidate term with the parenthetical as its alias), producing a real term candidate whose
+  // canonical_term/candidate_id genuinely differed by timezone (canonical_term "GMT+0000" under
+  // UTC vs "GMT+0900" under Asia/Tokyo vs "GMT+0800" under Asia/Shanghai, each a distinct
+  // candidate_id) - confirmed by running the actual extractLocalDictionaryCandidates() pipeline,
+  // not by inspecting normalized_text alone.
+  //
+  // Checkpoint 2.1 fixed safeNormalizeUnitText() to use toISOString() for Date raw values (same
+  // technique as the Checkpoint 2 excel_direct_adapter.js fix, applied at P2-A2's own
+  // normalization choke point; no candidate ID namespace/hash algorithm/extraction rule/threshold/
+  // term-alias-rule/provenance-structure change). After the fix, the VALUE unit's normalized_text
+  // is the plain ISO string (no parentheses), which no longer matches
+  // ALIAS_EXPLICIT_PARENTHETICAL and also still fails TERM_REPEATED_VALUE's >=2-row-occurrence
+  // gate (this fixture has only one data row) - so for this fixture, NO candidate or alias
+  // candidate is produced from the date VALUE at all, in any timezone. The assertions below
+  // verify that directly against the real candidate-evaluation output (candidateForDateValue),
+  // not merely against normalized_text, and report N/A rather than a false "fixed" claim if no
+  // candidate happens to be produced.
   {
     const r = collectAcrossZones('blank_display');
-    console.log('--- blank_display (blank positive display, date raw value) per-zone rawIso / p2a2 ---');
-    for (const z of ZONES) console.log(`  ${z}: rawIso=${r[z].rawIso} text=${JSON.stringify(r[z].text)} p2a2=${JSON.stringify(r[z].p2a2ValueNormalizedText)}`);
+    console.log('--- blank_display (blank positive display, date raw value) per-zone rawIso / p2a2 / candidate ---');
+    for (const z of ZONES) console.log(`  ${z}: rawIso=${r[z].rawIso} text=${JSON.stringify(r[z].text)} p2a2=${JSON.stringify(r[z].p2a2ValueNormalizedText)} candidateForDateValue=${JSON.stringify(r[z].candidateForDateValue)}`);
     assert(allEqual(r, 'rawIso'), 'blank_display: rawIso (provenance.verbatim.source_record) unchanged across timezones');
     assert(r.UTC.rawIso === '2026-08-02T00:00:00.000Z', 'blank_display: rawIso matches expected value');
     assert(r.UTC.display === '', 'blank_display: display is blank as constructed by the fixture (positive format section empty)');
     assert(allEqual(r, 'display'), 'blank_display: display (blank) unchanged across timezones');
-    assert(allEqual(r, 'text'), 'blank_display: Node.text unchanged across timezones (fixed: cellTextValue() Date fallback now uses toISOString())');
+    assert(allEqual(r, 'text'), 'blank_display: Node.text unchanged across timezones (Checkpoint 2: cellTextValue() Date fallback uses toISOString())');
     assert(allEqual(r, 'title'), 'blank_display: Node.title unchanged across timezones');
     assert(allEqual(r, 'sourceDocumentId'), 'blank_display: source_document_id unchanged across timezones');
     assert(allEqual(r, 'nodeId'), 'blank_display: node_id unchanged across timezones');
     assert(allEqual(r, 'knowledgeHash'), 'blank_display: knowledge_hash unchanged across timezones');
-    // Documented, out-of-scope residual: P2-A2's own normalized_text is NOT invariant here.
-    const p2a2Variant = !allEqual(r, 'p2a2ValueNormalizedText');
-    assert(p2a2Variant, 'blank_display: KNOWN RESIDUAL (documented, out of this remediation\'s scope) - P2-A2 normalized_text for this cell remains timezone-variant because private_dictionary_rule_extraction_core.js normalizes the same raw Date via its own String(raw) call, independent of excel_direct_adapter.js; fixing it would require changing that file\'s normalization logic, which this checkpoint explicitly prohibits ("do not change candidate-ID rules themselves")');
+    assert(allEqual(r, 'p2a2ValueNormalizedText'), 'blank_display: P2-A2 VALUE unit normalized_text unchanged across timezones (Checkpoint 2.1: safeNormalizeUnitText() Date fallback uses toISOString())');
+    assert(r.UTC.p2a2ValueNormalizedText === '2026-08-02T00:00:00.000Z', 'blank_display: P2-A2 VALUE unit normalized_text matches the canonical ISO representation (no host-timezone string leaked in)');
+    // Measured (not inferred) candidate-ID impact: with only one data row in this fixture,
+    // TERM_REPEATED_VALUE never reaches candidacy (needs >=2 distinct row occurrences) and the
+    // fixed ISO-string normalized_text no longer matches ALIAS_EXPLICIT_PARENTHETICAL, so no
+    // candidate/alias candidate is produced from this VALUE in any timezone. This is the
+    // measured ground truth; report it as N/A rather than asserting a false "fixed" candidate_id
+    // invariance for something that was never produced in the first place.
+    assert(r.UTC.candidateForDateValue === null, 'blank_display: candidate-ID impact is NOT APPLICABLE for this fixture (no term/alias candidate is produced from the date VALUE - single-row fixture never reaches TERM_REPEATED_VALUE candidacy, and the fixed ISO string no longer spuriously matches ALIAS_EXPLICIT_PARENTHETICAL)');
+    assert(allEqual(r, 'candidateForDateValue'), 'blank_display: candidateForDateValue (null/N-A) identical across all 5 timezones');
+  }
+
+  // --- mode 'blank_display_repeated': same blank-display date cell repeated across 2 rows, so ---
+  // TERM_REPEATED_VALUE candidacy's ">=2 distinct row occurrences" gate IS reached and a real term
+  // candidate IS produced from the date VALUE (unlike 'blank_display' above, which never produces
+  // one at all). This exercises the "an actual candidate is produced" branch of Checkpoint 2.1
+  // item 6: the candidate set and candidate_id must be identical across timezones after the fix,
+  // not merely absent.
+  {
+    const r = collectAcrossZones('blank_display_repeated');
+    console.log('--- blank_display_repeated (2 rows, same date value) per-zone candidateForDateValue ---');
+    for (const z of ZONES) console.log(`  ${z}: p2a2=${JSON.stringify(r[z].p2a2ValueNormalizedText)} candidateForDateValue=${JSON.stringify(r[z].candidateForDateValue)}`);
+    assert(allEqual(r, 'rawIso'), 'blank_display_repeated: rawIso unchanged across timezones');
+    assert(allEqual(r, 'text'), 'blank_display_repeated: Node.text unchanged across timezones');
+    assert(allEqual(r, 'knowledgeHash'), 'blank_display_repeated: knowledge_hash unchanged across timezones');
+    assert(allEqual(r, 'p2a2ValueNormalizedText'), 'blank_display_repeated: P2-A2 VALUE unit normalized_text unchanged across timezones');
+    assert(r.UTC.candidateForDateValue !== null && r.UTC.candidateForDateValue.kind === 'term',
+      'blank_display_repeated: a real term candidate IS produced from the date VALUE (confirms the positive case, not just N/A)');
+    assert(r.UTC.candidateForDateValue && r.UTC.candidateForDateValue.canonical_term === '2026-08-02T00:00:00.000Z',
+      'blank_display_repeated: candidate canonical_term is the canonical ISO representation (no host-timezone string)');
+    assert(ZONES.every(z => JSON.stringify(r[z].candidateForDateValue) === JSON.stringify(r.UTC.candidateForDateValue)),
+      'blank_display_repeated: candidate set/candidate_id identical across all 5 timezones');
   }
 
   console.log(failures === 0 ? '\nALL TIMEZONE DETERMINISM CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
