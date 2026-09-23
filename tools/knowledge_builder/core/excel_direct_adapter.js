@@ -137,17 +137,61 @@
     }
   }
 
-  // 是正Checkpoint 2a.1: SheetJSはcellDates:trueの日付セルを、シリアル値を「実行環境のローカル時刻」の
-  // 暦要素として解釈したDateオブジェクトで返す(内部的にlocalなDateコンストラクタを使うため)。
-  // そのため同じ.xlsxファイルでも、読み取るマシンのタイムゾーンが違うとraw値(延いてはknowledge_hash)が
-  // ずれてしまう。日付が本来タイムゾーンを持たない暦日である以上、返されたDateのローカル暦要素を
-  // そのままUTC基準へ組み直すことで、実行環境に依存しない安定したraw値にする。
+  // 是正Checkpoint 2a.1（原実装）: SheetJSはcellDates:trueの日付セルを、シリアル値を「実行環境の
+  // ローカル時刻」の暦要素として解釈したDateオブジェクトで返す(内部的にlocalなDateコンストラクタを
+  // 使うため)。そのため同じ.xlsxファイルでも、読み取るマシンのタイムゾーンが違うとraw値(延いては
+  // knowledge_hash)がずれてしまう、という意図でこの関数は「返されたDateのローカル暦要素をそのまま
+  // UTC基準へ組み直す」実装だった。
+  //
+  // 是正Checkpoint 2a.2（本修正、Excel Direct Adapter Timezone Determinism Remediation
+  // Checkpoint 2）: 上記の「組み直し」だけでは不十分なことが判明した。SheetJS自身のシリアル値→
+  // Dateオブジェクト変換が、Excelエポック(1899-12-30)を`new Date(1899,11,30,...)`という
+  // *ローカル*Dateコンストラクタで生成し、そこからのオフセット差を`Date.prototype
+  // .getTimezoneOffset()`(整数「分」単位でしか値を返せない)で補正している。Asia/Shanghai・
+  // Asia/Kolkata等、1901年以前の地方平均時(LMT)が現代の標準オフセットと非整数分の差を持つ
+  // 歴史的タイムゾーンでは、この整数分丸めにより数十秒の残差誤差がDateオブジェクトの
+  // ローカル暦要素そのものに混入する(例: Asia/Shanghaiで43秒、Asia/Kolkataで10秒)。この
+  // 残差はSheetJSの`cell.v`(Dateオブジェクト)が生成された時点で既に発生しているため、
+  // どれだけ丁寧に「組み直し」ても直せない。
+  //
+  // 本修正はこの問題を、SheetJS自身が`.w`(書式済み表示値)の計算に使っている
+  // *タイムゾーン非依存の純粋演算*経路(`XLSX.SSF.parse_date_code()`)を、Dateオブジェクトの
+  // 代わりに生のExcelシリアル値(数値)に対して直接呼び出すことで回避する。`inspectWorkbook()`が
+  // `cellDates:false`でワークブックを読み込むため、日付セルも`t:'n'`(数値)としてシリアル値の
+  // ままraw値(`cell.v`)を保持している(SheetJS本体は無変更。`XLSX.SSF.parse_date_code`/
+  // `XLSX.SSF.is_date`はいずれも既存の公開API)。ホストのタイムゾーン・`getTimezoneOffset()`・
+  // `Date`のローカルコンストラクタを一切経由しないため、実行環境に依存しない安定したraw値になる
+  // (UTC/Asia/Tokyo/Asia/Shanghai/America/New_York/Asia/Kolkataの5タイムゾーンで実測・確認済み)。
+  //
+  // 日付として誤認識される任意の数値セルを防ぐため、`cell.z`(書式文字列。`cellNF:true`により
+  // 常に文字列として存在する)が`XLSX.SSF.is_date()`で真と判定された場合のみ日付として扱う
+  // (数値セル一般を無条件で日付扱いにはしない)。シリアル値が数値でない、またはSheetJS自身が
+  // 解釈不能とみなす(`parse_date_code()`が`null`または不完全な結果を返す)場合は、その値だけを
+  // 無言でフォールバックさせず、文書全体をfail-closedする(本ファイル全体の既存方針と同じ)。
   function normalizeDateCellRaw(cell) {
-    if (cell && cell.t === 'd' && cell.v instanceof Date) {
-      const d = cell.v;
-      return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()));
+    if (!cell) return null;
+    if (cell.t === 'n' && typeof cell.z === 'string') {
+      const XLSX = resolveXLSX();
+      let isDateFormat = false;
+      try { isDateFormat = XLSX.SSF.is_date(cell.z); } catch (e) { isDateFormat = false; }
+      if (isDateFormat) {
+        if (typeof cell.v !== 'number' || !Number.isFinite(cell.v)) {
+          const err = new Error(`日付として書式設定されたセルの値が有効な数値ではありません(実際: ${JSON.stringify(cell.v)})。原データを保持できないため、この文書の取込を中止します。`);
+          err.code = 'excel_date_value_not_numeric';
+          throw err;
+        }
+        const dc = XLSX.SSF.parse_date_code(cell.v);
+        if (!dc || !Number.isInteger(dc.y) || !Number.isInteger(dc.m) || !Number.isInteger(dc.d)
+          || !Number.isInteger(dc.H) || !Number.isInteger(dc.M) || !Number.isInteger(dc.S)) {
+          const err = new Error(`日付として書式設定されたセルのシリアル値を解釈できません(実際: ${cell.v})。原データを保持できないため、この文書の取込を中止します。`);
+          err.code = 'excel_date_serial_unrecoverable';
+          throw err;
+        }
+        const ms = Math.round((typeof dc.u === 'number' && Number.isFinite(dc.u) ? dc.u : 0) * 1000);
+        return new Date(Date.UTC(dc.y, dc.m - 1, dc.d, dc.H, dc.M, dc.S, ms));
+      }
     }
-    return cell ? (cell.v ?? null) : null;
+    return cell.v ?? null;
   }
 
   // 是正Checkpoint 2a: 表示値(display)が空でも、数式(formula)を持つセルは「空セル」扱いにしない。
@@ -160,11 +204,16 @@
   // セルのtext表現。表示値があればそれを使い、表示値がない数式セルは"=数式"という固定表記にする
   // (是正Checkpoint 2a §2: 数式だけの行でも本文が不定にならないようにする)。
   // 是正Checkpoint 2a.1: 表示値も数式もないがraw値を持つセルは、raw値をそのまま文字列化する。
+  // 是正Checkpoint 2a.2: raw値が(normalizeDateCellRaw()により生成された)Dateオブジェクトの場合、
+  // 汎用の`String(cell.raw)`は`Date.prototype.toString()`を呼び出してしまい、これは実行環境の
+  // ローカルタイムゾーンに依存する文字列を返す(絶対時刻は同じでも文字列が変わる)。この文字列は
+  // text/title、延いてはknowledge_hashにまで伝播するため、Dateの場合だけ`toISOString()`
+  // (常にUTC、環境非依存)を使い分ける。日付以外のraw値(数値・文字列・真偽値)の扱いは変更しない。
   function cellTextValue(cell) {
     const disp = String(cell.display ?? '').trim();
     if (disp !== '') return disp;
     if (cell.formula) return `=${cell.formula}`;
-    if (hasRawValue(cell)) return String(cell.raw);
+    if (hasRawValue(cell)) return (cell.raw instanceof Date) ? cell.raw.toISOString() : String(cell.raw);
     return '';
   }
 
@@ -179,7 +228,12 @@
     const XLSX = resolveXLSX();
     let workbook;
     try {
-      workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: true, cellFormula: true, cellNF: true, cellText: true });
+      // 是正Checkpoint 2a.2: cellDates:falseで読み込む(以前はtrue)。日付セルもraw値は
+      // Excelシリアル値(数値)のまま保持され、normalizeDateCellRaw()がXLSX.SSF.parse_date_code()
+      // という純粋演算経路でタイムゾーン非依存にDateオブジェクトへ変換する(理由は同関数のコメント
+      // を参照)。.w(書式済み表示値)・.f(数式)・その他の型(文字列・真偽値・空白)の抽出結果は
+      // cellDatesの値に左右されないため、この変更で変わらない。
+      workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false, cellFormula: true, cellNF: true, cellText: true });
     } catch (e) {
       throw new Error(`Excelファイルを読み取れません: ${e.message || e}`);
     }
