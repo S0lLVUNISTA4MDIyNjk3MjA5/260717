@@ -168,7 +168,41 @@
   // (数値セル一般を無条件で日付扱いにはしない)。シリアル値が数値でない、またはSheetJS自身が
   // 解釈不能とみなす(`parse_date_code()`が`null`または不完全な結果を返す)場合は、その値だけを
   // 無言でフォールバックさせず、文書全体をfail-closedする(本ファイル全体の既存方針と同じ)。
-  function normalizeDateCellRaw(cell) {
+  //
+  // 是正Checkpoint 2.2 (Excel Date-System Boundary Closure):
+  //
+  // (a) 1900日付システムのシリアル値60は、Excelの伝統的なバグにより「1900年2月29日」という
+  //     架空の日付(1900年は閏年ではない)を表す。`XLSX.SSF.parse_date_code(60)`は暦要素として
+  //     `{y:1900,m:2,d:29}`をそのまま返す(SheetJS自身の`.w`表示値もこの架空の日付を表示する)。
+  //     これを`Date.UTC(1900,1,29,...)`へそのまま渡すと、JS の`Date.UTC()`は暦の妥当性を検証せず
+  //     月末超過分を繰り上げる(オーバーフロー正規化)ため、無言で「1900年3月1日」(シリアル値61の
+  //     正しい日付と同一)へすり替わってしまう。これはraw値とSheetJS自身の表示値(`.w`= "1900/02/29")
+  //     が食い違う、無言の暦日付き替えであり、書式済み表示値をそのまま信用してよい他のあらゆる
+  //     日付と異なり看過できない。実在しない暦日を実在する別の暦日へ勝手に読み替えることは行わず、
+  //     `dc.y===1900 && dc.m===2 && dc.d===29`を検出した時点でfail-closedする(固定の診断コード
+  //     `excel_date_1900_fictitious_leap_day`)。小数部を持つシリアル値(60.5等)も、整数部が60で
+  //     あれば同じ暦日を指すため同様に拒否する。1904日付システム(下記(b))では、シリアル値0が
+  //     `parse_date_code()`内部で先に+1462された上でこの判定が行われるため、有効な非負シリアル値が
+  //     この分岐に到達することは原理上ない(1904年は実在する閏年なので、この架空日付問題自体が
+  //     そもそも発生しない)。
+  //
+  // (b) Excelには2つの日付システムがある: 1900日付システム(既定、エポック1899-12-30)と、
+  //     1904日付システム(主に旧Mac版Excelが既定で使用。エポック1904-01-01)。同じシリアル値でも
+  //     日付システムが違えば指す暦日が1462日(約4年)ずれる。ワークブックがどちらの日付システムを
+  //     使うかは`workbook.Workbook.WBProps.date1904`(真偽値。真=1904システム)というブック単位の
+  //     メタデータで決まり、個々のセル値や表示文字列からは判別できない(実測: 1904システムの
+  //     ワークブックをSheetJSで読み書きしても`WBProps.date1904`はraw値として正しくround-tripし、
+  //     SheetJS自身の`.w`表示値も1904システムに基づいて正しく計算されている)。従来の実装は常に
+  //     1900システムとしてのみ`parse_date_code()`を呼んでいたため、1904システムのブックでは
+  //     raw値が常に1462日分ずれる(SheetJS自身の`.w`表示値とraw値が食い違う)という欠陥があった。
+  //     `XLSX.SSF.parse_date_code(value, opts)`の第2引数`opts.date1904`(真偽値)がまさにこの
+  //     切替えに対応する既存の公開APIであることを実測で確認した(`parse_date_code(0,{date1904:true})`
+  //     → `{y:1904,m:1,d:1}`、`parse_date_code(1,{date1904:true})` → `{y:1904,m:1,d:2}`)。
+  //     ホストのタイムゾーン・ロケール・現在時刻には一切依存しない、純粋にブック自身のメタデータ
+  //     だけに基づく決定的な切替えである。日付システムはセル値や表示文字列から推測しない
+  //     (`extractSheetRows()`が呼び出し時にワークブック全体から一度だけ読み取り、このヘルパーへ
+  //     明示的に渡す。モジュールレベルの可変状態は一切持たない)。
+  function normalizeDateCellRaw(cell, date1904) {
     if (!cell) return null;
     if (cell.t === 'n' && typeof cell.z === 'string') {
       const XLSX = resolveXLSX();
@@ -180,11 +214,16 @@
           err.code = 'excel_date_value_not_numeric';
           throw err;
         }
-        const dc = XLSX.SSF.parse_date_code(cell.v);
+        const dc = XLSX.SSF.parse_date_code(cell.v, { date1904: !!date1904 });
         if (!dc || !Number.isInteger(dc.y) || !Number.isInteger(dc.m) || !Number.isInteger(dc.d)
           || !Number.isInteger(dc.H) || !Number.isInteger(dc.M) || !Number.isInteger(dc.S)) {
           const err = new Error(`日付として書式設定されたセルのシリアル値を解釈できません(実際: ${cell.v})。原データを保持できないため、この文書の取込を中止します。`);
           err.code = 'excel_date_serial_unrecoverable';
+          throw err;
+        }
+        if (dc.y === 1900 && dc.m === 2 && dc.d === 29) {
+          const err = new Error(`シリアル値${cell.v}は1900年日付システムの架空の日付(1900年2月29日。1900年は閏年ではない)を指しています。実在しない暦日を別の暦日へ無言で読み替えることはできないため、この文書の取込を中止します。`);
+          err.code = 'excel_date_1900_fictitious_leap_day';
           throw err;
         }
         const ms = Math.round((typeof dc.u === 'number' && Number.isFinite(dc.u) ? dc.u : 0) * 1000);
@@ -270,6 +309,12 @@
     const sheetIndex = workbook.SheetNames.indexOf(sheetName);
     if (sheetIndex < 0) throw new Error(`シート「${sheetName}」が見つかりません。`);
     const worksheet = workbook.Sheets[sheetName];
+    // 是正Checkpoint 2.2: ワークブック単位の日付システム(1900/1904)は、個々のセル値や表示文字列
+    // からは判別できないブック単位のメタデータであるため、ここで一度だけ読み取り、後続の
+    // normalizeDateCellRaw()呼び出しへ明示的に渡す(モジュールレベルの可変状態は持たない)。
+    // `workbook.Workbook.WBProps.date1904`が真の場合のみ1904システムとして扱い、それ以外
+    // (フィールド欠落・false・非workbook等)はすべて既定の1900システムとして扱う。
+    const date1904 = !!(workbook.Workbook && workbook.Workbook.WBProps && workbook.Workbook.WBProps.date1904 === true);
     // 是正Checkpoint 2c.1: '!ref'(物理範囲)は参考情報として保持するだけで、抽出範囲の正本には
     // 使わない。列・行の範囲は必ずcomputeMeaningfulRange()が返す「意味のある実効範囲」を基準にする。
     const physicalUsedRange = (worksheet && worksheet['!ref']) ? worksheet['!ref'] : null;
@@ -325,7 +370,7 @@
         const c = firstCol + ci;
         const ref = XLSX.utils.encode_cell({ r: r0, c });
         const cell = worksheet[ref];
-        const raw = normalizeDateCellRaw(cell);
+        const raw = normalizeDateCellRaw(cell, date1904);
         const display = cell ? (cell.w != null ? cell.w : (cell.v != null ? String(cell.v) : '')) : '';
         const formula = cell && cell.f ? String(cell.f) : null;
         const cellObj = { ref, header: headers[ci], raw, display, formula };

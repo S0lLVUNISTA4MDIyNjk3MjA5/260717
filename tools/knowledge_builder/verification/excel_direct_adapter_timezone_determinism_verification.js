@@ -164,6 +164,80 @@ function allEqual(results, field) {
       'blank_display_repeated: candidate set/candidate_id identical across all 5 timezones');
   }
 
+  // --- Checkpoint 2.2: 1900 date-system boundary around the fictitious 1900-02-29. ---
+  // serial 59 and 61 are real calendar dates and must decode correctly and stay invariant.
+  // serial 60 and 60.5 (same date portion) both resolve to the fictitious 1900-02-29 and must
+  // fail closed with excel_date_1900_fictitious_leap_day - not silently become 1900-03-01 (what
+  // Date.UTC()'s own overflow normalization would otherwise silently do, colliding with serial 61).
+  {
+    const r59 = collectAcrossZones('serial59');
+    console.log('--- 1900 system serial 59 per-zone rawIso ---');
+    for (const z of ZONES) console.log(`  ${z}: ${r59[z].rawIso}`);
+    assert(allEqual(r59, 'rawIso'), '1900 serial 59: rawIso identical across all 5 timezones');
+    assert(r59.UTC.rawIso === '1900-02-28T00:00:00.000Z', '1900 serial 59: rawIso matches the correct calendar date (1900-02-28)');
+    assert(allEqual(r59, 'display'), '1900 serial 59: display unchanged across timezones');
+    assert(allEqual(r59, 'text'), '1900 serial 59: Node.text unchanged across timezones');
+    assert(allEqual(r59, 'title'), '1900 serial 59: Node.title unchanged across timezones');
+    assert(allEqual(r59, 'sourceDocumentId'), '1900 serial 59: source_document_id unchanged across timezones');
+    assert(allEqual(r59, 'nodeId'), '1900 serial 59: node_id unchanged across timezones');
+    assert(allEqual(r59, 'knowledgeHash'), '1900 serial 59: knowledge_hash unchanged across timezones');
+
+    const r60 = collectAcrossZones('serial60');
+    console.log('--- 1900 system serial 60 (fictitious 1900-02-29) per-zone errorCode ---');
+    for (const z of ZONES) console.log(`  ${z}: ${JSON.stringify(r60[z])}`);
+    assert(ZONES.every(z => r60[z].errorCode === 'excel_date_1900_fictitious_leap_day'), '1900 serial 60: fails closed with excel_date_1900_fictitious_leap_day in every timezone (not silently substituted to 1900-03-01)');
+    assert(ZONES.every(z => r60[z].unexpectedSuccess === undefined), '1900 serial 60: never silently succeeds in any timezone');
+
+    const r60_5 = collectAcrossZones('serial60_5');
+    console.log('--- 1900 system serial 60.5 (fictitious 1900-02-29, fractional) per-zone errorCode ---');
+    for (const z of ZONES) console.log(`  ${z}: ${JSON.stringify(r60_5[z])}`);
+    assert(ZONES.every(z => r60_5[z].errorCode === 'excel_date_1900_fictitious_leap_day'), '1900 serial 60.5: fails closed with excel_date_1900_fictitious_leap_day in every timezone');
+    assert(ZONES.every(z => r60_5[z].unexpectedSuccess === undefined), '1900 serial 60.5: never silently succeeds in any timezone');
+
+    const r61 = collectAcrossZones('serial61');
+    console.log('--- 1900 system serial 61 per-zone rawIso ---');
+    for (const z of ZONES) console.log(`  ${z}: ${r61[z].rawIso}`);
+    assert(allEqual(r61, 'rawIso'), '1900 serial 61: rawIso identical across all 5 timezones');
+    assert(r61.UTC.rawIso === '1900-03-01T00:00:00.000Z', '1900 serial 61: rawIso matches the correct calendar date (1900-03-01)');
+    assert(allEqual(r61, 'display'), '1900 serial 61: display unchanged across timezones');
+    assert(allEqual(r61, 'knowledgeHash'), '1900 serial 61: knowledge_hash unchanged across timezones');
+  }
+
+  // --- Checkpoint 2.2: 1904 date-system workbook (Workbook.WBProps.date1904 === true). ---
+  // Same fixture, 3 rows: serial 0 -> 1904-01-01, serial 1 -> 1904-01-02, and a modern date
+  // (serial 44774 under the 1904 system == serial 46236 under the 1900 system == 2026-08-02).
+  // Before the fix, every row here was off by exactly 1462 days (the 1900<->1904 epoch gap)
+  // because the adapter always assumed the 1900 system regardless of the workbook's own flag.
+  {
+    const r0 = collectAcrossZones('date1904_serial0');
+    console.log('--- 1904 system serial 0 per-zone rawIso ---');
+    for (const z of ZONES) console.log(`  ${z}: ${r0[z].rawIso}`);
+    assert(allEqual(r0, 'rawIso'), '1904 serial 0: rawIso identical across all 5 timezones');
+    assert(r0.UTC.rawIso === '1904-01-01T00:00:00.000Z', '1904 serial 0: rawIso matches the 1904 epoch (1904-01-01), not the 1900 epoch (1899-12-31)');
+    assert(allEqual(r0, 'display'), '1904 serial 0: display unchanged across timezones');
+    assert(allEqual(r0, 'text'), '1904 serial 0: Node.text unchanged across timezones');
+    assert(allEqual(r0, 'title'), '1904 serial 0: Node.title unchanged across timezones');
+    assert(allEqual(r0, 'sourceDocumentId'), '1904 serial 0: source_document_id unchanged across timezones');
+    assert(allEqual(r0, 'nodeId'), '1904 serial 0: node_id unchanged across timezones');
+    assert(allEqual(r0, 'knowledgeHash'), '1904 serial 0: knowledge_hash unchanged across timezones');
+
+    const r1 = collectAcrossZones('date1904_serial1');
+    console.log('--- 1904 system serial 1 per-zone rawIso ---');
+    for (const z of ZONES) console.log(`  ${z}: ${r1[z].rawIso}`);
+    assert(allEqual(r1, 'rawIso'), '1904 serial 1: rawIso identical across all 5 timezones');
+    assert(r1.UTC.rawIso === '1904-01-02T00:00:00.000Z', '1904 serial 1: rawIso matches 1904-01-02 (not 1900-01-01, the 1900-system misinterpretation)');
+    assert(allEqual(r1, 'display'), '1904 serial 1: display unchanged across timezones');
+    assert(allEqual(r1, 'knowledgeHash'), '1904 serial 1: knowledge_hash unchanged across timezones');
+
+    const rModern = collectAcrossZones('date1904_modern');
+    console.log('--- 1904 system modern date per-zone rawIso ---');
+    for (const z of ZONES) console.log(`  ${z}: ${rModern[z].rawIso}`);
+    assert(allEqual(rModern, 'rawIso'), '1904 modern date: rawIso identical across all 5 timezones');
+    assert(rModern.UTC.rawIso === '2026-08-02T00:00:00.000Z', '1904 modern date: rawIso matches the correct calendar date (2026-08-02), not shifted by 1462 days (which would be 2022-08-01)');
+    assert(allEqual(rModern, 'display'), '1904 modern date: display unchanged across timezones');
+    assert(allEqual(rModern, 'knowledgeHash'), '1904 modern date: knowledge_hash unchanged across timezones');
+  }
+
   console.log(failures === 0 ? '\nALL TIMEZONE DETERMINISM CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
   process.exit(failures === 0 ? 0 : 1);
 })();
