@@ -609,13 +609,15 @@ async function main() {
   }
 
   // AG/AH. no full dictionary payload / no private workbook content ever
-  // leaks - the sheet rows carry exactly the approved 11 columns, and the
+  // leaks - the sheet rows carry exactly the approved 12 columns, and the
   // OTHER (non-matched) dictionary entries' canonical terms never surface
   {
     const sheetRows = run(s1, 'buildApprovedDictResolutionProvenanceSheetRows(mergedResult.sysList, mergedResult.plmList)');
-    const expectedKeys = ['side','row_id','trace_id','original_term','resolution_type','resolved_canonical','snapshot_id','snapshot_version','dictionary_id','dictionary_version','scope'];
+    // Source Field Attribution slice: `source_field` is the one approved addition (appended last); the
+    // assertion still forbids any other column.
+    const expectedKeys = ['side','row_id','trace_id','original_term','resolution_type','resolved_canonical','snapshot_id','snapshot_version','dictionary_id','dictionary_version','scope','source_field'];
     const keysOk = sheetRows.every(r => JSON.stringify(Object.keys(r).sort()) === JSON.stringify([...expectedKeys].sort()));
-    assert(keysOk, 'AG/AH every provenance sheet row has exactly the 11 approved columns - no entries[]/effective_vocabulary/review-note field ever added');
+    assert(keysOk, 'AG/AH every provenance sheet row has exactly the 12 approved columns (11 original + source_field) - no entries[]/effective_vocabulary/review-note field ever added');
     const dump = JSON.stringify(sheetRows);
     assert(!dump.includes('Foo Assembly') && !dump.includes('Bar Assembly'), 'AG/AH decoy dictionary entries never matched by any row (Foo Assembly/Bar Assembly canonical terms) never leak into the export, even though they exist in the same dictionary payload');
   }

@@ -4740,6 +4740,13 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
 
       const rawAnnotations = safeReadApprovedDictSidecarField(sidecar, 'annotations');
       if (!Array.isArray(rawAnnotations)) return APPROVED_DICT_PROVENANCE_MALFORMED;
+      // Source field attribution: optional parallel array (absent on a sidecar that
+      // predates it -> source_field ''), but when present it is part of the same
+      // atomic artifact: array, same length as annotations, non-empty strings only.
+      const rawSourceFields = safeReadApprovedDictSidecarField(sidecar, 'annotation_source_fields');
+      if (rawSourceFields !== undefined) {
+        if (!Array.isArray(rawSourceFields) || rawSourceFields.length !== rawAnnotations.length) return APPROVED_DICT_PROVENANCE_MALFORMED;
+      }
       const annotations = [];
       const counts = { annotationCount: 0, exactCount: 0, aliasCount: 0, unknownCount: 0, conflictCount: 0 };
       for (let i = 0; i < rawAnnotations.length; i++) {
@@ -4752,6 +4759,12 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
           item[field] = v;
         }
         if (!APPROVED_DICT_RESOLUTION_TYPES.has(item.resolution_type)) return APPROVED_DICT_PROVENANCE_MALFORMED;
+        let sourceField = '';
+        if (rawSourceFields !== undefined) {
+          sourceField = safeReadApprovedDictSidecarField(rawSourceFields, i);
+          if (typeof sourceField !== 'string' || !sourceField) return APPROVED_DICT_PROVENANCE_MALFORMED;
+        }
+        item.source_field = sourceField;
         annotations.push(Object.freeze(item));
         counts.annotationCount++;
         if (item.resolution_type === 'EXACT_CANONICAL') counts.exactCount++;
@@ -4824,7 +4837,8 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
             'snapshot_version': binding.snapshot_version ?? '',
             'dictionary_id': binding.dictionary_id ?? '',
             'dictionary_version': binding.dictionary_version ?? '',
-            'scope': binding.scope ?? ''
+            'scope': binding.scope ?? '',
+            'source_field': a.source_field ?? ''
           });
         });
       });
@@ -4848,15 +4862,23 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
 
   function approvedDictionaryTermsForRow(row, schemaName) {
     const terms = [];
+    // Source field attribution: sourceFields[i] is the tagSourceFields() key
+    // (stable row field identity, never a display label) the i-th term was
+    // extracted from. Strictly parallel to `terms` (same length/order); the
+    // term list itself is unchanged, so resolution/dedup semantics are too.
+    const sourceFields = [];
     let skipped = 0;
+    let currentField = '';
     const considerScalar = value => {
       if (value == null || typeof value === 'object') return;
       const term = String(value);
       if (!term.trim() || term.length > APPROVED_DICT_MAX_TERM_LENGTH) { skipped++; return; }
       terms.push(term);
+      sourceFields.push(currentField);
     };
     tagSourceFields(schemaName).forEach(field => {
       const value = row?.[field];
+      currentField = field;
       if (value == null) return;
       if (Array.isArray(value)) {
         value.forEach(element => {
@@ -4870,7 +4892,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       // object (non-array) field values are entirely out of scope - never
       // JSON.stringify()'d into a term.
     });
-    return { terms, skipped };
+    return { terms, sourceFields, skipped };
   }
 
   // §16: at most 50000 terms per Resolver call. An empty term list still
@@ -4989,10 +5011,10 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     Object.entries(rowsBySide).forEach(([side, rows]) => {
       rows.forEach((row, rowIndex) => {
         if (!row || typeof row !== 'object') return;
-        const { terms, skipped } = approvedDictionaryTermsForRow(row, side);
+        const { terms, sourceFields, skipped } = approvedDictionaryTermsForRow(row, side);
         resultStats.skippedValues += skipped;
         if (!terms.length) return;
-        const indices = terms.map(term => { termEntries.push({ side, rowIndex, term }); return termEntries.length - 1; });
+        const indices = terms.map((term, i) => { termEntries.push({ side, rowIndex, term, sourceField: sourceFields[i] }); return termEntries.length - 1; });
         rowTermIndices.set(`${side}:${rowIndex}`, indices);
       });
     });
@@ -5046,7 +5068,10 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       const nextSidecar = Object.freeze({
         schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
         snapshot_binding: approvedDictionaryRuntime.snapshotBinding,
-        annotations: Object.freeze(rowAnnotations.slice())
+        annotations: Object.freeze(rowAnnotations.slice()),
+        // Source field attribution (parallel to `annotations`, index-for-index): the
+        // Resolver annotation contract itself is unchanged.
+        annotation_source_fields: Object.freeze(indices.map(i => termEntries[i].sourceField))
       });
       pendingTagged.push({ row, nextInfo, nextTags, nextDisplayMap, nextSidecar });
     });
@@ -5064,7 +5089,8 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         pendingEmpty.push({ row, nextSidecar: Object.freeze({
           schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
           snapshot_binding: approvedDictionaryRuntime.snapshotBinding,
-          annotations: Object.freeze([])
+          annotations: Object.freeze([]),
+          annotation_source_fields: Object.freeze([])
         }) });
       });
     });
@@ -11380,7 +11406,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       }
       if (provenance.available && provenance.annotations.length) {
         provenance.annotations.forEach(a => {
-          lines.push(`  ${a.original_term} → ${a.resolved_canonical || '(なし)'} [${approvedDictResolutionTypeLabel(a.resolution_type)}]`);
+          lines.push(`  ${a.original_term} → ${a.resolved_canonical || '(なし)'} [${approvedDictResolutionTypeLabel(a.resolution_type)}]${a.source_field ? ` 由来項目: ${a.source_field}` : ''}`);
         });
       }
     }
@@ -12780,7 +12806,11 @@ ${h.name}`, type:'requirement', detail:srcA };
       return [];
     }
     const anns = sidecar && Array.isArray(sidecar.annotations) ? sidecar.annotations : [];
-    return anns.filter(a => a && (a.resolution_type === 'EXACT_CANONICAL' || a.resolution_type === 'APPROVED_ALIAS'));
+    // Source field attribution: the parallel array is index-aligned with annotations, so it is
+    // read BEFORE the resolution_type filter below drops entries.
+    const srcFields = sidecar && Array.isArray(sidecar.annotation_source_fields) ? sidecar.annotation_source_fields : [];
+    return anns.map((a, i) => (a && typeof a === 'object' ? { ...a, source_field: typeof srcFields[i] === 'string' ? srcFields[i] : '' } : a))
+      .filter(a => a && (a.resolution_type === 'EXACT_CANONICAL' || a.resolution_type === 'APPROVED_ALIAS'));
   }
   function dictionaryContributionForEdge(r) {
     const aRaw = rowSourceMaps().a.get(r['A_ID'])?.row;
@@ -12798,7 +12828,7 @@ ${h.name}`, type:'requirement', detail:srcA };
   function dictionaryContributionLine(r) {
     const c = dictionaryContributionForEdge(r);
     if (c.status === 'none') return c.label;
-    const detail = c.annotations.map(a => `${a.side}: ${a.original_term || ''} → resolution:${a.resolution_type} canonical:${a.resolved_canonical || ''} snapshot:${a.dictionary_snapshot_id || ''}`).join(' / ');
+    const detail = c.annotations.map(a => `${a.side}: ${a.original_term || ''} → resolution:${a.resolution_type} canonical:${a.resolved_canonical || ''} snapshot:${a.dictionary_snapshot_id || ''}${a.source_field ? ` field:${a.source_field}` : ''}`).join(' / ');
     return `${c.label}${detail ? ' (' + detail + ')' : ''}`;
   }
   // Precomputed, PLAIN-DATA per-edge entries for the Detail table's expand rows. renderDetailTableFull()

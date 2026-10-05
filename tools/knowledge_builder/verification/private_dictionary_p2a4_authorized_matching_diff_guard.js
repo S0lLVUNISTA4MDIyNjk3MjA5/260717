@@ -527,7 +527,11 @@ const HUNK_19 = [
   "+      return [];",
   "+    }",
   "+    const anns = sidecar && Array.isArray(sidecar.annotations) ? sidecar.annotations : [];",
-  "+    return anns.filter(a => a && (a.resolution_type === 'EXACT_CANONICAL' || a.resolution_type === 'APPROVED_ALIAS'));",
+  "+    // Source field attribution: the parallel array is index-aligned with annotations, so it is",
+  "+    // read BEFORE the resolution_type filter below drops entries.",
+  "+    const srcFields = sidecar && Array.isArray(sidecar.annotation_source_fields) ? sidecar.annotation_source_fields : [];",
+  "+    return anns.map((a, i) => (a && typeof a === 'object' ? { ...a, source_field: typeof srcFields[i] === 'string' ? srcFields[i] : '' } : a))",
+  "+      .filter(a => a && (a.resolution_type === 'EXACT_CANONICAL' || a.resolution_type === 'APPROVED_ALIAS'));",
   "+  }",
   "+  function dictionaryContributionForEdge(r) {",
   "+    const aRaw = rowSourceMaps().a.get(r['A_ID'])?.row;",
@@ -545,7 +549,7 @@ const HUNK_19 = [
   "+  function dictionaryContributionLine(r) {",
   "+    const c = dictionaryContributionForEdge(r);",
   "+    if (c.status === 'none') return c.label;",
-  "+    const detail = c.annotations.map(a => `${a.side}: ${a.original_term || ''} → resolution:${a.resolution_type} canonical:${a.resolved_canonical || ''} snapshot:${a.dictionary_snapshot_id || ''}`).join(' / ');",
+  "+    const detail = c.annotations.map(a => `${a.side}: ${a.original_term || ''} → resolution:${a.resolution_type} canonical:${a.resolved_canonical || ''} snapshot:${a.dictionary_snapshot_id || ''}${a.source_field ? ` field:${a.source_field}` : ''}`).join(' / ');",
   "+    return `${c.label}${detail ? ' (' + detail + ')' : ''}`;",
   "+  }",
   "+  // Precomputed, PLAIN-DATA per-edge entries for the Detail table's expand rows. renderDetailTableFull()",
@@ -992,7 +996,38 @@ const HUNK_43 = "       s.diagnostics.forEach(d => { counts[d.code] = (counts[d.
 // changes.
 const HUNK_44 = "     quantityBindingState = null;\n     const el = $('quantityBindingStatus');\n     if (el) el.textContent = '入力選択が変更されました。「読み込み・照合」で数量注釈を再検証してください。';\n+    renderQuantityPropertyDetail(null); // L3-2 Checkpoint 2-D: stale per-record detailを残さない\n   };\n   plmFile.addEventListener('change', invalidateQuantityBindingSelection);\n   sysFile.addEventListener('change', invalidateQuantityBindingSelection);";
 
-const AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS = [HUNK_1, HUNK_2, HUNK_3, HUNK_4, HUNK_5, HUNK_6, HUNK_7, HUNK_8, HUNK_9, HUNK_10, HUNK_12, HUNK_14, HUNK_15, HUNK_16, HUNK_17, HUNK_18, HUNK_19, HUNK_20, HUNK_21, HUNK_22, HUNK_23, HUNK_24, HUNK_25, HUNK_26, HUNK_27, HUNK_28, HUNK_29, HUNK_30, HUNK_31, HUNK_32, HUNK_33, HUNK_34, HUNK_35, HUNK_36, HUNK_37, HUNK_39, HUNK_40, HUNK_41, HUNK_42, HUNK_43, HUNK_44];
+// ── Source Field Attribution for Dictionary Resolution Provenance (non-security vertical slice) ──
+// HUNK_16 above is RE-TOUCHED IN PLACE (approvedAnnotationsForRawRow() / dictionaryContributionLine():
+// the Detail edge dictionary line now also carries `field:<source_field>`). HUNK_45-HUNK_53 are new:
+//   HUNK_45 projection: optional parallel array annotation_source_fields (atomic shape check)
+//   HUNK_46 projection: per-annotation source_field
+//   HUNK_47 Excel 辞書照合根拠 sheet: `source_field` appended as the LAST column
+//   HUNK_48 approvedDictionaryTermsForRow(): sourceFields parallel to terms
+//   HUNK_49 approvedDictionaryTermsForRow(): return value
+//   HUNK_50 applyApprovedDictionaryTags(): termEntries carry sourceField
+//   HUNK_51 applyApprovedDictionaryTags(): row sidecar annotation_source_fields (processed rows)
+//   HUNK_52 applyApprovedDictionaryTags(): row sidecar annotation_source_fields (zero-term rows)
+//   HUNK_53 Graph node detail: `由来項目: <source_field>` suffix on each annotation line
+// All other hunks are unchanged. No matching / scoring / ranking / review code is touched.
+const HUNK_45 = " \n       const rawAnnotations = safeReadApprovedDictSidecarField(sidecar, 'annotations');\n       if (!Array.isArray(rawAnnotations)) return APPROVED_DICT_PROVENANCE_MALFORMED;\n+      // Source field attribution: optional parallel array (absent on a sidecar that\n+      // predates it -> source_field ''), but when present it is part of the same\n+      // atomic artifact: array, same length as annotations, non-empty strings only.\n+      const rawSourceFields = safeReadApprovedDictSidecarField(sidecar, 'annotation_source_fields');\n+      if (rawSourceFields !== undefined) {\n+        if (!Array.isArray(rawSourceFields) || rawSourceFields.length !== rawAnnotations.length) return APPROVED_DICT_PROVENANCE_MALFORMED;\n+      }\n       const annotations = [];\n       const counts = { annotationCount: 0, exactCount: 0, aliasCount: 0, unknownCount: 0, conflictCount: 0 };\n       for (let i = 0; i < rawAnnotations.length; i++) {";
+
+const HUNK_46 = "           item[field] = v;\n         }\n         if (!APPROVED_DICT_RESOLUTION_TYPES.has(item.resolution_type)) return APPROVED_DICT_PROVENANCE_MALFORMED;\n+        let sourceField = '';\n+        if (rawSourceFields !== undefined) {\n+          sourceField = safeReadApprovedDictSidecarField(rawSourceFields, i);\n+          if (typeof sourceField !== 'string' || !sourceField) return APPROVED_DICT_PROVENANCE_MALFORMED;\n+        }\n+        item.source_field = sourceField;\n         annotations.push(Object.freeze(item));\n         counts.annotationCount++;\n         if (item.resolution_type === 'EXACT_CANONICAL') counts.exactCount++;";
+
+const HUNK_47 = "             'snapshot_version': binding.snapshot_version ?? '',\n             'dictionary_id': binding.dictionary_id ?? '',\n             'dictionary_version': binding.dictionary_version ?? '',\n-            'scope': binding.scope ?? ''\n+            'scope': binding.scope ?? '',\n+            'source_field': a.source_field ?? ''\n           });\n         });\n       });";
+
+const HUNK_48 = " \n   function approvedDictionaryTermsForRow(row, schemaName) {\n     const terms = [];\n+    // Source field attribution: sourceFields[i] is the tagSourceFields() key\n+    // (stable row field identity, never a display label) the i-th term was\n+    // extracted from. Strictly parallel to `terms` (same length/order); the\n+    // term list itself is unchanged, so resolution/dedup semantics are too.\n+    const sourceFields = [];\n     let skipped = 0;\n+    let currentField = '';\n     const considerScalar = value => {\n       if (value == null || typeof value === 'object') return;\n       const term = String(value);\n       if (!term.trim() || term.length > APPROVED_DICT_MAX_TERM_LENGTH) { skipped++; return; }\n       terms.push(term);\n+      sourceFields.push(currentField);\n     };\n     tagSourceFields(schemaName).forEach(field => {\n       const value = row?.[field];\n+      currentField = field;\n       if (value == null) return;\n       if (Array.isArray(value)) {\n         value.forEach(element => {";
+
+const HUNK_49 = "       // object (non-array) field values are entirely out of scope - never\n       // JSON.stringify()'d into a term.\n     });\n-    return { terms, skipped };\n+    return { terms, sourceFields, skipped };\n   }\n \n   // §16: at most 50000 terms per Resolver call. An empty term list still";
+
+const HUNK_50 = "     Object.entries(rowsBySide).forEach(([side, rows]) => {\n       rows.forEach((row, rowIndex) => {\n         if (!row || typeof row !== 'object') return;\n-        const { terms, skipped } = approvedDictionaryTermsForRow(row, side);\n+        const { terms, sourceFields, skipped } = approvedDictionaryTermsForRow(row, side);\n         resultStats.skippedValues += skipped;\n         if (!terms.length) return;\n-        const indices = terms.map(term => { termEntries.push({ side, rowIndex, term }); return termEntries.length - 1; });\n+        const indices = terms.map((term, i) => { termEntries.push({ side, rowIndex, term, sourceField: sourceFields[i] }); return termEntries.length - 1; });\n         rowTermIndices.set(`${side}:${rowIndex}`, indices);\n       });\n     });";
+
+const HUNK_51 = "       const nextSidecar = Object.freeze({\n         schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,\n         snapshot_binding: approvedDictionaryRuntime.snapshotBinding,\n-        annotations: Object.freeze(rowAnnotations.slice())\n+        annotations: Object.freeze(rowAnnotations.slice()),\n+        // Source field attribution (parallel to `annotations`, index-for-index): the\n+        // Resolver annotation contract itself is unchanged.\n+        annotation_source_fields: Object.freeze(indices.map(i => termEntries[i].sourceField))\n       });\n       pendingTagged.push({ row, nextInfo, nextTags, nextDisplayMap, nextSidecar });\n     });";
+
+const HUNK_52 = "         pendingEmpty.push({ row, nextSidecar: Object.freeze({\n           schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,\n           snapshot_binding: approvedDictionaryRuntime.snapshotBinding,\n-          annotations: Object.freeze([])\n+          annotations: Object.freeze([]),\n+          annotation_source_fields: Object.freeze([])\n         }) });\n       });\n     });";
+
+const HUNK_53 = "       }\n       if (provenance.available && provenance.annotations.length) {\n         provenance.annotations.forEach(a => {\n-          lines.push(`  ${a.original_term} → ${a.resolved_canonical || '(なし)'} [${approvedDictResolutionTypeLabel(a.resolution_type)}]`);\n+          lines.push(`  ${a.original_term} → ${a.resolved_canonical || '(なし)'} [${approvedDictResolutionTypeLabel(a.resolution_type)}]${a.source_field ? ` 由来項目: ${a.source_field}` : ''}`);\n         });\n       }\n     }";
+
+const AUTHORIZED_MATCHING_TOOL_DIFF_HUNKS = [HUNK_1, HUNK_2, HUNK_3, HUNK_4, HUNK_5, HUNK_6, HUNK_7, HUNK_8, HUNK_9, HUNK_10, HUNK_12, HUNK_14, HUNK_15, HUNK_16, HUNK_17, HUNK_18, HUNK_19, HUNK_20, HUNK_21, HUNK_22, HUNK_23, HUNK_24, HUNK_25, HUNK_26, HUNK_27, HUNK_28, HUNK_29, HUNK_30, HUNK_31, HUNK_32, HUNK_33, HUNK_34, HUNK_35, HUNK_36, HUNK_37, HUNK_39, HUNK_40, HUNK_41, HUNK_42, HUNK_43, HUNK_44, HUNK_45, HUNK_46, HUNK_47, HUNK_48, HUNK_49, HUNK_50, HUNK_51, HUNK_52, HUNK_53];
 
 // Parses a `git diff` text into an array of hunk-body strings (everything
 // after each `@@ ... @@` header line, up to the next header or EOF), with
