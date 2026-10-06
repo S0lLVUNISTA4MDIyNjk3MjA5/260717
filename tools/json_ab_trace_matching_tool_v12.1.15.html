@@ -5089,6 +5089,42 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     return { terms, sourceFields, skipped };
   }
 
+  // Contract 0.2 (private_dictionary_matching_integration_contract_0.2.md): whole-value first, UNKNOWN_TERM
+  // fallback split. ONLY a whole-value the Resolver reported as UNKNOWN_TERM is a split candidate; a resolved or
+  // DICTIONARY_CONFLICT whole-value is kept as-is. Delimiters (literal, no pre-split normalization, no escape):
+  // / , ;  and the full-width  ／ 、 ， ； . Each token is trimmed; empty tokens are skipped; fewer than 2
+  // non-empty tokens -> no split. Duplicates and order are kept. This is the ONLY tokenizer (queue/UI reuse it).
+  const APPROVED_DICT_FALLBACK_DELIMITER_PATTERN = /[\/,;\uFF0F\u3001\uFF0C\uFF1B]/;
+  function approvedDictionaryFallbackTokens(term) {
+    if (typeof term !== 'string' || !APPROVED_DICT_FALLBACK_DELIMITER_PATTERN.test(term)) return null;
+    const tokens = term.split(new RegExp(APPROVED_DICT_FALLBACK_DELIMITER_PATTERN.source)).map(t => t.trim()).filter(t => t.length > 0);
+    return tokens.length >= 2 ? tokens : null;
+  }
+
+  // Resolves the fallback tokens of every UNKNOWN_TERM whole-value in ONE extra Resolver batch (no call at all
+  // when there is no candidate) and returns Map<entryIndex, resolved token entries> for the ADOPTED ones only:
+  // tokenization is adopted iff at least one token is not UNKNOWN_TERM. Not adopted -> the whole-value
+  // UNKNOWN_TERM annotation stays. Token entries inherit side/rowIndex/sourceField from their whole-value entry.
+  async function resolveApprovedDictionaryDelimiterFallback(resolvedEntries, expectedBinding) {
+    const candidates = [];
+    const tokenEntries = [];
+    resolvedEntries.forEach((entry, entryIndex) => {
+      if (entry.annotation.resolution_type !== 'UNKNOWN_TERM') return;
+      const tokens = approvedDictionaryFallbackTokens(entry.term);
+      if (!tokens) return;
+      candidates.push({ entryIndex, start: tokenEntries.length, count: tokens.length });
+      tokens.forEach(token => tokenEntries.push({ side: entry.side, rowIndex: entry.rowIndex, term: token, sourceField: entry.sourceField }));
+    });
+    const adopted = new Map();
+    if (!tokenEntries.length) return adopted;
+    const resolvedTokens = await resolveApprovedDictionaryTermEntries(tokenEntries, expectedBinding);
+    candidates.forEach(c => {
+      const tokenResults = resolvedTokens.slice(c.start, c.start + c.count);
+      if (tokenResults.some(t => t.annotation.resolution_type !== 'UNKNOWN_TERM')) adopted.set(c.entryIndex, tokenResults);
+    });
+    return adopted;
+  }
+
   // §16: at most 50000 terms per Resolver call. An empty term list still
   // produces exactly one (empty) chunk, so the §18 no-term validation call
   // (confirming the pinned Snapshot is still valid/binding-consistent even
@@ -5213,9 +5249,10 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       });
     });
 
-    let resolvedEntries;
+    let resolvedEntries, adoptedFallback;
     try {
       resolvedEntries = await resolveApprovedDictionaryTermEntries(termEntries, approvedDictionaryRuntime.snapshotBinding);
+      adoptedFallback = await resolveApprovedDictionaryDelimiterFallback(resolvedEntries, approvedDictionaryRuntime.snapshotBinding);
     } catch (err) {
       traceTagState.approvedDictWarningCode = approvedDictSanitizeErrorCode(err);
       return resultStats;
@@ -5237,7 +5274,9 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       const rowIndex = Number(key.slice(sepIndex + 1));
       const row = rowsBySide[side]?.[rowIndex];
       if (!row) return;
-      const rowAnnotations = indices.map(i => resolvedEntries[i].annotation);
+      // Contract 0.2: an adopted fallback replaces its whole-value UNKNOWN_TERM entry, in place, by its token entries.
+      const rowEntries = indices.flatMap(i => adoptedFallback.get(i) || [resolvedEntries[i]]);
+      const rowAnnotations = rowEntries.map(e => e.annotation);
       const approvedTags = [];
       const approvedDisplays = {};
       rowAnnotations.forEach(a => {
@@ -5265,7 +5304,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         annotations: Object.freeze(rowAnnotations.slice()),
         // Source field attribution (parallel to `annotations`, index-for-index): the
         // Resolver annotation contract itself is unchanged.
-        annotation_source_fields: Object.freeze(indices.map(i => termEntries[i].sourceField))
+        annotation_source_fields: Object.freeze(rowEntries.map(e => e.sourceField))
       });
       pendingTagged.push({ row, nextInfo, nextTags, nextDisplayMap, nextSidecar });
     });

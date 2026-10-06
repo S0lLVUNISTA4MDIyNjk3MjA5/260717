@@ -277,18 +277,48 @@ async function main() {
   }
 
   // ==========================================================================
-  // H. Delimiter no split
+  // H. Delimiter handling (contract 0.2: whole-value first, UNKNOWN_TERM fallback split)
+  //
+  // Contract-version migration (Human-approved, scoped to this item only): under contract 0.1 (S13.1) this item
+  // asserted that the comma-delimited whole value 'Foo,Bar' is NOT split (approvedDict.length === 0). Contract 0.2
+  // (private_dictionary_matching_integration_contract_0.2.md) replaced that rule with a controlled fallback, so the
+  // old expectation is superseded; it is preserved in git history (this file at commit fae8c204). Every fixture below
+  // uses dictionary entries whose resolution is unambiguous (canonical Foo / Bar / 'Foo,Bar' / alias conflict).
   // ==========================================================================
   {
-    const entryFoo = makeEntry({ canonical_term: 'Foo', aliases: [] });
-    const entryBar = makeEntry({ canonical_term: 'Bar', aliases: [] });
-    const wrapper = await buildWrapper([entryFoo, entryBar]);
-    const sandbox = loadMatchingToolSandbox();
-    configureSingleFieldKeyPair(sandbox);
-    sandbox.__wrapper = wrapper;
-    await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching(globalThis.__wrapper)');
-    const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc: 'Foo,Bar' }], []);
-    assert(sysList[0]._tagInfo.approvedDict.length === 0, 'H comma-delimited whole value is not split; no per-token resolution/tag');
+    const ann = sl => J(sl._approvedDictResolution.annotations.map(a => [a.original_term, a.resolution_type, a.resolved_canonical]));
+    function J(v) { return JSON.parse(JSON.stringify(v)); }
+    async function runH(entries, desc) {
+      const wrapper = await buildWrapper(entries);
+      const sandbox = loadMatchingToolSandbox();
+      configureSingleFieldKeyPair(sandbox);
+      sandbox.__wrapper = wrapper;
+      await runAsync(sandbox, 'setApprovedDictionarySnapshotForMatching(globalThis.__wrapper)');
+      const { sysList } = await setMergedResultAndAnnotate(sandbox, [{ desc }], []);
+      return sysList[0];
+    }
+    const entryFoo = () => makeEntry({ canonical_term: 'Foo', aliases: [] });
+    const entryBar = () => makeEntry({ canonical_term: 'Bar', aliases: [] });
+
+    // H1 (replaces the 0.1 assertion): whole value UNKNOWN + delimiter -> fallback split; both tokens resolve -> adopted
+    const h1 = await runH([entryFoo(), entryBar()], 'Foo,Bar');
+    assert(JSON.stringify(ann(h1)) === JSON.stringify([['Foo', 'EXACT_CANONICAL', 'Foo'], ['Bar', 'EXACT_CANONICAL', 'Bar']]), 'H1 (0.2) whole value "Foo,Bar" is UNKNOWN as a whole -> split into tokens Foo, Bar, each resolved by the existing Resolver; token annotations replace the whole-value one');
+    assert(h1._tagInfo.approvedDict.length === 2 && h1._tagInfo.approvedDict.includes('foo') && h1._tagInfo.approvedDict.includes('bar'), 'H1 (0.2) per-token resolution produces both approvedDict tags');
+    // H2: whole-value priority - a whole value that resolves is never split (delimiter inside a canonical term)
+    const h2 = await runH([entryFoo(), entryBar(), makeEntry({ canonical_term: 'Foo,Bar', aliases: [] })], 'Foo,Bar');
+    assert(JSON.stringify(ann(h2)) === JSON.stringify([['Foo,Bar', 'EXACT_CANONICAL', 'Foo,Bar']]) && h2._tagInfo.approvedDict.length === 1, 'H2 (0.2) whole-value priority: "Foo,Bar" resolves as a whole canonical term -> NOT split (Foo and Bar also exist)');
+    // H3: whole-value DICTIONARY_CONFLICT is kept, never split
+    const h3 = await runH([entryFoo(), entryBar(), makeEntry({ canonical_term: 'Cx1', aliases: ['Foo,Bar'] }), makeEntry({ canonical_term: 'Cx2', aliases: ['Foo,Bar'] })], 'Foo,Bar');
+    assert(JSON.stringify(ann(h3)) === JSON.stringify([['Foo,Bar', 'DICTIONARY_CONFLICT', null]]) && h3._tagInfo.approvedDict.length === 0, 'H3 (0.2) whole-value DICTIONARY_CONFLICT is kept as-is and never split');
+    // H4: partial resolution (at least one token resolved) -> adopted; the unresolved token stays UNKNOWN
+    const h4 = await runH([entryFoo()], 'Foo,Nothing');
+    assert(JSON.stringify(ann(h4)) === JSON.stringify([['Foo', 'EXACT_CANONICAL', 'Foo'], ['Nothing', 'UNKNOWN_TERM', null]]) && h4._tagInfo.approvedDict.length === 1, 'H4 (0.2) at least one token resolved -> token results adopted (Foo resolved, Nothing UNKNOWN_TERM)');
+    // H5: all tokens UNKNOWN -> not adopted; the original whole value UNKNOWN_TERM stays
+    const h5 = await runH([entryFoo(), entryBar()], 'Qux,Quux');
+    assert(JSON.stringify(ann(h5)) === JSON.stringify([['Qux,Quux', 'UNKNOWN_TERM', null]]) && h5._tagInfo.approvedDict.length === 0, 'H5 (0.2) every token UNKNOWN -> tokenization NOT adopted; the original whole value "Qux,Quux" stays as ONE UNKNOWN_TERM');
+    // H6: fallback is only for UNKNOWN whole values and only on the contract-0.2 delimiters
+    const h6 = await runH([entryFoo(), entryBar()], 'Foo\u30FBBar');
+    assert(JSON.stringify(ann(h6)) === JSON.stringify([['Foo\u30FBBar', 'UNKNOWN_TERM', null]]) && h6._tagInfo.approvedDict.length === 0, 'H6 (0.2) a non-contract delimiter (middle dot) is not split');
   }
 
   // ==========================================================================
