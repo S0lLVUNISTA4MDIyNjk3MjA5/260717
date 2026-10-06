@@ -3756,6 +3756,86 @@ display/export」はCheckpoint 12時点でRemaining MUST-CLOSEに数えられて
 おらず、Checkpoint 13で新たにCLOSEDへ追加されるのみで、他項目の分類は
 変更しない。
 
+### S30.17 Addendum — Source Field Attribution（Checkpoint 13後のHuman承認済み拡張）
+
+本節は、Checkpoint 13（S30.1〜S30.16）の**後続変更**として、Human承認済みの
+non-security vertical slice「Source Field Attribution」を記録する。Checkpoint 13
+当時の状態（S30.1が述べる「source fieldは存在しない」、S30.2のprojection形状、
+S30.9Bの11列定義）は、そのcheckpoint時点のhistorical stateとして**そのまま残し**、
+本節はその後に状態が拡張されたことを時間軸に沿って追記するものである。新しい
+matching仕様の設計ではない。
+
+**A. Approval context.** Source Field Attributionは後続のnon-security vertical sliceとして
+Human承認され、commit `182fcbde4a2b699578c48e5e7f119d3fa008f26d` で実装された。
+これはCheckpoint 13当時の状態を否定するものではなく、later approved extensionである。
+
+**B. Extraction.** `approvedDictionaryTermsForRow()`は、term文字列に加えて、そのtermが
+由来するstableなsource field identity（`tagSourceFields()`のfield key。表示ラベルではない）を
+`sourceFields[]`として保持する。`sourceFields[]`は`terms[]`と同じ長さ・同じ順序であり、
+term列そのものは変更されない（同一termが複数fieldに現れても、配列fieldの重複要素も、
+1件に潰さない）。
+
+**C. Sidecar.** row sidecar（`row._approvedDictResolution`）に`annotation_source_fields[]`
+が追加され、`annotations[]`とindex対応する（長さ一致、frozen）。
+
+**D. Resolver contract.** Resolver coreの既存annotation contract（8 field、
+`APPROVED_DICT_ANNOTATION_FIELDS`）は変更されていない。既存の8-field Resolver
+annotationへ直接fieldを追加したものではなく、Resolver coreも変更していない。
+Checkpoint 7由来の定数（`APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION`/
+`APPROVED_DICT_BINDING_FIELDS`/`APPROVED_DICT_ANNOTATION_FIELDS`/
+`APPROVED_DICT_RESOLUTION_TYPES`）も無変更である。
+
+**E. Projection.** dictionary provenance projection（`projectApprovedDictionaryResolution
+Provenance()`）は、各annotationに追加のderived fieldとして`source_field`を付与する
+（sidecarに`annotation_source_fields[]`が無い旧形式では空文字列）。`annotation_source_fields[]`
+が存在するのに形式が不正（配列でない・長さ不一致・空文字/非文字列要素）な場合は、
+S30.13と同じくprojection全体をmalformedとして扱う（部分的な帰属は出さない）。
+
+**F. Excel.** 専用sheet「辞書照合根拠」は、既存11列＋最終列`source_field`の12列となった。
+既存11列の順序は変更していない。
+
+**G. UI.** Knowledge Graphのnode detailはannotation行の末尾に`由来項目: <source_field>`を、
+Detail tableの展開行の辞書行は`field:<source_field>`を表示する。Detail tableのrow-level
+compact summary（S30.7）の文字列は変更しない。
+
+**H. Semantics.** 本拡張は表示・provenanceの追加のみであり、以下を変更しない:
+dictionary resolution semantics、matching score、candidate ranking、matching method、
+ACCEPT / REJECT、semantic matching、canonical matching。UNKNOWN_TERM/DICTIONARY_CONFLICT
+の判定条件も変更しない（baseline HTMLとの比較検証で、照合pair・method・score・順序・
+trace行・tag状態の一致を確認済み）。
+
+**読み替え規則（過去節との関係）.**
+- S30.1の「source fieldは存在しない」は、Checkpoint 13時点の状態を表す。Source Field
+  Attribution slice以降は、本節S30.17が優先される。
+- S30.2の「8-field contractそのまま」は、Resolver core（および`annotations[]`の8 field）
+  については引き続き有効である。projection結果については、追加のderived fieldとして
+  `source_field`が存在する（8 field + `source_field`）。
+- S30.1のsidecar形状（`schema_version`/`snapshot_binding`/`annotations`）は、Checkpoint 13
+  時点の形状である。後続slice以降は、`annotation_source_fields[]`が追加される。
+- S30.9Bの11列定義はCheckpoint 13時点の定義であり、後続slice以降は末尾に`source_field`を
+  追加した12列となる。
+- S30.12のprivacy境界（dictionary payload全体・review note・private workbook内容を出さない）
+  は変更しない。
+
+#### S30.17.2 UNKNOWN_TERM Review Queue（派生ビュー）のartifact区分
+
+Source Field Attributionを利用する後続のnon-security vertical slice「UNKNOWN_TERM Review
+Queue」について、S11が「別artifactとして想定する」とした点のHuman判断を記録する。
+
+- 現行のderived review queueは、既存のExcel workbook内の専用sheet「辞書未登録語」として、
+  comparison resultのsheetとは分離された**separate logical artifact**として表現できる
+  （別のExcelファイル・別のJSONファイルは要しない）。
+- queueはRow sidecarから派生する表示・出力用のビューであり、Resolverの再実行、辞書への
+  登録・承認・自動学習、永続化は行わない。UNKNOWN_TERMの判定条件・matching semanticsは
+  変更しない。queue itemの形・identity・ordering・dedup（item単位では潰さない）は、
+  実装メモ`private_dictionary_unknown_term_review_queue_note.md`に記録する。
+- 本判断は、S11/S23 #4/S29.15/S30.16/S32.15でFUTURE SLICEとされている
+  persistent unknown/conflict maintenance queue（永続queue・queue import/export・
+  review-stateの永続化・辞書メンテナンス入力・feedback workflow）について、
+  同一workbook内のsheetでなければならないことを意味しない。**将来のmaintenance queueの
+  永続化formatは本節では定義せず、引き続き未確定**（PERSISTENCE CONTRACT NOT
+  SUFFICIENTLY FIXED）である。
+
 ## S31 Checkpoint 14: HUMAN-01/02/03 UI Convergence
 ### （P2-A3 Candidate Review UI + Matching Integration Terminology Cleanup）
 

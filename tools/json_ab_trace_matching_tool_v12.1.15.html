@@ -893,6 +893,23 @@
       <label style="margin-left:16px; font-size:12px; font-weight:600; color:var(--muted); cursor:pointer;"><input type="checkbox" id="detailShowDictResolutionColsToggle" style="vertical-align:middle;" /> 辞書照合根拠の列も表示（Dictionary Resolution Provenance）</label>
     </div>
 
+    <!-- UNKNOWN_TERM Review Queue: derived, display/export only - never writes to a dictionary -->
+    <details id="unknownTermQueuePanel" style="margin-bottom:12px;">
+      <summary style="cursor:pointer; font-weight:700; padding:8px 12px; background:#f1f5f9; border-radius:8px; border:1px solid #e2e8f0; user-select:none;">
+        📝 辞書未登録語レビュー候補 (UNKNOWN_TERM Review Queue) <span id="unknownTermQueueBadge" class="edit-badge" style="display:none;"></span>
+      </summary>
+      <div style="padding:12px; border:1px solid #e2e8f0; border-top:none; border-radius:0 0 8px 8px; background:#fafcff;">
+        <div class="field-hint" style="margin-bottom:8px;">辞書Snapshotに未登録だった語を、由来（JSON A/B・行・項目）つきで一覧します。人が後で確認するための候補一覧であり、辞書への登録・承認や照合結果の変更は行いません。</div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-bottom:8px;">
+          <div><label style="font-size:12px; color:var(--muted); font-weight:600;">語・行ID・項目（部分一致）</label><input type="text" id="unknownTermQueueFilterText" placeholder="例: motor" style="margin-top:4px;" /></div>
+          <div><label style="font-size:12px; color:var(--muted); font-weight:600;">側</label><select id="unknownTermQueueFilterSide" style="margin-top:4px;"><option value="">すべて</option><option value="JSON A">JSON A</option><option value="JSON B">JSON B</option></select></div>
+          <div><label style="font-size:12px; color:var(--muted); font-weight:600;">由来項目 (source field)</label><select id="unknownTermQueueFilterField" style="margin-top:4px;"><option value="">すべて</option></select></div>
+        </div>
+        <div id="unknownTermQueueSummary" class="field-hint" role="status"></div>
+        <div id="unknownTermQueueList"></div>
+      </div>
+    </details>
+
     <!-- フィルタパネル -->
     <details id="detailFilterPanel" style="margin-bottom:12px;">
       <summary style="cursor:pointer; font-weight:700; padding:8px 12px; background:#f1f5f9; border-radius:8px; border:1px solid #e2e8f0; user-select:none;">
@@ -2333,6 +2350,7 @@
         await yieldToUi(0);
         assertMatchingNotCancelled(job);
         renderDetailTableFull();
+        renderUnknownTermReviewQueuePanel();
         renderDirty.detail = false;
       }
 
@@ -4852,6 +4870,182 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     project: (row) => projectApprovedDictionaryResolutionProvenance(row),
     compactSummary: (row) => approvedDictProvenanceCompactSummary(projectApprovedDictionaryResolutionProvenance(row)),
     buildProvenanceSheetRows: (sysList, plmList) => buildApprovedDictResolutionProvenanceSheetRows(sysList, plmList)
+  });
+
+  /* ════════════════════════════════════════════════════════════════════
+     UNKNOWN_TERM Review Queue (design doc S11: unknown candidates are collected
+     in session memory and kept as an artifact SEPARATE from the comparison
+     result; persistence / maintenance workflow is a FUTURE SLICE, so this is a
+     DERIVED view only - nothing is stored, nothing is written to a dictionary).
+     Pure projection over the SAME single interpretation point as Detail/Graph/
+     Excel (projectApprovedDictionaryResolutionProvenance, which already carries
+     source_field): never re-runs the Resolver, never touches matching/score/
+     review state, never decides what is UNKNOWN_TERM (that is the Resolver's
+     annotation resolution_type, read as-is).
+     Item identity (no randomness, no hash): [side, row_id, source_field,
+     original_term, occurrence_index], occurrence_index = 0-based ordinal among
+     identical tuples in scan order. Same string from different rows/fields is
+     NEVER merged at item level; groups only aggregate for display.
+     Ordering: groups by occurrence_count desc then original_term (UTF-16 code
+     unit order); items inside a group in scan order (JSON A rows, then JSON B
+     rows; row position; annotation position).
+     ════════════════════════════════════════════════════════════════════ */
+
+  const UNKNOWN_TERM_QUEUE_STATE_UNRESOLVED = 'unresolved';
+  function unknownTermQueueCompare(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
+
+  function groupAndOrderUnknownTermOccurrences(occurrences) {
+    const byTerm = new Map();
+    occurrences.forEach(o => {
+      if (!byTerm.has(o.original_term)) byTerm.set(o.original_term, []);
+      byTerm.get(o.original_term).push(o);
+    });
+    const groups = [...byTerm.entries()].map(([term, list]) => {
+      const items = list.slice().sort((x, y) => x.source_order - y.source_order);
+      return {
+        original_term: term,
+        occurrence_count: items.length,
+        source_fields: Object.freeze([...new Set(items.map(i => i.source_field))].sort(unknownTermQueueCompare)),
+        items
+      };
+    }).sort((a, b) => (b.occurrence_count - a.occurrence_count) || unknownTermQueueCompare(a.original_term, b.original_term));
+    return groups;
+  }
+
+  function buildUnknownTermReviewQueue(sysList, plmList) {
+    const raw = [];
+    const counts = { rowsScanned: 0, rowsWithResolution: 0, malformedRows: 0 };
+    const seenTuple = new Map();
+    let sourceOrder = 0;
+    const scanSide = (rows, side, idFn) => {
+      (rows || []).forEach((row, idx) => {
+        if (!row || typeof row !== 'object') return;
+        counts.rowsScanned++;
+        const projection = projectApprovedDictionaryResolutionProvenance(row);
+        if (projection.malformed) { counts.malformedRows++; return; }
+        if (!projection.available) return;
+        counts.rowsWithResolution++;
+        const rowId = idFn(row, idx);
+        const traceId = normalizeText(row?.trace_id) || '';
+        const binding = projection.snapshotBinding || {};
+        projection.annotations.forEach((a, annotationIndex) => {
+          if (a.resolution_type !== 'UNKNOWN_TERM') return;
+          const tupleKey = JSON.stringify([side, rowId, a.source_field, a.original_term]);
+          const occurrenceIndex = seenTuple.get(tupleKey) || 0;
+          seenTuple.set(tupleKey, occurrenceIndex + 1);
+          sourceOrder++;
+          raw.push({
+            occurrence_id: JSON.stringify([side, rowId, a.source_field, a.original_term, occurrenceIndex]),
+            side, row_id: rowId, trace_id: traceId,
+            source_field: a.source_field, original_term: a.original_term,
+            occurrence_index: occurrenceIndex, annotation_index: annotationIndex,
+            review_state: UNKNOWN_TERM_QUEUE_STATE_UNRESOLVED,
+            snapshot_id: binding.snapshot_id ?? '', snapshot_version: binding.snapshot_version ?? '',
+            dictionary_id: binding.dictionary_id ?? '', dictionary_version: binding.dictionary_version ?? '',
+            scope: binding.scope ?? '',
+            source_order: sourceOrder
+          });
+        });
+      });
+    };
+    scanSide(sysList, 'JSON A', (row, idx) => sysRowId(row, idx));
+    scanSide(plmList, 'JSON B', (row, idx) => plmUniqueKey(row, idx));
+    return finalizeUnknownTermReviewQueue(raw, counts);
+  }
+
+  // keepPositions: a filtered VIEW keeps each item's queue_position from the full queue (stable reference).
+  function finalizeUnknownTermReviewQueue(occurrences, counts, keepPositions = false) {
+    let position = 0;
+    const groups = groupAndOrderUnknownTermOccurrences(occurrences).map(g => Object.freeze({
+      original_term: g.original_term, occurrence_count: g.occurrence_count, source_fields: g.source_fields,
+      items: Object.freeze(g.items.map(i => Object.freeze({ ...i, queue_position: keepPositions ? i.queue_position : ++position })))
+    }));
+    return Object.freeze({
+      kind: 'UNKNOWN_TERM_REVIEW_QUEUE_DERIVED',
+      counts: Object.freeze({ ...counts, occurrenceCount: groups.reduce((n, g) => n + g.occurrence_count, 0), distinctTermCount: groups.length }),
+      items: Object.freeze(groups.flatMap(g => g.items)),
+      groups: Object.freeze(groups)
+    });
+  }
+
+  // Filter = restrict OCCURRENCES, then regroup (counts shown are the filtered counts).
+  function filterUnknownTermReviewQueue(queue, filter) {
+    const f = filter || {};
+    const text = String(f.text || '').trim().toLowerCase();
+    const kept = queue.items.filter(i =>
+      (!f.side || i.side === f.side) &&
+      (!f.sourceField || i.source_field === f.sourceField) &&
+      (!text || [i.original_term, i.row_id, i.trace_id, i.source_field].some(v => String(v).toLowerCase().includes(text))));
+    return finalizeUnknownTermReviewQueue(kept, queue.counts, true);
+  }
+
+  function buildUnknownTermReviewQueueSheetRows(sysList, plmList) {
+    const q = buildUnknownTermReviewQueue(sysList, plmList);
+    const countByTerm = new Map(q.groups.map(g => [g.original_term, g.occurrence_count]));
+    return q.items.map(i => ({
+      'queue_position': i.queue_position,
+      'side': i.side,
+      'row_id': i.row_id,
+      'trace_id': i.trace_id,
+      'source_field': i.source_field,
+      'original_term': i.original_term,
+      'occurrence_index': i.occurrence_index,
+      'term_occurrence_count': countByTerm.get(i.original_term),
+      'review_state': i.review_state,
+      'snapshot_id': i.snapshot_id,
+      'snapshot_version': i.snapshot_version,
+      'dictionary_id': i.dictionary_id,
+      'dictionary_version': i.dictionary_version,
+      'scope': i.scope
+    }));
+  }
+
+  const UNKNOWN_TERM_QUEUE_RENDER_GROUP_LIMIT = 200;
+  let unknownTermQueueCurrent = null;
+  function renderUnknownTermReviewQueuePanel(rebuild = true) {
+    const listEl = $('unknownTermQueueList');
+    if (!listEl) return;
+    if (rebuild || !unknownTermQueueCurrent) {
+      unknownTermQueueCurrent = buildUnknownTermReviewQueue(mergedResult?.sysList || [], mergedResult?.plmList || []);
+      const fieldSel = $('unknownTermQueueFilterField');
+      if (fieldSel) {
+        const prev = fieldSel.value;
+        const fields = [...new Set(unknownTermQueueCurrent.items.map(i => i.source_field))].sort(unknownTermQueueCompare);
+        fieldSel.innerHTML = '<option value="">すべて</option>' + fields.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f || '(不明)')}</option>`).join('');
+        if (fields.includes(prev)) fieldSel.value = prev;
+      }
+    }
+    const q = unknownTermQueueCurrent;
+    const view = filterUnknownTermReviewQueue(q, {
+      text: $('unknownTermQueueFilterText')?.value, side: $('unknownTermQueueFilterSide')?.value, sourceField: $('unknownTermQueueFilterField')?.value
+    });
+    const badge = $('unknownTermQueueBadge');
+    if (badge) { badge.textContent = `${q.counts.occurrenceCount}件`; badge.style.display = q.counts.occurrenceCount ? 'inline' : 'none'; }
+    const summary = $('unknownTermQueueSummary');
+    if (summary) {
+      let msg;
+      if (q.counts.rowsWithResolution === 0 && q.counts.malformedRows === 0) msg = '辞書Snapshotによる解決結果がありません（辞書未適用、または適用前の照合結果です）。';
+      else if (q.counts.occurrenceCount === 0) msg = `未登録語はありません（辞書解決済みの行 ${q.counts.rowsWithResolution} 件）。`;
+      else msg = `未登録語 ${q.counts.distinctTermCount} 種 / 出現 ${q.counts.occurrenceCount} 件（表示: ${view.groups.length} 種 / ${view.items.length} 件）。状態はすべて 未確認 (unresolved) です。`;
+      if (q.counts.malformedRows) msg += ` 辞書照合情報を表示できない行が ${q.counts.malformedRows} 件あります。`;
+      summary.textContent = msg;
+    }
+    const shown = view.groups.slice(0, UNKNOWN_TERM_QUEUE_RENDER_GROUP_LIMIT);
+    listEl.innerHTML = shown.map(g => `<details class="unknown-term-group" data-term="${escapeHtml(g.original_term)}" style="margin:4px 0; border:1px solid #e2e8f0; border-radius:6px; background:#fff;">
+      <summary style="cursor:pointer; padding:6px 10px;"><strong>${escapeHtml(g.original_term)}</strong> — ${g.occurrence_count} 件（由来項目: ${escapeHtml(g.source_fields.map(f => f || '(不明)').join(', '))}）</summary>
+      <table style="width:100%; font-size:12px; border-collapse:collapse;"><thead><tr><th>#</th><th>側</th><th>行ID</th><th>trace_id</th><th>由来項目</th><th>Snapshot</th><th>scope</th><th>状態</th></tr></thead><tbody>${g.items.map(i => `<tr class="unknown-term-occurrence"><td>${i.queue_position}</td><td>${escapeHtml(i.side)}</td><td>${escapeHtml(i.row_id)}</td><td>${escapeHtml(i.trace_id)}</td><td>${escapeHtml(i.source_field || '(不明)')}</td><td>${escapeHtml(i.snapshot_id)} v${escapeHtml(i.snapshot_version)}</td><td>${escapeHtml(i.scope)}</td><td>未確認 (${UNKNOWN_TERM_QUEUE_STATE_UNRESOLVED})</td></tr>`).join('')}</tbody></table>
+    </details>`).join('') + (view.groups.length > shown.length ? `<div class="field-hint">他 ${view.groups.length - shown.length} 種は絞り込みまたはExcel出力（辞書未登録語シート）で確認できます。</div>` : '');
+  }
+  ['unknownTermQueueFilterText', 'unknownTermQueueFilterSide', 'unknownTermQueueFilterField'].forEach(id => {
+    const el = $(id);
+    if (el) el.addEventListener(id === 'unknownTermQueueFilterText' ? 'input' : 'change', () => renderUnknownTermReviewQueuePanel(false));
+  });
+
+  globalThis.__unknownTermQueueDiagnostics = Object.freeze({
+    build: (sysList, plmList) => buildUnknownTermReviewQueue(sysList, plmList),
+    filter: (queue, filter) => filterUnknownTermReviewQueue(queue, filter),
+    sheetRows: (sysList, plmList) => buildUnknownTermReviewQueueSheetRows(sysList, plmList),
+    render: (rebuild) => renderUnknownTermReviewQueuePanel(rebuild)
   });
 
   // ---- §13 whole-value term extraction. Source-of-truth field boundary is
@@ -14180,6 +14374,9 @@ ${h.name}`, type:'requirement', detail:srcA };
       // comparisons a row participates in.
       const provenanceRows = buildApprovedDictResolutionProvenanceSheetRows(mergedResult.sysList||[], mergedResult.plmList||[]);
       if (provenanceRows.length) addJsonSheet(wb,'辞書照合根拠',provenanceRows);
+      // UNKNOWN_TERM Review Queue: dedicated sheet (derived from the same sidecars; the 辞書照合根拠 sheet above is unchanged).
+      const unknownTermQueueRows = buildUnknownTermReviewQueueSheetRows(mergedResult.sysList||[], mergedResult.plmList||[]);
+      if (unknownTermQueueRows.length) addJsonSheet(wb,'辞書未登録語',unknownTermQueueRows);
       await appendTwoDimensionalMatrixSheet(wb,currentSettings(),job);
       await writeWorkbook(wb,`${safeFileName(graphNameOrDefault())}_照合結果一覧_${linkBasis==='plm'?'JSON B基準':'JSON A基準'}_V12_1_15.xlsx`,job);
       finishMatchingJob(job,'Excel保存完了'); statusEl.textContent='照合結果一覧と２元マトリクスをExcelへ保存しました。';
