@@ -16105,6 +16105,10 @@ ${h.name}`, type:'requirement', detail:srcA };
   async function b4bReviewedExportRefreshUi(keepStatusText) {
     if (!b4bJsonBtn || !b4bExcelBtn || !b4bStatusEl || b4bRefreshInFlight) return;
     b4bRefreshInFlight = true;
+    // 待機中(下のactiveMatchingJob待ち)にexportハンドラが最終結果メッセージ(保存完了/中止/失敗)を
+    // 書き込むことがある。待機を始めた時点の表示と変わっていれば、それはハンドラ自身の最終結果であり、
+    // 古い待機の末尾でidle文言に上書きしてはならない(ボタンのdisabled更新だけ行う)。
+    const statusAtStart = b4bStatusEl.textContent;
     try {
       const deadline = Date.now() + 2000;
       while (activeMatchingJob !== null && Date.now() < deadline) {
@@ -16117,7 +16121,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       const ready = TraceComparisonReviewRuntime.peekReviewedExportReady();
       b4bJsonBtn.disabled = !ready;
       b4bExcelBtn.disabled = !ready;
-      if (keepStatusText) return;
+      if (keepStatusText || b4bStatusEl.textContent !== statusAtStart) return;
       b4bStatusEl.textContent = ready
         ? '保存できます。'
         : 'レビューを開始すると保存できます。';
