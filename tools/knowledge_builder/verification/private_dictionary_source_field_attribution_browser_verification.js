@@ -109,8 +109,9 @@ async function main() {
   assert(wb.SheetNames.includes('辞書照合根拠'), `Excel: real workbook contains the provenance sheet (sheets: ${wb.SheetNames.join(', ')})`);
   if (wb.Sheets['辞書照合根拠']) {
     const aoa = XLSX.utils.sheet_to_json(wb.Sheets['辞書照合根拠'], { header: 1 });
-    assert(aoa[0].join() === 'side,row_id,trace_id,original_term,resolution_type,resolved_canonical,snapshot_id,snapshot_version,dictionary_id,dictionary_version,scope,source_field', 'Excel: header = 11 existing columns in original positions + source_field last');
+    assert(aoa[0].slice(0, 12).join() === 'side,row_id,trace_id,original_term,resolution_type,resolved_canonical,snapshot_id,snapshot_version,dictionary_id,dictionary_version,scope,source_field' && aoa[0].length === 13 && aoa[0][12] === 'source_origin', 'Excel: header = 11 existing columns in original positions + source_field (column 12) + (0.3) source_origin appended last (column 13)');
     const objs = XLSX.utils.sheet_to_json(wb.Sheets['辞書照合根拠']);
+    assert(objs.length > 0 && objs.every(o => o.source_origin === 'top_level'), 'Excel: (0.3) every top-level provenance row has source_origin === "top_level"');
     const req1 = objs.filter(o => o.side === 'JSON A' && o.trace_id === 'REQ-1').map(o => [o.original_term, o.source_field]);
     assert(JSON.stringify(req1) === JSON.stringify([['Browser Requirement One', 'trace_title'], ['Browser Golden Compressor', 'desc'], ['Browser Golden Alias', 'category']]), `Excel: REQ-1 source row + source field + original term (${JSON.stringify(req1)})`);
     const req2 = objs.filter(o => o.side === 'JSON A' && o.trace_id === 'REQ-2').map(o => [o.original_term, o.resolution_type.split(' ')[0], o.source_field]);

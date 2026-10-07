@@ -4103,6 +4103,62 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     });
   }
 
+  /* Contract 0.3 (private_dictionary_matching_integration_contract_0.3.md, S3.1): session-scoped host API for the
+     explicit nested dictionary projection allowlist. Session-local, in-memory only (no config/profile/localStorage/
+     UI/persistence, no column discovery), empty by default (= nested projection disabled). Independent of the
+     Snapshot (set/clear of a Snapshot never touches it). Fail-closed: any invalid item rejects the WHOLE list and
+     keeps the previous allowlist. The stored value is a frozen defensive copy; array order = extraction order. */
+  const APPROVED_DICT_NESTED_ORIGINS = Object.freeze(['source_record', 'table_row']);
+  const APPROVED_DICT_SOURCE_ORIGINS = Object.freeze(['top_level', 'source_record', 'table_row']);
+  const APPROVED_DICT_NESTED_ALLOWLIST_INVALID = 'APPROVED_DICT_NESTED_ALLOWLIST_INVALID';
+  let approvedDictNestedAllowlist = Object.freeze([]);
+
+  function captureNestedDictionaryProjectionAllowlist(items) {
+    if (!Array.isArray(items)) return null;
+    const out = [];
+    const seen = new Set();
+    try {
+      const length = items.length;
+      for (let i = 0; i < length; i++) {
+        const item = items[i];
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+        // plain object (also across realms): the prototype is null or a root prototype (class instances are rejected)
+        const proto = Object.getPrototypeOf(item);
+        if (proto !== null && Object.getPrototypeOf(proto) !== null) return null;
+        const keys = Object.keys(item);
+        if (keys.length !== 2 || !keys.includes('origin') || !keys.includes('field')) return null;
+        const origin = item.origin;
+        const field = item.field;
+        if (typeof origin !== 'string' || !APPROVED_DICT_NESTED_ORIGINS.includes(origin)) return null;
+        if (typeof field !== 'string' || !field.trim()) return null;
+        const identity = JSON.stringify([origin, field]);
+        if (seen.has(identity)) return null;
+        seen.add(identity);
+        out.push(Object.freeze({ origin, field }));
+      }
+    } catch (_err) {
+      return null;
+    }
+    return Object.freeze(out);
+  }
+
+  function setNestedDictionaryProjectionAllowlistForMatching(items) {
+    const captured = captureNestedDictionaryProjectionAllowlist(items);
+    if (!captured) {
+      const e = new Error('nested dictionary projection allowlist rejected');
+      e.code = APPROVED_DICT_NESTED_ALLOWLIST_INVALID;
+      throw e;
+    }
+    if (JSON.stringify(captured) !== JSON.stringify(approvedDictNestedAllowlist)) {
+      approvedDictNestedAllowlist = captured;
+      // Same staleness handling as a Snapshot change: an existing result was built with another allowlist.
+      markTraceTagsDirty('辞書照合のnested列選択が変更されました');
+      tagIndexCache = null;
+      if (mergedResult?.sysList && mergedResult?.plmList) markTraceMatrixStale('辞書照合のnested列選択が変更されました。再照合してください。');
+    }
+    return approvedDictNestedAllowlist;
+  }
+
   /* P2-A4 Checkpoint 10 (§S26): Project Snapshot Pin -> matching session
      explicit runtime binding gate. NEVER a Snapshot selector search - both
      `project_pin` and `snapshot_wrapper` must be supplied explicitly by the
@@ -4269,7 +4325,8 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       setSnapshot: setApprovedDictionarySnapshotForMatching,
       setProjectPin: setApprovedDictionaryProjectPinForMatching,
       clearSnapshot: clearApprovedDictionarySnapshotForMatching,
-      getStatus: approvedDictionaryMatchingStatus
+      getStatus: approvedDictionaryMatchingStatus,
+      setNestedDictionaryProjectionAllowlist: setNestedDictionaryProjectionAllowlistForMatching
     });
   }
 
@@ -4765,6 +4822,13 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       if (rawSourceFields !== undefined) {
         if (!Array.isArray(rawSourceFields) || rawSourceFields.length !== rawAnnotations.length) return APPROVED_DICT_PROVENANCE_MALFORMED;
       }
+      // Contract 0.3: optional parallel annotation_source_origins[]. Absent -> every annotation is 'top_level'
+      // (a sidecar without it predates nested projection or has no nested annotation); present -> same atomic rule:
+      // array, same length as annotations, each value one of top_level / source_record / table_row.
+      const rawSourceOrigins = safeReadApprovedDictSidecarField(sidecar, 'annotation_source_origins');
+      if (rawSourceOrigins !== undefined) {
+        if (!Array.isArray(rawSourceOrigins) || rawSourceOrigins.length !== rawAnnotations.length) return APPROVED_DICT_PROVENANCE_MALFORMED;
+      }
       const annotations = [];
       const counts = { annotationCount: 0, exactCount: 0, aliasCount: 0, unknownCount: 0, conflictCount: 0 };
       for (let i = 0; i < rawAnnotations.length; i++) {
@@ -4783,6 +4847,14 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
           if (typeof sourceField !== 'string' || !sourceField) return APPROVED_DICT_PROVENANCE_MALFORMED;
         }
         item.source_field = sourceField;
+        let sourceOrigin = 'top_level';
+        if (rawSourceOrigins !== undefined) {
+          sourceOrigin = safeReadApprovedDictSidecarField(rawSourceOrigins, i);
+          if (typeof sourceOrigin !== 'string' || !APPROVED_DICT_SOURCE_ORIGINS.includes(sourceOrigin)) return APPROVED_DICT_PROVENANCE_MALFORMED;
+          // nested origin without a field name cannot be a valid attribution
+          if (sourceOrigin !== 'top_level' && !sourceField) return APPROVED_DICT_PROVENANCE_MALFORMED;
+        }
+        item.source_origin = sourceOrigin;
         annotations.push(Object.freeze(item));
         counts.annotationCount++;
         if (item.resolution_type === 'EXACT_CANONICAL') counts.exactCount++;
@@ -4856,7 +4928,8 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
             'dictionary_id': binding.dictionary_id ?? '',
             'dictionary_version': binding.dictionary_version ?? '',
             'scope': binding.scope ?? '',
-            'source_field': a.source_field ?? ''
+            'source_field': a.source_field ?? '',
+            'source_origin': a.source_origin ?? 'top_level'
           });
         });
       });
@@ -4930,13 +5003,18 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         const binding = projection.snapshotBinding || {};
         projection.annotations.forEach((a, annotationIndex) => {
           if (a.resolution_type !== 'UNKNOWN_TERM') return;
-          const tupleKey = JSON.stringify([side, rowId, a.source_field, a.original_term]);
+          // Contract 0.3 S8: identity = origin + field (+ term + ordinal). A top_level occurrence keeps the pre-0.3
+          // id format exactly; a nested occurrence appends its origin, so same term/field in another origin never collides.
+          const tupleKey = JSON.stringify([side, rowId, a.source_origin, a.source_field, a.original_term]);
           const occurrenceIndex = seenTuple.get(tupleKey) || 0;
           seenTuple.set(tupleKey, occurrenceIndex + 1);
           sourceOrder++;
+          const idParts = [side, rowId, a.source_field, a.original_term, occurrenceIndex];
+          if (a.source_origin !== 'top_level') idParts.push(a.source_origin);
           raw.push({
-            occurrence_id: JSON.stringify([side, rowId, a.source_field, a.original_term, occurrenceIndex]),
+            occurrence_id: JSON.stringify(idParts),
             side, row_id: rowId, trace_id: traceId,
+            source_origin: a.source_origin,
             source_field: a.source_field, original_term: a.original_term,
             occurrence_index: occurrenceIndex, annotation_index: annotationIndex,
             review_state: UNKNOWN_TERM_QUEUE_STATE_UNRESOLVED,
@@ -4996,8 +5074,25 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       'snapshot_version': i.snapshot_version,
       'dictionary_id': i.dictionary_id,
       'dictionary_version': i.dictionary_version,
-      'scope': i.scope
+      'scope': i.scope,
+      'source_origin': i.source_origin
     }));
+  }
+
+  // Contract 0.3 S9: display label of a queue source. top_level keeps the bare field name (pre-0.3 display);
+  // a nested source shows its origin as well so same-named columns of different origins stay distinguishable.
+  function unknownTermQueueSourceLabel(item) {
+    const field = item.source_field || '(不明)';
+    return item.source_origin && item.source_origin !== 'top_level' ? `${item.source_origin} / ${field}` : field;
+  }
+
+  // Unique (field, origin) pairs of a group, ordered by field (UTF-16 code unit order) then origin.
+  function unknownTermQueueGroupSourceLabels(group) {
+    const pairs = new Map();
+    group.items.forEach(i => pairs.set(JSON.stringify([i.source_field, i.source_origin]), i));
+    return [...pairs.values()]
+      .sort((x, y) => unknownTermQueueCompare(x.source_field, y.source_field) || unknownTermQueueCompare(x.source_origin, y.source_origin))
+      .map(unknownTermQueueSourceLabel);
   }
 
   const UNKNOWN_TERM_QUEUE_RENDER_GROUP_LIMIT = 200;
@@ -5032,8 +5127,8 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     }
     const shown = view.groups.slice(0, UNKNOWN_TERM_QUEUE_RENDER_GROUP_LIMIT);
     listEl.innerHTML = shown.map(g => `<details class="unknown-term-group" data-term="${escapeHtml(g.original_term)}" style="margin:4px 0; border:1px solid #e2e8f0; border-radius:6px; background:#fff;">
-      <summary style="cursor:pointer; padding:6px 10px;"><strong>${escapeHtml(g.original_term)}</strong> — ${g.occurrence_count} 件（由来項目: ${escapeHtml(g.source_fields.map(f => f || '(不明)').join(', '))}）</summary>
-      <table style="width:100%; font-size:12px; border-collapse:collapse;"><thead><tr><th>#</th><th>側</th><th>行ID</th><th>trace_id</th><th>由来項目</th><th>Snapshot</th><th>scope</th><th>状態</th></tr></thead><tbody>${g.items.map(i => `<tr class="unknown-term-occurrence"><td>${i.queue_position}</td><td>${escapeHtml(i.side)}</td><td>${escapeHtml(i.row_id)}</td><td>${escapeHtml(i.trace_id)}</td><td>${escapeHtml(i.source_field || '(不明)')}</td><td>${escapeHtml(i.snapshot_id)} v${escapeHtml(i.snapshot_version)}</td><td>${escapeHtml(i.scope)}</td><td>未確認 (${UNKNOWN_TERM_QUEUE_STATE_UNRESOLVED})</td></tr>`).join('')}</tbody></table>
+      <summary style="cursor:pointer; padding:6px 10px;"><strong>${escapeHtml(g.original_term)}</strong> — ${g.occurrence_count} 件（由来項目: ${escapeHtml(unknownTermQueueGroupSourceLabels(g).join(', '))}）</summary>
+      <table style="width:100%; font-size:12px; border-collapse:collapse;"><thead><tr><th>#</th><th>側</th><th>行ID</th><th>trace_id</th><th>由来項目</th><th>Snapshot</th><th>scope</th><th>状態</th></tr></thead><tbody>${g.items.map(i => `<tr class="unknown-term-occurrence"><td>${i.queue_position}</td><td>${escapeHtml(i.side)}</td><td>${escapeHtml(i.row_id)}</td><td>${escapeHtml(i.trace_id)}</td><td>${escapeHtml(unknownTermQueueSourceLabel(i))}</td><td>${escapeHtml(i.snapshot_id)} v${escapeHtml(i.snapshot_version)}</td><td>${escapeHtml(i.scope)}</td><td>未確認 (${UNKNOWN_TERM_QUEUE_STATE_UNRESOLVED})</td></tr>`).join('')}</tbody></table>
     </details>`).join('') + (view.groups.length > shown.length ? `<div class="field-hint">他 ${view.groups.length - shown.length} 種は絞り込みまたはExcel出力（辞書未登録語シート）で確認できます。</div>` : '');
   }
   ['unknownTermQueueFilterText', 'unknownTermQueueFilterSide', 'unknownTermQueueFilterField'].forEach(id => {
@@ -5050,25 +5145,32 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
 
   // ---- §13 whole-value term extraction. Source-of-truth field boundary is
   // exactly tagSourceFields(schemaName) - never availableJsonKeys()/全field/
-  // hidden field. No delimiter split, no truncation (overlength values are
-  // skipped, never cut to fit, so whole-value exact semantics are never
-  // silently broken). ----
+  // hidden field - plus, since contract 0.3, the explicit session allowlist of
+  // nested source_record / table_row columns (host API; never auto-discovered).
+  // No delimiter split here (contract 0.2 splits later, only for UNKNOWN_TERM),
+  // no truncation (overlength values are skipped, never cut to fit, so
+  // whole-value exact semantics are never silently broken). ----
 
-  function approvedDictionaryTermsForRow(row, schemaName) {
+  function approvedDictionaryTermsForRow(row, schemaName, nestedAllowlist = approvedDictNestedAllowlist) {
     const terms = [];
     // Source field attribution: sourceFields[i] is the tagSourceFields() key
     // (stable row field identity, never a display label) the i-th term was
     // extracted from. Strictly parallel to `terms` (same length/order); the
     // term list itself is unchanged, so resolution/dedup semantics are too.
     const sourceFields = [];
+    // Contract 0.3: sourceOrigins[i] is 'top_level' (tagSourceFields()) or the nested container
+    // ('source_record' / 'table_row') of the i-th term; parallel to `terms` like sourceFields.
+    const sourceOrigins = [];
     let skipped = 0;
     let currentField = '';
+    let currentOrigin = 'top_level';
     const considerScalar = value => {
       if (value == null || typeof value === 'object') return;
       const term = String(value);
       if (!term.trim() || term.length > APPROVED_DICT_MAX_TERM_LENGTH) { skipped++; return; }
       terms.push(term);
       sourceFields.push(currentField);
+      sourceOrigins.push(currentOrigin);
     };
     tagSourceFields(schemaName).forEach(field => {
       const value = row?.[field];
@@ -5086,7 +5188,25 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       // object (non-array) field values are entirely out of scope - never
       // JSON.stringify()'d into a term.
     });
-    return { terms, sourceFields, skipped };
+    // Contract 0.3: explicit nested projection. AFTER every top-level term, in allowlist order; one level only
+    // (own property of row.source_record / row.table_row); string and finite number only. A missing
+    // container/field is skipped silently; any other unsupported non-null value is skipped (counted).
+    nestedAllowlist.forEach(({ origin, field }) => {
+      let value;
+      try {
+        const container = row?.[origin];
+        if (!container || typeof container !== 'object' || Array.isArray(container)) return;
+        if (!Object.prototype.hasOwnProperty.call(container, field)) return;
+        value = container[field];
+      } catch (_err) { return; }
+      if (value == null) return;
+      currentField = field;
+      currentOrigin = origin;
+      if (typeof value === 'string') considerScalar(value);
+      else if (typeof value === 'number' && Number.isFinite(value)) considerScalar(String(value));
+      else skipped++;
+    });
+    return { terms, sourceFields, sourceOrigins, skipped };
   }
 
   // Contract 0.2 (private_dictionary_matching_integration_contract_0.2.md): whole-value first, UNKNOWN_TERM
@@ -5113,7 +5233,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       const tokens = approvedDictionaryFallbackTokens(entry.term);
       if (!tokens) return;
       candidates.push({ entryIndex, start: tokenEntries.length, count: tokens.length });
-      tokens.forEach(token => tokenEntries.push({ side: entry.side, rowIndex: entry.rowIndex, term: token, sourceField: entry.sourceField }));
+      tokens.forEach(token => tokenEntries.push({ side: entry.side, rowIndex: entry.rowIndex, term: token, sourceField: entry.sourceField, sourceOrigin: entry.sourceOrigin }));
     });
     const adopted = new Map();
     if (!tokenEntries.length) return adopted;
@@ -5235,16 +5355,18 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     }
 
     const revisionAtStart = approvedDictionaryRuntime.revision;
+    // Contract 0.3: one run uses the nested allowlist captured here (a change mid-run discards the run below).
+    const nestedAllowlistAtStart = approvedDictNestedAllowlist;
     const rowsBySide = { sys: sysRows || [], plm: plmRows || [] };
     const termEntries = [];
     const rowTermIndices = new Map(); // "side:rowIndex" -> indices into termEntries
     Object.entries(rowsBySide).forEach(([side, rows]) => {
       rows.forEach((row, rowIndex) => {
         if (!row || typeof row !== 'object') return;
-        const { terms, sourceFields, skipped } = approvedDictionaryTermsForRow(row, side);
+        const { terms, sourceFields, sourceOrigins, skipped } = approvedDictionaryTermsForRow(row, side, nestedAllowlistAtStart);
         resultStats.skippedValues += skipped;
         if (!terms.length) return;
-        const indices = terms.map((term, i) => { termEntries.push({ side, rowIndex, term, sourceField: sourceFields[i] }); return termEntries.length - 1; });
+        const indices = terms.map((term, i) => { termEntries.push({ side, rowIndex, term, sourceField: sourceFields[i], sourceOrigin: sourceOrigins[i] }); return termEntries.length - 1; });
         rowTermIndices.set(`${side}:${rowIndex}`, indices);
       });
     });
@@ -5298,13 +5420,17 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       const rawCodes = extractCodesFromText(tagSourceText(row, side));
       const nextTags = composeFinalTags(nextInfo);
       const nextDisplayMap = buildTagDisplayMap(row, nextInfo, row._tagDisplayMap, rawCodes, side, approvedDisplays);
+      // Contract 0.3: annotation_source_origins[] (parallel to annotations / annotation_source_fields) exists ONLY
+      // when the row has a non-top_level annotation; every other sidecar keeps the exact pre-0.3 shape.
+      const rowOrigins = rowEntries.map(e => e.sourceOrigin);
       const nextSidecar = Object.freeze({
         schema_version: APPROVED_DICT_ROW_SIDECAR_SCHEMA_VERSION,
         snapshot_binding: approvedDictionaryRuntime.snapshotBinding,
         annotations: Object.freeze(rowAnnotations.slice()),
         // Source field attribution (parallel to `annotations`, index-for-index): the
         // Resolver annotation contract itself is unchanged.
-        annotation_source_fields: Object.freeze(rowEntries.map(e => e.sourceField))
+        annotation_source_fields: Object.freeze(rowEntries.map(e => e.sourceField)),
+        ...(rowOrigins.some(o => o !== 'top_level') ? { annotation_source_origins: Object.freeze(rowOrigins) } : {})
       });
       pendingTagged.push({ row, nextInfo, nextTags, nextDisplayMap, nextSidecar });
     });
@@ -5331,7 +5457,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     // §19/§45: discard the entire pending result if the session-local
     // Snapshot pin changed while this (possibly long-running, chunked)
     // resolution was in flight. No partial/mixed-snapshot commit.
-    if (approvedDictionaryRuntime.revision !== revisionAtStart) {
+    if (approvedDictionaryRuntime.revision !== revisionAtStart || approvedDictNestedAllowlist !== nestedAllowlistAtStart) {
       traceTagState.approvedDictWarningCode = 'APPROVED_DICT_SESSION_CHANGED';
       return resultStats;
     }
@@ -11639,7 +11765,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       }
       if (provenance.available && provenance.annotations.length) {
         provenance.annotations.forEach(a => {
-          lines.push(`  ${a.original_term} → ${a.resolved_canonical || '(なし)'} [${approvedDictResolutionTypeLabel(a.resolution_type)}]${a.source_field ? ` 由来項目: ${a.source_field}` : ''}`);
+          lines.push(`  ${a.original_term} → ${a.resolved_canonical || '(なし)'} [${approvedDictResolutionTypeLabel(a.resolution_type)}]${a.source_origin && a.source_origin !== 'top_level' ? ` 由来元: ${a.source_origin}` : ''}${a.source_field ? ` 由来項目: ${a.source_field}` : ''}`);
         });
       }
     }
@@ -13042,7 +13168,9 @@ ${h.name}`, type:'requirement', detail:srcA };
     // Source field attribution: the parallel array is index-aligned with annotations, so it is
     // read BEFORE the resolution_type filter below drops entries.
     const srcFields = sidecar && Array.isArray(sidecar.annotation_source_fields) ? sidecar.annotation_source_fields : [];
-    return anns.map((a, i) => (a && typeof a === 'object' ? { ...a, source_field: typeof srcFields[i] === 'string' ? srcFields[i] : '' } : a))
+    // Contract 0.3: same alignment for the origin (absent array / unknown value -> 'top_level').
+    const srcOrigins = sidecar && Array.isArray(sidecar.annotation_source_origins) ? sidecar.annotation_source_origins : [];
+    return anns.map((a, i) => (a && typeof a === 'object' ? { ...a, source_field: typeof srcFields[i] === 'string' ? srcFields[i] : '', source_origin: APPROVED_DICT_SOURCE_ORIGINS.includes(srcOrigins[i]) ? srcOrigins[i] : 'top_level' } : a))
       .filter(a => a && (a.resolution_type === 'EXACT_CANONICAL' || a.resolution_type === 'APPROVED_ALIAS'));
   }
   function dictionaryContributionForEdge(r) {
@@ -13061,7 +13189,7 @@ ${h.name}`, type:'requirement', detail:srcA };
   function dictionaryContributionLine(r) {
     const c = dictionaryContributionForEdge(r);
     if (c.status === 'none') return c.label;
-    const detail = c.annotations.map(a => `${a.side}: ${a.original_term || ''} → resolution:${a.resolution_type} canonical:${a.resolved_canonical || ''} snapshot:${a.dictionary_snapshot_id || ''}${a.source_field ? ` field:${a.source_field}` : ''}`).join(' / ');
+    const detail = c.annotations.map(a => `${a.side}: ${a.original_term || ''} → resolution:${a.resolution_type} canonical:${a.resolved_canonical || ''} snapshot:${a.dictionary_snapshot_id || ''}${a.source_origin && a.source_origin !== 'top_level' ? ` origin:${a.source_origin}` : ''}${a.source_field ? ` field:${a.source_field}` : ''}`).join(' / ');
     return `${c.label}${detail ? ' (' + detail + ')' : ''}`;
   }
   // Precomputed, PLAIN-DATA per-edge entries for the Detail table's expand rows. renderDetailTableFull()

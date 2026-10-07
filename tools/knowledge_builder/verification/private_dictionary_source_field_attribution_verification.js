@@ -278,15 +278,19 @@ async function main() {
     assert(pe.available === true && pe.annotations.length === 0, 'B5 a processed row with no eligible term still projects (available, 0 annotations) with an empty parallel array');
     const p0 = proj(s, 0);
     assert(Object.isFrozen(run(s, '__approvedDictProvenanceDiagnostics.project(mergedResult.sysList[0]).annotations[0]')), 'B6 projected annotation (incl. source_field) is frozen');
-    assert(p0.annotations.every(a => Object.keys(a).join() === [...contract, 'source_field'].join()), 'B7 projected annotation = the 8 contract fields in unchanged order + source_field');
+    // Contract 0.3: the projection additionally carries source_origin (appended after source_field).
+    assert(p0.annotations.every(a => Object.keys(a).join() === [...contract, 'source_field', 'source_origin'].join()), 'B7 projected annotation = the 8 contract fields in unchanged order + source_field + (0.3) source_origin');
+    assert(p0.annotations.every(a => Object.keys(a).slice(0, 9).join() === [...contract, 'source_field'].join()) && p0.annotations.every(a => a.source_origin === 'top_level'), 'B7b the 8 contract fields and source_field keep their positions; every top-level annotation has source_origin === "top_level" (0.3)');
   }
   {
     const base = JSON.parse(JSON.stringify(run(s, `({ schema_version: mergedResult.sysList[0]._approvedDictResolution.schema_version, snapshot_binding: mergedResult.sysList[0]._approvedDictResolution.snapshot_binding, annotations: mergedResult.sysList[0]._approvedDictResolution.annotations })`)));
     const projWith = (extra) => { s.__row = { _approvedDictResolution: Object.assign({}, base, extra) }; return JSON.parse(JSON.stringify(run(s, '__approvedDictProvenanceDiagnostics.project(globalThis.__row)'))); };
     const absent = projWith({});
     assert(absent.available === true && absent.malformed === false && absent.annotations.length === 4 && absent.annotations.every(a => a.source_field === ''), 'B8 a sidecar WITHOUT the parallel array (older shape) still projects; source_field is the empty string');
+    assert(absent.annotations.every(a => a.source_origin === 'top_level'), 'B8b (0.3) the same legacy sidecar without annotation_source_origins projects source_origin === "top_level" (nested origin is never guessed)');
     const ok = projWith({ annotation_source_fields: ['name', 'desc', 'tags', 'tags'] });
     assert(ok.available === true && ok.annotations.map(a => a.source_field).join('|') === 'name|desc|tags|tags', 'B9 a well-formed parallel array is projected index-for-index');
+    assert(ok.annotations.every(a => a.source_origin === 'top_level'), 'B9b (0.3) a well-formed source-field array without an origins array projects top_level');
     for (const [label, arr] of [['too short', ['name']], ['too long', ['a', 'b', 'c', 'd', 'e']], ['non-string element', ['name', 1, 'tags', 'tags']], ['empty-string element', ['name', '', 'tags', 'tags']], ['null element', ['name', null, 'tags', 'tags']], ['not an array', 'name'], ['null', null]]) {
       const bad = projWith({ annotation_source_fields: arr });
       assert(bad.available === false && bad.malformed === true && bad.annotations.length === 0, `B10 malformed parallel array (${label}) invalidates the whole projection atomically (never a partial attribution)`);
@@ -299,7 +303,8 @@ async function main() {
   {
     const rows = JSON.parse(JSON.stringify(run(s, 'buildApprovedDictResolutionProvenanceSheetRows(mergedResult.sysList, mergedResult.plmList)')));
     const cols = Object.keys(rows[0]);
-    assert(cols.join() === ['side', 'row_id', 'trace_id', 'original_term', 'resolution_type', 'resolved_canonical', 'snapshot_id', 'snapshot_version', 'dictionary_id', 'dictionary_version', 'scope', 'source_field'].join(), 'C1 provenance sheet columns: the 11 existing columns keep their positions; source_field is appended last');
+    assert(cols.slice(0, 12).join() === ['side', 'row_id', 'trace_id', 'original_term', 'resolution_type', 'resolved_canonical', 'snapshot_id', 'snapshot_version', 'dictionary_id', 'dictionary_version', 'scope', 'source_field'].join() && cols.length === 13 && cols[12] === 'source_origin', 'C1 provenance sheet columns: the 11 existing columns keep their positions; source_field stays at column 12; (0.3) source_origin is appended last as column 13');
+    assert(rows.every(r => r.source_origin === 'top_level'), 'C1b (0.3) every top-level provenance row has source_origin === "top_level"');;
     const r1 = rows.filter(r => r.side === 'JSON A' && r.trace_id === 'REQ-1');
     assert(r1.length === 4 && r1.map(r => r.source_field).join('|') === 'name|desc|tags|tags' && r1.map(r => r.original_term).join('|') === 'Foo Assembly|Foo Assembly|FooAlias|Qux Gadget', 'C2 REQ-1 rows: source row + source field + original term are all present and in order');
     assert(r1.every(r => r.snapshot_id === wrapper.snapshot_id && r.scope === 'PROJECT' && r.dictionary_id === wrapper.dictionary_payload.dictionary_id), 'C3 snapshot metadata and scope still projected on every attributed row');

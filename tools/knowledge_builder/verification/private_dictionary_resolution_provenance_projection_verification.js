@@ -614,10 +614,11 @@ async function main() {
   {
     const sheetRows = run(s1, 'buildApprovedDictResolutionProvenanceSheetRows(mergedResult.sysList, mergedResult.plmList)');
     // Source Field Attribution slice: `source_field` is the one approved addition (appended last); the
-    // assertion still forbids any other column.
-    const expectedKeys = ['side','row_id','trace_id','original_term','resolution_type','resolved_canonical','snapshot_id','snapshot_version','dictionary_id','dictionary_version','scope','source_field'];
+    // assertion still forbids any other column. Contract 0.3 (Nested Dictionary Projection) adds `source_origin`
+    // (appended last) as the second approved addition; every OTHER extra column is still forbidden.
+    const expectedKeys = ['side','row_id','trace_id','original_term','resolution_type','resolved_canonical','snapshot_id','snapshot_version','dictionary_id','dictionary_version','scope','source_field','source_origin'];
     const keysOk = sheetRows.every(r => JSON.stringify(Object.keys(r).sort()) === JSON.stringify([...expectedKeys].sort()));
-    assert(keysOk, 'AG/AH every provenance sheet row has exactly the 12 approved columns (11 original + source_field) - no entries[]/effective_vocabulary/review-note field ever added');
+    assert(keysOk, 'AG/AH every provenance sheet row has exactly the 13 approved columns (11 original + source_field + (0.3) source_origin) - no entries[]/effective_vocabulary/review-note field ever added');
     const dump = JSON.stringify(sheetRows);
     assert(!dump.includes('Foo Assembly') && !dump.includes('Bar Assembly'), 'AG/AH decoy dictionary entries never matched by any row (Foo Assembly/Bar Assembly canonical terms) never leak into the export, even though they exist in the same dictionary payload');
   }

@@ -115,10 +115,11 @@ async function main() {
   const wb = XLSX.read(fs.readFileSync(xlsxPath), { type: 'buffer' });
   assert(wb.SheetNames.includes('辞書未登録語') && wb.SheetNames.includes('辞書照合根拠'), `Excel: dedicated 辞書未登録語 sheet added next to the unchanged 辞書照合根拠 sheet (${wb.SheetNames.join(', ')})`);
   const prov = XLSX.utils.sheet_to_json(wb.Sheets['辞書照合根拠'], { header: 1 });
-  assert(prov[0].join() === 'side,row_id,trace_id,original_term,resolution_type,resolved_canonical,snapshot_id,snapshot_version,dictionary_id,dictionary_version,scope,source_field', 'Excel: 辞書照合根拠 header unchanged (12 columns of the accepted slice)');
+  assert(prov[0].slice(0, 12).join() === 'side,row_id,trace_id,original_term,resolution_type,resolved_canonical,snapshot_id,snapshot_version,dictionary_id,dictionary_version,scope,source_field' && prov[0].length === 13 && prov[0][12] === 'source_origin', 'Excel: 辞書照合根拠 header = the 12 columns of the accepted slice unchanged + (0.3) source_origin appended last');
   const uq = XLSX.utils.sheet_to_json(wb.Sheets['辞書未登録語']);
   const uqAoa = XLSX.utils.sheet_to_json(wb.Sheets['辞書未登録語'], { header: 1 });
-  assert(uqAoa[0].join() === 'queue_position,side,row_id,trace_id,source_field,original_term,occurrence_index,term_occurrence_count,review_state,snapshot_id,snapshot_version,dictionary_id,dictionary_version,scope', 'Excel: queue sheet header');
+  assert(uqAoa[0].slice(0, 14).join() === 'queue_position,side,row_id,trace_id,source_field,original_term,occurrence_index,term_occurrence_count,review_state,snapshot_id,snapshot_version,dictionary_id,dictionary_version,scope' && uqAoa[0].length === 15 && uqAoa[0][14] === 'source_origin', 'Excel: queue sheet header = the 14 documented columns unchanged + (0.3) source_origin appended last');
+  assert(uq.every(r => r.source_origin === 'top_level'), 'Excel: (0.3) every top-level queue row has source_origin === "top_level"');
   assert(uq.length === 9 && uq[0].original_term === 'Widget X' && uq[0].queue_position === 1 && uq.every(r => r.review_state === 'unresolved' && r.source_field && r.row_id && r.trace_id), 'Excel: 9 queue rows, queue order, provenance on every row');
   assert(JSON.stringify(uq.slice(0, 4).map(r => [r.side, r.trace_id, r.source_field])) === JSON.stringify([['JSON A', 'REQ-1', 'category'], ['JSON A', 'REQ-2', 'desc'], ['JSON A', 'REQ-2', 'category'], ['JSON B', 'PART-1', 'category']]), 'Excel: the 4 Widget X rows match the panel occurrences exactly');
   const provUnknown = XLSX.utils.sheet_to_json(wb.Sheets['辞書照合根拠']).filter(r => String(r.resolution_type).startsWith('UNKNOWN_TERM'));

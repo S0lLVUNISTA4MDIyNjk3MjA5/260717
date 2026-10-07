@@ -333,7 +333,11 @@ async function main() {
     const missing = names.filter(n => fnSrc(baselineHtml, n) === null || fnSrc(cur, n) === null);
     assert(missing.length === 0, `I1 all ${names.length} matching/scoring/ranking/tag/projection/queue functions located in both versions (missing: ${missing.join(',') || 'none'})`);
     const changed = names.filter(n => fnSrc(baselineHtml, n) !== fnSrc(cur, n));
-    assert(changed.length === 0, `I2 scoring formula, ranking, tag matching, composeFinalTags, term extraction, Resolver-batch, projection and queue code are byte-identical to the baseline (changed: ${changed.join(',') || 'none'})`);
+    // Contract 0.3 (Nested Dictionary Projection) legitimately extends exactly three of these functions (term extraction, projection,
+    // queue builder: nested origin / source_origin). Every OTHER function stays byte-identical, and the change set is pinned exactly.
+    const AUTHORIZED_BY_0_3 = ['approvedDictionaryTermsForRow', 'projectApprovedDictionaryResolutionProvenance', 'buildUnknownTermReviewQueue'];
+    assert(changed.filter(n => !AUTHORIZED_BY_0_3.includes(n)).length === 0, `I2 scoring formula, ranking, tag matching, composeFinalTags, Resolver-batch and every other listed function are byte-identical to the baseline (changed outside the 0.3-authorized set: ${changed.filter(n => !AUTHORIZED_BY_0_3.includes(n)).join(',') || 'none'})`);
+    assert(JSON.stringify(changed) === JSON.stringify(names.filter(n => AUTHORIZED_BY_0_3.includes(n))), `I2b (0.3) the functions changed relative to the 0.1 baseline are exactly the three 0.3-authorized ones: ${AUTHORIZED_BY_0_3.join(', ')} (changed: ${changed.join(',')}); their 0.2 behaviour stays pinned by the behavioural assertions A-H and I3-I9`);
 
     const capture = async (htmlOverride, sys, plm, withDictionary) => {
       const sb = await session(wrapper, sys, plm, { htmlOverride, withDictionary });

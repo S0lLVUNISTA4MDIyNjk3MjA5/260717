@@ -281,8 +281,10 @@ async function main() {
   // ===== D. Excel sheet rows =====
   {
     const rows = J(run(s, '__unknownTermQueueDiagnostics.sheetRows(mergedResult.sysList, mergedResult.plmList)'));
-    const cols = ['queue_position', 'side', 'row_id', 'trace_id', 'source_field', 'original_term', 'occurrence_index', 'term_occurrence_count', 'review_state', 'snapshot_id', 'snapshot_version', 'dictionary_id', 'dictionary_version', 'scope'];
-    assert(rows.length === q.items.length && rows.every(r => Object.keys(r).join() === cols.join()), 'D1 sheet rows: one per item, 14 columns in the documented order');
+    const cols14 = ['queue_position', 'side', 'row_id', 'trace_id', 'source_field', 'original_term', 'occurrence_index', 'term_occurrence_count', 'review_state', 'snapshot_id', 'snapshot_version', 'dictionary_id', 'dictionary_version', 'scope'];
+    const cols = [...cols14, 'source_origin']; // Contract 0.3: source_origin appended as the 15th (last) column
+    assert(rows.length === q.items.length && rows.every(r => Object.keys(r).join() === cols.join()), 'D1 sheet rows: one per item, the 14 documented columns in their original order + (0.3) source_origin appended last (15 columns)');
+    assert(rows.every(r => Object.keys(r).slice(0, 14).join() === cols14.join()) && rows.every((r, i) => r.source_origin === 'top_level' && q.items[i].source_origin === 'top_level'), 'D1b (0.3) the first 14 columns are unchanged; every top-level UNKNOWN_TERM has source_origin === "top_level" in the queue item and in the sheet row');
     assert(rows.every((r, i) => r.queue_position === q.items[i].queue_position && r.original_term === q.items[i].original_term && r.source_field === q.items[i].source_field && r.row_id === q.items[i].row_id && r.trace_id === q.items[i].trace_id && r.side === q.items[i].side), 'D2 sheet rows mirror the queue items (same order, same provenance)');
     assert(rows.filter(r => r.original_term === 'motor').every(r => r.term_occurrence_count === 7) && rows.filter(r => r.original_term === 'pump').every(r => r.term_occurrence_count === 2), 'D3 term_occurrence_count carries the display-group size on every row');
     assert(rows.every(r => r.review_state === 'unresolved'), 'D4 review_state column is unresolved');
@@ -369,10 +371,33 @@ async function main() {
         assert(JSON.stringify(a.matches) === JSON.stringify(b.matches), `F1 (${label}) matched pairs / method / score / keyword / order identical`);
         assert(JSON.stringify(a.trace) === JSON.stringify(b.trace), `F2 (${label}) trace-matrix rows (judgement / review / unmatched state / ranking) identical`);
         assert(JSON.stringify(a.tags) === JSON.stringify(b.tags), `F3 (${label}) tag state identical`);
-        if (sha.startsWith('182fcbde')) assert(JSON.stringify(a.prov) === JSON.stringify(b.prov), `F4 (${label}) existing 辞書照合根拠 rows byte-identical to the committed Source Field Attribution state`);
-        else assert(JSON.stringify(a.prov.map(r => { const { source_field, ...rest } = r; return rest; })) === JSON.stringify(b.prov), `F4 (${label}) existing 辞書照合根拠 rows identical to the original tip except the (already accepted) source_field column`);
+        // Contract 0.3: the ONLY additional attribute of an existing provenance row is source_origin, and it is "top_level" for every top-level row.
+        assert(a.prov.every(r => r.source_origin === 'top_level'), `F4a (${label}) (0.3) every existing top-level 辞書照合根拠 row has source_origin === "top_level"`);
+        if (sha.startsWith('182fcbde')) assert(JSON.stringify(a.prov.map(r => { const { source_origin, ...rest } = r; return rest; })) === JSON.stringify(b.prov), `F4 (${label}) existing 辞書照合根拠 rows byte-identical to the committed Source Field Attribution state except the (0.3) source_origin column`);
+        else assert(JSON.stringify(a.prov.map(r => { const { source_field, source_origin, ...rest } = r; return rest; })) === JSON.stringify(b.prov), `F4 (${label}) existing 辞書照合根拠 rows identical to the original tip except the (already accepted) source_field column and the (0.3) source_origin column`);
       }
     }
+  }
+
+  // ===== G. Contract 0.3: source_origin in the queue (top-level / nested / identity) =====
+  {
+    const nested = async (allowlist, sys) => {
+      const sb = loadMatchingToolSandbox();
+      configureThreeFields(sb);
+      sb.__wrapper = wrapper;
+      await runAsync(sb, 'setApprovedDictionarySnapshotForMatching(globalThis.__wrapper)');
+      sb.__allow = allowlist;
+      run(sb, 'PrivateDictionaryMatchingSession.setNestedDictionaryProjectionAllowlist(globalThis.__allow)');
+      await setMergedResultAndAnnotate(sb, JSON.parse(JSON.stringify(sys)), []);
+      return buildQ(sb);
+    };
+    const top = buildQ(await session(wrapper, [{ trace_id: 'R', name: 'motor', desc: 'pump', tags: [] }], []));
+    assert(top.items.length === 2 && top.items.every(i => i.source_origin === 'top_level' && JSON.parse(i.occurrence_id).length === 5), 'G1 top-level UNKNOWN_TERM items: source_origin === "top_level" and the pre-0.3 five-part occurrence_id');
+    const q3 = await nested([{ origin: 'source_record', field: 'Part' }, { origin: 'table_row', field: 'Part' }], [{ trace_id: 'R', name: 'motor', desc: '', tags: [], source_record: { Part: 'zeta-x' }, table_row: { Part: 'zeta-x' } }]);
+    assert(q3.items.length === 3 && q3.items.map(i => [i.source_origin, i.source_field, i.original_term, i.occurrence_index].join('|')).join() === 'source_record|Part|zeta-x|0,table_row|Part|zeta-x|0,top_level|name|motor|0', 'G2 nested UNKNOWN_TERM items (queue order: count desc, then term) carry the correct nested origin + exact field; same term + same field + different origin = distinct occurrences, each occurrence_index 0');
+    assert(new Set(q3.items.map(i => i.occurrence_id)).size === 3 && q3.groups.find(g => g.original_term === 'zeta-x').occurrence_count === 2, 'G3 occurrence ids are distinct; both nested occurrences still group under the term (existing display grouping)');
+    const dup = await nested([{ origin: 'source_record', field: 'A' }, { origin: 'source_record', field: 'B' }], [{ trace_id: 'R', name: 'Foo Assembly', desc: '', tags: [], source_record: { A: 'same-t', B: 'same-t' } }]);
+    assert(dup.items.length === 2 && dup.items.every(i => i.occurrence_index === 0) && dup.items.map(i => i.source_field).join() === 'A,B', 'G4 same term in two different nested fields of one origin stays two occurrences (field is part of identity)');
   }
 
   console.log(`\n${passed} PASS / ${failed} FAIL / ${incomplete} INCOMPLETE`);
