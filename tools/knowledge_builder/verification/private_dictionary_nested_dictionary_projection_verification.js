@@ -221,7 +221,7 @@ async function main() {
   {
     const sb = loadMatchingToolSandbox();
     const api = run(sb, 'PrivateDictionaryMatchingSession');
-    assert(eq(Object.keys(api).sort(), ['clearSnapshot', 'getStatus', 'setNestedDictionaryProjectionAllowlist', 'setProjectPin', 'setSnapshot']), 'A0 session API = the four existing functions + setNestedDictionaryProjectionAllowlist (no synonym API)');
+    assert(eq(Object.keys(api).sort(), ['clearSnapshot', 'getNestedDictionaryProjectionAllowlist', 'getStatus', 'setNestedDictionaryProjectionAllowlist', 'setProjectPin', 'setSnapshot']), 'A0 session API = the four existing functions + setNestedDictionaryProjectionAllowlist + (Selection UI slice, Human-approved read accessor) getNestedDictionaryProjectionAllowlist (no synonym API)');
     assert(Object.isFrozen(api), 'A0b session object stays frozen');
     const ok = setAllow(sb, [SR('Part Name'), TR('name')]);
     assert(eq(J(ok), [SR('Part Name'), TR('name')]) && eq(curAllow(sb), [SR('Part Name'), TR('name')]), 'A1 valid source_record + table_row items are accepted and stored in the given order');

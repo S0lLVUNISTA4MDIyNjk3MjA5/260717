@@ -117,6 +117,34 @@ nested allowlistはdictionary Resolverへ供給する入力集合を変える。
 - **previous valid allowlistを保持**する。
 - derived state（row sidecar / `_tagInfo` / warning code等）を変更しない。**stale化もしない。**
 
+### S3.4 Selection UI binding / read accessor（Human承認・UI bindingのみ。core semanticsは変更しない）
+
+**Read accessor.** `PrivateDictionaryMatchingSession.getNestedDictionaryProjectionAllowlist()` は、現在sessionに設定されている
+ordered allowlistを返す**read-only**のAPIである（Selection UIがHost側の変更と同期するための用途）。
+- 順序・origin・exact fieldを保持する。呼び出しごとに**新しい複製**を返し、呼び出し側が返却値を変更しても
+  session stateは変わらない（内部参照を返さない）。
+- nested projection allowlist専用であり、Snapshot / Pin / Resolver / status / tag / profileの状態を含めない。
+  `getStatus()`のshapeは変更しない。同義のAPIは作らない。永続化しない。
+
+**Selection UI（setter / getterのfront endであり、新しい意味を持たない）。**
+- 配置: 「入力・実行」領域の辞書Snapshot / Project Pin設定の隣にある、折りたたみ式の小panel。session-onlyであることを表示する
+  （logic profile / profile JSON / localStorage / review artifact / export workbook / 永続設定には保存されない）。
+- 候補列: 読み込み済みの**全row（JSON A、続いてJSON B）を1回走査**したunionで、`source_record` / `table_row`それぞれの
+  own enumerable keyを、**初出順**（row順 → rowごとのkey出現順）で列挙する。先頭N行・120行制限・alphabetical sort・
+  `table_headers`起点の列挙は行わない。候補にはorigin、exact field、出現row数、supported value（string / finite number）row数、
+  A/B側の存在を持たせる。表示順はallowlist順とは別である。
+- 選択不可の候補: supported value数が0の列、およびsetterが拒否する空・空白のみの列名は、非表示にせず**選択不可**として理由付きで表示する。
+  同名fieldでもoriginが違えば別候補。identityは`origin + exact field`（dotted pathやtrim名にしない。sideを含めない）。
+- 選択: 明示的なcheckboxのみ（自動選択・全列選択なし）。選択中リストは順序番号・origin・fieldを示し、▲ / ▼ / 削除を持つ
+  （先頭の▲・末尾の▼は無効）。同一identityを重複して追加できず、UIからはsetterが受理するallowlistだけを構築する。
+- 適用: 編集中のdraftは「適用」で**1回だけ**setterへ渡す。「クリア」は`[]`の適用と同義。**自動再照合はしない**
+  （S3.2の既存stale / 無効化機構をそのまま使う）。setterがthrowした場合、適用済み表示は変えず、codeに基づく簡潔なエラーのみ表示する。
+- 同期: UI refresh時に適用済みallowlistをgetterから読み直す。編集中にHostが変更した場合は、draftを保持したまま外部変更を表示する。
+- reload: 候補は再列挙するが、**適用済みallowlistは自動削除しない**。新しい入力に無いitemは選択中リストに残し、
+  「現在の入力には存在しない」と表示する。後で同じidentityが現れれば同一itemとして扱う。
+- 前提: Snapshot未設定やタグ生成条件の不成立でもUIは操作可能で、「現在の設定では照合結果へ反映されない」旨を表示する。
+- 永続化・side別allowlistは行わない。
+
 ## S4. Provenance（D4・D6・D7）
 
 - 各nested由来annotationは、既存のSource Field Attribution（0.1 S30.17）の `annotation_source_fields[]` と同様に、

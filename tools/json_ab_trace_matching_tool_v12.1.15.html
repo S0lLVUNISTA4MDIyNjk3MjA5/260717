@@ -568,6 +568,24 @@
         <div id="projectPinFileStatus" class="field-hint" role="status">未読込 (Not loaded)</div>
       </div>
 
+      <!-- Contract 0.3 S3.4: Selection UI for the session-scoped nested dictionary projection allowlist. A pure front end of
+           PrivateDictionaryMatchingSession.setNestedDictionaryProjectionAllowlist()/get...(): explicit selection only, applied
+           by the 適用 button, never persisted (no profile / logic JSON / localStorage / export), never re-matches by itself. -->
+      <details class="profile-card" id="nestedDictSelectionPanel" style="margin-bottom:12px;">
+        <summary style="cursor:pointer; font-weight:700;">辞書参照列（入れ子列 source_record / table_row） <span id="nestedDictSelectionBadge" class="edit-badge" style="display:none;"></span></summary>
+        <div class="profile-hint" style="margin-top:8px;">この選択は<strong>現在のセッションのみ</strong>有効です。照合プロファイル・ロジックJSON・localStorage・レビュー成果物・Excel出力・永続設定には保存されません。明示的に選んだ列だけが辞書解決の入力になります（自動選択はしません）。</div>
+        <div id="nestedDictSelectionHint" class="field-hint" role="status"></div>
+        <div class="profile-hint" style="margin-top:10px; font-weight:700;">候補列（読み込み済みの全行から列挙・初出順）</div>
+        <div id="nestedDictCandidateList" style="max-height:220px; overflow:auto; border:1px solid var(--border); border-radius:8px; background:#fff; padding:6px 8px;"></div>
+        <div class="profile-hint" style="margin-top:10px; font-weight:700;">選択中の列（この順序で辞書解決の入力になります）</div>
+        <div id="nestedDictSelectedList" style="border:1px solid var(--border); border-radius:8px; background:#fff; padding:6px 8px;"></div>
+        <div class="btn-row" style="margin-top:10px;">
+          <button id="nestedDictApplyBtn" class="secondary" type="button" data-nested-act="apply">✅ 適用</button>
+          <button id="nestedDictClearBtn" class="secondary" type="button" data-nested-act="clear">🧹 クリア</button>
+        </div>
+        <div id="nestedDictSelectionStatus" class="field-hint" role="status"></div>
+      </details>
+
       <div class="workflow-grid">
         <div>
           <label class="json-side-a-label">JSON A（上流・照合元）</label>
@@ -4071,6 +4089,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     markTraceTagsDirty('正式辞書Snapshotの設定が変更されました');
     tagIndexCache = null;
     if (mergedResult?.sysList && mergedResult?.plmList) markTraceMatrixStale('正式辞書Snapshotの設定が変更されました。再照合してください。');
+    renderNestedDictionarySelectionPanel(); // the "is the selection effective" hint depends on the Snapshot state
     return { stale: false, status: approvedDictionaryMatchingStatus() };
   }
 
@@ -4089,6 +4108,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     markTraceTagsDirty('正式辞書Snapshotが解除されました');
     tagIndexCache = null;
     if (mergedResult?.sysList && mergedResult?.plmList) markTraceMatrixStale('正式辞書Snapshotが解除されました。再照合してください。');
+    renderNestedDictionarySelectionPanel(); // the "is the selection effective" hint depends on the Snapshot state
     return approvedDictionaryMatchingStatus();
   }
 
@@ -4112,6 +4132,15 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   const APPROVED_DICT_SOURCE_ORIGINS = Object.freeze(['top_level', 'source_record', 'table_row']);
   const APPROVED_DICT_NESTED_ALLOWLIST_INVALID = 'APPROVED_DICT_NESTED_ALLOWLIST_INVALID';
   let approvedDictNestedAllowlist = Object.freeze([]);
+  // Selection UI state (Contract 0.3 S3.4). Session-only, in memory only: the ordered UI draft (not yet applied), whether the
+  // user changed it, the applied allowlist it was based on, the last action message and the candidate cache.
+  let nestedSelDraft = [];
+  let nestedSelDraftDirty = false;
+  let nestedSelBaseJson = '[]';
+  let nestedSelSeenAppliedJson = '[]';
+  let nestedSelMessage = '';
+  let nestedSelCache = null;
+  let nestedSelRendered = [];
 
   function captureNestedDictionaryProjectionAllowlist(items) {
     if (!Array.isArray(items)) return null;
@@ -4155,8 +4184,15 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       markTraceTagsDirty('辞書照合のnested列選択が変更されました');
       tagIndexCache = null;
       if (mergedResult?.sysList && mergedResult?.plmList) markTraceMatrixStale('辞書照合のnested列選択が変更されました。再照合してください。');
+      renderNestedDictionarySelectionPanel(); // keeps the Selection UI in sync when a Host (not the UI) changed the allowlist
     }
     return approvedDictNestedAllowlist;
+  }
+
+  // Contract 0.3 S3.4: read-only accessor of the CURRENT ordered allowlist (nested projection only - never Snapshot/status state).
+  // Returns a fresh, mutable copy on every call: the caller can never reach or alter the session state.
+  function getNestedDictionaryProjectionAllowlistForMatching() {
+    return approvedDictNestedAllowlist.map(item => ({ origin: item.origin, field: item.field }));
   }
 
   /* P2-A4 Checkpoint 10 (§S26): Project Snapshot Pin -> matching session
@@ -4326,7 +4362,8 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       setProjectPin: setApprovedDictionaryProjectPinForMatching,
       clearSnapshot: clearApprovedDictionarySnapshotForMatching,
       getStatus: approvedDictionaryMatchingStatus,
-      setNestedDictionaryProjectionAllowlist: setNestedDictionaryProjectionAllowlistForMatching
+      setNestedDictionaryProjectionAllowlist: setNestedDictionaryProjectionAllowlistForMatching,
+      getNestedDictionaryProjectionAllowlist: getNestedDictionaryProjectionAllowlistForMatching
     });
   }
 
@@ -4403,8 +4440,217 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     await globalThis.PrivateDictionaryMatchingSession.setSnapshot(dictSnapshotFileSelectedContent);
     renderDictSnapshotStatus();
     renderProjectPinFileStatus(); // Project Pin panel's own "matches current Snapshot" display depends on runtime state that may have just changed.
+    renderNestedDictionarySelectionPanel(); // its "does the selection take effect" hint depends on the Snapshot state
   });
   renderDictSnapshotStatus();
+
+  /* ═══════════════════════════════════════════════════════
+     Nested Dictionary Selection UI (Contract 0.3 S3.4). Front end of the session-scoped Host API only:
+       - candidates  : ONE pass over every loaded row of both sides; own enumerable keys of row.source_record / row.table_row;
+                       first-appearance order (A rows, then B rows; inside a row the key order). table_headers is NOT a source.
+       - draft       : the ordered UI selection being edited (candidate checkboxes, up/down/remove). Nothing is applied until 適用.
+       - applied     : always read back with getNestedDictionaryProjectionAllowlist() (a Host may change it behind the UI).
+       - identity    : (origin, exact field) - never a dotted path, never a trimmed name, never the side.
+     No persistence of any kind, no automatic selection, no automatic re-matching (the setter's stale marking is reused). */
+  function nestedSelId(origin, field) { return JSON.stringify([origin, field]); }
+
+  function enumerateNestedDictionaryCandidates() {
+    const sysRows = rowsForSchema('sys');
+    const plmRows = rowsForSchema('plm');
+    const cache = nestedSelCache;
+    if (cache && cache.sysRows === sysRows && cache.plmRows === plmRows && cache.sysLen === sysRows.length && cache.plmLen === plmRows.length) return cache.result;
+    const byId = new Map();
+    const list = [];
+    const scan = (rows, isA) => {
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || typeof row !== 'object') continue;
+        for (const origin of APPROVED_DICT_NESTED_ORIGINS) {
+          let container, keys;
+          try {
+            container = row[origin];
+            if (!container || typeof container !== 'object' || Array.isArray(container)) continue;
+            keys = Object.keys(container);
+          } catch (_err) { continue; }
+          for (const field of keys) {
+            const id = nestedSelId(origin, field);
+            let c = byId.get(id);
+            if (!c) { c = { origin, field, rowCount: 0, supportedRowCount: 0, inA: false, inB: false }; byId.set(id, c); list.push(c); }
+            c.rowCount++;
+            if (isA) c.inA = true; else c.inB = true;
+            let value;
+            try { value = container[field]; } catch (_err) { value = undefined; }
+            if (typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))) c.supportedRowCount++;
+          }
+        }
+      }
+    };
+    scan(sysRows, true);
+    scan(plmRows, false);
+    list.forEach(c => {
+      c.unselectableReason = !c.field.trim() ? 'blank-name' : (c.supportedRowCount === 0 ? 'no-supported-values' : null);
+      Object.freeze(c);
+    });
+    const result = Object.freeze({ items: Object.freeze(list), byId, hasRows: sysRows.length + plmRows.length > 0 });
+    nestedSelCache = { sysRows, plmRows, sysLen: sysRows.length, plmLen: plmRows.length, result };
+    return result;
+  }
+
+  function nestedSelApplied() { return getNestedDictionaryProjectionAllowlistForMatching(); }
+  function nestedSelDraftIndex(origin, field) { return nestedSelDraft.findIndex(i => i.origin === origin && i.field === field); }
+
+  function nestedSelToggle(origin, field, checked) {
+    const at = nestedSelDraftIndex(origin, field);
+    if (checked && at < 0) {
+      const c = enumerateNestedDictionaryCandidates().byId.get(nestedSelId(origin, field));
+      if (!c || c.unselectableReason) return false; // never build an allowlist the setter would reject
+      nestedSelDraft.push({ origin, field });
+    } else if (!checked && at >= 0) {
+      nestedSelDraft.splice(at, 1);
+    } else return false;
+    nestedSelDraftDirty = true;
+    nestedSelMessage = '';
+    return true;
+  }
+  function nestedSelMove(index, delta) {
+    const to = index + delta;
+    if (!Number.isInteger(index) || index < 0 || index >= nestedSelDraft.length || to < 0 || to >= nestedSelDraft.length) return false;
+    const [item] = nestedSelDraft.splice(index, 1);
+    nestedSelDraft.splice(to, 0, item);
+    nestedSelDraftDirty = true;
+    nestedSelMessage = '';
+    return true;
+  }
+  function nestedSelRemove(index) {
+    if (!Number.isInteger(index) || index < 0 || index >= nestedSelDraft.length) return false;
+    nestedSelDraft.splice(index, 1);
+    nestedSelDraftDirty = true;
+    nestedSelMessage = '';
+    return true;
+  }
+
+  // Calls the Host API setter exactly once with the ordered draft. On success the applied state is re-read; on a throw nothing changes.
+  function nestedSelApply(items) {
+    const before = JSON.stringify(nestedSelApplied());
+    const wasDirty = nestedSelDraftDirty;
+    nestedSelDraftDirty = false; // the setter re-renders the panel; the draft it renders is the one being applied
+    try {
+      setNestedDictionaryProjectionAllowlistForMatching(items.map(i => ({ origin: i.origin, field: i.field })));
+    } catch (err) {
+      nestedSelDraftDirty = wasDirty;
+      nestedSelMessage = `適用できませんでした${err && err.code ? `（${err.code}）` : ''}。以前の設定を維持しています。`;
+      renderNestedDictionarySelectionPanel();
+      return { ok: false, code: err && err.code ? err.code : null };
+    }
+    const after = nestedSelApplied();
+    const changed = before !== JSON.stringify(after);
+    nestedSelDraftDirty = false;
+    nestedSelMessage = changed
+      ? (after.length ? `適用しました（${after.length}件）。タグの再生成または再照合が必要です。` : 'クリアしました（nested辞書投影は無効です）。タグの再生成または再照合が必要です。')
+      : '変更はありません（再照合は不要です）。';
+    renderNestedDictionarySelectionPanel();
+    return { ok: true, changed };
+  }
+  function nestedSelApplyDraft() { return nestedSelApply(nestedSelDraft); }
+  function nestedSelClear() { nestedSelDraft = []; return nestedSelApply([]); }
+
+  function nestedSelSideLabel(c) { return c.inA && c.inB ? 'A+B' : (c.inA ? 'Aのみ' : 'Bのみ'); }
+  function nestedSelFieldHtml(field) {
+    return field.trim() ? escapeHtml(field) : escapeHtml(JSON.stringify(field));
+  }
+
+  function renderNestedDictionarySelectionPanel() {
+    const listEl = $('nestedDictCandidateList');
+    const selEl = $('nestedDictSelectedList');
+    if (!listEl || !selEl) return;
+    const applied = nestedSelApplied();
+    const appliedJson = JSON.stringify(applied);
+    if (appliedJson !== nestedSelSeenAppliedJson) { nestedSelSeenAppliedJson = appliedJson; nestedSelMessage = ''; } // the applied allowlist changed: an older action message no longer describes it
+    const candidates = enumerateNestedDictionaryCandidates();
+    if (!nestedSelDraftDirty) { nestedSelDraft = applied; nestedSelBaseJson = appliedJson; }
+    const externalChange = nestedSelDraftDirty && appliedJson !== nestedSelBaseJson;
+
+    nestedSelRendered = candidates.items;
+    const group = origin => {
+      const rows = candidates.items.map((c, idx) => ({ c, idx })).filter(x => x.c.origin === origin);
+      if (!rows.length) return `<div class="field-hint">${escapeHtml(origin)}: 候補列なし</div>`;
+      return `<div class="field-hint" style="font-weight:700; margin-top:4px;">${escapeHtml(origin)}</div>` + rows.map(({ c, idx }) => {
+        const checked = nestedSelDraftIndex(c.origin, c.field) >= 0;
+        const disabled = !!c.unselectableReason && !checked;
+        const reason = c.unselectableReason === 'blank-name' ? '（空白のみの列名は選択できません）' : (c.unselectableReason === 'no-supported-values' ? '（文字列・有限数値の値が無いため選択できません）' : '');
+        return `<label style="display:block; font-size:12px; padding:2px 0;${disabled ? ' opacity:.6;' : ''}"><input type="checkbox" data-nested-cand="${idx}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} /> ${escapeHtml(c.origin)} / <strong>${nestedSelFieldHtml(c.field)}</strong> — ${c.rowCount}行 / 有効${c.supportedRowCount} / ${nestedSelSideLabel(c)}${reason}</label>`;
+      }).join('');
+    };
+    listEl.innerHTML = candidates.hasRows ? group('source_record') + group('table_row') : '<div class="field-hint">JSON A/Bを読み込むと候補列が表示されます。</div>';
+
+    selEl.innerHTML = nestedSelDraft.length ? nestedSelDraft.map((item, i) => {
+      const c = candidates.byId.get(nestedSelId(item.origin, item.field));
+      const note = !candidates.hasRows ? '（入力未読込のため存在確認なし）' : (!c ? '（現在の入力には存在しません）' : (c.unselectableReason === 'no-supported-values' ? '（現在の入力に有効な値がありません）' : ''));
+      return `<div style="display:flex; gap:6px; align-items:center; font-size:12px; padding:2px 0;"><span style="min-width:2em; text-align:right;">${i + 1}.</span><span style="flex:1;">${escapeHtml(item.origin)} / <strong>${nestedSelFieldHtml(item.field)}</strong>${note ? ` <span style="color:#b45309;">${escapeHtml(note)}</span>` : ''}</span>`
+        + `<button type="button" class="secondary" data-nested-act="up" data-nested-idx="${i}" ${i === 0 ? 'disabled' : ''} style="padding:2px 8px;" aria-label="上へ">▲</button>`
+        + `<button type="button" class="secondary" data-nested-act="down" data-nested-idx="${i}" ${i === nestedSelDraft.length - 1 ? 'disabled' : ''} style="padding:2px 8px;" aria-label="下へ">▼</button>`
+        + `<button type="button" class="secondary" data-nested-act="remove" data-nested-idx="${i}" style="padding:2px 8px;" aria-label="削除">✕</button></div>`;
+    }).join('') : '<div class="field-hint">選択中の列はありません（nested辞書投影は無効です）。</div>';
+
+    const notes = [];
+    const tagSettings = normalizeTagSettings();
+    if (!approvedDictionaryRuntime.active) notes.push('辞書Snapshotが未設定');
+    if (!tagSettings.enabled) notes.push('タグ生成がOFF');
+    else if (!tagSettings.useForMatching) notes.push('「タグを照合に使用」がOFF（辞書照合根拠・未登録語には出ますが、照合スコアには使われません）');
+    const hint = $('nestedDictSelectionHint');
+    if (hint) {
+      const parts = [];
+      if (notes.length) parts.push(`現在の設定ではnested列選択は照合結果へ反映されません: ${notes.join(' / ')}。選択のみ先に行い、後から設定・再照合することもできます。`);
+      if (nestedSelDraftDirty) parts.push('未適用の変更があります（「適用」を押すまで反映されません）。');
+      if (externalChange) parts.push('適用済みの設定が外部（Host）から変更されました。編集中の内容は未適用で、適用すると上書きされます。');
+      hint.textContent = parts.join(' ');
+    }
+    const status = $('nestedDictSelectionStatus');
+    if (status) status.textContent = nestedSelMessage || `適用済み: ${applied.length}件。候補: source_record ${candidates.items.filter(c => c.origin === 'source_record').length}列 / table_row ${candidates.items.filter(c => c.origin === 'table_row').length}列。`;
+    const badge = $('nestedDictSelectionBadge');
+    if (badge) { badge.textContent = `${applied.length}件`; badge.style.display = applied.length ? 'inline' : 'none'; }
+  }
+
+  (() => {
+    const root = $('nestedDictSelectionPanel');
+    if (!root) return;
+    root.addEventListener('toggle', () => { if (root.open) renderNestedDictionarySelectionPanel(); });
+    root.addEventListener('change', e => {
+      const t = e.target;
+      if (!t || !t.dataset || t.dataset.nestedCand === undefined) return;
+      const c = nestedSelRendered[Number(t.dataset.nestedCand)];
+      if (c) nestedSelToggle(c.origin, c.field, !!t.checked);
+      renderNestedDictionarySelectionPanel();
+    });
+    root.addEventListener('click', e => {
+      const b = e.target && e.target.closest ? e.target.closest('button[data-nested-act]') : null;
+      if (!b || b.disabled) return;
+      const act = b.dataset.nestedAct;
+      const idx = Number(b.dataset.nestedIdx);
+      if (act === 'apply') nestedSelApplyDraft();
+      else if (act === 'clear') nestedSelClear();
+      else {
+        if (act === 'up') nestedSelMove(idx, -1);
+        else if (act === 'down') nestedSelMove(idx, 1);
+        else if (act === 'remove') nestedSelRemove(idx);
+        renderNestedDictionarySelectionPanel();
+      }
+    });
+  })();
+  renderNestedDictionarySelectionPanel();
+
+  // Node/vm-sandbox and browser verification hook only - never used by production code paths above.
+  globalThis.__nestedDictionarySelectionDiagnostics = Object.freeze({
+    candidates: () => JSON.parse(JSON.stringify(enumerateNestedDictionaryCandidates().items)),
+    draft: () => nestedSelDraft.map(i => ({ origin: i.origin, field: i.field })),
+    dirty: () => nestedSelDraftDirty,
+    toggle: (origin, field, checked) => nestedSelToggle(origin, field, checked),
+    move: (index, delta) => nestedSelMove(index, delta),
+    remove: index => nestedSelRemove(index),
+    apply: () => nestedSelApplyDraft(),
+    clear: () => nestedSelClear(),
+    render: () => renderNestedDictionarySelectionPanel()
+  });
 
   /* ═══════════════════════════════════════════════════════════════════════
      P2-A4 Checkpoint 12 (design doc S29): Project Snapshot Pin browser File
@@ -4699,7 +4945,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   });
   $('projectPinFileApplyBtn')?.addEventListener('click', async () => {
     const result = await applyLoadedProjectSnapshotPinToMatchingSession();
-    if (!result.stale) renderProjectPinFileStatus(); // a stale Apply result must never overwrite a newer load's display (§31/§X).
+    if (!result.stale) { renderProjectPinFileStatus(); renderNestedDictionarySelectionPanel(); } // a stale Apply result must never overwrite a newer load's display (§31/§X).
     if (!result.ok && !result.stale) {
       const el = $('projectPinFileStatus');
       if (el) el.textContent = projectPinFileDisplayMessage(result.code);
@@ -8727,6 +8973,9 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
 
     // synonymMap 表
     renderSynonymTable();
+
+    // 入力読み込み後の候補列再列挙（辞書参照列パネル）
+    renderNestedDictionarySelectionPanel();
   }
 
   function renderSynonymTable() {
