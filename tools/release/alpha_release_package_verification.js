@@ -51,6 +51,8 @@ const EXPECTED_SELF_AUTHORED_RUNTIME = [
   { src: path.join(REPO_ROOT, 'tools', 'generated', 'trace_comparison_schema_v2.browser.js'), dest: 'trace_comparison_schema_v2.browser.js' },
   { src: path.join(REPO_ROOT, 'tools', 'design_notes', 'json_schema_minivalidator.js'), dest: 'json_schema_minivalidator.js' },
   { src: path.join(REPO_ROOT, 'tools', 'design_notes', 'trace_comparison_record_set_validator.js'), dest: 'trace_comparison_record_set_validator.js' },
+  // Nested Dictionary Selection persistence codec (Contract 0.3 S3.5) - the single, dependency-free private-dictionary file in the bundle.
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_nested_selection_persistence_core.js'), dest: 'private_dictionary_nested_selection_persistence_core.js' },
 ];
 const EXPECTED_VENDOR_RUNTIME_DEST = {
   cytoscape: 'cytoscape-3.26.0.min.js',
@@ -199,7 +201,7 @@ function main() {
   const runtimeFiles = relFiles.filter(f => f.rel.startsWith('runtime/'));
   const licenseFiles = relFiles.filter(f => f.rel.startsWith('licenses/'));
   const docFiles = relFiles.filter(f => EXPECTED_DOC_FILES.includes(f.rel));
-  check('runtime/ has exactly 12 files', runtimeFiles.length === 12, `found ${runtimeFiles.length}`);
+  check('runtime/ has exactly 13 files (3 vendor + 10 self-authored)', runtimeFiles.length === 13, `found ${runtimeFiles.length}`);
   check('licenses/ has exactly 5 files', licenseFiles.length === 5, `found ${licenseFiles.length}`);
   check(`doc files present: exactly ${EXPECTED_DOC_FILES.length}`, docFiles.length === EXPECTED_DOC_FILES.length, `found ${docFiles.length}`);
   check('HTML file name matches expected exactly', actualRelSet.has(OUTPUT_HTML_NAME));

@@ -3,8 +3,8 @@
 /*
  * Alpha Release Gate 1 - Checkpoint 2: version harmonization + user docs.
  *
- * Copies the product HTML plus its already-approved runtime dependencies (9
- * self-authored cores + 3 vendored third-party libraries, 12 files total) into
+ * Copies the product HTML plus its already-approved runtime dependencies (10
+ * self-authored cores + 3 vendored third-party libraries, 13 files total) into
  * dist/, and produces a version-harmonized distribution copy:
  *
  *   1. Apply an exact, individually-verified set of string replacements to the
@@ -21,7 +21,7 @@
  *      references them.
  *   2. Insert a small alpha-release notice directly after the (now-updated)
  *      <h1>, without any other UI redesign.
- *   3. Rewrite the 12 known <script src="..."> attributes to point at the
+ *   3. Rewrite the 13 known <script src="..."> attributes to point at the
  *      local runtime/ folder.
  *   4. Copy the vendor + self-authored runtime files, the 5 license texts, and
  *      the 4 user-facing docs (tools/release/docs/) into the output directory.
@@ -82,7 +82,7 @@ function replaceExact(source, oldValue, newValue, expectedCount) {
   return source.split(oldValue).join(newValue);
 }
 
-// Self-authored runtime: 7 tools/(generated) files + 2 design_notes files = 9.
+// Self-authored runtime: 7 tools/(generated) files + 2 design_notes files + 1 persistence codec = 10.
 const SELF_AUTHORED_RUNTIME = [
   { src: path.join(REPO_ROOT, 'tools', 'trace_comparison_review_state_core.js'), dest: 'trace_comparison_review_state_core.js' },
   { src: path.join(REPO_ROOT, 'tools', 'trace_comparison_review_session_core.js'), dest: 'trace_comparison_review_session_core.js' },
@@ -93,6 +93,9 @@ const SELF_AUTHORED_RUNTIME = [
   { src: path.join(REPO_ROOT, 'tools', 'generated', 'trace_comparison_schema_v2.browser.js'), dest: 'trace_comparison_schema_v2.browser.js' },
   { src: path.join(REPO_ROOT, 'tools', 'design_notes', 'json_schema_minivalidator.js'), dest: 'json_schema_minivalidator.js' },
   { src: path.join(REPO_ROOT, 'tools', 'design_notes', 'trace_comparison_record_set_validator.js'), dest: 'trace_comparison_record_set_validator.js' },
+  // Nested Dictionary Selection persistence codec (Contract 0.3 S3.5): the ONE private-dictionary file shipped, because it has no
+  // dependency on any other core (see the header of the file). Lets the release bundle Save / Load the Selection settings artifact.
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_nested_selection_persistence_core.js'), dest: 'private_dictionary_nested_selection_persistence_core.js' },
 ];
 
 const VENDOR_ENTRIES = [
@@ -113,7 +116,7 @@ const LICENSE_FILES = [
 const DOC_FILES = ['README_ja.md', 'KNOWN_LIMITATIONS.md', 'THIRD_PARTY_LICENSES.md', 'BROWSER_VALIDATION_REPORT.md', 'trace_matching_tool_detailed_operation_manual_v12.2.0_alpha.1.pdf'];
 
 // Exact <script src="..."> attribute value -> new local runtime/ relative path.
-// One entry per of the 12 runtime files; build fails if any doesn't match exactly once.
+// One entry per rewritten runtime file (13); build fails if any doesn't match exactly once.
 const SCRIPT_SRC_REWRITES = [
   ['https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js', 'runtime/cytoscape-3.26.0.min.js'],
   ['https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js', 'runtime/xlsx-0.18.5.full.min.js'],
@@ -127,6 +130,7 @@ const SCRIPT_SRC_REWRITES = [
   ['./trace_comparison_review_session_core.js', 'runtime/trace_comparison_review_session_core.js'],
   ['./trace_comparison_review_projection_core.js', 'runtime/trace_comparison_review_projection_core.js'],
   ['./trace_comparison_review_export_core.js', 'runtime/trace_comparison_review_export_core.js'],
+  ['./knowledge_builder/core/private_dictionary_nested_selection_persistence_core.js', 'runtime/private_dictionary_nested_selection_persistence_core.js'],
 ];
 
 // Category A only (product release version -> V12.2.0-alpha.1). Every entry's
@@ -307,7 +311,7 @@ function main() {
     1
   );
 
-  // ... then rewrite the 12 known script src attributes.
+  // ... then rewrite the 13 known script src attributes.
   for (const [from, to] of SCRIPT_SRC_REWRITES) {
     const needle = `src="${from}"`;
     const count = html.split(needle).length - 1;

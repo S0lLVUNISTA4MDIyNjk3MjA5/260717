@@ -74,7 +74,9 @@ async function main() {
     return { sameSection: p.parentElement === snap.parentElement, afterPin: !!(pin.compareDocumentPosition(p) & Node.DOCUMENT_POSITION_FOLLOWING), inLogicTab: logic.contains(p), tag: p.tagName, open: p.open }; });
   assert(placement.sameSection && placement.afterPin && !placement.inLogicTab && placement.tag === 'DETAILS' && placement.open === false, `panel placement: a collapsed <details> in the 入力・実行 section right after the Dictionary Snapshot / Project Pin panels, not in the logic tab (${JSON.stringify(placement)})`);
   const sessionOnly = await page.$eval('#nestedDictSelectionPanel', e => e.textContent);
-  assert(/現在のセッションのみ/.test(sessionOnly) && /保存されません/.test(sessionOnly), 'the panel states that the selection is for the current session only and is not saved');
+  // Selection Persistence slice (Human-approved wording change): the selection applies to the current session and can be saved / loaded as a
+  // DEDICATED file; it is still stated NOT to be part of the logic / profile / Snapshot / Pin / localStorage / Excel.
+  assert(/現在のセッションに適用/.test(sessionOnly) && /専用の設定ファイル/.test(sessionOnly) && /ロジックJSON/.test(sessionOnly) && /含まれません/.test(sessionOnly), 'the panel states that the selection applies to the current session, may be saved / loaded only as a dedicated settings file, and is not part of the logic JSON / profile / Snapshot / Pin / localStorage / Excel');
   assert((await candLabels()).length === 0 && /読み込む/.test(await T('#nestedDictCandidateList')) && JSON.stringify(await getter()) === '[]', 'before any input: no candidates, a load hint, empty allowlist');
   await page.evaluate(() => { matchLogic.keyPairs = ['trace_title', 'desc'].map(f => ({ enabled: true, sysField: f, plmField: f, method: 'auto' })); });
 

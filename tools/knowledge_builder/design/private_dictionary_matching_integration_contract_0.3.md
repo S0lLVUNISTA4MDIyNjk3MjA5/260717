@@ -90,7 +90,8 @@ Private Dictionary Matching Integration Contract 0.3 — Explicit Nested Diction
   同一内容の再設定は変更ではない。1回のmatching実行は、開始時点のallowlistを使用する。実行中にallowlistが変更された
   場合、その実行の結果は（snapshot変更時と同様に）破棄され、部分的な混在状態を残さない。
   setterは設定後の（freezeされた）allowlistを返す。plain objectの判定はrealm非依存（prototypeがnullまたはroot prototype）とする。
-- **永続化しない**: config / profile schema、localStorage、profile JSON、review artifact、その他いかなる永続化も行わない。
+- **永続化しない（専用artifactを除く）**: config / profile schema、logic JSON、trace profile、localStorage、profile JSON、review artifact、その他の永続化は行わない。
+  allowlistを保存・復元できる唯一の経路は、S3.5の**専用artifact**である。
   **0.3にselection UIは無い**。**automatic column discovery（自動列探索）は行わない**。
   allowlistに無い列は、nested objectに存在してもdictionary resolutionの入力にならない。
 
@@ -124,7 +125,7 @@ ordered allowlistを返す**read-only**のAPIである（Selection UIがHost側�
 - 順序・origin・exact fieldを保持する。呼び出しごとに**新しい複製**を返し、呼び出し側が返却値を変更しても
   session stateは変わらない（内部参照を返さない）。
 - nested projection allowlist専用であり、Snapshot / Pin / Resolver / status / tag / profileの状態を含めない。
-  `getStatus()`のshapeは変更しない。同義のAPIは作らない。永続化しない。
+  `getStatus()`のshapeは変更しない。同義のAPIは作らない。getter自体は永続化を行わない。
 
 **Selection UI（setter / getterのfront endであり、新しい意味を持たない）。**
 - 配置: 「入力・実行」領域の辞書Snapshot / Project Pin設定の隣にある、折りたたみ式の小panel。session-onlyであることを表示する
@@ -143,7 +144,61 @@ ordered allowlistを返す**read-only**のAPIである（Selection UIがHost側�
 - reload: 候補は再列挙するが、**適用済みallowlistは自動削除しない**。新しい入力に無いitemは選択中リストに残し、
   「現在の入力には存在しない」と表示する。後で同じidentityが現れれば同一itemとして扱う。
 - 前提: Snapshot未設定やタグ生成条件の不成立でもUIは操作可能で、「現在の設定では照合結果へ反映されない」旨を表示する。
-- 永続化・side別allowlistは行わない。
+- 永続化はS3.5の専用artifactのみ（保存・読込ボタン）。side別allowlistは行わない。
+
+### S3.5 Selection Persistence Addendum（Human承認・runtime matching semanticsは変更しない）
+
+applied allowlistを、**専用の独立artifact**として保存・読込できる。これはserialization / restorationのbindingだけを定め、
+S2〜S3.4のruntime semantics、matching algorithm、scoring、ranking、canonical matchingを変更しない。Contract 0.1 / 0.2も変更しない。
+
+**artifact（初版）.** 純粋core `private_dictionary_nested_selection_persistence_core.js`（storage-neutral。Project Snapshot Pin
+persistence coreの前例に従う）が扱う。
+- schema identity: `artifact_schema_version` = `private-dictionary-nested-selection-persistence/0.1`（初版）。
+- rootのkeyは**厳密に** `artifact_schema_version` と `allowlist` の2つだけ（未知のkeyは拒否 — dedicated artifactとして厳格）。
+- `allowlist`: S3.1のitem形（`{ origin, field }` のみ）の**順序付き配列**。`[]`は有効で、nested projection disabledの明示設定である
+  （fieldの省略と空設定を曖昧にしない）。
+- timestamp・side情報・Snapshot・Project Pin・dictionary内容・tag・queue・row・照合結果・key pair・profileは含めない。
+- 決定的出力: keyをソートした正規形（`canonicalJson`と**byte-identical**。pure coreは依存を持たず直接この形を生成し、parity testで固定する）で
+  直列化し、同一allowlistは常にbyte-identicalなtextになる。ファイル名は `private_dictionary_nested_selection.json`。
+- **サイズ上限（Human正式採用）.** artifactの最大サイズは **1 MiB（1048576 bytes、UTF-8）**。これを超えるtextはparse前にrejectする
+  （`NESTED_SELECTION_PERSISTENCE_SERIALIZED_INVALID`）。このほかのサイズ制限（item数・field長等）は設けない。
+- strictなparse: 重複key・非標準JSON・`__proto__`系key・末尾の余剰内容・サイズ超過（1 MiB）を拒否する。
+- 現在のtoolが理解できないversion（schema identityの接頭辞は同じで版が異なる）は**拒否**する（best-effort parseをしない）。
+- 保存するのは**applied allowlistのみ**（getterから取得）。UI draftは保存しない。
+
+**保存.** getterから現在のapplied allowlistを取得して直列化するだけで、allowlistや照合状態を変更しない。順序・exact fieldはそのまま
+（sort・dedup・normalization・trimをしない）。allowlistが`[]`でも保存できる（空だから無効、としない）。
+
+**読込（atomic）.** (1) file読込 → (2) JSON parseとroot / schema / versionの検証（core） → (3) allowlist本体の意味検証
+（**既存のHost API validation** `captureNestedDictionaryProjectionAllowlist` を再利用し、別実装を持たない） → (4) すべて成功した後に
+**Host API setter経由**で適用。1つでも失敗すれば、artifact全体をrejectし、適用済みallowlist・UI draft・derived state・stale状態は
+いずれも変更しない（部分適用・invalid itemのskip・`[]`扱いはしない）。
+- 変更あり → setterの既存semantics（tags dirty / matrix stale / 再照合が必要）。**同一内容・同一順序 → no-op**（stale化しない）。
+- 成功後、draftは読み込んだapplied stateに同期する。
+- 現在の入力に存在しないfieldはimport errorにしない（実行時はskip。UIは既存の「現在の入力には存在しません」を表示する）。
+- Snapshotの有無に依存しない（効力条件は既存のUI hintで示す）。
+
+**error.** artifact水準: `NESTED_SELECTION_PERSISTENCE_SERIALIZED_INVALID`（形式・schema identity・root key・allowlistが配列でない等）、
+`NESTED_SELECTION_PERSISTENCE_UNSUPPORTED_VERSION`（対応しない版）。allowlistの意味エラー（不正origin・空 / 空白のみのfield・
+重複・余剰property・不正なitem）は既存の `APPROVED_DICT_NESTED_ALLOWLIST_INVALID` を用いる。errorは`{ code, path }`のみで、
+artifactの内容をstatus・errorへ露出しない。
+
+**独立性.** logic JSON / trace profile / Snapshot / Project Pin / workbookは、いずれもallowlistを含まず、本artifactもそれらを含まない。
+`matchLogic`のschema、logic JSONのexport / import、trace profileのexport / import、`version: '12.1.15-column-order'`、
+release filenameは変更しない。side別の保存はしない（identityは`origin + field`のみ、A/B共通）。
+
+**release bundle.** release bundle（`tools/release/build_alpha_release.js`が生成するoffline配布物）でも、同一のSave / Load機能を
+提供する。pure coreは**依存なし**の単一fileとして`runtime/`へ同梱し（他のprivate dictionary coreや`id_hash_utils`は同梱しない）、
+release HTMLは`runtime/`配下のscriptとして読み込む。通常のrelease bundleでUIの「利用できません」fallback
+（`NESTED_SELECTION_PERSISTENCE_DEPENDENCY_FAILED`）に入ってはならない（fallbackは防御としてのみ残す）。release filename・
+`version: '12.1.15-column-order'`・logic JSON schema・trace profile・Snapshot / Pin artifact・workbook schemaは変更しない。
+
+**契約の要点（確認用）.** 専用artifact／schema identityとversion／strictなroot key／applied allowlistのみ／明示的な`[]`／順序保持／
+exact field／invalid時はatomicにreject（現在のstateを維持）／setter再利用／現在の入力に無いfieldは許容／同一内容のloadはno-op／
+変更ありのloadはstale／Snapshot・Project Pinとは独立／logic JSON・trace profileへは含めない／最大1 MiB／release bundleでも提供。
+
+**UI.** 辞書参照列パネルに「Selection設定を保存」「Selection設定を読込」を置く（常に操作可能）。表示は「選択内容は現在のセッションに
+適用されます。必要に応じて専用の設定ファイルとして保存・読込できます」とし、logic / profile等には含まれないことを示す。
 
 ## S4. Provenance（D4・D6・D7）
 
@@ -242,6 +297,6 @@ nested annotationについて、Humanが少なくとも origin / field / origina
 ## S11. Scope外（0.3でも対象外）
 
 nested array、object arrayの再帰、boolean、複数階層、nested列のsemantic / canonical matching、自動列探索、
-selection UI、allowlistの永続化（config / profile schema / localStorage / profile JSON / review artifact）、
+allowlistの永続化のうち、専用artifact（S3.5）以外の経路（config / profile schema / logic JSON / trace profile / localStorage / profile JSON / review artifact）、
 STANDARD/DOMAIN/SESSION layer integration、
 dictionary auto-feedback、auto-learning、queue persistence format、辞書への自動登録・承認。

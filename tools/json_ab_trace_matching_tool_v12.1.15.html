@@ -91,6 +91,7 @@
        codec（Checkpoint 11、無変更）をbrowser File Adapterから使用するために
        追加。既存5本の並びを崩さないため末尾へ追加する。 -->
   <script src="./knowledge_builder/core/private_dictionary_project_snapshot_pin_persistence_core.js"></script>
+  <script src="./knowledge_builder/core/private_dictionary_nested_selection_persistence_core.js"></script>
   <style>
     :root {
       --primary: #2563eb;
@@ -573,7 +574,7 @@
            by the 適用 button, never persisted (no profile / logic JSON / localStorage / export), never re-matches by itself. -->
       <details class="profile-card" id="nestedDictSelectionPanel" style="margin-bottom:12px;">
         <summary style="cursor:pointer; font-weight:700;">辞書参照列（入れ子列 source_record / table_row） <span id="nestedDictSelectionBadge" class="edit-badge" style="display:none;"></span></summary>
-        <div class="profile-hint" style="margin-top:8px;">この選択は<strong>現在のセッションのみ</strong>有効です。照合プロファイル・ロジックJSON・localStorage・レビュー成果物・Excel出力・永続設定には保存されません。明示的に選んだ列だけが辞書解決の入力になります（自動選択はしません）。</div>
+        <div class="profile-hint" style="margin-top:8px;">選択内容は<strong>現在のセッションに適用</strong>されます。必要に応じて<strong>専用の設定ファイル</strong>として保存・読込できます（下のボタン）。照合プロファイル・ロジックJSON・辞書Snapshot・Project Pin・localStorage・Excel出力には含まれません。明示的に選んだ列だけが辞書解決の入力になります（自動選択はしません）。</div>
         <div id="nestedDictSelectionHint" class="field-hint" role="status"></div>
         <div class="profile-hint" style="margin-top:10px; font-weight:700;">候補列（読み込み済みの全行から列挙・初出順）</div>
         <div id="nestedDictCandidateList" style="max-height:220px; overflow:auto; border:1px solid var(--border); border-radius:8px; background:#fff; padding:6px 8px;"></div>
@@ -582,6 +583,9 @@
         <div class="btn-row" style="margin-top:10px;">
           <button id="nestedDictApplyBtn" class="secondary" type="button" data-nested-act="apply">✅ 適用</button>
           <button id="nestedDictClearBtn" class="secondary" type="button" data-nested-act="clear">🧹 クリア</button>
+          <button id="nestedDictSaveBtn" class="secondary" type="button">💾 Selection設定を保存</button>
+          <button id="nestedDictLoadBtn" class="secondary" type="button">📂 Selection設定を読込</button>
+          <input type="file" id="nestedDictLoadInput" accept=".json,application/json" style="display:none;" />
         </div>
         <div id="nestedDictSelectionStatus" class="field-hint" role="status"></div>
       </details>
@@ -4650,6 +4654,83 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     apply: () => nestedSelApplyDraft(),
     clear: () => nestedSelClear(),
     render: () => renderNestedDictionarySelectionPanel()
+  });
+
+  /* ═══════════════════════════════════════════════════════
+     Nested Dictionary Selection Persistence (Contract 0.3 S3.5): a DEDICATED artifact file for the applied allowlist.
+       - Save : current applied allowlist (getter) -> versioned artifact -> download. Never the UI draft, never changes any state.
+       - Load : file text -> strict artifact parse (root / schema / version) -> Host API allowlist validation -> only then the
+                Host API setter. Atomic: any failure leaves the allowlist, the draft, the derived state and the stale state as
+                they were. A valid load that changes the allowlist reuses the setter's stale / invalidation semantics.
+     Independent of the logic JSON, the trace profile, the Snapshot and the Project Pin (none of them carries the allowlist). */
+  const NESTED_SEL_ARTIFACT_FILE_NAME = 'private_dictionary_nested_selection.json';
+  function nestedSelPersistenceCore() {
+    const core = globalThis.PrivateDictionaryNestedSelectionPersistenceCore;
+    return core && typeof core.serializeNestedSelection === 'function' && typeof core.parseNestedSelectionArtifact === 'function' ? core : null;
+  }
+  function nestedSelArtifactErrorMessage(code) {
+    if (code === 'NESTED_SELECTION_PERSISTENCE_UNSUPPORTED_VERSION') return '読み込めませんでした（このツールが対応していない版の設定ファイルです）。現在の選択を維持しています。';
+    if (code === APPROVED_DICT_NESTED_ALLOWLIST_INVALID) return `読み込めませんでした（選択内容が正しくありません: ${code}）。現在の選択を維持しています。`;
+    if (code === 'NESTED_SELECTION_PERSISTENCE_DEPENDENCY_FAILED') return 'Selection設定の保存・読込機能を利用できません。';
+    return '読み込めませんでした（Selection設定ファイルの形式が正しくありません）。現在の選択を維持しています。';
+  }
+  // Serializes the CURRENT APPLIED allowlist (read through the getter, never the draft). Pure: changes nothing.
+  function buildNestedSelectionArtifactText() {
+    const core = nestedSelPersistenceCore();
+    if (!core) return { ok: false, code: 'NESTED_SELECTION_PERSISTENCE_DEPENDENCY_FAILED' };
+    try {
+      return { ok: true, text: core.serializeNestedSelection(getNestedDictionaryProjectionAllowlistForMatching()) };
+    } catch (err) {
+      return { ok: false, code: err && err.code ? err.code : 'NESTED_SELECTION_PERSISTENCE_SERIALIZED_INVALID' };
+    }
+  }
+  function saveNestedSelectionArtifact() {
+    const built = buildNestedSelectionArtifactText();
+    if (!built.ok) { nestedSelMessage = nestedSelArtifactErrorMessage(built.code); renderNestedDictionarySelectionPanel(); return built; }
+    downloadText(NESTED_SEL_ARTIFACT_FILE_NAME, built.text, 'application/json');
+    nestedSelMessage = `Selection設定を ${NESTED_SEL_ARTIFACT_FILE_NAME} として保存しました（適用済み ${getNestedDictionaryProjectionAllowlistForMatching().length}件）。`;
+    renderNestedDictionarySelectionPanel();
+    return { ok: true };
+  }
+  // Atomic load of an artifact text. Everything is validated BEFORE the setter is called; a failure touches nothing.
+  function loadNestedSelectionArtifactText(text) {
+    const fail = code => {
+      nestedSelMessage = nestedSelArtifactErrorMessage(code);
+      renderNestedDictionarySelectionPanel(); // message only: the allowlist, the draft and the stale state are unchanged
+      return { ok: false, code };
+    };
+    const core = nestedSelPersistenceCore();
+    if (!core) return fail('NESTED_SELECTION_PERSISTENCE_DEPENDENCY_FAILED');
+    let parsed;
+    try { parsed = core.parseNestedSelectionArtifact(text); }
+    catch (err) { return fail(err && err.code ? err.code : 'NESTED_SELECTION_PERSISTENCE_SERIALIZED_INVALID'); }
+    if (!captureNestedDictionaryProjectionAllowlist(parsed.allowlist)) return fail(APPROVED_DICT_NESTED_ALLOWLIST_INVALID); // the Host API validation, not a copy
+    const before = JSON.stringify(nestedSelApplied());
+    try { setNestedDictionaryProjectionAllowlistForMatching(parsed.allowlist); }
+    catch (err) { return fail(err && err.code ? err.code : APPROVED_DICT_NESTED_ALLOWLIST_INVALID); }
+    const after = nestedSelApplied();
+    nestedSelDraftDirty = false; // the loaded state is the applied state: the draft follows it
+    nestedSelMessage = before !== JSON.stringify(after)
+      ? `Selection設定を読み込みました（${after.length}件）。タグの再生成または再照合が必要です。`
+      : 'Selection設定を読み込みました（変更はありません。再照合は不要です）。';
+    renderNestedDictionarySelectionPanel();
+    return { ok: true, changed: before !== JSON.stringify(after) };
+  }
+  (() => {
+    $('nestedDictSaveBtn')?.addEventListener('click', () => { saveNestedSelectionArtifact(); });
+    $('nestedDictLoadBtn')?.addEventListener('click', () => $('nestedDictLoadInput')?.click());
+    $('nestedDictLoadInput')?.addEventListener('change', async e => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      let text;
+      try { text = await file.text(); } catch (_err) { text = null; }
+      loadNestedSelectionArtifactText(text);
+    });
+  })();
+  globalThis.__nestedSelectionPersistenceDiagnostics = Object.freeze({
+    buildText: () => buildNestedSelectionArtifactText(),
+    loadText: text => loadNestedSelectionArtifactText(text)
   });
 
   /* ═══════════════════════════════════════════════════════════════════════
