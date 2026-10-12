@@ -55,8 +55,11 @@ async function main() {
   check('A5 SHA256SUMS.txt lists the core with its real hash', fs.existsSync(CORE_DEST) && sums.includes(`${sha256(fs.readFileSync(CORE_DEST))}  runtime/private_dictionary_nested_selection_persistence_core.js`));
   const coreText = (fs.existsSync(CORE_DEST) ? fs.readFileSync(CORE_DEST, 'utf8') : '').replace(/\/\*[\s\S]*?\*\//g, '');
   check('A6 the shipped core has no dependency on any other file or global (minimal dependency set = this single file)', !/\brequire\s*\(|\bimport\b|KnowledgeIdHashUtils|QuantitySidecarBinding/.test(coreText));
-  const shippedPrivateDict = !fs.existsSync(path.join(DIST, 'runtime')) ? [] : fs.readdirSync(path.join(DIST, 'runtime')).filter(f => /private_dictionary|id_hash_utils|resolver|snapshot/i.test(f));
-  check('A7 no other private dictionary core was added to the bundle (only the persistence codec)', JSON.stringify(shippedPrivateDict) === JSON.stringify(['private_dictionary_nested_selection_persistence_core.js']), shippedPrivateDict.join(','));
+  // The bundle ships the full set of private-dictionary runtime cores the product HTML loads (Release Bundle Completeness). This test
+  // only fixes that the persistence codec is among them and is dependency-free; completeness of the rest is proven by
+  // alpha_release_bundle_completeness_verification.js.
+  const shippedPrivateDict = !fs.existsSync(path.join(DIST, 'runtime')) ? [] : fs.readdirSync(path.join(DIST, 'runtime')).filter(f => /private_dictionary|id_hash_utils/i.test(f)).sort();
+  check('A7 the persistence codec is bundled together with the private dictionary runtime set (6 private_dictionary_* cores incl. the persistence codec + id_hash_utils)', shippedPrivateDict.includes('private_dictionary_nested_selection_persistence_core.js') && shippedPrivateDict.length === 7, shippedPrivateDict.join(','));
   check('A8 the logic version identifier is unchanged by the bundling', (html.match(/12\.1\.15-column-order/g) || []).length === (fs.readFileSync(path.join(REPO_ROOT, 'tools', 'json_ab_trace_matching_tool_v12.1.15.html'), 'utf8').match(/12\.1\.15-column-order/g) || []).length - 1);
   check('A9 the release file name is unchanged', path.basename(DIST_HTML) === 'json_ab_trace_matching_tool_v12.2.0-alpha.1.html');
 

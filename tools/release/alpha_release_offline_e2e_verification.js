@@ -36,8 +36,11 @@ const EXPECTED_PLM_COUNT = 4;
 const EXPECTED_SIDECAR_REQUIREMENT_COUNT = 5;
 const EXPECTED_SIDECAR_ACTUAL_COUNT = 4;
 const EXPECTED_DETAIL_ROW_COUNT = 5;
-const EXPECTED_GRAPH_NODE_COUNT = 12;
-const EXPECTED_GRAPH_EDGE_COUNT = 20;
+// Graph expectation = the CURRENT dev (source HTML) behaviour on this fixture, i.e. with matching_partial_segment_significance_core.js
+// loaded (boilerplate-segment partial-match suppression). 12 nodes / 20 edges was the pre-HE-1 value, measured while that core was
+// (wrongly) missing from the bundle. alpha_release_bundle_completeness_verification.js independently proves dev == release on this fixture.
+const EXPECTED_GRAPH_NODE_COUNT = 11;
+const EXPECTED_GRAPH_EDGE_COUNT = 7;
 const EXPECTED_COMPARISON_IDS = [
   'cmp-v1:36:blk-b409e2cdd9b38c1957e1c6c16bbc8432,14:excel-0d37a56d,70:q-c880ec8e4774f77996bee7a6381987c4::q-426737683506aef7e446ea5b7b5fd877,',
   'cmp-v1:36:blk-b409e2cdd9b38c1957e1c6c16bbc8432,14:excel-0d37a56d,70:q-c880ec8e4774f77996bee7a6381987c4::q-6d54b0324779902df9d3614f4b4e6ba0,',
@@ -266,8 +269,8 @@ async function runAllScenarios(browser, tempDir, files) {
       partBorderColor: partNode.nonempty() ? partNode.style('border-color') : null,
     };
   });
-  check('[A] ナレッジグラフのnode数が固定期待値と一致(12)', graphInfo && graphInfo.nodes === EXPECTED_GRAPH_NODE_COUNT, graphInfo);
-  check('[A] ナレッジグラフのedge数が固定期待値と一致(20)', graphInfo && graphInfo.edges === EXPECTED_GRAPH_EDGE_COUNT, graphInfo);
+  check('[A] ナレッジグラフのnode数が固定期待値と一致(11)', graphInfo && graphInfo.nodes === EXPECTED_GRAPH_NODE_COUNT, graphInfo);
+  check('[A] ナレッジグラフのedge数が固定期待値と一致(7)', graphInfo && graphInfo.edges === EXPECTED_GRAPH_EDGE_COUNT, graphInfo);
   check('[A] エッジが存在する', graphInfo && graphInfo.hasEdges === true, graphInfo);
   check('[A] JSON A(requirement)ノードが青系(#1d4ed8 border)', graphInfo && graphInfo.reqBorderColor === 'rgb(29,78,216)', graphInfo && graphInfo.reqBorderColor);
   check('[A] JSON B(part)ノードが橙系(#c2410c border)', graphInfo && graphInfo.partBorderColor === 'rgb(194,65,12)', graphInfo && graphInfo.partBorderColor);
