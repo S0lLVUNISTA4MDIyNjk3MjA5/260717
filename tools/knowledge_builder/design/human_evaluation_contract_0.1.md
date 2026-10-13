@@ -134,13 +134,25 @@ netstring(s) = <sのUTF-8 byte長を10進で> ":" <s> ","
 
 1. **未評価** = entryが存在しないこと。artifact上に「未評価」状態は無い。
 2. **`SKIP`はartifactのdecisionではない。** SKIPはUI操作で、**評価を変更せず次のcomparisonへ進む**。未評価とSKIP済みを永続stateで区別しない。
-3. decisionの変更は同一`pair_id`のentryの**置換**である（履歴は保持しない）。decisionが`INCORRECT`以外へ変わるとき、`issue_category`は`null`になる。
+3. decisionの変更は同一`pair_id`のentryの**置換**である（履歴は保持しない）。decisionが`INCORRECT`以外へ変わるとき、`issue_category`は`null`になる。`INCORRECT`へ変わるときは、有効な`issue_category`が必須である（S9）。
 4. 評価の削除（Clear）はS16。
 
 ## S9. Issue category
 
-`issue_category`は **`decision === "INCORRECT"` のときのみstring**、それ以外は`null`でなければならない（違反は`ISSUE_CATEGORY_INVALID`）。
-decisionとissue categoryは別fieldで、混同しない。`INCORRECT`でも`null`（未選択）は許す。
+**`INCORRECT`は、6種類のうち有効な`issue_category`をちょうど1つ必須とする**（Human決定）。`CORRECT`と`UNSURE`では`issue_category`は必ず`null`である。
+
+| decision | `issue_category` | 判定 |
+|---|---|---|
+| `CORRECT` | `null` | valid |
+| `CORRECT` | non-null（6値を含む任意の値） | invalid |
+| `UNSURE` | `null` | valid |
+| `UNSURE` | non-null（6値を含む任意の値） | invalid |
+| `INCORRECT` | 6値のいずれか | valid |
+| `INCORRECT` | `null` / 空文字 / 未知の値 / 小文字などの変形 / `MISSING_MATCH` / 文字列でない値 | invalid |
+
+違反はいずれも`ISSUE_CATEGORY_INVALID`でrejectする（S23）。decisionとissue categoryは別fieldで混同しないが、`INCORRECT`では`issue_category`は必須である。
+**理由**: `INCORRECT`と判断した場合、その誤りの主要理由を1つ記録する。これにより、`INCORRECT`だけで原因情報が失われることを防ぐ。
+複数categoryの選択は0.1では作らない（1つのみ）。`null`を許すのは`CORRECT` / `UNSURE`のためだけである。
 
 **正式enum（6値）**:
 
@@ -157,7 +169,7 @@ decisionとissue categoryは別fieldで、混同しない。`INCORRECT`でも`nu
   （評価entryは存在するcomparisonに付くため、「あるべき対応が存在しない」を理由にするのは粒度と矛盾する）。
 - `QUANTITY`は**人間が付与する理由ラベル**として採用する。**確認済み事実**として、一般のcomparison行は数量情報を持たない（数量はcmp-v1の別系統）。
   したがって一般entryに数量専用の巨大snapshotを追加せず、0.1のmachine-resultに数量fieldは含めない（S10）。
-- comparison + optional issue detailの将来拡張は、新schema versionでentryへkeyを追加して行う（S22）。
+- 将来のissue detail（categoryより詳細な情報）の拡張は、新schema versionでentryへkeyを追加して行う（S22）。0.1の`issue_category`とは別である。
 
 ## S10. Machine-result: full projection / fingerprint / display snapshot
 
@@ -256,7 +268,7 @@ Human Evaluation**専用のstate**を持つ（名称は実装時決定、例: `h
 
 **UI draftとappliedの関係（検討結果）**:
 
-- **離散的な操作**（decisionの選択、issue categoryの選択）は**即時にapplied stateへ反映**する単純構造とする。
+- **離散的な操作**（decisionの選択、issue categoryの選択）は**即時にapplied stateへ反映**する単純構造とする。ただし`INCORRECT`は有効なissue categoryと**同時にcommit**する（categoryの無い`INCORRECT`のentryは作らない。categoryを選ぶまで`INCORRECT`はUI上の選択中の状態であり、appliedには入らない）。
 - **自由入力**（note・evaluator）は、キー入力ごとに反映すると、途中の文字列がentryになり、`evaluated_at`の更新規則（S14.3）と衝突するため、
   **UI draftとして保持し、明示的な確定操作（フォーカス離脱または確定ボタン）でappliedへ反映**する。確定時、appliedと比較して**実質変更が無ければ何も変更しない**。
 - entryが無い状態で入力したnote・evaluatorは、decisionの選択時に一緒にcommitされる（noteだけのentryは作らない）。
@@ -291,7 +303,7 @@ Human Evaluationは機械行を得る際に**Trace Review storeを変更し得�
 | `pair_id` | S7の文字列。`requirement_trace_id` / `actual_trace_id`から再生成した値と一致 |
 | `requirement_trace_id`, `actual_trace_id` | 有効な文字列（空・空白のみ不可）。無加工 |
 | `decision` | `"CORRECT"` / `"INCORRECT"` / `"UNSURE"` |
-| `issue_category` | S9の6値のstring（`INCORRECT`のときのみ可）または`null` |
+| `issue_category` | `INCORRECT`: S9の6値のstringが**必須**（`null`は不可）。`CORRECT` / `UNSURE`: **必ず`null`**（nullを許すのはこの2つのdecisionのためだけ） |
 | `note` | `null` または 1〜4096 code pointsの文字列（S14.1） |
 | `evaluator` | `null` または 1〜256 code pointsの文字列（S14.2） |
 | `evaluated_at` | 正規ISO文字列 `YYYY-MM-DDTHH:mm:ss.sssZ`（必須。S14.3） |
@@ -372,7 +384,7 @@ matching tool内の**独立「Human Evaluation」タブ**を正式な第一候�
 1. **eligible comparison list**（statusフィルタ付き。S19の件数表示）。
 2. **current pair**: `requirement_trace_id` / `actual_trace_id`、current machine result（classification、**confidence**、**method**、**evidence**、**dictionary contribution**）。
    既存の`relationPresentation`等と同じ情報源を使い、根拠を再選定しない。
-3. **操作**: decision（CORRECT / INCORRECT / UNSURE）、issue category（INCORRECT時のみ有効）、note、optional evaluator。
+3. **操作**: decision（CORRECT / INCORRECT / UNSURE）、issue category（`INCORRECT`時は必須で選択する／`CORRECT`・`UNSURE`時は無効で`null`）、note、optional evaluator。
 4. **Previous / Next / Skip**: Skipは評価を変更せず次へ進む（保存されない）。ナビゲーションはフィルタ結果の順を使う。
 5. **status filter**: 全て／未評価／CORRECT／INCORRECT／UNSURE／STALE／ORPHANED／評価不可（ineligible）。
    ORPHANEDは現在のcomparison一覧に存在しないため、過去評価のグループとして閲覧し、個別にclearできる。
@@ -441,7 +453,7 @@ fingerprintの計算（`canonicalJson` / `rawSha256Utf8` / `computeDatasetSignat
 | `…_PAIR_IDENTITY_MISMATCH` | `pair_id`の形式不正、または再生成値との不一致 |
 | `…_DUPLICATE_PAIR` | 同一`pair_id`が複数 |
 | `…_DECISION_INVALID` | decisionがenum外 |
-| `…_ISSUE_CATEGORY_INVALID` | enum外、またはdecisionと不整合（`INCORRECT`以外でnon-null） |
+| `…_ISSUE_CATEGORY_INVALID` | `INCORRECT`で`null` / 空文字 / 未知の値 / 非文字列、`CORRECT` / `UNSURE`でnon-null（enum外の値を含む） |
 | `…_MACHINE_RESULT_INVALID` | `machine_result`（display / identity）の形式・上限の不正 |
 | `…_SOURCE_IDENTITY_INVALID` | `source_identity`の形式不正 |
 | `…_DATASET_CONTEXT_INVALID` | `dataset_context`の形式不正（現在datasetとの**不一致**ではない） |
@@ -460,7 +472,10 @@ UIレベルの状態（artifactエラーではない）: `PERSISTENT_EVALUATION_
 
 **Decision / Issue category**
 - V-D1: CORRECT / INCORRECT / UNSURE の設定と置換。V-D2: SKIPが状態を変えず、未評価と区別されない。V-D3: clear current / clear all（matching等に影響しない。all clearは確認必須）。
-- V-D4: issue category全6値、`INCORRECT`のみnon-null、他decisionでnull、decision変更時の`null`化、`MISSING_MATCH`が不正。
+- V-D4: issue categoryの必須/null規則。
+  Valid: `CORRECT` + `null`、`UNSURE` + `null`、`INCORRECT` + 6値それぞれ（`WRONG_MATCH` / `WRONG_FIELD` / `DICTIONARY` / `QUANTITY` / `INSUFFICIENT_EVIDENCE` / `OTHER`）。
+  Invalid（すべて`ISSUE_CATEGORY_INVALID`）: `CORRECT` + category、`UNSURE` + category、`INCORRECT` + `null`、`INCORRECT` + 空文字・未知の値・小文字などの変形・`MISSING_MATCH`・文字列でない値。
+  serializeは`INCORRECT` + `null`のartifactを生成せず、decodeはartifact全体をatomicにrejectする（valid entryだけの部分importをしない）。builderは`OTHER`などへ自動補完しない。decision変更時は`INCORRECT`以外への変更で`null`化し、`INCORRECT`への変更は有効なcategoryを要する。
 - V-D5: note exact round-trip（改行・絵文字・前後空白・`<script>`文字列がそのまま保存・表示され、HTMLとして解釈されない）、4096 code points境界、空→null。V-D6: evaluator 256境界。
 - V-D7: evaluated_atの更新規則（実質変更でのみ更新、Load/Save/navigation/filter/unchanged re-applyでは不変、STALE再評価で更新）。
 
