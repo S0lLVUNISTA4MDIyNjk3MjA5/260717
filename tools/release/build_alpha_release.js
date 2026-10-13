@@ -3,8 +3,8 @@
 /*
  * Alpha Release Gate 1 - Checkpoint 2: version harmonization + user docs.
  *
- * Copies the product HTML plus its already-approved runtime dependencies (20
- * self-authored cores + 3 vendored third-party libraries, 23 files total) into
+ * Copies the product HTML plus its already-approved runtime dependencies (21
+ * self-authored cores + 3 vendored third-party libraries, 24 files total) into
  * dist/, and produces a version-harmonized distribution copy:
  *
  *   1. Apply an exact, individually-verified set of string replacements to the
@@ -21,7 +21,7 @@
  *      references them.
  *   2. Insert a small alpha-release notice directly after the (now-updated)
  *      <h1>, without any other UI redesign.
- *   3. Rewrite the 23 known <script src="..."> attributes to point at the
+ *   3. Rewrite the 24 known <script src="..."> attributes to point at the
  *      local runtime/ folder.
  *   4. Copy the vendor + self-authored runtime files, the 5 license texts, and
  *      the 4 user-facing docs (tools/release/docs/) into the output directory.
@@ -96,6 +96,8 @@ const SELF_AUTHORED_RUNTIME = [
   // Nested Dictionary Selection persistence codec (Contract 0.3 S3.5): the ONE private-dictionary file shipped, because it has no
   // dependency on any other core (see the header of the file). Lets the release bundle Save / Load the Selection settings artifact.
   { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_nested_selection_persistence_core.js'), dest: 'private_dictionary_nested_selection_persistence_core.js' },
+  // Human Evaluation 0.1 core (pure codec / identity / status engine); the product HTML injects canonicalJson / rawSha256Utf8 from the already-bundled QuantitySidecarBinding.
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'human_evaluation_core.js'), dest: 'human_evaluation_core.js' },
   // Release Bundle Completeness: the remaining runtime cores the product HTML already loads via <script src> (HTML is the source of
   // truth for runtime dependencies). Dependency closure: role_binding -> registry; sidecar_context -> role_binding + registry;
   // id_hash_utils -> QuantitySidecarBinding; learning -> id_hash; snapshot -> learning; resolver -> snapshot + learning + id_hash;
@@ -130,7 +132,7 @@ const LICENSE_FILES = [
 const DOC_FILES = ['README_ja.md', 'KNOWN_LIMITATIONS.md', 'THIRD_PARTY_LICENSES.md', 'BROWSER_VALIDATION_REPORT.md', 'trace_matching_tool_detailed_operation_manual_v12.2.0_alpha.1.pdf'];
 
 // Exact <script src="..."> attribute value -> new local runtime/ relative path.
-// One entry per rewritten runtime file (23); build fails if any doesn't match exactly once.
+// One entry per rewritten runtime file (24); build fails if any doesn't match exactly once.
 const SCRIPT_SRC_REWRITES = [
   ['https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js', 'runtime/cytoscape-3.26.0.min.js'],
   ['https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js', 'runtime/xlsx-0.18.5.full.min.js'],
@@ -145,6 +147,7 @@ const SCRIPT_SRC_REWRITES = [
   ['./trace_comparison_review_projection_core.js', 'runtime/trace_comparison_review_projection_core.js'],
   ['./trace_comparison_review_export_core.js', 'runtime/trace_comparison_review_export_core.js'],
   ['./knowledge_builder/core/private_dictionary_nested_selection_persistence_core.js', 'runtime/private_dictionary_nested_selection_persistence_core.js'],
+  ['./knowledge_builder/core/human_evaluation_core.js', 'runtime/human_evaluation_core.js'],
   ['./canonical_matching_field_registry_core.js', 'runtime/canonical_matching_field_registry_core.js'],
   ['./knowledge_builder/core/canonical_quantity_role_binding_core.js', 'runtime/canonical_quantity_role_binding_core.js'],
   ['./knowledge_builder/core/canonical_quantity_sidecar_context_core.js', 'runtime/canonical_quantity_sidecar_context_core.js'],
@@ -335,7 +338,7 @@ function main() {
     1
   );
 
-  // ... then rewrite the 23 known script src attributes.
+  // ... then rewrite the 24 known script src attributes.
   for (const [from, to] of SCRIPT_SRC_REWRITES) {
     const needle = `src="${from}"`;
     const count = html.split(needle).length - 1;

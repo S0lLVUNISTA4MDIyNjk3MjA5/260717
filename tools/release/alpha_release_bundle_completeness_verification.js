@@ -63,7 +63,7 @@ const EAGER_DEPS = {
 const RUNTIME_GLOBALS = ['CanonicalMatchingFieldRegistry', 'CanonicalQuantityRoleBinding', 'CanonicalQuantitySidecarContext',
   'MatchingPartialSegmentSignificance', 'KnowledgeIdHashUtils', 'PrivateDictionaryLearningCore', 'PrivateDictionarySnapshotCore',
   'PrivateDictionaryResolverCore', 'PrivateDictionarySnapshotActivationCore', 'PrivateDictionaryProjectSnapshotPinPersistenceCore',
-  'PrivateDictionaryNestedSelectionPersistenceCore', 'QuantitySidecarBinding', 'PrivateDictionaryMatchingSession'];
+  'PrivateDictionaryNestedSelectionPersistenceCore', 'HumanEvaluationCore', 'QuantitySidecarBinding', 'PrivateDictionaryMatchingSession'];
 
 const checks = [];
 const check = (name, ok, detail) => { checks.push({ name, ok: !!ok, detail }); };
@@ -83,12 +83,12 @@ async function main() {
   const srcSrcs = srcList(srcHtml), distSrcs = srcList(distHtml);
   const srcLocal = srcSrcs.filter(s => !/^https?:/.test(s));
   const srcRemote = srcSrcs.filter(s => /^https?:/.test(s));
-  check('A1 source HTML: 23 script src = 3 vendor CDN + 20 local', srcSrcs.length === 23 && srcRemote.length === 3 && srcLocal.length === 20, `${srcSrcs.length}/${srcRemote.length}/${srcLocal.length}`);
-  check('A2 dist HTML: exactly 23 script src, all under runtime/, no relative / absolute / remote src left', distSrcs.length === 23 && distSrcs.every(s => s.startsWith('runtime/')), distSrcs.filter(s => !s.startsWith('runtime/')).join(','));
+  check('A1 source HTML: 24 script src = 3 vendor CDN + 21 local', srcSrcs.length === 24 && srcRemote.length === 3 && srcLocal.length === 21, `${srcSrcs.length}/${srcRemote.length}/${srcLocal.length}`);
+  check('A2 dist HTML: exactly 24 script src, all under runtime/, no relative / absolute / remote src left', distSrcs.length === 24 && distSrcs.every(s => s.startsWith('runtime/')), distSrcs.filter(s => !s.startsWith('runtime/')).join(','));
   check('A3 every dist script src resolves to a real, non-empty bundled file (missing relative script = 0)', distSrcs.every(s => fs.existsSync(path.join(DIST, s)) && fs.statSync(path.join(DIST, s)).size > 0), distSrcs.filter(s => !fs.existsSync(path.join(DIST, s))).join(','));
   check('A4 dist script order equals the source HTML order (so every load-order requirement is preserved)', JSON.stringify(distSrcs.map(base).filter(b => !/^(cytoscape|xlsx|tiny-segmenter)/.test(b))) === JSON.stringify(srcLocal.map(base)));
   const runtimeFiles = fs.readdirSync(path.join(DIST, 'runtime'));
-  check('A5 runtime/ files == referenced files exactly (no orphan, no unexpected file): 23', runtimeFiles.length === 23 && runtimeFiles.every(f => distSrcs.includes('runtime/' + f)) && distSrcs.every(s => runtimeFiles.includes(base(s))), `${runtimeFiles.length}`);
+  check('A5 runtime/ files == referenced files exactly (no orphan, no unexpected file): 24', runtimeFiles.length === 24 && runtimeFiles.every(f => distSrcs.includes('runtime/' + f)) && distSrcs.every(s => runtimeFiles.includes(base(s))), `${runtimeFiles.length}`);
   let identical = true, badCore = '';
   for (const rel of srcLocal) {
     const from = path.join(TOOLS, rel);
@@ -179,7 +179,7 @@ async function main() {
   const dev = await open('dev');
   const globalsRel = await rel.page.evaluate(g => Object.fromEntries(g.map(k => [k, typeof globalThis[k]])), RUNTIME_GLOBALS);
   const globalsDev = await dev.page.evaluate(g => Object.fromEntries(g.map(k => [k, typeof globalThis[k]])), RUNTIME_GLOBALS);
-  check('B1 release page load: every runtime global present (13/13), equal to dev', RUNTIME_GLOBALS.every(k => globalsRel[k] === 'object') && JSON.stringify(globalsRel) === JSON.stringify(globalsDev), JSON.stringify(globalsRel));
+  check('B1 release page load: every runtime global present (14/14), equal to dev', RUNTIME_GLOBALS.every(k => globalsRel[k] === 'object') && JSON.stringify(globalsRel) === JSON.stringify(globalsDev), JSON.stringify(globalsRel));
   check('B2 release page load: zero failed requests (no ERR_FILE_NOT_FOUND), zero console errors, zero page errors', rel.rec.failed.length === 0 && rel.rec.consoleErrors.length === 0 && rel.rec.pageErrors.length === 0, JSON.stringify({ failed: rel.rec.failed, consoleErrors: rel.rec.consoleErrors, pageErrors: rel.rec.pageErrors }));
   check('B3 dev reference page load is itself clean (the comparison baseline is valid)', dev.rec.pageErrors.length === 0 && dev.rec.consoleErrors.length === 0 && dev.rec.failed.length === 0, JSON.stringify({ failed: dev.rec.failed, consoleErrors: dev.rec.consoleErrors }));
   check('B4 neither variant attempts any non-file request', rel.rec.external.length === 0 && dev.rec.external.length >= 0 /* dev CDN requests are served locally */, rel.rec.external.join(','));

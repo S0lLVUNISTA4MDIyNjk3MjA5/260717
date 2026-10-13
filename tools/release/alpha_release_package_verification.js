@@ -53,6 +53,7 @@ const EXPECTED_SELF_AUTHORED_RUNTIME = [
   { src: path.join(REPO_ROOT, 'tools', 'design_notes', 'trace_comparison_record_set_validator.js'), dest: 'trace_comparison_record_set_validator.js' },
   // Nested Dictionary Selection persistence codec (Contract 0.3 S3.5) - the single, dependency-free private-dictionary file in the bundle.
   { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_nested_selection_persistence_core.js'), dest: 'private_dictionary_nested_selection_persistence_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'human_evaluation_core.js'), dest: 'human_evaluation_core.js' },
   // Release Bundle Completeness: the 10 runtime cores the product HTML loads that were previously missing from the bundle.
   { src: path.join(REPO_ROOT, 'tools', 'canonical_matching_field_registry_core.js'), dest: 'canonical_matching_field_registry_core.js' },
   { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'canonical_quantity_role_binding_core.js'), dest: 'canonical_quantity_role_binding_core.js' },
@@ -212,7 +213,7 @@ function main() {
   const runtimeFiles = relFiles.filter(f => f.rel.startsWith('runtime/'));
   const licenseFiles = relFiles.filter(f => f.rel.startsWith('licenses/'));
   const docFiles = relFiles.filter(f => EXPECTED_DOC_FILES.includes(f.rel));
-  check('runtime/ has exactly 23 files (3 vendor + 20 self-authored)', runtimeFiles.length === 23, `found ${runtimeFiles.length}`);
+  check('runtime/ has exactly 24 files (3 vendor + 21 self-authored)', runtimeFiles.length === 24, `found ${runtimeFiles.length}`);
   check('licenses/ has exactly 5 files', licenseFiles.length === 5, `found ${licenseFiles.length}`);
   check(`doc files present: exactly ${EXPECTED_DOC_FILES.length}`, docFiles.length === EXPECTED_DOC_FILES.length, `found ${docFiles.length}`);
   check('HTML file name matches expected exactly', actualRelSet.has(OUTPUT_HTML_NAME));
@@ -252,13 +253,13 @@ function main() {
   const html = fs.readFileSync(htmlPath, 'utf8');
   const scriptSrcs = [...html.matchAll(/<script[^>]*\bsrc\s*=\s*"([^"]*)"/g)].map(m => m[1]);
   // Reference completeness invariant (Release Bundle Completeness): the product HTML is the runtime-dependency source of truth, so the
-  // set of <script src> must be EXACTLY the set of runtime/ files the bundle ships (3 vendor + 20 self-authored), every reference must
+  // set of <script src> must be EXACTLY the set of runtime/ files the bundle ships (3 vendor + 21 self-authored), every reference must
   // resolve to a real file, and every shipped runtime script must be referenced (no orphan, no missing, no unexpected local src).
   const expectedRuntimeRefs = new Set([
     ...EXPECTED_SELF_AUTHORED_RUNTIME.map(e => `runtime/${e.dest}`),
     ...Object.values(EXPECTED_VENDOR_RUNTIME_DEST).map(d => `runtime/${d}`),
   ]);
-  check('exactly 23 <script src="..."> references (3 vendor + 20 self-authored)', scriptSrcs.length === 23, `found ${scriptSrcs.length}`);
+  check('exactly 24 <script src="..."> references (3 vendor + 21 self-authored)', scriptSrcs.length === 24, `found ${scriptSrcs.length}`);
   check('every <script src> maps to an expected runtime file (no unexpected local src)', scriptSrcs.every(s => expectedRuntimeRefs.has(s)), scriptSrcs.filter(s => !expectedRuntimeRefs.has(s)).join(', '));
   check('every expected runtime script is referenced by the HTML (no orphan)', [...expectedRuntimeRefs].every(r => scriptSrcs.includes(r)), [...expectedRuntimeRefs].filter(r => !scriptSrcs.includes(r)).join(', '));
   check('no relative (non-runtime/, ./, ../) local script src remains', scriptSrcs.every(s => !/^(\.\/|\.\.\/|\/)/.test(s)), scriptSrcs.filter(s => /^(\.\/|\.\.\/|\/)/.test(s)).join(', '));

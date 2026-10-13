@@ -2,8 +2,8 @@
 /* Human Evaluation Contract 0.1 - Node verification of the pure core (tools/knowledge_builder/core/human_evaluation_core.js):
  * persistent eligibility, pair identity, decision / issue category / note / evaluator / evaluated_at validation, machine-result and
  * source identity, strict artifact decode, deterministic serialization, size boundary, duplicate detection, atomic rejection and
- * CURRENT / STALE / ORPHANED / NO_CURRENT_RESULT status derivation. All data is synthetic. The core is not connected to the
- * matching tool in this slice, so this verification also pins that boundary.
+ * CURRENT / STALE / ORPHANED / NO_CURRENT_RESULT status derivation. All data is synthetic. This verification also pins the permanent
+ * Core isolation boundary (A10): the Core stays pure and the integration direction stays product -> Core.
  *
  * Run: node tools/knowledge_builder/verification/human_evaluation_core_verification.js
  */
@@ -52,10 +52,6 @@ const artifactText = obj => JSON.stringify(obj);
 function rawArtifact(evals, dc = null) { return { artifact_schema_version: Core.ARTIFACT_SCHEMA_VERSION, dataset_context: dc, evaluations: clone(evals) }; }
 
 async function main() {
-  const E1 = await entry();
-  const E2 = await entry({ requirement_trace_id: 'REQ-2', actual_trace_id: 'PART-2', decision: 'INCORRECT', issue_category: 'WRONG_MATCH', note: 'メモ😀', evaluator: '山田' });
-  const E3 = await entry({ requirement_trace_id: '要求-1', actual_trace_id: 'P-1', decision: 'UNSURE' });
-
   // ===== A. static boundary / purity =====
   const src = fs.readFileSync(CORE_PATH, 'utf8');
   const code0 = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
@@ -67,9 +63,65 @@ async function main() {
   ok(!Core.DECISIONS.includes('SKIP') && JSON.stringify(Core.DECISIONS) === '["CORRECT","INCORRECT","UNSURE"]', 'A7 persistent decisions are exactly CORRECT / INCORRECT / UNSURE (no SKIP)');
   ok(JSON.stringify(Core.ISSUE_CATEGORIES) === '["WRONG_MATCH","WRONG_FIELD","DICTIONARY","QUANTITY","INSUFFICIENT_EVIDENCE","OTHER"]', 'A8 issue categories are the six approved values (no MISSING_MATCH)');
   ok(Core.MAX_SERIALIZED_BYTES === 8388608 && Core.ARTIFACT_SCHEMA_VERSION === 'human-evaluation-persistence/0.1', 'A9 8 MiB limit and schema id');
-  ok(!fs.readFileSync(HTML_PATH, 'utf8').includes('human_evaluation_core') && !fs.readFileSync(BUILD_PATH, 'utf8').includes('human_evaluation_core'), 'A10 this slice does not connect the core to the matching tool or the release bundle');
+  // A10 permanent Core isolation boundary and integration direction (product -> Core, never Core -> product DOM / runtime).
+  // (Replaces the Core-implementation-slice assumption "not connected yet"; it must hold before and after the product integrates the Core.)
+  const PRODUCT_TOKENS = ['tabHumanEval', 'getElementById', 'querySelector', 'addEventListener', 'createElement', 'textContent', 'innerHTML', '__humanEvaluation',
+    'json_ab_trace_matching_tool', 'build_alpha_release', 'QuantitySidecarBinding', 'PrivateDictionary', 'human_evaluation.json', '.html', 'runtime/', 'downloadText', 'activeMatchingJob', 'matchRunSeq', 'traceComparison'];
+  const productHits = PRODUCT_TOKENS.filter(t => code0.includes(t));
+  ok(productHits.length === 0, `A10a the Core source contains no product DOM / runtime / release-specific identifier (hits: ${productHits.join(',') || 'none'})`);
+  const vm = require('vm');
+  const poisoned = {};
+  ['document', 'window', 'localStorage', 'sessionStorage', 'indexedDB', 'navigator', 'fetch', 'XMLHttpRequest', 'FileReader', 'Blob', 'traceReviewStore', 'mergedResult', 'matchLogic', 'QuantitySidecarBinding', 'traceMatrixRows', 'mlModel']
+    .forEach(k => Object.defineProperty(poisoned, k, { configurable: true, enumerable: true, get() { throw new Error(`Core touched host global ${k}`); } }));
+  poisoned.TextEncoder = TextEncoder; poisoned.TextDecoder = TextDecoder; // standard encoding builtins (not host DOM / storage / clock); a bare vm realm lacks them
+  const sandbox = vm.createContext(poisoned);
+  const preKeys = Object.keys(sandbox);
+  vm.runInContext('Math.random = () => { throw new Error("Core read randomness"); }; Date.now = () => { throw new Error("Core read the clock"); };', sandbox);
+  let isolated = null, isolationError = null;
+  try {
+    vm.runInContext(src, sandbox, { filename: 'human_evaluation_core.js' });
+    isolated = vm.runInContext('globalThis.HumanEvaluationCore', sandbox);
+  } catch (e) { isolationError = e; }
+  ok(isolated && !isolationError && Object.keys(isolated).length === Object.keys(Core).length, `A10b the Core loads in a bare realm whose DOM / storage / network / Trace Review / matching globals, clock and randomness all throw on access${isolationError ? ' (' + isolationError.message + ')' : ''}`);
+  let exercised = null, exerciseError = null;
+  try {
+    // run inside the bare realm so every object the Core sees is native to that realm (the Core validates plain objects)
+    sandbox.__deps = deps; sandbox.__input = JSON.stringify({ proj: PROJ, a: REC_A, b: REC_B, t0: T0 });
+    const outJson = await vm.runInContext(`(async () => {
+      const C = globalThis.HumanEvaluationCore, d = __deps, i = JSON.parse(__input);
+      const pair = C.encodePairId('REQ-1', 'PART-1');
+      const cls = C.classifyEligibility([{ matching_engine: true, has_a: true, has_b: true, requirement_trace_id_raw: 'REQ-1', requirement_trace_id: 'REQ-1', actual_trace_id_raw: 'PART-1', actual_trace_id: 'PART-1' }],
+        { requirement: C.buildTraceIdCounts(['REQ-1']), actual: C.buildTraceIdCounts(['PART-1']) });
+      const built = await C.buildEvaluationEntry({ requirement_trace_id: 'REQ-1', actual_trace_id: 'PART-1', decision: 'INCORRECT', issue_category: 'OTHER', note: null, evaluator: null,
+        evaluated_at: i.t0, machine_projection: i.proj, requirement_record: i.a, actual_record: i.b }, d);
+      const text = await C.serializeHumanEvaluation({ dataset_context: null, evaluations: [built] }, d);
+      const back = C.decodeHumanEvaluation(text);
+      const st = C.deriveEntryStatuses(back.evaluations, { available: false, comparisons: [] });
+      return JSON.stringify({ pair, eligible: cls[0].eligible, same: back.evaluations.length === 1 && back.evaluations[0].pair_id === pair, status: st[0].status });
+    })()`, sandbox);
+    exercised = JSON.parse(outJson);
+    exercised.ownKeys = Object.keys(sandbox).filter(k => !preKeys.includes(k) && k !== '__deps' && k !== '__input');
+  } catch (e) { exerciseError = e; }
+  ok(exercised && !exerciseError && exercised.pair === 'hev-pair-v1:5:REQ-1,6:PART-1,' && exercised.eligible === true && exercised.same && exercised.status === 'NO_CURRENT_RESULT',
+    `A10c identity, entry building, serialize / decode and status derivation all run with injected dependencies only (no host global, clock or randomness)${exerciseError ? ' (' + exerciseError.message + ')' : ''}`);
+  ok(exercised && JSON.stringify(exercised.ownKeys) === '["HumanEvaluationCore"]', 'A10d the only global the Core defines is its own export (no leaked helper or mutable singleton)');
+  // Integration direction: where the product / release consume the Core they use only its exported API, and load the dependency provider first.
+  const htmlText = fs.readFileSync(HTML_PATH, 'utf8');
+  const used = [...htmlText.matchAll(/\b(?:core\(\)|HumanEvaluationCore)\.([A-Za-z_]\w*)/g)].map(m => m[1]);
+  const unknownUsed = [...new Set(used)].filter(n => !(n in Core));
+  ok(unknownUsed.length === 0, `A10e the product consumes only exported Core API names (${[...new Set(used)].length} used; unknown: ${unknownUsed.join(',') || 'none'})`);
+  const srcTags = [...htmlText.matchAll(/<script[^>]*\bsrc\s*=\s*"([^"]*)"/g)].map(m => m[1]);
+  const coreIdx = srcTags.findIndex(t => /human_evaluation_core\.js$/.test(t)), bindIdx = srcTags.findIndex(t => /quantity_sidecar_binding_core\.js$/.test(t));
+  ok(coreIdx === -1 || (bindIdx !== -1 && bindIdx < coreIdx), 'A10f where the product loads the Core by <script src>, the dependency provider (QuantitySidecarBinding) is loaded before it');
+  const buildText = fs.readFileSync(BUILD_PATH, 'utf8');
+  ok(!/human_evaluation_core/.test(buildText) || /dest: 'human_evaluation_core\.js'/.test(buildText), 'A10g where the release build ships the Core, it ships it as its own runtime file (byte-identical copy, no rewrite)');
   ok(JSON.stringify(Object.keys(Core.CODES).sort()) === JSON.stringify(['DATASET_CONTEXT_INVALID', 'DECISION_INVALID', 'DUPLICATE_PAIR', 'ENTRY_INVALID', 'ISSUE_CATEGORY_INVALID', 'MACHINE_RESULT_INVALID', 'PAIR_IDENTITY_MISMATCH', 'ROOT_INVALID', 'SERIALIZED_INVALID', 'SIZE_EXCEEDED', 'SOURCE_IDENTITY_INVALID', 'UNSUPPORTED_VERSION'])
     && Object.values(Core.CODES).every(v => v.startsWith('HUMAN_EVALUATION_PERSISTENCE_')), 'A11 the twelve HUMAN_EVALUATION_PERSISTENCE_* codes');
+
+  // fixtures are built after the static / isolation boundary (A) so a boundary violation is reported by its own assertion, not as a setup crash
+  const E1 = await entry();
+  const E2 = await entry({ requirement_trace_id: 'REQ-2', actual_trace_id: 'PART-2', decision: 'INCORRECT', issue_category: 'WRONG_MATCH', note: 'メモ😀', evaluator: '山田' });
+  const E3 = await entry({ requirement_trace_id: '要求-1', actual_trace_id: 'P-1', decision: 'UNSURE' });
 
   // ===== B. identity =====
   ok(Core.encodePairId('REQ-1', 'PART-1') === 'hev-pair-v1:5:REQ-1,6:PART-1,', 'B1 ASCII golden pair id');

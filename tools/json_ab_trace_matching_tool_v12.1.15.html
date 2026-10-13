@@ -92,6 +92,7 @@
        追加。既存5本の並びを崩さないため末尾へ追加する。 -->
   <script src="./knowledge_builder/core/private_dictionary_project_snapshot_pin_persistence_core.js"></script>
   <script src="./knowledge_builder/core/private_dictionary_nested_selection_persistence_core.js"></script>
+  <script src="./knowledge_builder/core/human_evaluation_core.js"></script>
   <style>
     :root {
       --primary: #2563eb;
@@ -753,6 +754,7 @@
   <button class="tab-btn" data-tab="tabGraph">ナレッジグラフ</button>
   <button class="tab-btn" data-tab="tabML">学習（フィードバック）</button>
   <button class="tab-btn" data-tab="tabCode">モデルテキスト出力</button>
+  <button class="tab-btn" data-tab="tabHumanEval">Human Evaluation</button>
   <button class="tab-btn" data-tab="tabHelp">HELP</button>
 </div>
 
@@ -13516,6 +13518,7 @@ ${h.name}`, type:'requirement', detail:srcA };
     if (used.length) return { status:'used', label:'辞書寄与あり', annotations:used };
     return { status:'present_unused', label:'辞書解決あり・この照合には未使用', annotations:allAnns };
   }
+  window.__humanEvaluationDictionaryContribution = r => dictionaryContributionForEdge(r).status;
   function dictionaryContributionLine(r) {
     const c = dictionaryContributionForEdge(r);
     if (c.status === 'none') return c.label;
@@ -16711,5 +16714,487 @@ ${h.name}`, type:'requirement', detail:srcA };
 })();
 </script>
 
+<!-- ── Human Evaluation 0.1 (Human Evaluation Contract 0.1): read-only quality evaluation overlay ──
+     独立タブ。Trace Reviewとは保存領域・state・キーを共有しない。matching結果・effective relation・Graph・ML・辞書へ副作用を与えない。
+     評価の保存は専用JSON artifact（human_evaluation.json）のSave / Loadのみ。localStorageへは保存しない。 -->
+<style>
+  .he-hint { font-size:12px; color:var(--muted); line-height:1.7; margin:4px 0 10px; }
+  .he-counts { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; }
+  .he-count { border:1px solid #cbd5e1; border-radius:8px; padding:4px 10px; background:#f8fafc; font-size:12px; min-width:92px; }
+  .he-count b { display:block; font-size:16px; color:#0f172a; }
+  .he-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0; }
+  .he-layout { display:grid; grid-template-columns:minmax(220px, 1fr) minmax(320px, 2fr); gap:12px; align-items:start; }
+  .he-list { max-height:460px; overflow:auto; border:1px solid #cbd5e1; border-radius:8px; background:#fff; }
+  .he-item { display:block; width:100%; text-align:left; background:#fff; color:#0f172a; border:0; border-bottom:1px solid #e2e8f0; border-radius:0; padding:6px 8px; font-size:12px; cursor:pointer; }
+  .he-item:hover { background:#eff6ff; }
+  .he-item.selected { background:#dbeafe; font-weight:700; }
+  .he-badge { display:inline-block; font-size:11px; padding:0 6px; border-radius:8px; margin-right:6px; background:#e2e8f0; color:#334155; }
+  .he-badge.CURRENT { background:#dcfce7; color:#166534; }
+  .he-badge.STALE { background:#fef3c7; color:#92400e; }
+  .he-badge.ORPHANED { background:#fee2e2; color:#991b1b; }
+  .he-badge.NO_CURRENT_RESULT { background:#e0e7ff; color:#3730a3; }
+  .he-badge.INELIGIBLE { background:#f1f5f9; color:#64748b; }
+  .he-dl { display:grid; grid-template-columns:150px 1fr; gap:2px 10px; font-size:13px; margin:6px 0; }
+  .he-dl dt { color:var(--muted); }
+  .he-dl dd { margin:0; word-break:break-word; white-space:pre-wrap; }
+  .he-ctl { margin:8px 0; }
+  .he-ctl label { margin-right:10px; font-size:13px; }
+  .he-ctl textarea { width:100%; min-height:70px; }
+  .he-warn { color:#92400e; background:#fffbeb; border:1px solid #fcd34d; border-radius:6px; padding:4px 8px; font-size:12px; }
+</style>
+<div id="tabHumanEval" class="tab-panel">
+  <div class="card">
+    <h2>Human Evaluation</h2>
+    <div class="he-hint">自動照合結果の<strong>品質評価</strong>を記録する専用機能です。<strong>Trace Reviewとは別機能</strong>で、照合結果・Graph・学習・辞書には影響しません。
+      評価は専用JSON（<code>human_evaluation.json</code>）でSave / Loadします（ページを再読込すると空に戻ります）。評価にはtrace_idが必要です（trace_idが無い・重複する対応は閲覧のみ）。</div>
+    <div id="heStatus" class="field-hint" role="status"></div>
+    <div id="heWarning" class="he-warn" role="status" style="display:none;"></div>
+    <div id="heCounts" class="he-counts"></div>
+    <div class="he-bar">
+      <label for="heFilter">表示</label>
+      <select id="heFilter">
+        <option value="ALL">すべて (ALL)</option><option value="UNEVALUATED">未評価 (UNEVALUATED)</option><option value="CURRENT">評価済み (CURRENT)</option>
+        <option value="CORRECT">CORRECT</option><option value="INCORRECT">INCORRECT</option><option value="UNSURE">UNSURE</option>
+        <option value="STALE">STALE</option><option value="ORPHANED">ORPHANED</option><option value="INELIGIBLE">評価不可 (INELIGIBLE)</option>
+      </select>
+      <button id="hePrevBtn" class="secondary" type="button">◀ Previous</button>
+      <button id="heNextBtn" class="secondary" type="button">Next ▶</button>
+      <button id="heSkipBtn" class="secondary" type="button" title="評価を変更せず次へ進みます（保存されません）">Skip ▶▶</button>
+      <span id="hePosition" class="field-hint"></span>
+    </div>
+    <div class="he-bar">
+      <button id="heSaveBtn" class="secondary" type="button">💾 Human Evaluationを保存</button>
+      <button id="heLoadBtn" class="secondary" type="button">📂 Human Evaluationを読込</button>
+      <input type="file" id="heLoadInput" accept=".json,application/json" style="display:none;" />
+      <button id="heClearCurrentBtn" class="secondary" type="button">この評価を削除</button>
+      <button id="heClearAllBtn" class="secondary" type="button">すべての評価を削除</button>
+    </div>
+    <div class="he-layout">
+      <div id="heList" class="he-list" role="listbox" aria-label="Human Evaluation 対象"></div>
+      <div id="heDetail">
+        <div id="heEmpty" class="field-hint">対象がありません。</div>
+        <div id="hePair" style="display:none;">
+          <h3 style="font-size:14px; margin:0 0 4px;">Current pair</h3>
+          <dl class="he-dl">
+            <dt>requirement_trace_id</dt><dd id="heReqId"></dd>
+            <dt>actual_trace_id</dt><dd id="heActId"></dd>
+            <dt>評価状態</dt><dd id="heEntryStatus"></dd>
+          </dl>
+          <div id="heUnavailable" class="he-warn" style="display:none;">PERSISTENT_EVALUATION_UNAVAILABLE: この対応は評価を保存できません。</div>
+          <h3 style="font-size:14px; margin:8px 0 4px;">Machine result</h3>
+          <dl class="he-dl">
+            <dt>classification</dt><dd id="heMrClass"></dd>
+            <dt>confidence</dt><dd id="heMrConf"></dd>
+            <dt>method</dt><dd id="heMrMethod"></dd>
+            <dt>evidence</dt><dd id="heMrEvidence"></dd>
+            <dt>matched A field</dt><dd id="heMrAField"></dd>
+            <dt>matched B field</dt><dd id="heMrBField"></dd>
+            <dt>dictionary contribution</dt><dd id="heMrDict"></dd>
+          </dl>
+          <h3 style="font-size:14px; margin:8px 0 4px;">Human Evaluation</h3>
+          <div id="heSaved" class="field-hint"></div>
+          <div class="he-ctl" id="heDecisionGroup" role="radiogroup" aria-label="decision">
+            <label><input type="radio" name="heDecision" value="CORRECT" /> CORRECT</label>
+            <label><input type="radio" name="heDecision" value="INCORRECT" /> INCORRECT</label>
+            <label><input type="radio" name="heDecision" value="UNSURE" /> UNSURE</label>
+          </div>
+          <div class="he-ctl">
+            <label for="heCategory">issue category（INCORRECTでは必須）</label>
+            <select id="heCategory">
+              <option value="">（未選択）</option><option value="WRONG_MATCH">WRONG_MATCH</option><option value="WRONG_FIELD">WRONG_FIELD</option>
+              <option value="DICTIONARY">DICTIONARY</option><option value="QUANTITY">QUANTITY</option>
+              <option value="INSUFFICIENT_EVIDENCE">INSUFFICIENT_EVIDENCE</option><option value="OTHER">OTHER</option>
+            </select>
+            <div id="heCategoryHint" class="field-hint"></div>
+          </div>
+          <div class="he-ctl"><label for="heNote">note（任意）</label><textarea id="heNote" maxlength="20000"></textarea></div>
+          <div class="he-ctl"><label for="heEvaluator">evaluator（任意）</label> <input id="heEvaluator" type="text" maxlength="2000" /></div>
+          <div class="he-ctl"><button id="heApplyBtn" type="button">Apply（評価を確定）</button> <span id="heApplyHint" class="field-hint"></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  // Human Evaluation 0.1 runtime. State is private to this closure: nothing here is stored in traceReviewStore / matchLogic /
+  // comparison rows / dictionary session / ML state, and nothing is persisted automatically (no localStorage).
+  const FILE_NAME = 'human_evaluation.json';
+  const LIST_LIMIT = 500;
+  const CATEGORIES = ['WRONG_MATCH', 'WRONG_FIELD', 'DICTIONARY', 'QUANTITY', 'INSUFFICIENT_EVIDENCE', 'OTHER'];
+  const el = id => document.getElementById(id);
+  const core = () => globalThis.HumanEvaluationCore;
+  const binding = () => globalThis.QuantitySidecarBinding;
+  const deps = () => { const b = binding(); return b ? { canonicalJson: b.canonicalJson, rawSha256Utf8: b.rawSha256Utf8 } : null; };
+
+  const state = { entries: new Map(), loadedContext: null, dirty: false, selectedKey: null, filter: 'ALL', drafts: new Map(), message: '', warning: '' };
+  let view = { available: false, reason: '', items: [], statusByPair: new Map(), counts: null };
+  let build = null;          // cached comparison build for one matching result
+  let refreshSeq = 0;
+  const identityCache = new WeakMap();   // comparison -> { machine, source } promise
+
+  const nowIso = () => new Date().toISOString();
+
+  // ---- current-result availability: explicit, derived only from existing runtime state variables ----
+  function currentResultState() {
+    if (!(mergedResult && mergedResult.sysList && mergedResult.plmList)) return { available: false, reason: 'JSON A/B が読み込まれていません。' };
+    if (activeMatchingJob) return { available: false, reason: '照合または処理の実行中です。' };
+    if (!(mergedResult.metadata && mergedResult.metadata.matchStatus === 'matched') || matchRunSeq < 1 || traceComparisonReadyRunId !== matchRunSeq) {
+      return { available: false, reason: '照合が未実行、または完了していません。' };
+    }
+    if (traceMatrixStale === true) return { available: false, reason: '照合設定が変更されました。再照合が必要です。' };
+    return { available: true, reason: '' };
+  }
+
+  // ---- machine comparisons (machine-generated results only; never the effective / Trace Review view) ----
+  function buildComparisons() {
+    const key = activeKeyPairsKey();
+    if (build && build.ref === mergedResult && build.seq === matchRunSeq && build.pairsKey === key) return build;
+    const sysList = mergedResult.sysList, plmList = mergedResult.plmList;
+    const bByKey = new Map();
+    plmList.forEach((p, i) => bByKey.set(plmUniqueKey(p, i), p));
+    const comparisons = [];
+    sysList.forEach((item, idx) => {
+      const aId = sysRowId(item, idx);
+      matchPlmParts(item, plmList).forEach((m, mi) => {
+        const bId = plmUniqueKey(m, mi);
+        const bRow = bByKey.get(bId) || null;
+        const classification = matchHasGate(m) ? '要確認' : traceJudgement(m.matchMethod, m.confidence);
+        const confidence = Number((m.confidence || 0).toFixed(2));
+        const evidence = traceEvidenceForMatch(m);
+        const rowLike = { A_ID: aId, B_ID: bId, '方式': m.matchMethod, '根拠': evidence, '信頼度': confidence, '分類': classification,
+          _tagEvidence: m._tagEvidence ? JSON.parse(JSON.stringify(m._tagEvidence)) : null };
+        const contribution = typeof window.__humanEvaluationDictionaryContribution === 'function' ? window.__humanEvaluationDictionaryContribution(rowLike) : 'none';
+        const aRaw = item && item.trace_id, bRaw = bRow ? bRow.trace_id : (m && m.trace_id);
+        comparisons.push({
+          aRow: item, bRow, aId, bId,
+          input: { matching_engine: true, has_a: true, has_b: !!bRow,
+            requirement_trace_id_raw: aRaw, requirement_trace_id: normalizeText(aRaw) || null,
+            actual_trace_id_raw: bRaw, actual_trace_id: normalizeText(bRaw) || null },
+          projection: { classification, confidence, method: String(m.matchMethod == null ? '' : m.matchMethod), evidence,
+            matched_a_field: m._matchedSysField || '', matched_b_field: m._matchedPlmField || '', dictionary_contribution: contribution }
+        });
+      });
+    });
+    const sideIds = list => list.map(r => (r && typeof r.trace_id === 'string') ? (normalizeText(r.trace_id) || null) : null);
+    const counts = { requirement: core().buildTraceIdCounts(sideIds(sysList)), actual: core().buildTraceIdCounts(sideIds(plmList)) };
+    const classes = core().classifyEligibility(comparisons.map(c => c.input), counts);
+    comparisons.forEach((c, i) => { c.eligible = classes[i].eligible; c.reason = classes[i].reason; c.pair_id = classes[i].pair_id; });
+    build = { ref: mergedResult, seq: matchRunSeq, pairsKey: key, comparisons, consistent: consistentWithDisplayedRun(comparisons) };
+    return build;
+  }
+
+  // The machine rows are recomputed from the matcher; they must equal the rows of the displayed run (config edits that do not
+  // mark the matrix stale, e.g. a threshold change, would otherwise show a result that is not the one the user last ran).
+  function consistentWithDisplayedRun(comparisons) {
+    const shown = new Map();
+    (Array.isArray(traceMatrixRows) ? traceMatrixRows : []).forEach(r => { if (r && r['A_ID'] && r['B_ID']) shown.set(r['A_ID'] + '\u0000' + r['B_ID'], r); });
+    if (shown.size !== comparisons.length) return false;
+    return comparisons.every(c => {
+      const r = shown.get(c.aId + '\u0000' + c.bId);
+      return !!r && r['方式'] === c.projection.method && r['信頼度'] === c.projection.confidence && r['根拠'] === c.projection.evidence && r['分類'] === c.projection.classification;
+    });
+  }
+
+  function identitiesFor(c) {
+    if (!identityCache.has(c)) {
+      const d = deps();
+      identityCache.set(c, Promise.all([
+        core().computeMachineResultIdentity(c.projection, d),
+        core().computeSourceIdentity(c.aRow, d),
+        core().computeSourceIdentity(c.bRow, d)
+      ]).then(([machine, req, act]) => ({ machine, source: { requirement: req, actual: act } })).catch(() => null));
+    }
+    return identityCache.get(c);
+  }
+
+  const sortedEntries = () => [...state.entries.values()].sort((a, b) => core().comparePairIds(a.pair_id, b.pair_id));
+
+  // ---- view model (async because identities are SHA-256 based) ----
+  async function refresh() {
+    const seq = ++refreshSeq;
+    const cr = currentResultState();
+    let cmps = [];
+    if (cr.available) {
+      try {
+        const b = buildComparisons();
+        if (b.consistent) cmps = b.comparisons; else { cr.available = false; cr.reason = '照合設定が変更されています。再照合が必要です。'; }
+      } catch (err) { cr.available = false; cr.reason = '現在の照合結果を読み取れませんでした。'; }
+    }
+    const entries = sortedEntries();
+    const byPair = new Map();
+    cmps.forEach(c => { if (c.eligible) byPair.set(c.pair_id, c); });
+    const current = { available: cr.available, comparisons: [] };
+    if (cr.available) {
+      for (const c of cmps) {
+        const rec = { pair_id: c.pair_id, eligible: !!c.eligible, machine_identity: null, source_identity: null };
+        if (c.eligible && state.entries.has(c.pair_id)) {
+          const ids = await identitiesFor(c);
+          if (ids) { rec.machine_identity = ids.machine; rec.source_identity = ids.source; } else { rec.eligible = false; c.idError = true; }
+        }
+        current.comparisons.push(rec);
+      }
+    }
+    if (seq !== refreshSeq) return view;
+    const statuses = core().deriveEntryStatuses(entries, current);
+    const statusByPair = new Map(statuses.map(s => [s.pair_id, s.status]));
+    const items = [];
+    if (cr.available) {
+      cmps.forEach((c, i) => {
+        const entry = c.eligible && !c.idError ? (state.entries.get(c.pair_id) || null) : null;
+        items.push({ key: c.eligible ? c.pair_id : 'inel#' + i, kind: c.eligible && !c.idError ? 'eligible' : 'ineligible', cmp: c, entry,
+          status: entry ? statusByPair.get(c.pair_id) : null, reason: c.eligible && !c.idError ? null : (c.reason || 'SOURCE_RECORD_UNAVAILABLE') });
+      });
+      entries.forEach(e => { if (statusByPair.get(e.pair_id) === 'ORPHANED') items.push({ key: e.pair_id, kind: 'orphaned', cmp: null, entry: e, status: 'ORPHANED', reason: null }); });
+    } else {
+      entries.forEach(e => items.push({ key: e.pair_id, kind: 'past', cmp: null, entry: e, status: 'NO_CURRENT_RESULT', reason: null }));
+    }
+    const eligibleItems = items.filter(x => x.kind === 'eligible');
+    const cur = eligibleItems.filter(x => x.status === 'CURRENT');
+    const counts = cr.available ? {
+      eligible: eligibleItems.length, evaluated: cur.length, unevaluated: eligibleItems.length - cur.length,
+      CORRECT: cur.filter(x => x.entry.decision === 'CORRECT').length, INCORRECT: cur.filter(x => x.entry.decision === 'INCORRECT').length,
+      UNSURE: cur.filter(x => x.entry.decision === 'UNSURE').length,
+      STALE: items.filter(x => x.status === 'STALE').length, ORPHANED: items.filter(x => x.status === 'ORPHANED').length,
+      ineligible: items.filter(x => x.kind === 'ineligible').length } : null;
+    view = { available: cr.available, reason: cr.reason, items, statusByPair, counts };
+    updateDatasetWarning();
+    render();
+    return view;
+  }
+
+  function matchesFilter(item) {
+    switch (state.filter) {
+      case 'ALL': return true;
+      case 'UNEVALUATED': return item.kind === 'eligible' && item.status !== 'CURRENT';
+      case 'CURRENT': return item.kind === 'eligible' && item.status === 'CURRENT';
+      case 'CORRECT': case 'INCORRECT': case 'UNSURE': return item.kind === 'eligible' && item.status === 'CURRENT' && item.entry.decision === state.filter;
+      case 'STALE': return item.status === 'STALE';
+      case 'ORPHANED': return item.status === 'ORPHANED';
+      case 'INELIGIBLE': return item.kind === 'ineligible';
+      default: return true;
+    }
+  }
+  const filteredItems = () => view.items.filter(matchesFilter);
+  const selectedItem = () => view.items.find(x => x.key === state.selectedKey) || null;
+
+  // ---- draft handling (note / evaluator are drafts until Apply; decision / category commit immediately) ----
+  function draftFor(item) {
+    if (!state.drafts.has(item.key)) {
+      const e = item.entry;
+      state.drafts.set(item.key, { decision: e ? e.decision : null, category: e ? e.issue_category : null, note: e && e.note != null ? e.note : '', evaluator: e && e.evaluator != null ? e.evaluator : '' });
+    }
+    return state.drafts.get(item.key);
+  }
+  const desiredOf = d => ({ decision: d.decision, issue_category: d.decision === 'INCORRECT' ? d.category : null, note: d.note === '' ? null : d.note, evaluator: d.evaluator === '' ? null : d.evaluator });
+
+  async function commit() {
+    const item = selectedItem();
+    if (!item || item.kind !== 'eligible' || !view.available) return;
+    const d = draftFor(item);
+    if (!d.decision) { setMessage('decision を選択してください。'); return; }
+    if (d.decision === 'INCORRECT' && !d.category) { setMessage('INCORRECT では issue category の選択が必要です（選択すると確定します）。'); render(); return; }
+    const want = desiredOf(d), ex = item.entry;
+    if (ex && item.status === 'CURRENT' && ex.decision === want.decision && ex.issue_category === want.issue_category && ex.note === want.note && ex.evaluator === want.evaluator) {
+      setMessage('変更はありません（評価は更新されません）。'); render(); return;
+    }
+    const ids = await identitiesFor(item.cmp);
+    if (!ids) { setMessage('入力recordからidentityを生成できないため、この対応は評価できません。'); return; }
+    try {
+      const entry = await core().buildEvaluationEntry({
+        requirement_trace_id: item.cmp.input.requirement_trace_id, actual_trace_id: item.cmp.input.actual_trace_id,
+        decision: want.decision, issue_category: want.issue_category, note: want.note, evaluator: want.evaluator,
+        evaluated_at: nowIso(), machine_projection: item.cmp.projection, requirement_record: item.cmp.aRow, actual_record: item.cmp.bRow }, deps());
+      state.entries.set(entry.pair_id, entry);
+      state.dirty = true;
+      setMessage(ex ? '評価を更新しました。' : '評価を記録しました。');
+    } catch (err) {
+      setMessage('評価を確定できません（' + (err && err.code ? err.code : 'ERROR') + '）。noteは4096文字以内、evaluatorは256文字以内です。');
+    }
+    await refresh();
+  }
+
+  function setMessage(msg) { state.message = msg; const s = el('heStatus'); if (s) s.textContent = msg; }
+
+  // ---- navigation ----
+  function move(delta) {
+    const list = filteredItems();
+    if (!list.length) return;
+    const i = list.findIndex(x => x.key === state.selectedKey);
+    const next = Math.min(list.length - 1, Math.max(0, (i < 0 ? 0 : i + delta)));
+    state.selectedKey = list[next].key;
+    render();
+  }
+
+  // ---- rendering (text nodes only; evidence / note / evaluator are never interpreted as HTML) ----
+  const COUNT_LABELS = [['eligible', 'eligible total'], ['evaluated', 'evaluated (CURRENT)'], ['unevaluated', 'unevaluated'], ['CORRECT', 'CORRECT'], ['INCORRECT', 'INCORRECT'],
+    ['UNSURE', 'UNSURE'], ['STALE', 'STALE'], ['ORPHANED', 'ORPHANED'], ['ineligible', 'ineligible']];
+  function render() {
+    if (!el('tabHumanEval')) return;
+    const counts = el('heCounts'); counts.textContent = '';
+    COUNT_LABELS.forEach(([k, label]) => {
+      const box = document.createElement('div'); box.className = 'he-count'; box.dataset.count = k;
+      const b = document.createElement('b'); b.textContent = view.counts ? String(view.counts[k]) : '-';
+      box.append(b, document.createTextNode(label)); counts.appendChild(box);
+    });
+    const list = filteredItems();
+    if (!list.some(x => x.key === state.selectedKey)) state.selectedKey = list.length ? list[0].key : null;
+    const box = el('heList'); box.textContent = '';
+    list.slice(0, LIST_LIMIT).forEach(item => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'he-item' + (item.key === state.selectedKey ? ' selected' : ''); b.dataset.key = item.key;
+      const badge = document.createElement('span'); const st = item.kind === 'ineligible' ? 'INELIGIBLE' : (item.status || '未評価'); badge.className = 'he-badge ' + st; badge.textContent = st;
+      const ids = item.cmp ? item.cmp.input : item.entry;
+      b.append(badge, document.createTextNode((item.kind === 'ineligible' ? ((ids.requirement_trace_id || '(trace_idなし)') + ' → ' + (ids.actual_trace_id || '(trace_idなし)')) : (ids.requirement_trace_id + ' → ' + ids.actual_trace_id))));
+      b.addEventListener('click', () => { state.selectedKey = item.key; render(); });
+      box.appendChild(b);
+    });
+    if (list.length > LIST_LIMIT) { const more = document.createElement('div'); more.className = 'field-hint'; more.style.padding = '6px 8px'; more.textContent = '先頭 ' + LIST_LIMIT + ' 件を表示しています（Previous / Next は全 ' + list.length + ' 件を移動します）。'; box.appendChild(more); }
+    const idx = list.findIndex(x => x.key === state.selectedKey);
+    el('hePosition').textContent = list.length ? (idx + 1) + ' / ' + list.length : '0 / 0';
+    el('hePrevBtn').disabled = !(idx > 0);
+    el('heNextBtn').disabled = !(idx >= 0 && idx < list.length - 1);
+    el('heSkipBtn').disabled = !(idx >= 0 && idx < list.length - 1);
+    el('heClearAllBtn').disabled = state.entries.size === 0;
+    el('heStatus').textContent = state.message || (view.available ? '' : view.reason + ' 保存済みの評価は変更されません。');
+    const w = el('heWarning'); w.style.display = state.warning ? 'block' : 'none'; w.textContent = state.warning;
+    renderDetail(selectedItem());
+  }
+
+  function renderDetail(item) {
+    el('heEmpty').style.display = item ? 'none' : 'block';
+    el('hePair').style.display = item ? 'block' : 'none';
+    if (!item) { el('heClearCurrentBtn').disabled = true; return; }
+    const ids = item.cmp ? item.cmp.input : item.entry;
+    el('heReqId').textContent = ids.requirement_trace_id || '(なし)';
+    el('heActId').textContent = ids.actual_trace_id || '(なし)';
+    const e = item.entry;
+    el('heEntryStatus').textContent = item.kind === 'ineligible' ? 'PERSISTENT_EVALUATION_UNAVAILABLE（' + item.reason + '）' : (item.status || '未評価');
+    const un = el('heUnavailable'); un.style.display = item.kind === 'ineligible' ? 'block' : 'none';
+    const p = item.cmp ? item.cmp.projection : null;
+    el('heMrClass').textContent = p ? p.classification : '-'; el('heMrConf').textContent = p ? String(p.confidence) : '-';
+    el('heMrMethod').textContent = p ? p.method : '-'; el('heMrEvidence').textContent = p ? p.evidence : (e ? e.machine_result.display.evidence + '（保存時の表示）' : '-');
+    el('heMrAField').textContent = p ? p.matched_a_field : '-'; el('heMrBField').textContent = p ? p.matched_b_field : '-';
+    el('heMrDict').textContent = p ? p.dictionary_contribution : '-';
+    el('heSaved').textContent = e ? ('保存済み: ' + e.decision + (e.issue_category ? ' / ' + e.issue_category : '') + ' / evaluated_at ' + e.evaluated_at + (e.evaluator ? ' / ' + e.evaluator : '') + (e.note ? ' / note: ' + e.note : '')) : '保存済みの評価はありません。';
+    const editable = item.kind === 'eligible' && view.available;
+    const d = editable ? draftFor(item) : { decision: e ? e.decision : null, category: e ? e.issue_category : null, note: e && e.note != null ? e.note : '', evaluator: e && e.evaluator != null ? e.evaluator : '' };
+    document.querySelectorAll('input[name="heDecision"]').forEach(r => { r.checked = d.decision === r.value; r.disabled = !editable; });
+    const cat = el('heCategory'); cat.value = d.decision === 'INCORRECT' && d.category ? d.category : ''; cat.disabled = !editable || d.decision !== 'INCORRECT';
+    el('heCategoryHint').textContent = d.decision === 'INCORRECT' ? (d.category ? '' : 'カテゴリを選択すると INCORRECT が確定します。') : 'CORRECT / UNSURE では issue category は null です。';
+    const note = el('heNote'); note.value = d.note; note.disabled = !editable;
+    const ev = el('heEvaluator'); ev.value = d.evaluator; ev.disabled = !editable;
+    const apply = el('heApplyBtn'); apply.disabled = !editable || !d.decision || (d.decision === 'INCORRECT' && !d.category);
+    el('heApplyHint').textContent = !editable ? (item.kind === 'ineligible' ? '評価を保存できません。' : '現在の照合結果が無いため、評価の新規保存はできません。') : (item.status === 'STALE' ? '現在の結果に対して再評価します。' : '');
+    el('heClearCurrentBtn').disabled = !e;
+  }
+
+  // ---- dataset context (advisory) ----
+  async function currentDatasetContext() {
+    if (!view.available || !mergedResult) return null;
+    const b = binding(), c = core();
+    const side = async list => {
+      let signature = null;
+      try { signature = await b.computeDatasetSignature(list.map(r => c.projectSourceRecord(r))); } catch (_) { signature = null; }
+      return { record_count: list.length, signature };
+    };
+    return { actual: await side(mergedResult.plmList), requirement: await side(mergedResult.sysList) };
+  }
+  let warnSeq = 0;
+  async function updateDatasetWarning() {
+    const my = ++warnSeq;
+    if (!state.loadedContext || !view.available) { if (my === warnSeq) { state.warning = ''; } return; }
+    const cur = await currentDatasetContext();
+    if (my !== warnSeq) return;
+    const r = core().compareDatasetContext(state.loadedContext, cur);
+    state.warning = r.mismatch ? '読み込んだ評価の入力datasetは、現在のdatasetと異なる可能性があります（pairごとに CURRENT / STALE / ORPHANED を判定しています）。' : '';
+    const w = el('heWarning'); if (w) { w.style.display = state.warning ? 'block' : 'none'; w.textContent = state.warning; }
+  }
+
+  // ---- Save / Load (dedicated artifact, Core codec only) ----
+  async function save() {
+    try {
+      const ctx = view.available ? await currentDatasetContext() : state.loadedContext;
+      const text = core().serializeHumanEvaluation({ dataset_context: ctx, evaluations: sortedEntries() }, deps());
+      downloadText(FILE_NAME, text, 'application/json');
+      state.dirty = false;
+      setMessage('Human Evaluationを保存しました（' + state.entries.size + ' 件）。');
+    } catch (err) {
+      setMessage('保存できません（' + (err && err.code ? err.code : 'ERROR') + (err && err.path ? ' ' + err.path : '') + '）。');
+    }
+  }
+  async function load(file) {
+    let decoded;
+    try {
+      decoded = core().decodeHumanEvaluation(new Uint8Array(await file.arrayBuffer()));
+    } catch (err) {
+      setMessage('読み込めません（' + (err && err.code ? err.code : 'ERROR') + (err && err.path ? ' ' + err.path : '') + '）。現在の評価は変更されていません。');
+      return;
+    }
+    if ((state.dirty || [...state.drafts.values()].some(x => x && x.touched)) && !window.confirm('未保存のHuman Evaluationの変更は、読み込みによって置き換えられます。続けますか？')) { setMessage('読み込みを取り消しました。'); return; }
+    state.entries = new Map(decoded.evaluations.map(e => [e.pair_id, e]));
+    state.loadedContext = decoded.dataset_context;
+    state.drafts = new Map(); state.dirty = false; state.warning = '';
+    setMessage('Human Evaluationを読み込みました（' + state.entries.size + ' 件）。');
+    await refresh();
+  }
+
+  // ---- wiring ----
+  function wire() {
+    el('heFilter').addEventListener('change', e => { state.filter = e.target.value; render(); });
+    el('hePrevBtn').addEventListener('click', () => move(-1));
+    el('heNextBtn').addEventListener('click', () => move(1));
+    el('heSkipBtn').addEventListener('click', () => move(1));   // Skip changes no evaluation state at all
+    document.querySelectorAll('input[name="heDecision"]').forEach(r => r.addEventListener('change', async () => {
+      const item = selectedItem(); if (!item || item.kind !== 'eligible' || !view.available) return;
+      const d = draftFor(item); d.decision = r.value; d.touched = true;
+      if (d.decision !== 'INCORRECT') d.category = null;
+      if (d.decision === 'INCORRECT' && !d.category) { setMessage('INCORRECT では issue category の選択が必要です（選択すると確定します）。'); render(); return; }
+      await commit();
+    }));
+    el('heCategory').addEventListener('change', async e => {
+      const item = selectedItem(); if (!item || item.kind !== 'eligible' || !view.available) return;
+      const d = draftFor(item); d.category = e.target.value || null; d.touched = true;
+      if (d.decision === 'INCORRECT' && d.category) await commit(); else render();
+    });
+    el('heNote').addEventListener('input', e => { const item = selectedItem(); if (!item || item.kind !== 'eligible') return; const d = draftFor(item); d.note = e.target.value; d.touched = true; renderApplyOnly(item); });
+    el('heEvaluator').addEventListener('input', e => { const item = selectedItem(); if (!item || item.kind !== 'eligible') return; const d = draftFor(item); d.evaluator = e.target.value; d.touched = true; renderApplyOnly(item); });
+    el('heApplyBtn').addEventListener('click', () => commit());
+    el('heSaveBtn').addEventListener('click', () => save());
+    el('heLoadBtn').addEventListener('click', () => el('heLoadInput').click());
+    el('heLoadInput').addEventListener('change', async e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) await load(f); });
+    el('heClearCurrentBtn').addEventListener('click', async () => {
+      const item = selectedItem(); if (!item || !item.entry) return;
+      state.entries.delete(item.entry.pair_id); state.drafts.delete(item.key); state.dirty = true;
+      setMessage('この評価を削除しました。'); await refresh();
+    });
+    el('heClearAllBtn').addEventListener('click', async () => {
+      const n = state.entries.size; if (!n) return;
+      if (!window.confirm(n + '件のHuman Evaluationを削除します。よろしいですか？')) return;
+      state.entries = new Map(); state.drafts = new Map(); state.dirty = true;
+      setMessage(n + '件のHuman Evaluationを削除しました。'); await refresh();
+    });
+    const tabBtn = document.querySelector('[data-tab="tabHumanEval"]');
+    if (tabBtn) tabBtn.addEventListener('click', () => { refresh().catch(() => {}); });
+  }
+  function renderApplyOnly(item) {
+    const d = draftFor(item); const apply = el('heApplyBtn');
+    apply.disabled = !d.decision || (d.decision === 'INCORRECT' && !d.category);
+  }
+
+  // A read-only overlay must never break the host page (e.g. a host with only part of the DOM): if the UI cannot be wired, it stays inert.
+  try { wire(); render(); } catch (err) { /* Human Evaluation UI unavailable in this host; the matching tool is unaffected */ }
+
+  // diagnostics (read-only accessors for verification)
+  window.__humanEvaluationDiagnostics = Object.freeze({
+    refresh: () => refresh(),
+    entries: () => sortedEntries().map(e => JSON.parse(JSON.stringify(e))),
+    view: () => ({ available: view.available, reason: view.reason, counts: view.counts && { ...view.counts },
+      items: view.items.map(x => ({ key: x.key, kind: x.kind, status: x.status, reason: x.reason, pair_id: x.cmp ? x.cmp.pair_id : (x.entry ? x.entry.pair_id : null) })) }),
+    state: () => ({ dirty: state.dirty, selectedKey: state.selectedKey, filter: state.filter, message: state.message, warning: state.warning, entryCount: state.entries.size }),
+    projections: () => (view.available && build ? build.comparisons.map(c => ({ aId: c.aId, bId: c.bId, eligible: c.eligible, reason: c.reason, pair_id: c.pair_id, input: { ...c.input }, projection: { ...c.projection } })) : [])
+  });
+})();
+</script>
 </body>
 </html>
