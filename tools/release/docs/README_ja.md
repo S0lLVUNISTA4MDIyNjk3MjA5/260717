@@ -92,6 +92,7 @@ JSON A/Bそれぞれに対応する「数量注釈」データです。付属の
 - **Project設定 (Project Snapshot Pin)**: 「Private Dictionary Project設定」パネルで、Project設定ファイルの保存・読込と、照合セッションへの適用ができます。
 - **辞書参照列(Nested Selection)**: 「辞書参照列(入れ子列 source_record / table_row)」パネルで、辞書の照合に使う入れ子列を選択・適用できます。選択内容は現在のセッションに適用され、「Selection設定を保存」「Selection設定を読込」で専用の設定ファイルとして保存・読込できます。この設定ファイルは、照合ロジックJSON・トレースプロファイル・辞書Snapshot・Project設定ファイルには含まれません。
 - **Human Evaluation(人手による照合品質評価)**: 「Human Evaluation」タブで、自動照合結果の各対応に対し人間が **CORRECT / INCORRECT / UNSURE** を記録できます(INCORRECTでは問題種別の選択が必要です)。評価の対象は、trace_idを持ち重複しない照合エンジンの対応のみです。これは照合結果を変更しない読み取り専用の品質評価で、Trace Reviewとは別機能です。評価は「Human Evaluationを保存」「Human Evaluationを読込」で専用ファイル(`human_evaluation.json`)として保存・読込します。照合ロジックJSON・トレースプロファイル・Excel出力には含まれず、ページを再読込すると読込み直すまで空に戻ります。入力や照合結果が変わった評価は、削除されずSTALE / ORPHANEDとして表示されます。
+  Human Evaluationタブには、現在の対応のA・Bそれぞれの**入力record(項目名と値)を読み取り専用で表示**します(照合に使われた項目は強調されます)。また任意で、**1行に1つの`pair_id`を書いたテキストファイル(Sample pair list)**を読み込むと、その一覧だけを書かれた順序で表示・移動できます。Sample pair listは実行中の表示用で、`human_evaluation.json`にもブラウザにも保存されず、ページを再読込すると解除されます。
 
 ## データと通信
 

@@ -9,6 +9,8 @@
  *                QuantitySidecarBinding it depends on, the "Human Evaluation" tab is present, and the shipped docs describe it.
  *   B. runtime - the dist HTML itself is opened in real Chromium (file://, product requests NOT intercepted) and the Human Evaluation
  *                tab is operated: evaluate, Save, clear, Load, status derivation, no localStorage.
+ *   D. assistance - original A/B record display and the runtime-only sample pair list (60 / 60 / 0 on the medium sample, file order, pairs
+ *                beyond the 500-row list limit reachable, rejection of an invalid list) behave identically in the dev and the dist HTML.
  *   C. parity  - with a frozen clock, the dev HTML and the dist HTML produce byte-identical human_evaluation.json for the same input
  *                and the same operations, and the artifact equals the repository Core serialization of its own decoded content.
  *
@@ -117,6 +119,57 @@ async function main() {
   }
   const rel = await drive(DIST_HTML, 'dist');
   const dev = await drive(DEV_HTML, 'dev');
+  // ---- D. evaluation assistance (medium sample, 653 comparisons) ----
+  const MED = path.join(REPO_ROOT, 'samples', 'knowledge_builder_alpha01', 'medium');
+  const medA = path.join(MED, 'JSON_A_medium_customer_requirements_trace.json'), medB = path.join(MED, 'JSON_B_medium_design_review_trace.json');
+  const medRecA = JSON.parse(fs.readFileSync(medA, 'utf8'))._trace_records;
+  async function driveAssist(htmlPath) {
+    const page = await browser.newPage({ acceptDownloads: true });
+    const errs = []; page.on('pageerror', e => errs.push(String(e && e.message || e))); page.on('dialog', dlg => dlg.accept());
+    await page.goto('file://' + htmlPath, { waitUntil: 'load', timeout: 30000 }); await page.waitForTimeout(800);
+    await page.setInputFiles('#sysFile', medA); await page.setInputFiles('#plmFile', medB); await page.click('#loadBtn'); await page.waitForTimeout(1500);
+    // wait until the matching run has finished (the dist page can be slower than the dev page), re-opening the tab to refresh the view
+    for (let i = 0; i < 90; i++) { await page.click('[data-tab="tabHumanEval"]'); await page.waitForTimeout(700); if (await page.evaluate(() => window.__humanEvaluationDiagnostics.view().available)) break; }
+    const o = {};
+    const v0 = await page.evaluate(() => window.__humanEvaluationDiagnostics.view());
+    const keys = v0.items.filter(x => x.kind === 'eligible').map(x => x.key), pos = new Map(v0.items.map((x, i) => [x.key, i + 1]));
+    o.eligible = keys.length;
+    const fileOrder = keys.filter((k, i) => i % 11 === 0).slice(0, 60).sort().reverse();
+    o.beyond500 = fileOrder.filter(k => pos.get(k) > 500).length;
+    const load = async (name, text) => { await page.setInputFiles('#heSampleInput', { name, mimeType: 'text/plain', buffer: Buffer.from(text) }); await page.waitForTimeout(500); };
+    await load('sample_pairs.txt', fileOrder.join('\n') + '\n');
+    o.sample = await page.evaluate(() => { const s = window.__humanEvaluationDiagnostics.sample(); return { loaded: s.loaded, resolved: s.resolved, unresolved: s.unresolved, valid: s.valid, only: s.only }; });
+    o.status = await page.textContent('#heSampleStatus');
+    const lk = await page.$$eval('#heList .he-item', xs => xs.map(x => x.dataset.key));
+    o.listIsFileOrder = JSON.stringify(lk) === JSON.stringify(fileOrder);
+    o.firstSelected = (await page.evaluate(() => window.__humanEvaluationDiagnostics.state().selectedKey)) === fileOrder[0];
+    o.position = await page.textContent('#hePosition');
+    const rows = async id => page.$$eval('#' + id + ' .he-src-row', rs => rs.map(r => [r.dataset.field, r.children[1].textContent, r.classList.contains('matched')]));
+    const reqId = await page.textContent('#heReqId'), recA = medRecA.find(r => r.trace_id === reqId);
+    const ra = await rows('heSrcA');
+    o.sourceExact = ra.length === Object.keys(recA).length && ra.every(([f, val]) => val === (typeof recA[f] === 'string' ? recA[f] : JSON.stringify(recA[f])));
+    o.sourceRows = ra.length; o.matchedFields = ra.filter(r => r[2]).map(r => r[0]);
+    o.bodyShown = ['trace_title', 'trace_text', 'trace_content'].every(f => ra.some(r => r[0] === f && r[1].length > 0));
+    await page.click('#heNextBtn'); await page.click('#heSkipBtn');
+    o.navOrder = (await page.evaluate(() => window.__humanEvaluationDiagnostics.state().selectedKey)) === fileOrder[2];
+    const far = fileOrder.find(k => pos.get(k) > 500);
+    await page.locator(`#heList .he-item[data-key="${far}"]`).click();
+    o.farReachable = (await page.evaluate(() => window.__humanEvaluationDiagnostics.state().selectedKey)) === far;
+    // an invalid list is rejected and the previous sample state is kept
+    await load('dup.txt', fileOrder.concat([fileOrder[1]]).join('\n'));
+    o.dupRejected = await page.evaluate(ids => { const s = window.__humanEvaluationDiagnostics.sample(); return s.valid && s.only && JSON.stringify(s.ids) === JSON.stringify(ids); }, fileOrder);
+    o.dupStatus = (await page.textContent('#heSampleStatus')).includes('重複 1');
+    // evaluation through the UI; the artifact carries no sample information
+    await page.locator('input[name="heDecision"][value="CORRECT"]').check(); await page.waitForTimeout(200);
+    const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 15000 }), page.click('#heSaveBtn')]);
+    const text = fs.readFileSync(await dl.path(), 'utf8'); const dec = HE.decodeHumanEvaluation(text);
+    o.artifactClean = dec.evaluations.length === 1 && fileOrder.filter(k => k !== far).every(k => !text.includes(k)) && Object.keys(JSON.parse(text)).sort().join() === 'artifact_schema_version,dataset_context,evaluations';
+    o.ls = await page.evaluate(() => Object.keys(localStorage).map(k => localStorage.getItem(k)).filter(v => /hev-pair|human_evaluation|req-|design-/.test(String(v))).length);
+    o.errors = errs.length;
+    await page.close();
+    return o;
+  }
+  const aRel = await driveAssist(DIST_HTML), aDev = await driveAssist(DEV_HTML);
   await browser.close();
 
   check('B1 the dist page loaded the core and its dependency (globals present), no failed local request', rel.globals === true && rel.failedRequests.filter(u => /human_evaluation_core/.test(u)).length === 0);
@@ -130,6 +183,17 @@ async function main() {
   check('C1 dev and dist produce byte-identical human_evaluation.json (frozen clock)', rel.saved.text === dev.saved.text);
   check('C2 dev and dist derive identical statuses and counts', JSON.stringify(rel.changed.view) === JSON.stringify(dev.changed.view) && JSON.stringify(rel.before.view) === JSON.stringify(dev.before.view));
   check('C3 evaluated_at comes from the runtime clock (frozen value) for every entry', rel.afterEval.entries.every(e => e.evaluated_at === FROZEN));
+  check('D1 dist: the medium sample list (60 pairs, in non-canonical file order) resolves 60 / 60 / 0 and Sample only is active', aRel.eligible >= 653 && aRel.sample.loaded === 60 && aRel.sample.resolved === 60 && aRel.sample.unresolved === 0 && aRel.sample.valid && aRel.sample.only && aRel.status.includes('読込 60 / 解決 60 / 未解決 0'), JSON.stringify({ eligible: aRel.eligible, status: aRel.status, sample: aRel.sample }));
+  check('D2 dist: the list shows exactly the sample in file order, starts at line 1, position 1 / 60', aRel.listIsFileOrder && aRel.firstSelected && aRel.position === '1 / 60');
+  check('D3 dist: sample pairs beyond list position 500 are reachable', aRel.beyond500 >= 10 && aRel.farReachable, `beyond500=${aRel.beyond500}`);
+  check('D4 dist: Next / Skip follow the sample file order', aRel.navOrder);
+  check('D5 dist: original A record shows every field with its exact source value, including the body fields (the matched field, when there is one, is marked)', aRel.sourceExact && aRel.bodyShown && aRel.matchedFields.length <= 1, JSON.stringify(aRel.matchedFields));
+  check('D6 dist: an invalid sample list is rejected with the previous state kept', aRel.dupRejected && aRel.dupStatus);
+  check('D7 dist: the saved artifact carries no sample information; nothing in localStorage; no page error', aRel.artifactClean && aRel.ls === 0 && aRel.errors === 0);
+  // The dist page bundles the tokenizer that the dev page would load from a CDN (unreachable offline), so the two pages can generate a slightly different
+  // number of comparisons for the same input (observed: 653 dev / 654 dist). Parity is therefore asserted on every assistance behaviour, not on that count.
+  const norm = o => JSON.stringify({ eligible: o.eligible >= 653, beyond500: o.beyond500 >= 10, sample: o.sample, status: o.status, listIsFileOrder: o.listIsFileOrder, firstSelected: o.firstSelected, position: o.position, sourceExact: o.sourceExact, bodyShown: o.bodyShown, matched: o.matchedFields.length <= 1, navOrder: o.navOrder, farReachable: o.farReachable, dupRejected: o.dupRejected, dupStatus: o.dupStatus, artifactClean: o.artifactClean, ls: o.ls, errors: o.errors });
+  check('D8 dev / dist parity of every assistance observation (counts of generated comparisons excluded: dev ' + aDev.eligible + ' / dist ' + aRel.eligible + ')', norm(aRel) === norm(aDev), norm(aDev));
   report();
   process.exit(checks.every(c => c.ok) ? 0 : 1);
 }
@@ -139,4 +203,4 @@ function report() {
   for (const c of checks) console.log(`[${c.ok ? 'OK' : 'FAIL'}] ${c.name}${!c.ok && c.detail ? ' :: ' + c.detail : ''}`);
   console.log(`${checks.filter(c => c.ok).length} OK / ${checks.filter(c => !c.ok).length} FAIL`);
 }
-main().catch(e => { check('FATAL (run aborted before all checks completed)', false, String(e && e.message || e)); report(); process.exit(1); });
+main().catch(e => { check('FATAL (run aborted before all checks completed)', false, String(e && (e.stack || e.message) || e)); report(); process.exit(1); });
