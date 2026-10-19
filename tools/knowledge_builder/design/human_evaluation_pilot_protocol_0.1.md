@@ -4,6 +4,8 @@ Human Evaluation Pilot Protocol 0.1 — 実データで Human Evaluation 0.1 を
 状態: **HUMAN-APPROVED FOR PILOT 1B**（2026-10-17）。手順書としてのversionは0.1のまま。Pilot 1Aの実施条件はS20.1、Pilot 1B（Human blind review）の実施条件と環境固定はS20.2に固定した（手順そのものは変更していない）。この「状態」はProtocol文書のものであり、Human Evaluation Contract 0.1の状態とは別である。Pilot 1Bは**まだ実施していない**。
 
 **2026-10-19 更新（canonical runtime rebaseline）**: Pilot 1B の現行の実施条件・環境固定・sample・package は **S20.3** に固定した。S4（固定baseline）、S8.5の参照値、S20.2.2 の sample 行、S20.2.4〜S20.2.6 は **Pilot 1A が実施された fallback 時代 baseline の historical 記録**であり、現行の Pilot 1B 条件ではない（各節に SUPERSEDED と明記）。
+
+**2026-10-20 更新（Option 3 R2・FULL_SCOPE 固定）**: Pilot 1B は、ブラウザに保存された「概要範囲を照合へ適用」の設定によって照合の universe が変わらないよう、**Pilot 実行 profile（`pilot_1b_canonical_human`・必須範囲 `FULL_SCOPE`）** で実行する。現行の実施条件・package は **S20.4** に固定した（S20.3.2〜S20.3.4 の canonical baseline・universe・sample は変わらない。S20.3.5 の package は SUPERSEDED）。
 本書は設計文書であり、製品コード・Contract・Core・UI・release・guard・dictionary・quantity・canonical・Graph・Trace Review・workbook・logic JSON・ML のいずれも変更しない。
 通常のdata correctness（品質評価の運用手順）であり、security / G2 / 暗号 / 信頼アーキテクチャは扱わない。
 
@@ -577,6 +579,7 @@ Pilot 1B でも、accuracy・precision・recall・F1・正解率として解釈�
 | package | `pilot_1b_canonical_package.zip`（SHA-256 `7a9ee5525b67123bcddef97c55ee378d2f0e7f50c8d360f3a5fd3bd55447589c`、958,071 bytes、ZIP 内 41 entry（ファイル 37）、ZIP の整合性検査 OK） |
 | 内容 | HTML、`runtime/`（ローカル TinySegmenter、cytoscape、xlsx、各 core）、`data/`（JSON A／B、`sample_pairs.txt`）、`README_JA.txt`、`MANIFEST.txt`、`SHA256SUMS.txt`、ライセンス |
 | 保存先 | `/home/user/human_evaluation_pilot_0.1/pilot_1b_canonical_human_blind_small60/`（Pilot 1A／旧 Pilot 1B の directory とは別。Git 管理対象外） |
+| **SUPERSEDED（2026-10-20）** | 上記 `pilot_1b_canonical_package.zip` は **SUPERSEDED — PERSISTED SCOPE DEPENDENCY**（ブラウザの保存設定 `v12_1_overview_ui.applyScope=true` で 653 件になり得る。S20.4.1）。historical な証跡として保持し、削除・上書き・Pilot での使用はしない。現行の package は S20.4.7 |
 | 旧 package | `pilot_1b_package.zip`（SHA-256 `f5808d8ac17007e9e31c5155bd259cc7dbb149e735a64312d8de56e6d73fc46e`）は **STALE**。使用しない・上書きしない |
 
 #### 20.3.6 Mandatory pre-check（評価を始める前に必ず行う）
@@ -598,6 +601,86 @@ Pilot 1B でも、accuracy・precision・recall・F1・正解率として解釈�
 #### 20.3.7 解釈の制限
 
 S20.2.7 と同じ。accuracy・precision・recall・F1・正解率として解釈しない。Pilot 1A との一致を評価に先立って示さない。
+
+### 20.4 Pilot 1B の Option 3 R2（FULL_SCOPE 固定・Human承認済み・2026-10-20）
+
+#### 20.4.1 経緯（原因は確定済み）
+
+- Human の実 PC で 653 件となった原因は、ブラウザの localStorage `v12_1_overview_ui` に `applyScope=true`（既定は false）が保存されていたことだった。「概要範囲を照合へ適用」が ON だと、概要の範囲外の候補（partial 等。exact／code は例外）が**採点の前に**除外され、partial が 1 件減る（5→4）。Windows／Edge・locale・形態素解析・浮動小数は原因ではない（Linux の Chromium でも保存設定 ON で同一の 653 件と identity が再現し、OFF で 654 件に戻る）。
+- この設定は、同じブラウザの `file://` ページ間で共有され得る（Chromium で確認）。したがって、過去に別の版で ON にした設定が Pilot に効き得る。
+
+#### 20.4.2 Pilot 実行 profile と必須範囲
+
+- Pilot 1B の package には、実行 profile `pilot_1b_canonical_human` が埋め込まれる。**必須の照合範囲は `FULL_SCOPE`**（概要範囲による絞り込みなしの全件照合）。
+- **保存された設定（persisted）と実効範囲（effective）は別物**として扱う。Pilot では、保存設定が ON でも実効範囲は FULL_SCOPE であり、保存設定そのものは**削除も書き換えもしない**（Pilot の外の一般利用では従来どおり保存設定が有効）。UI と診断 JSON は、persisted と effective を別々に、読める値（boolean／モード名）で示す。
+- 一般ツールの機能「概要範囲を照合へ適用」は残る。Pilot の期待値（654 等）は一般の照合エンジンへ埋め込まず、Pilot の profile にだけ置く。
+
+#### 20.4.3 baseline gate（fail-closed）
+
+次がすべて期待値と一致しているときだけ、Human Evaluation の decision 入力（CORRECT／INCORRECT／UNSURE／category／note／evaluator／Apply）ができる。1つでも違えば `PILOT_BASELINE_MISMATCH` を表示し、入力を無効にする（設定・sample・結果の自動修正はしない）。
+
+| 項目 | 期待値 |
+|---|---|
+| 有効範囲 | `FULL_SCOPE` |
+| generated comparisons／eligible／ineligible | 654／654／0 |
+| pair-set identity | `5f8123bdcb1e48a390c72d3eca95ccf3bcb5bacfeb7f090e26cf9b1ba45b4d9c` |
+| machine result projection identity | `01db5392c42ffabbfeabdbcdb72ef9aa59d52634236e7f52be7d3e4707bf515b` |
+| method の内訳 | exact 497／tag 149／partial 5／vector 3（診断で確認。gate は pair-set と machine identity で結果そのものを照合する） |
+| sample（読込／解決／未解決／重複／評価不可） | 60／60／0／0／0（sample は評価の前に読み込み、完全に解決されていること） |
+
+- note と evaluator の入力も gate の対象である。gate が不成立の間は内部の draft を変更せず、gate が成立した後に、不成立中の入力が現れることはない。
+- 一般ツールには 654 などを埋め込まない（Pilot profile がある場合だけ働く）。
+
+#### 20.4.4 identity の要件
+
+- **matching behavior identity は semantic** である。Tool version、matching compatibility id（`matchLogic.version`。互換ラベルであり Tool version ではない）、product commit、build revision、runtime component、effective scope、input、result は**別々の identity** とし、1つの version 文字列に統合しない。
+- 結果に影響する**実効辞書の semantics を表す**: 辞書が有効（active）なときは、Snapshot の `snapshot_id`、`dictionary_payload_sha256`、`wrapper_integrity_sha256`、**順序つき**の nested allowlist。辞書が無効なときは `active=false` のみ（このとき Snapshot や allowlist は照合結果に影響しない）。
+- **session の bind カウンター（revision）・時刻（`lastSyncAt`／`trainedAt`／`generatedAt`／`importedAt`／`updatedAt` 等）・自由記述・locale・browser・OS は identity に含めない**。revision は診断情報としてのみ記録する。
+- 同一の semantic な辞書を再 bind しても identity は変わらず、辞書の内容・allowlist・照合設定が変われば identity が変わる。
+
+文言の訂正（独立レビューの observation への対応・コードは変更しない）: 辞書が無効なとき、実装は「行に触れずに戻る」のではなく、**既存の `approvedDict` sidecar を最初に消去したうえで**、Snapshot／allowlist の semantics を照合へ適用しない。
+
+#### 20.4.5 Human Evaluation の分離
+
+Human Evaluation の decision 状態は、matching の製品状態から分離されたままである（読み取り専用の overlay）。CORRECT／INCORRECT／UNSURE、category、artifact schema、永続化は変更しない。gate は評価入力の可否だけを制御し、照合結果・保存設定を変更しない。
+
+#### 20.4.6 canonical baseline（S20.3.2〜S20.3.4）は変更しない
+
+canonical product baseline（commit `5e9e9fa…`）、universe（654／654／0）、pair-set／machine identity、sample（`sample_pairs.txt` SHA-256 `f6f5e952…`）、TinySegmenter（SHA-256 `91beda36…`）は S20.3 のとおり。保存設定が未設定・false・true のいずれでも、Pilot の結果は同一（654・canonical identity）である。
+
+#### 20.4.7 Human package（現行・正式な社内 Pilot 1B Human-A 用）
+
+| 項目 | 値 |
+|---|---|
+| package | `pilot_1b_canonical_human_small60_option3_formal.zip`（SHA-256 `ec480a629fd5630df470f61f8744bbb118e06e492c0b5741f743414ad255b8bc`、976,569 bytes、ZIP 内 37 entry（ファイル 37・ディレクトリ 0）、ZIP の整合性検査 OK） |
+| Build | `pilot1b-option3-formal-r1`（clean な commit 済みソースから build。`dirty=false`） |
+| product commit | `606345384d3793f0c8223ee0bc9923f2abd0c214`（`Formalize Pilot 1B Option 3 R2 remediation`）。matching behavior の基準は引き続き `5e9e9fa…` |
+| release HTML | `json_ab_trace_matching_tool_v12.2.0-alpha.1.html`（SHA-256 `aed8d34e052c7578adb2274aae4fb754b975bae45fab7d63ca91010390991ab4`、1,088,210 bytes） |
+| 内容 | HTML、`runtime/`（ローカル TinySegmenter ほか）、`data/`（JSON A／B、`sample_pairs.txt`）、`README_JA.txt`、`MANIFEST.txt`（35）、`SHA256SUMS.txt`（36）、ライセンス |
+| 保存先 | `/home/user/human_evaluation_pilot_0.1/pilot_1b_formal_option3/`（Git 管理対象外） |
+| 位置づけ | 公開リリースではない。GitHub Release・tag は作らない |
+
+候補 package（R1／R2 candidate）・独立レビュー bundle は、独立レビューの証跡として保持する（評価には使わない）。
+
+#### 20.4.8 Mandatory pre-check（評価を始める前に必ず行う）
+
+S20.3.6 の確認に加えて、次を確認する。
+
+| 確認 | 期待値 |
+|---|---|
+| 画面上部の帯 | Scope `FULL_SCOPE`、Pilot baseline `PASS`、TinySegmenter `READY` |
+| 保存設定と有効範囲 | 保存設定が ON でも有効範囲は FULL_SCOPE（詳細の Scope の節） |
+| baseline | `PILOT_BASELINE_MISMATCH` が出ていない |
+
+sample を読み込む前は baseline gate は成立しない（sample の項目が未達）。sample 読込後に PASS になることを確認してから評価を始める。
+
+#### 20.4.9 Pilot の開始
+
+formal package と Manual v4 が整っていても、**Pilot 1B Human-A の評価開始は別の Human 判断**である。この節は開始を許可しない。
+
+#### 20.4.10 解釈の制限
+
+S20.2.7 と同じ。accuracy・precision・recall・F1・正解率として解釈しない。Pilot 1A の結果を Human 向けの package・UI・Manual に含めない。
 
 ---
 
