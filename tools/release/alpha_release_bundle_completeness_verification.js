@@ -83,10 +83,10 @@ async function main() {
   const srcSrcs = srcList(srcHtml), distSrcs = srcList(distHtml);
   const srcLocal = srcSrcs.filter(s => !/^https?:/.test(s));
   const srcRemote = srcSrcs.filter(s => /^https?:/.test(s));
-  check('A1 source HTML: 24 script src = 3 vendor CDN + 21 local', srcSrcs.length === 24 && srcRemote.length === 3 && srcLocal.length === 21, `${srcSrcs.length}/${srcRemote.length}/${srcLocal.length}`);
+  check('A1 source HTML: 24 script src = 2 vendor CDN (cytoscape/xlsx) + 22 local (21 cores + the local TinySegmenter)', srcSrcs.length === 24 && srcRemote.length === 2 && srcLocal.length === 22 && srcRemote.every(s => !/tiny-segmenter/.test(s)), `${srcSrcs.length}/${srcRemote.length}/${srcLocal.length}`);
   check('A2 dist HTML: exactly 24 script src, all under runtime/, no relative / absolute / remote src left', distSrcs.length === 24 && distSrcs.every(s => s.startsWith('runtime/')), distSrcs.filter(s => !s.startsWith('runtime/')).join(','));
   check('A3 every dist script src resolves to a real, non-empty bundled file (missing relative script = 0)', distSrcs.every(s => fs.existsSync(path.join(DIST, s)) && fs.statSync(path.join(DIST, s)).size > 0), distSrcs.filter(s => !fs.existsSync(path.join(DIST, s))).join(','));
-  check('A4 dist script order equals the source HTML order (so every load-order requirement is preserved)', JSON.stringify(distSrcs.map(base).filter(b => !/^(cytoscape|xlsx|tiny-segmenter)/.test(b))) === JSON.stringify(srcLocal.map(base)));
+  check('A4 dist script order equals the source HTML order (so every load-order requirement is preserved)', JSON.stringify(distSrcs.map(base).filter(b => !/^(cytoscape|xlsx|tiny-segmenter)/.test(b))) === JSON.stringify(srcLocal.filter(s => !/tiny-segmenter/.test(s)).map(base)));
   const runtimeFiles = fs.readdirSync(path.join(DIST, 'runtime'));
   check('A5 runtime/ files == referenced files exactly (no orphan, no unexpected file): 24', runtimeFiles.length === 24 && runtimeFiles.every(f => distSrcs.includes('runtime/' + f)) && distSrcs.every(s => runtimeFiles.includes(base(s))), `${runtimeFiles.length}`);
   let identical = true, badCore = '';
@@ -160,7 +160,6 @@ async function main() {
       if (variant === 'dev') {
         if (/unpkg\.com\/cytoscape/.test(url)) return route.fulfill({ status: 200, contentType: 'text/javascript', body: fs.readFileSync(vendorFile('cytoscape')) });
         if (/cdn\.jsdelivr\.net\/npm\/xlsx/.test(url)) return route.fulfill({ status: 200, contentType: 'text/javascript', body: fs.readFileSync(vendorFile('xlsx')) });
-        if (/unpkg\.com\/tiny-segmenter/.test(url)) return route.fulfill({ status: 200, contentType: 'text/javascript', body: fs.readFileSync(vendorFile('tiny_segmenter')) });
       }
       rec.external.push(url); return route.abort();
     });

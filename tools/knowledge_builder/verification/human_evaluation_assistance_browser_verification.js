@@ -55,11 +55,11 @@ async function main() {
   const rtState = page => page.evaluate(() => JSON.stringify({ a: mergedResult.sysList, b: mergedResult.plmList, rows: (traceMatrixRows || []).map(r => [r.A_ID, r.B_ID, r['分類'], r['方式'], r['信頼度'], r['根拠']]), logic: matchLogic, seq: matchRunSeq }));
   const trSnap = page => page.evaluate(() => JSON.stringify({ store: traceReviewStore, ls: Object.keys(localStorage).sort().map(k => [k, localStorage.getItem(k)]) }));
 
-  // ===== setup: medium dataset (80 x 100, 653 eligible comparisons) =====
+  // ===== setup: medium dataset (80 x 100, 654 eligible comparisons under the canonical runtime = local TinySegmenter, network ON or OFF) =====
   const { page } = await open({ a: MED_A, b: MED_B });
   let d = await diag(page);
   const keys = d.view.items.filter(x => x.kind === 'eligible').map(x => x.key);
-  assert(d.view.available && keys.length === 653 && d.view.counts.ineligible === 0, 'setup: medium dataset yields 653 eligible comparisons, 0 ineligible');
+  assert(d.view.available && keys.length === 654 && d.view.counts.ineligible === 0, 'setup: medium dataset yields 654 eligible comparisons (canonical local TinySegmenter runtime), 0 ineligible');
   const posOf = new Map(d.view.items.map((x, i) => [x.key, i + 1]));
   const rtBefore = await rtState(page);
 

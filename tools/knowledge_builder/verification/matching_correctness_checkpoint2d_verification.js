@@ -184,6 +184,10 @@ function setEq(actual, expectedPairs, label) {
     const page = await browser.newPage(); await installVendorRoutes(page);
     const edges = await loadAndDump(page, HVAC_B, HVAC_A);
     setEq(edges, [['excel-hvac-001', 'stable-uid-id-v2 [#2]'], ['excel-hvac-002', 'stable-uid-id-v2 [#3]'], ['excel-hvac-003', 'stable-uid-id-v2 [#4]'], ['excel-hvac-004', 'stable-uid-id-v2 [#5]']], 'B2 User HVAC B->A (4 correct / 0 wrong, per reviewer HVAC-R02)');
+    // Ground truth (expected_relationships.csv HVAC-016): blk-hvac-r03 x excel-hvac-004 = no_edge (the codes differ: IU-2 vs OU-2). The word tokenizer
+    // cuts the server-room word "サーバ" out of "サーバ室専用…" and "サーバールーム"; that weak token alone must never create this edge.
+    assert(!edges.some(e => e.a === 'excel-hvac-004' && e.b === 'stable-uid-id-v2 [#4]'), 'B2b HVAC-016 ground truth: excel-hvac-004 => stable-uid-id-v2 [#4] is NOT an accepted edge (no_edge)');
+    assert(edges.filter(e => e.a === 'excel-hvac-004').length === 1, 'B2c excel-hvac-004 has exactly one accepted edge (its OU-2 counterpart)');
     await page.close();
   }
 
@@ -333,6 +337,46 @@ function setEq(actual, expectedPairs, label) {
     const edges = await loadAndDump(page, tmpJson(A), tmpJson(B));
     const e4 = edges.filter(e => e.a === 'E4-A1');
     assert(e4.length === 1 && e4[0].method === 'exact', `E4 no cross-field code-system-disagreement veto exists: a unique title still matches even when A/B use entirely unrelated code vocabularies (actual: ${JSON.stringify(e4)})`);
+    await page.close();
+  }
+
+  // ===== D. canonical-tokenizer false-positive remediation: neighbouring cases =====
+  {
+    // R1: the same shape as User HVAC B2 in a minimal throwaway fixture. The identified row (OU-2 counterpart) is reached through a natural-language
+    // partial ("顕熱") that wins an equal-score tie before the code-shaped keyword; the other row only shares the weak token "サーバ". Structured
+    // identity must not depend on that tie order: exactly one accepted edge, to the OU-2 row.
+    const A = [
+      { trace_id: 'F1-A1', trace_title: 'サーバ室専用高顕熱室外機', trace_text: 'サーバ室専用高顕熱室外機 / 定格容量: 3.6kW / 合格 (OU-2相当)' },
+      { trace_id: 'F1-A2', trace_title: '別の要求その2', trace_text: '別の要求その2 詳細' },
+      { trace_id: 'F1-A3', trace_title: '別の要求その3', trace_text: '別の要求その3 詳細' },
+    ];
+    const B = [
+      { trace_id: 'F1-B1', trace_title: '高顕熱型室外ユニット (OU-2)', trace_text: '高顕熱型室外ユニット (OU-2) 定格冷房 3.6kW 屋外置場' },
+      { trace_id: 'F1-B2', trace_title: '壁掛型室内機 (IU-2)', trace_text: '壁掛型室内機 (IU-2) 冷房 2.8kW サーバールーム' },
+      { trace_id: 'F1-B3', trace_title: '無関係な納入記録', trace_text: '無関係な納入記録 詳細' },
+    ];
+    const page = await browser.newPage(); await installVendorRoutes(page);
+    const edges = await loadAndDump(page, tmpJson(A), tmpJson(B));
+    const d1 = edges.filter(e => e.a === 'F1-A1');
+    assert(d1.length === 1 && d1[0].b.includes('OU-2') && !edges.some(e => e.a === 'F1-A1' && e.b.includes('IU-2')), `R1 weak token "サーバ" must not add an edge next to the structurally identified OU-2 counterpart (actual: ${JSON.stringify(d1)})`);
+    await page.close();
+  }
+  {
+    // R2: the weak token is the ONLY signal for the row (no structured identity exists anywhere for it): nothing to dominate it, the genuine partial stays.
+    const A = [
+      { trace_id: 'F2-A1', trace_title: 'サーバ室専用ラック', trace_text: 'サーバ室専用ラック' },
+      { trace_id: 'F2-A2', trace_title: '別の要求その2', trace_text: '別の要求その2 詳細' },
+      { trace_id: 'F2-A3', trace_title: '別の要求その3', trace_text: '別の要求その3 詳細' },
+    ];
+    const B = [
+      { trace_id: 'F2-B1', trace_title: 'サーバ設置用の床補強', trace_text: 'サーバ設置用の床補強' },
+      { trace_id: 'F2-B2', trace_title: '無関係な納入記録その2', trace_text: '無関係な納入記録その2 詳細' },
+      { trace_id: 'F2-B3', trace_title: '無関係な納入記録その3', trace_text: '無関係な納入記録その3 詳細' },
+    ];
+    const page = await browser.newPage(); await installVendorRoutes(page);
+    const edges = await loadAndDump(page, tmpJson(A), tmpJson(B));
+    const d2 = edges.filter(e => e.a === 'F2-A1');
+    assert(d2.length === 1 && d2[0].b.includes('サーバ設置用') && d2[0].method === 'partial', `R2 a lone weak-token partial with no structured identity anywhere is still a valid edge (actual: ${JSON.stringify(d2)})`);
     await page.close();
   }
 

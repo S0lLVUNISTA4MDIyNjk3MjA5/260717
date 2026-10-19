@@ -88,7 +88,7 @@ function buildBrowserStubSandbox() {
     fetch: undefined, XMLHttpRequest: undefined, Worker: undefined,
     FileReader: class FileReader { readAsText(){} readAsArrayBuffer(){} },
     cytoscape: function () { return { on(){}, add(){}, elements(){ return { remove(){} }; }, destroy(){}, layout(){ return { run(){} }; }, fit(){}, resize(){}, style(){ return { update(){} }; } }; },
-    XLSX: undefined, TinySegmenter: undefined,
+    XLSX: undefined,
     crypto: require('crypto').webcrypto,
     TextEncoder, TextDecoder,
     setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask,
@@ -118,6 +118,8 @@ function loadMatchingToolSandbox({ withRealResolverDeps = true, htmlOverride = n
     sandbox.PrivateDictionaryResolverCore = crossRealmWrap(ResolverCore, ['resolveDictionaryTerms']);
   }
   vm.createContext(sandbox);
+  // Canonical matching runtime: the local vendored TinySegmenter is REQUIRED (no tokenizer fallback), so the sandbox loads the real library.
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', '..', 'release', 'vendor', 'tiny-segmenter-0.2.0', 'tiny-segmenter-0.2.0.js'), 'utf8'), sandbox, { filename: 'tiny-segmenter-0.2.0.js (canonical local runtime)' });
   vm.runInContext(src, sandbox, { filename: 'json_ab_trace_matching_tool_v12.1.15.html (sandbox)' });
   return sandbox;
 }

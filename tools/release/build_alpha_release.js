@@ -136,7 +136,7 @@ const DOC_FILES = ['README_ja.md', 'KNOWN_LIMITATIONS.md', 'THIRD_PARTY_LICENSES
 const SCRIPT_SRC_REWRITES = [
   ['https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js', 'runtime/cytoscape-3.26.0.min.js'],
   ['https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js', 'runtime/xlsx-0.18.5.full.min.js'],
-  ['https://unpkg.com/tiny-segmenter@0.2.0/dist/tiny-segmenter-0.2.0.js', 'runtime/tiny-segmenter-0.2.0.js'],
+  ['./release/vendor/tiny-segmenter-0.2.0/tiny-segmenter-0.2.0.js', 'runtime/tiny-segmenter-0.2.0.js'],
   ['./generated/quantity_annotation_schema_v1.browser.js', 'runtime/quantity_annotation_schema_v1.browser.js'],
   ['./quantity_sidecar_binding_core.js', 'runtime/quantity_sidecar_binding_core.js'],
   ['./generated/trace_comparison_schema_v2.browser.js', 'runtime/trace_comparison_schema_v2.browser.js'],

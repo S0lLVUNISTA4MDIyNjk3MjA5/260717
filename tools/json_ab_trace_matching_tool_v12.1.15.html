@@ -53,8 +53,8 @@
   <title>JSON A/B トレース照合ツール V12.1.15</title>
   <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
-  <!-- 軽量形態素解析（読み込み失敗時は文字種チャンクに自動フォールバック） -->
-  <script src="https://unpkg.com/tiny-segmenter@0.2.0/dist/tiny-segmenter-0.2.0.js" onerror="window.__tsLoadFailed=true"></script>
+  <!-- 軽量形態素解析（正式runtime: ローカル同梱のTinySegmenter 0.2.0。CDN・フォールバックtokenizerは使用しない。読み込めない場合は照合を開始せずTOKENIZER_RUNTIME_UNAVAILABLEを表示する） -->
+  <script src="./release/vendor/tiny-segmenter-0.2.0/tiny-segmenter-0.2.0.js" onerror="window.__tsLoadFailed=true"></script>
   <script src="./generated/quantity_annotation_schema_v1.browser.js"></script>
   <script src="./quantity_sidecar_binding_core.js"></script>
   <!-- L3-1 (staged, not yet applied to the tracked protected file - see checkpoint report) -->
@@ -6267,12 +6267,15 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     // 元全文（または全文と同値の既存entry）と全コードは上限外の必須項目。
     const mandatory = [fullEntry, ...codes];
     const optional = [...segments, ...tokens];
+    // Canonical-tokenizer false-positive remediation: every entry remembers the value of the field it was extracted from, raw and normalized
+    // (non-enumerable, so the entry shape seen by diagnostics/serialization is unchanged); keywordOnlyInSharedHeading() reads it.
+    const withParent = list => { list.forEach(e => { if (!Object.prototype.hasOwnProperty.call(e, 'parentNorm')) { Object.defineProperty(e, 'parentNorm', { value: fullNorm, enumerable: false }); Object.defineProperty(e, 'parentRaw', { value: text, enumerable: false }); } }); return list; };
     const limit = normalizePerformanceSettings().maxKeywordsPerField;
-    if (limit === 0 || mandatory.length + optional.length <= limit) return [...mandatory, ...optional];
+    if (limit === 0 || mandatory.length + optional.length <= limit) return withParent([...mandatory, ...optional]);
 
     // 必須分だけで上限を超える場合はexact/code保護を優先して上限超過を許容する。
     const slots = Math.max(0, limit - mandatory.length);
-    return [...mandatory, ...optional.slice(0, slots)];
+    return withParent([...mandatory, ...optional.slice(0, slots)]);
   }
 
   // 後方互換ラッパ。full追加分を除き、V11.13のキーワード集合と一致する。
@@ -6391,22 +6394,47 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   }
 
   /* ═══════════════════════════════════════════
-     形態素解析（TinySegmenter + フォールバック）
+     形態素解析（ローカル同梱TinySegmenter必須 / CDN・フォールバック無し）
+     正式runtimeはローカルのTinySegmenterのみ。ネットワーク状態・browser cacheでtokenizerを切り替えない。
+     読み込めない場合は別tokenizerへ黙って切り替えず、TOKENIZER_RUNTIME_UNAVAILABLEとして照合を開始しない。
   ═══════════════════════════════════════════ */
+  const TOKENIZER_RUNTIME_UNAVAILABLE = 'TOKENIZER_RUNTIME_UNAVAILABLE';
+  const TOKENIZER_RUNTIME_UNAVAILABLE_MESSAGE = TOKENIZER_RUNTIME_UNAVAILABLE + ': ローカル同梱のTinySegmenterを読み込めないため、照合を開始できません（別のtokenizerへの切り替えは行いません）。';
   let segmenter = null;
+  let tokenizerRuntimeFailure = '';
   try {
-    if (typeof TinySegmenter === 'function') segmenter = new TinySegmenter();
-  } catch (e) { segmenter = null; }
+    if (typeof TinySegmenter !== 'function') tokenizerRuntimeFailure = 'TinySegmenter is not available';
+    else {
+      const candidate = new TinySegmenter();
+      if (!Array.isArray(candidate.segment('照合'))) throw new Error('TinySegmenter.segment() did not return an array');
+      segmenter = candidate;
+    }
+  } catch (e) { segmenter = null; tokenizerRuntimeFailure = String((e && e.message) || e); }
+
+  function tokenizerRuntimeError() {
+    const err = new Error(TOKENIZER_RUNTIME_UNAVAILABLE_MESSAGE);
+    err.code = TOKENIZER_RUNTIME_UNAVAILABLE;
+    return err;
+  }
+  function assertTokenizerRuntimeReady() { if (!segmenter) throw tokenizerRuntimeError(); }
+  if (!segmenter) { const st = document.getElementById('status'); if (st) st.textContent = TOKENIZER_RUNTIME_UNAVAILABLE_MESSAGE; }
 
   function tokenize(text) {
+    assertTokenizerRuntimeReady();
     const t = normalizeForMatch(text);
     if (!t) return [];
-    if (segmenter) {
-      try { return segmenter.segment(t).map(s=>s.trim()).filter(Boolean); } catch (e) { /* fall through */ }
-    }
-    // フォールバック: 文字種チャンク（漢字連続 / カタカナ連続 / 英数字連続 / ひらがな連続）
-    return t.match(/[\u4E00-\u9FFF]+|[\u30A0-\u30FFー]+|[a-z0-9_\-]+|[\u3040-\u309F]+/g) || [t];
+    return segmenter.segment(t).map(s=>s.trim()).filter(Boolean);
   }
+
+  // verification-only read-only accessor: which tokenizer runtime the canonical matching path uses.
+  window.__matchingTokenizerDiagnostics = Object.freeze({
+    status: () => ({
+      implementation: 'TinySegmenter', required: true, ready: !!segmenter,
+      code: segmenter ? null : TOKENIZER_RUNTIME_UNAVAILABLE, detail: tokenizerRuntimeFailure,
+      scriptSrcs: Array.from(document.querySelectorAll('script[src]')).map(el => el.getAttribute('src')).filter(src => /tiny-segmenter/i.test(src))
+    }),
+    tokenize: text => tokenize(text)
+  });
 
   /* ═══════════════════════════════════════════
      TF-IDF ベクトル化（文字bigram + 形態素トークン）
@@ -7492,6 +7520,41 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     return bigramSimilarity(remA, remB) <= 0;
   }
 
+  // Canonical-tokenizer false-positive remediation (RISK-FUZZY-01, keyword level): a heading that both field values share may be cut into several
+  // short keywords - by a word-tokenizer ("確認結果一覧" -> 確認 / 結果 / 一覧) or by the field delimiters themselves (a 'segment' split on / 、 , ・ ; or a
+  // newline). Each such keyword is then a 'partial' containment hit on its own, although the shared heading is doing ALL of the work: this is the
+  // same defect sharedPrefixDominatesSimilarity() closes for fuzzy/vector, one level down. A 'token' or 'segment' keyword gets no partial credit when
+  // (1) the field value it came from and the target share a leading run (>= 2 chars) that is a complete delimiter-bounded unit in BOTH values - the
+  // delimiter either follows the run or is the run's last character, because normalizeForMatch() only drops whitespace and keeps any other delimiter -
+  // (a heading / leading segment, not the first word of a running sentence), (2) every occurrence of the keyword lies inside that shared run, and
+  // (3) the two remainders after the run are both non-empty and share no bigram (nothing beyond the heading agrees). A keyword confined to a shared
+  // heading while the discriminative tails differ is not evidence, whichever delimiter separates heading and tail; a shared subject word that
+  // continues into the sentence ("点検口には…" / "点検口カバーに…"), a field value wholly contained in the target (empty remainder), or tails that
+  // still agree are unaffected.
+  function sharedRunEndsAtDelimiter(raw, run) {
+    const text = String(raw == null ? '' : raw);
+    const isDelimiter = ch => /[\s、,，\/・;；:：|｜]/.test(ch);
+    for (let i = 1; i <= text.length; i++) {
+      if (normalizeForMatch(text.slice(0, i)).length >= run) return i < text.length && (isDelimiter(text[i]) || isDelimiter(text[i - 1]));
+    }
+    return false;
+  }
+  function keywordOnlyInSharedHeading(keywordMeta, kwNorm, targetNorm, targetRaw) {
+    if (!keywordMeta || (keywordMeta.source !== 'token' && keywordMeta.source !== 'segment') || keywordMeta.isFullText) return false;
+    const parent = keywordMeta.parentNorm;
+    if (!parent || !kwNorm || !targetNorm) return false;
+    let lcp = 0;
+    const maxLcp = Math.min(parent.length, targetNorm.length);
+    while (lcp < maxLcp && parent[lcp] === targetNorm[lcp]) lcp++;
+    if (lcp < 2) return false;
+    const first = parent.indexOf(kwNorm), last = parent.lastIndexOf(kwNorm);
+    if (first < 0 || last + kwNorm.length > lcp) return false;
+    const remA = parent.slice(lcp), remB = targetNorm.slice(lcp);
+    if (!remA || !remB) return false;
+    if (bigramSimilarity(remA, remB) > 0) return false;
+    return sharedRunEndsAtDelimiter(keywordMeta.parentRaw, lcp) && sharedRunEndsAtDelimiter(targetRaw, lcp);
+  }
+
   // HE-1 Remediation Checkpoint 2-D (RC1, whole-field/'full'-source vector-fuzzy generalization):
   // sharedPrefixDominatesSimilarity() above only catches boilerplate confined to a single LEADING
   // run. RA-01's trace_key_text/trace_text fields instead share population-boilerplate CONTENT
@@ -7624,7 +7687,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       // full-value evidence under a different method label. containsHit is guaranteed true here
       // whenever exactHit is true, so this branch is only reached for a genuine non-exact partial
       // containment, OR for the (exactHit && exactAmbiguous) case which must stay unaccepted.
-      else if (containsHit && !exactHit && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta)) cand.push(['partial', getScore('partial')]);
+      else if (containsHit && !exactHit && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !keywordOnlyInSharedHeading(keywordMeta, kw, target, targetRaw)) cand.push(['partial', getScore('partial')]);
     } else if (mode === 'code') {
       if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);
       if ((containsHit || codeHit) && isStructuredCodeEvidence(keyword, keywordMeta)) cand.push(['code', getScore('code')]);
@@ -7661,7 +7724,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       // population-frequency check alone cannot see - applied to auto mode's own fuzzy/vector
       // candidates identically to the explicit-mode branches.
       if (kw.length >= minLen && f.bigramSim >= (matchLogic.fuzzyThreshold ?? 0.75) && f.bigramSim < 1 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target) && !boilerplateContentDominatesSimilarity(keyword, targetRaw, pair) && !similarityIsAmbiguousAcrossCandidates(keyword, pair, f.bigramSim)) cand.push(['fuzzy', getScore('fuzzy')]);
-      if (containsHit && !exactHit && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta)) cand.push(['partial', getScore('partial')]);
+      if (containsHit && !exactHit && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !keywordOnlyInSharedHeading(keywordMeta, kw, target, targetRaw)) cand.push(['partial', getScore('partial')]);
       const vs = vectorConfidenceFromFeatures(f);
       if (vs > 0 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target) && !boilerplateContentDominatesSimilarity(keyword, targetRaw, pair) && !similarityIsAmbiguousAcrossCandidates(keyword, pair, f.bigramSim)) cand.push(['vector', vs]);
     }
@@ -8085,6 +8148,11 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
 
   function bestMatchForPlm(sysItem, plm) {
     let best = { score: 0, method: 'none', keyword: '', features: null, pair: null, chunk: null, chunkMatches: [] };
+    // Canonical-tokenizer false-positive remediation: the strongest score ANY code-shaped keyword reached for this row pair. Which keyword is
+    // reported as `best` among equal scores depends on iteration order (and therefore on which tokens the tokenizer happened to produce); the
+    // per-row structured-identity dominance in matchPlmParts() must not depend on that accident.
+    let structuredScore = 0;
+    const noteStructured = (entry, r) => { if (r.score > structuredScore && isStructuredCodeEvidence(entry.text, entry)) structuredScore = r.score; };
     const chunkDetails = [];
     const pairs = activeKeyPairs();
     const perf = normalizePerformanceSettings();
@@ -8101,6 +8169,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
           let chunkBest = { score:0, method:'none', keyword:'', features:null };
           for (const entry of entries) {
             const r = calcPairMatch(entry.text, plm, pair, entry);
+            noteStructured(entry, r);
             if (r.score > chunkBest.score) chunkBest = { ...r, keyword: entry.text };
             if (perf.earlyExitOnExact && chunkBest.score >= maxScore) break;
           }
@@ -8111,6 +8180,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         const entries = keywordEntriesForSysField(sysItem, pair.sysField);
         for (const entry of entries) {
           const r = calcPairMatch(entry.text, plm, pair, entry);
+          noteStructured(entry, r);
           if (r.score > best.score) best = { ...r, keyword: entry.text, pair, chunk:null, chunkMatches:[] };
           if (perf.earlyExitOnExact && best.score >= maxScore) {
             if (!hasAnyChunkPath) break outerPairs;
@@ -8125,6 +8195,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         .slice(0, 5)
         .map(x => ({ index:x.index, text:x.text, conf:Number((x.conf || 0).toFixed(2)), method:x.method, keyword:x.keyword, field:x.field }));
     }
+    best.structuredScore = structuredScore;
     return best;
   }
 
@@ -8596,15 +8667,19 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     // genuine one-to-many relationship resting entirely on descriptive text (no code field on
     // either side) is completely unaffected, since nothing here is "confirmed" for it to compete
     // against.
+    // Canonical-tokenizer false-positive remediation: a candidate counts as structurally identified when its winning keyword is code-shaped OR when
+    // a code-shaped keyword reached the acceptance threshold for it (bestMatchForPlm().structuredScore) - so an equal-scoring natural-language
+    // keyword that merely won the tie can neither hide the row's structured identity nor strip the identified candidate itself.
+    const candidateIsStructured = c => c.best.method === 'exact' || c.best.method === 'code' || isStructuredCodeEvidence(c.best.keyword, null) ||
+      (c.best.structuredScore || 0) >= matchLogic.minConfidence;
     const rowHasStructuredIdentityMatch = candidates.some(c =>
-      c.conf >= matchLogic.minConfidence && c.best.score > 0 &&
-      (c.best.method === 'exact' || c.best.method === 'code' || isStructuredCodeEvidence(c.best.keyword, null)));
+      c.conf >= matchLogic.minConfidence && c.best.score > 0 && candidateIsStructured(c));
 
     const matches = [];
     for (const c of candidates) {
       const nk = normalizeForMatch(c.best.keyword);
       if (nk && exactKeywords.has(nk) && !(c.best.method === 'exact' || c.best.method === 'code')) continue;
-      if (rowHasStructuredIdentityMatch && !(c.best.method === 'exact' || c.best.method === 'code' || c.best.method === 'tag') && !isStructuredCodeEvidence(c.best.keyword, null)) continue;
+      if (rowHasStructuredIdentityMatch && !(c.best.method === 'exact' || c.best.method === 'code' || c.best.method === 'tag') && !candidateIsStructured(c)) continue;
       if (c.conf >= matchLogic.minConfidence && c.best.score > 0) {
         const m = { ...c.plm, matchedKeyword:c.best.keyword, confidence:c.conf,
           matchMethod:c.best.method, _features:c.best.features,
@@ -9033,7 +9108,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     // 形態素解析ステータス
     $('segmenterStatus').textContent = segmenter
       ? 'TinySegmenter 使用中'
-      : '文字種チャンク（フォールバック）— TinySegmenterのCDN読み込みに失敗。オフライン環境の可能性があります';
+      : TOKENIZER_RUNTIME_UNAVAILABLE_MESSAGE;
 
     renderKeyPairTable();
 
@@ -9226,7 +9301,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     const out = {
       exported_at: new Date().toISOString(),
       note: '特徴語の接頭辞 b:=文字bigram, t:=形態素トークン。重みはTF-IDF。',
-      segmenter: segmenter ? 'TinySegmenter' : 'char-type-fallback',
+      segmenter: 'TinySegmenter',
       plm_vectors: mergedResult.plmList.map(plm => {
         const pv = vectorIndex.plmVecs.get(plm) || {};
         return {
@@ -9495,6 +9570,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
 
   /* ── 再照合 ── */
   $('rerunMatchBtn').addEventListener('click', async () => {
+    if (!segmenter) { statusEl.textContent = TOKENIZER_RUNTIME_UNAVAILABLE_MESSAGE; alert(TOKENIZER_RUNTIME_UNAVAILABLE_MESSAGE); return; }
     if (!mergedResult?.sysList || !mergedResult?.plmList) {
       alert('先にJSON AとJSON Bを読み込んでください。');
       return;
@@ -9532,7 +9608,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         statusEl.textContent = '再照合を中止しました。';
       } else {
         console.error(err);
-        statusEl.textContent = '再照合中にエラーが発生しました。';
+        statusEl.textContent = (err && err.code === TOKENIZER_RUNTIME_UNAVAILABLE) ? TOKENIZER_RUNTIME_UNAVAILABLE_MESSAGE : '再照合中にエラーが発生しました。';
         alert('再照合中にエラーが発生しました: ' + err.message);
       }
       failMatchingJob(job);
@@ -12243,6 +12319,7 @@ ${h.name}`, type:'requirement', detail:srcA };
   sysQuantityFile?.addEventListener('change', invalidateQuantityBindingSelection);
 
   loadBtn.addEventListener('click', async () => {
+    if (!segmenter) { statusEl.textContent = TOKENIZER_RUNTIME_UNAVAILABLE_MESSAGE; alert(TOKENIZER_RUNTIME_UNAVAILABLE_MESSAGE); return; }
     const runId = ++matchRunSeq;
     const job = beginMatchingJob('読み込み中');
     traceComparisonInputStale = true;
@@ -12350,6 +12427,9 @@ ${h.name}`, type:'requirement', detail:srcA };
       console.error(err);
       if (err instanceof MatchingCancelledError) {
         statusEl.textContent = err.message || '読み込みまたは照合処理を中止しました。';
+      } else if (err && err.code === TOKENIZER_RUNTIME_UNAVAILABLE) {
+        statusEl.textContent = TOKENIZER_RUNTIME_UNAVAILABLE_MESSAGE;
+        alert(TOKENIZER_RUNTIME_UNAVAILABLE_MESSAGE);
       } else {
         statusEl.textContent = 'エラー: JSONの読み込みまたは照合に失敗しました。';
         alert('JSONの読み込みまたは照合に失敗しました。形式・照合設定を確認してください。');

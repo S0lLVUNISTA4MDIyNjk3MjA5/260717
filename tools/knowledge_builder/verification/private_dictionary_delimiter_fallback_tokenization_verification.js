@@ -86,7 +86,7 @@ function buildBrowserStubSandbox() {
     fetch: undefined, XMLHttpRequest: undefined, Worker: undefined,
     FileReader: class FileReader { readAsText(){} readAsArrayBuffer(){} },
     cytoscape: function () { return { on(){}, add(){}, elements(){ return { remove(){} }; }, destroy(){}, layout(){ return { run(){} }; }, fit(){}, resize(){}, style(){ return { update(){} }; } }; },
-    XLSX: undefined, TinySegmenter: undefined,
+    XLSX: undefined,
     crypto: require('crypto').webcrypto,
     TextEncoder, TextDecoder,
     setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask,
@@ -116,6 +116,8 @@ function loadMatchingToolSandbox({ withRealResolverDeps = true, htmlOverride = n
     sandbox.PrivateDictionaryResolverCore = crossRealmWrap(ResolverCore, ['resolveDictionaryTerms']);
   }
   vm.createContext(sandbox);
+  // Canonical matching runtime: the local vendored TinySegmenter is REQUIRED (no tokenizer fallback), so the sandbox loads the real library.
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', '..', 'release', 'vendor', 'tiny-segmenter-0.2.0', 'tiny-segmenter-0.2.0.js'), 'utf8'), sandbox, { filename: 'tiny-segmenter-0.2.0.js (canonical local runtime)' });
   vm.runInContext(src, sandbox, { filename: 'json_ab_trace_matching_tool_v12.1.15.html (sandbox)' });
   return sandbox;
 }
@@ -332,7 +334,13 @@ async function main() {
     const names = ['evaluateTagMatch', 'getScore', 'bestMatchForPlm', 'bestDeterministicMatchForPlm', 'calcPairMatch', 'matchPlmParts', 'buildTagIndex', 'composeFinalTags', 'buildRowTagInfo', 'applyFieldGates', 'applyHierarchyGate', 'buildTraceMatrixRows', 'normalizeForMatch', 'normalizeTagValue', 'tagSourceFields', 'tagSourceText', 'approvedDictionaryTermsForRow', 'resolveApprovedDictionaryTermEntries', 'projectApprovedDictionaryResolutionProvenance', 'buildUnknownTermReviewQueue'];
     const missing = names.filter(n => fnSrc(baselineHtml, n) === null || fnSrc(cur, n) === null);
     assert(missing.length === 0, `I1 all ${names.length} matching/scoring/ranking/tag/projection/queue functions located in both versions (missing: ${missing.join(',') || 'none'})`);
-    const changed = names.filter(n => fnSrc(baselineHtml, n) !== fnSrc(cur, n));
+    // Canonical TinySegmenter False-Positive Remediation (Human-authorized matching change) legitimately extends exactly these three functions
+    // (keyword-level shared-heading guard, structured-identity dominance independent of tie order). They are NOT exempted from the identity check:
+    // each is pinned to the SHA-256 of its authorized source, so any further change (or a revert) still fails this test. Everything else stays byte-identical.
+    const FP_REMEDIATED = { bestMatchForPlm: 'e3f890c3a4df2cca012befc6b5f06669e0d4a2709d43521a4c9574f4ffcbc7c2', calcPairMatch: '2490344b9d428f4802f43866f29ad2d3979d5431a7a03a8c2d68ff255a190e8f', matchPlmParts: '2157376e75fa61eb443949231626bdf341e0ff26372ae34f6f292ce512e33156' };
+    const fpPinned = n => Object.prototype.hasOwnProperty.call(FP_REMEDIATED, n) && crypto.createHash('sha256').update(fnSrc(cur, n) || '').digest('hex') === FP_REMEDIATED[n];
+    assert(Object.keys(FP_REMEDIATED).every(n => fpPinned(n) && fnSrc(baselineHtml, n) !== fnSrc(cur, n)), 'FP the three false-positive-remediation functions (bestMatchForPlm, calcPairMatch, matchPlmParts) differ from the baseline and equal their pinned authorized SHA-256');
+    const changed = names.filter(n => fnSrc(baselineHtml, n) !== fnSrc(cur, n) && !fpPinned(n));
     // Contract 0.3 (Nested Dictionary Projection) legitimately extends exactly three of these functions (term extraction, projection,
     // queue builder: nested origin / source_origin). Every OTHER function stays byte-identical, and the change set is pinned exactly.
     const AUTHORIZED_BY_0_3 = ['approvedDictionaryTermsForRow', 'projectApprovedDictionaryResolutionProvenance', 'buildUnknownTermReviewQueue'];

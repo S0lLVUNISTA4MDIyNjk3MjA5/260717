@@ -80,7 +80,7 @@ function buildBrowserStubSandbox() {
     fetch: undefined, XMLHttpRequest: undefined, Worker: undefined,
     FileReader: class FileReader { readAsText(){} readAsArrayBuffer(){} },
     cytoscape: function () { return { on(){}, add(){}, elements(){ return { remove(){} }; }, destroy(){}, layout(){ return { run(){} }; }, fit(){}, resize(){}, style(){ return { update(){} }; } }; },
-    XLSX: undefined, TinySegmenter: undefined,
+    XLSX: undefined,
     crypto: require('crypto').webcrypto,
     TextEncoder, TextDecoder,
     setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask,
@@ -117,6 +117,8 @@ function loadMatchingToolSandbox({ withRealResolverDeps = true, htmlOverride = n
   sandbox.__storageWrites = 0;
   ['localStorage', 'sessionStorage'].forEach(k => { const st = sandbox[k]; const set = st.setItem; st.setItem = function (a, b) { sandbox.__storageWrites++; return set.call(this, a, b); }; });
   vm.createContext(sandbox);
+  // Canonical matching runtime: the local vendored TinySegmenter is REQUIRED (no tokenizer fallback), so the sandbox loads the real library.
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', '..', 'release', 'vendor', 'tiny-segmenter-0.2.0', 'tiny-segmenter-0.2.0.js'), 'utf8'), sandbox, { filename: 'tiny-segmenter-0.2.0.js (canonical local runtime)' });
   vm.runInContext(src, sandbox, { filename: 'json_ab_trace_matching_tool_v12.1.15.html (sandbox)' });
   return sandbox;
 }
@@ -442,7 +444,13 @@ async function main() {
       assert(lg(baseline) !== null && lg(baseline) === lg(src), 'F10 the trace profile + logic JSON export / import handlers are byte-identical to the baseline');
       const fnSrc = (h, name) => { const i = h.indexOf(`function ${name}(`); if (i < 0) return null; let d = 0, j = h.indexOf('{', i); for (; j < h.length; j++) { if (h[j] === '{') d++; else if (h[j] === '}') { d--; if (d === 0) break; } } return h.slice(i, j + 1); };
       const same = ['traceProfileExportPayload', 'applyImportedTraceProfilePayload', 'sanitizeTraceProfile', 'sanitizeKeyPairs', 'profileListFromPayload', 'mergeUserTraceProfiles', 'saveProjectSnapshotPinFile', 'loadProjectSnapshotPinFile', 'applyLoadedProjectSnapshotPinToMatchingSession', 'setApprovedDictionarySnapshotForMatching', 'captureNestedDictionaryProjectionAllowlist', 'setNestedDictionaryProjectionAllowlistForMatching', 'getNestedDictionaryProjectionAllowlistForMatching', 'enumerateNestedDictionaryCandidates', 'nestedSelApply', 'composeFinalTags', 'matchPlmParts', 'getScore', 'evaluateTagMatch', 'approvedDictionaryTermsForRow', 'applyApprovedDictionaryTags'];
-      const diff = same.filter(n => fnSrc(baseline, n) === null || fnSrc(baseline, n) !== fnSrc(src, n));
+      // Canonical TinySegmenter False-Positive Remediation (Human-authorized matching change) legitimately extends exactly these three functions
+      // (keyword-level shared-heading guard, structured-identity dominance independent of tie order). They are NOT exempted from the identity check:
+      // each is pinned to the SHA-256 of its authorized source, so any further change (or a revert) still fails this test. Everything else stays byte-identical.
+      const FP_REMEDIATED = { bestMatchForPlm: 'e3f890c3a4df2cca012befc6b5f06669e0d4a2709d43521a4c9574f4ffcbc7c2', calcPairMatch: '2490344b9d428f4802f43866f29ad2d3979d5431a7a03a8c2d68ff255a190e8f', matchPlmParts: '2157376e75fa61eb443949231626bdf341e0ff26372ae34f6f292ce512e33156' };
+      const fpPinned = n => Object.prototype.hasOwnProperty.call(FP_REMEDIATED, n) && crypto.createHash('sha256').update(fnSrc(src, n) || '').digest('hex') === FP_REMEDIATED[n];
+      assert(Object.keys(FP_REMEDIATED).every(n => fpPinned(n) && fnSrc(baseline, n) !== fnSrc(src, n)), 'FP the three false-positive-remediation functions (bestMatchForPlm, calcPairMatch, matchPlmParts) differ from the baseline and equal their pinned authorized SHA-256');
+      const diff = same.filter(n => fnSrc(baseline, n) === null || (fnSrc(baseline, n) !== fnSrc(src, n) && !fpPinned(n)));
       assert(diff.length === 0, `F11 trace profile, key pair, Snapshot / Pin, Host API setter / getter validation, Selection UI core and matching / dictionary code are byte-identical to the baseline (changed: ${diff.join(',') || 'none'})`);
       assert(/matchLogic\.version = '12.1.15-column-order'/.test(src) && src.split("'12.1.15-column-order'").length === baseline.split("'12.1.15-column-order'").length, 'F12 the logic version identifier and its occurrences are unchanged');
     }

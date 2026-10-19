@@ -190,8 +190,8 @@ async function main() {
   check('D5 dist: original A record shows every field with its exact source value, including the body fields (the matched field, when there is one, is marked)', aRel.sourceExact && aRel.bodyShown && aRel.matchedFields.length <= 1, JSON.stringify(aRel.matchedFields));
   check('D6 dist: an invalid sample list is rejected with the previous state kept', aRel.dupRejected && aRel.dupStatus);
   check('D7 dist: the saved artifact carries no sample information; nothing in localStorage; no page error', aRel.artifactClean && aRel.ls === 0 && aRel.errors === 0);
-  // The dist page bundles the tokenizer that the dev page would load from a CDN (unreachable offline), so the two pages can generate a slightly different
-  // number of comparisons for the same input (observed: 653 dev / 654 dist). Parity is therefore asserted on every assistance behaviour, not on that count.
+  // Dev and dist both use the same canonical local TinySegmenter, so both generate the same comparisons (654 for the medium dataset, network ON or OFF);
+  // parity is nevertheless asserted on every assistance behaviour rather than on the raw count (the count is reported in the check title).
   const norm = o => JSON.stringify({ eligible: o.eligible >= 653, beyond500: o.beyond500 >= 10, sample: o.sample, status: o.status, listIsFileOrder: o.listIsFileOrder, firstSelected: o.firstSelected, position: o.position, sourceExact: o.sourceExact, bodyShown: o.bodyShown, matched: o.matchedFields.length <= 1, navOrder: o.navOrder, farReachable: o.farReachable, dupRejected: o.dupRejected, dupStatus: o.dupStatus, artifactClean: o.artifactClean, ls: o.ls, errors: o.errors });
   check('D8 dev / dist parity of every assistance observation (counts of generated comparisons excluded: dev ' + aDev.eligible + ' / dist ' + aRel.eligible + ')', norm(aRel) === norm(aDev), norm(aDev));
   report();

@@ -21,7 +21,8 @@
  *                                 sub-entry - see codeHitIsBoilerplateForPair()).
  *                                 AFTER fix:  4 edges, 4 correct, 0 wrong.
  *   HE-11 PDF->Excel / HE-12 Excel->PDF: unaffected either way (4/4 correct, 0 wrong, unchanged
- *                                 vector confidences 0.82/0.82/0.82/0.82 and 0.82/0.77/0.81/0.82) -
+ *                                 vector confidences 0.82/0.82/0.82/0.82 and, under the canonical TinySegmenter
+ *                                 runtime, 0.82/0.79/0.82/0.82 [legacy fallback tokenizer: 0.82/0.77/0.81/0.82]) -
  *                                 these already matched via 'vector' on trace_text, not
  *                                 'partial'/'hier' on trace_key_text.
  *
@@ -205,8 +206,10 @@ async function main() {
     r.detailRows.forEach(row => parseEdgesFromRow(row).forEach(e => { if (e.method === 'vector') vectorScores.push(e.score); }));
     check('HE-12 Excel->PDF: correct edges = 4', cls.correct === 4, `correct=${cls.correct}`);
     check('HE-12 Excel->PDF: wrong edges = 0', cls.wrong === 0, `wrong=${cls.wrong} ${JSON.stringify(cls.wrongDetails)}`);
-    check('HE-12 Excel->PDF: weakest known correct vector ~=0.77 preserved', vectorScores.includes(0.77), JSON.stringify(vectorScores));
-    check('HE-12 Excel->PDF: vector confidences otherwise unchanged (0.82/0.77/0.81/0.82)', JSON.stringify(vectorScores.slice().sort()) === JSON.stringify([0.77, 0.81, 0.82, 0.82].slice().sort()), JSON.stringify(vectorScores));
+    // CANONICAL TOKENIZATION EXPECTATION DRIFT: the canonical matching runtime uses the bundled TinySegmenter, so these expectations reflect the
+    // TinySegmenter path (0.77 -> 0.79 and 0.81 -> 0.82 through the unchanged vector formula) rather than the legacy fallback tokenizer.
+    check('HE-12 Excel->PDF: weakest known correct vector ~=0.79 preserved (canonical TinySegmenter tokenization)', vectorScores.includes(0.79), JSON.stringify(vectorScores));
+    check('HE-12 Excel->PDF: vector confidences otherwise unchanged (canonical 0.82/0.79/0.82/0.82)', JSON.stringify(vectorScores.slice().sort()) === JSON.stringify([0.79, 0.82, 0.82, 0.82].slice().sort()), JSON.stringify(vectorScores));
     await page.close();
   }
 
@@ -607,6 +610,109 @@ async function main() {
     check('TEST H2 (single-occurrence shared prefix): 温度/圧力 best candidate stays below minConfidence (no accepted edge)', result.h2.score < result.minConfidence, JSON.stringify(result.h2));
     check('TEST H3 (genuine cross-format near-duplicate sharing an item-name prefix): still matches at high confidence, method fuzzy or vector', result.h3.score >= result.minConfidence && (result.h3.method === 'fuzzy' || result.h3.method === 'vector'), JSON.stringify(result.h3));
     check('TEST H4 (fuzzyThreshold lowered to 0.65): risk pair still blocked (no accepted edge) even under a more permissive threshold', result.h4.score < result.minConfidence, JSON.stringify(result.h4));
+    await page.close();
+  }
+
+  // ── TEST I: canonical-tokenizer false-positive remediation - neighbouring TRUE positives must survive ─────────────────────────────
+  // TEST H2/H4 above (unchanged) pin that a heading shared by two values does not make UNRELATED quantities match. The guard that closes the
+  // TinySegmenter variant of that defect (tokenOnlyInSharedHeading) only withholds partial credit from a 'token' keyword confined to a leading
+  // run that is delimited in BOTH values and whose tails share nothing. These neighbours must keep their partial credit.
+  {
+    const page = await browser.newPage();
+    await page.goto('file://' + HTML_PATH);
+    await page.waitForTimeout(300);
+    const result = await page.evaluate(() => {
+      function bestMatch(a, b, mode) {
+        const pair = { sysField: 'f', plmField: 'f', method: mode || 'auto', enabled: true };
+        let best = { score: 0, method: 'none', keyword: '' };
+        for (const entry of extractKeywordEntries(a)) {
+          const r = calcPairMatch(entry.text, { f: b }, pair, entry);
+          if (r.score > best.score) best = { score: r.score, method: r.method, keyword: entry.text };
+        }
+        return best;
+      }
+      return {
+        // the shared leading word continues into the sentence (no delimiter after it): a genuine shared subject word
+        i1: bestMatch('点検口には施錠機構を設けること。', '点検口カバーにシリンダー錠を追加する。'),
+        // the whole value is contained in the target after the shared heading (nothing divergent on the keyword side)
+        i2: bestMatch('確認結果一覧 冷却水', '確認結果一覧 冷却水ポンプ'),
+        // heading shared AND the tails still agree
+        i3: bestMatch('確認結果一覧 温度センサ', '確認結果一覧 温度センサ校正'),
+        // delimited shared subject, tails agree
+        i4: bestMatch('冷却水ポンプ 定格流量100L', '冷却水ポンプ 定格流量105L'),
+        // the token ALSO occurs in the divergent tail of its own value: it is not confined to the shared heading
+        i5: bestMatch('点検結果 点検口', '点検結果 配管図'),
+        // the same unrelated-quantity pair as H2, with the EXPLICIT 'contains' method (the guard gates that method's partial candidate too)
+        j1: bestMatch('確認結果一覧 温度', '確認結果一覧 圧力', 'contains'),
+        j2: bestMatch('冷却水ポンプ 定格流量', '冷却水ポンプ 吐出圧力', 'contains'),
+        // premise of the guard's minimum shared-run length: no keyword entry is shorter than two normalized characters
+        minEntryLen: Math.min(...['確認結果一覧 温度', 'P-101 温度', 'OU-2 サーバ室専用', 'ポンプ/点検 台帳', 'あ い う'].flatMap(v => extractKeywordEntries(v).map(e => normalizeForMatch(e.text).length))),
+        minConfidence: matchLogic.minConfidence
+      };
+    });
+    check('TEST I5 (token also occurs in the divergent tail): partial credit preserved', result.i5.score >= result.minConfidence && result.i5.method === 'partial', JSON.stringify(result.i5));
+    check('TEST J1 (explicit contains method, unrelated quantities sharing a heading): no accepted edge', result.j1.score < result.minConfidence, JSON.stringify(result.j1));
+    check('TEST J2 (explicit contains method, delimited shared subject with different tails): no accepted edge', result.j2.score < result.minConfidence, JSON.stringify(result.j2));
+    check('TEST I8 (premise): every extracted keyword entry has at least two normalized characters', result.minEntryLen >= 2, String(result.minEntryLen));
+    for (const [id, label] of [['i1', 'shared subject word that continues into the sentence'], ['i2', 'whole value contained after the shared heading'], ['i3', 'shared heading with agreeing tails'], ['i4', 'delimited shared subject with agreeing tails']]) {
+      check(`TEST ${id.toUpperCase()} (${label}): partial credit preserved (true positive, not over-suppressed)`, result[id].score >= result.minConfidence && result[id].method === 'partial', JSON.stringify(result[id]));
+    }
+    await page.close();
+  }
+
+  // RISK-FUZZY-01 is delimiter-independent: the unrelated-quantity pair must not be accepted whether the shared heading is separated from the
+  // divergent tail by a space, a tab, a colon, a slash, a Japanese comma or a newline (N1-N5), in either explicit method or auto. P1-P4 keep the
+  // genuine neighbours (same tail, strong identifier, agreeing tail after the delimiter) so the generalization cannot over-suppress.
+  {
+    const page = await browser.newPage();
+    await page.goto('file://' + HTML_PATH);
+    await page.waitForTimeout(300);
+    const result = await page.evaluate(() => {
+      function bestMatch(a, b, mode) {
+        const pair = { sysField: 'f', plmField: 'f', method: mode || 'auto', enabled: true };
+        let best = { score: 0, method: 'none', keyword: '' };
+        for (const entry of extractKeywordEntries(a)) {
+          const r = calcPairMatch(entry.text, { f: b }, pair, entry);
+          if (r.score > best.score) best = { score: r.score, method: r.method, keyword: entry.text };
+        }
+        return best;
+      }
+      const DELIMS = { n1: ' ', n1tab: '\t', n2: ':', n3: '/', n4: '、', n5: '\n' };
+      const out = { minConfidence: matchLogic.minConfidence, n: {}, p: {} };
+      for (const [id, d] of Object.entries(DELIMS)) {
+        out.n[id] = ['auto', 'contains'].map(mode => bestMatch('確認結果一覧' + d + '温度', '確認結果一覧' + d + '圧力', mode));
+      }
+      // the other delimiters the field-segment splitter itself knows (, ， ・ ; ；) and the fullwidth colon / pipe
+      for (const d of [',', '，', '・', ';', '；', '：', '|']) out.n['x' + d] = ['auto', 'contains'].map(mode => bestMatch('確認結果一覧' + d + '温度', '確認結果一覧' + d + '圧力', mode));
+      out.p.p1 = bestMatch('確認結果一覧:温度', '確認結果一覧:温度');
+      out.p.p2 = bestMatch('確認結果一覧/圧力', '確認結果一覧/圧力');
+      out.p.p3 = bestMatch('確認結果一覧\n流量', '確認結果一覧\n流量');
+      // weak heading + strong identifier: the identifier after the delimiter agrees
+      out.p.p4a = bestMatch('確認結果一覧:温度 TS-101', '確認結果一覧:圧力 TS-101');
+      out.p.p4b = bestMatch('確認結果一覧/TS-101', '確認結果一覧/TS-101 温度');
+      // the tail after the delimiter still agrees (shares a bigram) although the values differ
+      out.p.p5 = bestMatch('確認結果一覧:温度センサ', '確認結果一覧:温度センサ校正');
+      out.p.p6 = bestMatch('確認結果一覧/冷却水ポンプ', '確認結果一覧/冷却水ポンプ点検');
+      // a shared STRUCTURED IDENTIFIER (code-shaped keyword) is outside the guard: the identifier is the evidence, whatever follows it
+      out.p.p8a = bestMatch('OU-2 サーバ室専用', 'OU-2 事務室用', 'contains');
+      out.p.p8b = bestMatch('TS-101/温度', 'TS-101/圧力', 'contains');
+      out.p.p8c = bestMatch('OU-2 サーバ室専用', 'OU-2 事務室用');
+      // the tails differ but still agree on a bigram (neither tail is a whole keyword): the shared heading keeps its partial credit
+      out.p.p9a = bestMatch('確認結果一覧/温量設校', '確認結果一覧/量設');
+      out.p.p9b = bestMatch('点検記録票:出圧力吐値', '点検記録票:圧力');
+      out.p.p9c = bestMatch('確認結果一覧/温量設校', '確認結果一覧/量設', 'contains');
+      // a value wholly contained in the target after the delimiter (empty remainder)
+      out.p.p7 = bestMatch('確認結果一覧:冷却水', '確認結果一覧:冷却水ポンプ');
+      return out;
+    });
+    const labels = { n1: 'N1 whitespace', n1tab: 'N1b tab', n2: 'N2 colon', n3: 'N3 slash', n4: 'N4 Japanese comma', n5: 'N5 newline' };
+    for (const [id, res] of Object.entries(result.n)) {
+      check(`TEST ${labels[id] || 'N6 delimiter ' + JSON.stringify(id.slice(1))} (unrelated quantities sharing a heading, auto + contains): no accepted edge`, res.every(r => r.score < result.minConfidence), JSON.stringify(res));
+    }
+    const plabels = { p1: 'P1 colon, same tail', p2: 'P2 slash, same tail', p3: 'P3 newline, same tail', p4a: 'P4a heading + strong identifier (space-separated)', p4b: 'P4b heading + strong identifier (slash)', p5: 'P5 colon, agreeing tail', p6: 'P6 slash, agreeing tail', p7: 'P7 colon, value contained in target', p8a: 'P8a shared identifier heading (contains)', p8b: 'P8b shared identifier heading, slash (contains)', p8c: 'P8c shared identifier heading (auto)', p9a: 'P9a slash, tails agree on a bigram (auto)', p9b: 'P9b colon, tails agree on a bigram (auto)', p9c: 'P9c slash, tails agree on a bigram (contains)' };
+    for (const [id, res] of Object.entries(result.p)) {
+      check(`TEST ${plabels[id]}: correct match preserved (score >= minConfidence)`, res.score >= result.minConfidence, JSON.stringify(res));
+    }
     await page.close();
   }
 
