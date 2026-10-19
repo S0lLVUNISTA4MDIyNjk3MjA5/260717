@@ -2,6 +2,8 @@ Human Evaluation Pilot Protocol 0.1 — 実データで Human Evaluation 0.1 を
 =============================================================================================
 
 状態: **HUMAN-APPROVED FOR PILOT 1B**（2026-10-17）。手順書としてのversionは0.1のまま。Pilot 1Aの実施条件はS20.1、Pilot 1B（Human blind review）の実施条件と環境固定はS20.2に固定した（手順そのものは変更していない）。この「状態」はProtocol文書のものであり、Human Evaluation Contract 0.1の状態とは別である。Pilot 1Bは**まだ実施していない**。
+
+**2026-10-19 更新（canonical runtime rebaseline）**: Pilot 1B の現行の実施条件・環境固定・sample・package は **S20.3** に固定した。S4（固定baseline）、S8.5の参照値、S20.2.2 の sample 行、S20.2.4〜S20.2.6 は **Pilot 1A が実施された fallback 時代 baseline の historical 記録**であり、現行の Pilot 1B 条件ではない（各節に SUPERSEDED と明記）。
 本書は設計文書であり、製品コード・Contract・Core・UI・release・guard・dictionary・quantity・canonical・Graph・Trace Review・workbook・logic JSON・ML のいずれも変更しない。
 通常のdata correctness（品質評価の運用手順）であり、security / G2 / 暗号 / 信頼アーキテクチャは扱わない。
 
@@ -47,6 +49,8 @@ Human Evaluationタブ／診断accessorを**読み取り専用**で参照して�
 
 Pilotは、上記baselineのツールで実施する。baselineが変わった場合（ツールのSHA-256が異なる等）は、Pilotを開始せず本書を再確認する。
 
+> **historical（Pilot 1A の baseline）**: 上表は Pilot 1A が実施された fallback 時代 baseline（形態素解析のCDN読込が失敗すると文字種チャンクへ黙って切り替わる実装）の記録である。**Pilot 1B の現行 baseline は S20.3**（canonical product commit `5e9e9fa14e510fe56052db74e79201b87b4b2b4c`、同梱のローカル TinySegmenter）。
+
 ## 5. Evaluation Unit
 
 **評価単位 = Human Evaluation persistent eligible machine-generated comparison（pair単位）。**
@@ -77,6 +81,8 @@ Pilot datasetとして使うには、最低限次を満たすこと（S7の表�
 5. 期待する関連（ground truth）が付属していても、**Pilot中は参照しない**（S18。ground truthはMissing Match／Recall評価の将来設計の材料であり、本Pilotの評価入力ではない）。
 
 ## 7. Dataset Candidate Inventory
+
+> **historical**: 本章（S7）と S8.5 の実測値（medium の 653 comparisons など）は、baseline `2593e8e`（形態素解析の fallback 時代）で得た値である。canonical runtime での medium の実測値は S20.3.3（654 comparisons）。S8 のアルゴリズム自体は変わらない。
 
 ### 7.1 調査方法
 
@@ -180,6 +186,8 @@ mediumでは `classification` と `confidence帯` が `method` から一意に�
 | **Full evaluation** | 653 | 100% | 77／96 | 抽出の恣意性が無く、構成比をそのままdataset全体の記述として示せる | 件数が多い。UIのリストは先頭500件までの表示（S11.4）。評価者の疲労・一貫性の管理が必要 |
 
 sample sheetの参照値（baseline `2593e8e` ・既定読込・付録Aのsnippet）: Small（60行）の SHA-256 は `f81676b4a419d55ad7704df0223a59f9194b6391aea66e10a6e6b0a4d7fd4a95`（先頭行 `req-maint-log → design-maint-interval`）、Recommended（160行）は `1c1fbe726fd940a8deb143d8be51a9a92b8ac71f9d8fd9d8e22bbd375b4eeb28`（先頭行 `req-test-emc → design-test-vibration`）。機械結果全体（pair_idと7項目射影）の決定性は、独立した2回の読込で一致することを確認した（射影ハッシュ `eb2a66af06a633c0b4e6192191b303147b1e3cd36984a1f310ea828133aa577b`）。
+
+> **historical**: 上の参照値（Small 60 の `f81676b4…`、Recommended 160 の `1c1fbe72…`）は baseline `2593e8e`（fallback 時代）の値である。canonical runtime で S8.3 を再実行した値は S20.3.4 に記録した（Small 60 は pair の一部が異なる）。
 Pilot実施時にsample sheetのSHA-256がこの参照値と異なる場合、入力・設定・ツールのいずれかがbaselineと異なる。**原因を記録し、Human確認まで評価を始めない。**
 
 ## 9. Decision Rules
@@ -242,7 +250,7 @@ Contractの定義は、`UNSURE` =「判断できない」、`INSUFFICIENT_EVIDEN
 1. baseline（S4）のHEAD・ツールSHA-256を確認する。
 2. 入力ファイル（JSON A / JSON B）のSHA-256を記録する（S17）。
 3. `file://` で matching tool を開き、JSON A / JSON B を読み込んで**読込**を実行する（既定の照合設定。**Pilot中は照合設定・辞書Snapshot・nested選択・threshold等を変更しない**。変更すると結果が古くなり、`NO_CURRENT_RESULT` / `STALE` の原因になる）。
-4. 「Human Evaluation」タブを開き、`eligible total`・`ineligible` が想定（mediumなら eligible 653、ineligible 0）と一致することを確認する。
+4. 「Human Evaluation」タブを開き、`eligible total`・`ineligible` が想定（mediumなら eligible 654、ineligible 0。canonical runtime の実測値。S20.3.3。旧 653 は historical）と一致することを確認する。
 5. sampleを使う場合は、S8.3の手順でsample sheetを作成し、SHA-256を記録する（付録A）。
 
 ### 11.2 評価者の確認順序（毎回同じ順序）
@@ -269,7 +277,7 @@ noteは**必須ではない**。次の場合は記入を**推奨**する: `UNSUR
 
 ### 11.4 UI上の実務上の制限（実測・事実）
 
-- Human Evaluationタブの対象リストは**先頭500件までの表示**（それを超える場合は注記が出る）。653件のmediumでは、501件目以降は Previous / Next でのみ到達できる。
+- Human Evaluationタブの対象リストは**先頭500件までの表示**（それを超える場合は注記が出る）。654件のmediumでは、501件目以降は Previous / Next でのみ到達できる（Sample only の一覧には、500件より後ろの pair も含めて sample の60件がすべて並ぶ）。
 - リストの順序は照合結果の順序であり、`pair_id` 順ではない。sample sheetの行を探すには、リスト上の「requirement_trace_id → actual_trace_id」表示でtrace IDを照らし合わせる。**UIにはsample専用のfilterは無い**。
 - Skipは何も保存しない（未評価のまま）。
 - sampleを使う案（Small / Recommended）では、上記の探索が手作業になり、見落としや**sample外の評価**が起きやすい。sample外に評価した分は削除せず、summaryで**sample外**として別集計する（S15）。
@@ -448,14 +456,14 @@ Pilot 1A は **`PILOT 1A COMPLETE — AI EVALUATOR OPERATIONAL PILOT`**。単一
 - **Human ground truth ではない**。matching accuracyを示さない。Human／AI agreementは未測定。
 - Pilot 1A の成果物（artifact、manifest、summary、sample）は Protocol 本文へ転記しない。結果は Pilot summary 側の責務である。Pilot 1A の artifact は変更しない。
 
-#### 20.2.2 Pilot 1B の実施条件
+#### 20.2.2 Pilot 1B の実施条件（当初案。実施環境・sample の部分は S20.3 が優先する）
 
 Pilot 1B は、**人間が Pilot 1A と同じ60 pairを独立に評価する Human blind review** である。
 
 | 項目 | Pilot 1B |
 |---|---|
 | dataset | medium（`samples/knowledge_builder_alpha01/medium`） |
-| sample | **Pilot 1A の固定sample**（60 pair、`sample_pairs.txt` のみを使用。再生成しない） |
+| sample | ~~Pilot 1A の固定sample（60 pair、`sample_pairs.txt` のみを使用。再生成しない）~~ **SUPERSEDED（S20.3.4）**: canonical runtime では 58/60 しか解決できないため、S8.3 を canonical comparison universe へ再実行した新 Small 60 を使う |
 | evaluator | 人間（識別子の扱いは S11.5。実名を必須にしない） |
 | 判定基準・手順 | S9〜S13（変更なし） |
 | 終了条件 | S13（60件にdecision／CURRENT 60／STALE 0／ORPHANED 0／sample外評価 0／最終artifact保存とSHA記録／再読込＋Load後もCURRENT 60／summary作成済み。欠ければ PILOT INCOMPLETE） |
@@ -472,7 +480,9 @@ Pilot 1B の evaluator に**表示してはいけない／参照させてはい�
 
 使用してよい Pilot 1A の資料は **`sample_pairs.txt` のみ**。Pilot 1B の開始状態は、Human Evaluation entries = 0、Pilot 1A artifact 未Load、`sample_pairs.txt` のみ読込済み、であること。
 
-#### 20.2.4 Pilot 1B 実施環境の固定
+#### 20.2.4 Pilot 1B 実施環境の固定 — SUPERSEDED（historical・fallback 時代）
+
+> 本節は当初の環境固定（dev source HTML、network遮断、comparisons 653）の記録であり、**現行の条件ではない**。現行は S20.3。
 
 Pilot 1B は **Pilot 1A と同一の環境**で実施する。
 
@@ -480,7 +490,9 @@ Pilot 1B は **Pilot 1A と同一の環境**で実施する。
 - Pilot 1A と同じ **network-blocked** 条件（外部ネットワークへの要求を遮断した状態でファイルを開く）。
 - 期待される固定状態: generated comparisons = **653**、sample = **60**、sample resolved = **60**、unresolved = **0**。
 
-#### 20.2.5 Mandatory pre-check（評価を始める前に必ず行う）
+#### 20.2.5 Mandatory pre-check — SUPERSEDED（historical・fallback 時代）
+
+> 本節の期待値（653、旧 sample identity、旧 machine result projection identity 等）は fallback 時代 baseline のものであり、**現行の pre-check ではない**。現行は S20.3.6。
 
 次を**すべて**確認する。1つでも一致しなければ**評価を開始しない**（Abort）。原因を記録し、Humanへ報告する。
 
@@ -499,7 +511,9 @@ Pilot 1B は **Pilot 1A と同一の環境**で実施する。
 - ツールのHTMLのSHA-256は、実施時に記録する。Pilot 1A 時点のツールからUI補助が加わっているため、HTMLそのものの一致は要求せず、上の機械結果の同一性で判定する。
 - 値は完全値だけを使う。省略されたhashから値を推測しない。
 
-#### 20.2.6 KNOWN ENVIRONMENT DIFFERENCE — NOT USED FOR PILOT 1B
+#### 20.2.6 KNOWN ENVIRONMENT DIFFERENCE — SUPERSEDED（historical）
+
+> この環境差（network により 653／654）は、形態素解析をローカル同梱に統一し黙ったfallbackを廃止したことで解消した（canonical runtime は network の有無に依らず同一）。以下は当時の記録。
 
 | 環境 | generated comparisons | Pilot 1A の sample |
 |---|---|---|
@@ -513,6 +527,77 @@ Pilot 1B は **Pilot 1A と同一の環境**で実施する。
 #### 20.2.7 解釈の制限
 
 Pilot 1B でも、accuracy・precision・recall・F1・正解率として解釈しない（false negativeは測らない。S18）。Pilot 1A の結果との一致を評価に先立って示さない。Human／AI の比較は、Pilot 1B の完了後に別途行う。
+
+### 20.3 Pilot 1B の canonical runtime による rebaseline（Human承認済み・2026-10-19）
+
+#### 20.3.1 位置づけと比較可能性
+
+- **Pilot 1A は historical な fallback 時代 baseline で実施された**（AI evaluator operational pilot。S20.2.1）。その artifact・manifest・summary・sample は変更しない。
+- Pilot 1B は、**canonical matching runtime（同梱のローカル TinySegmenter）** で再 baseline した **新しい Small 60** を、人間が独立に評価する Human blind review である。
+- 新 sample は Pilot 1A の sample と**一部の pair が異なる**。したがって **Pilot 1A と Pilot 1B は same-sample comparison ではない**。Pilot 1A の結果を新 60 件へ投影・補完しない。Human／AI の比較は、Pilot 1B の完了後に別途、共通 pair に限って検討する。
+- Blindness（S20.2.3）は変わらない。Human 向け package・README・UI・sample には Pilot 1A の結果を一切含めない。
+
+#### 20.3.2 canonical product baseline
+
+| 項目 | 値 |
+|---|---|
+| canonical product commit | `5e9e9fa14e510fe56052db74e79201b87b4b2b4c`（`Canonicalize TinySegmenter matching and remediate fuzzy false positives`、branch `claude/knowledge-matching-core-next`、upstreamなし） |
+| matching tool（repository） | `tools/json_ab_trace_matching_tool_v12.1.15.html`（SHA-256 `0c2152fc5091a0f765082f92d302b6090601610422b22ce1f3598810341845a8`） |
+| tokenizer / runtime | ローカル同梱 TinySegmenter 0.2.0（`tiny-segmenter-0.2.0.js`、SHA-256 `91beda36fe50aa9dc90798f2124a38b45beedcf845120fa4f5550229ef8ebe8d`）。CDN・network 依存・黙った fallback なし |
+| Human package の HTML | 上記 commit から release build（`tools/release/build_alpha_release.js`）で生成した offline 形式 `json_ab_trace_matching_tool_v12.2.0-alpha.1.html`（SHA-256 `1582475fead5092da80f24af34ea327565bfd7faf3b1732bda857a692a9eb703`）。repository の HTML との差は、題名・版表示・script の読込パス（`runtime/` 配下の同梱ファイル）・アルファ版の注意書き・`TOOL_VERSION` の表示だけで、照合の処理は同一（machine result projection identity が dev 形式と一致することを確認済み）。cytoscape／xlsx も同梱され、外部CDNへの依存はない |
+
+#### 20.3.3 canonical comparison universe（medium・実測）
+
+| 項目 | 値 |
+|---|---|
+| JSON A | `JSON_A_medium_customer_requirements_trace.json`（SHA-256 `418bfc7378e2d7068f19783f45a9a24b5e65159c818f06de89f3a8672043f8d1`、80 records） |
+| JSON B | `JSON_B_medium_design_review_trace.json`（SHA-256 `bbe32bdb0d4f89888579b6d3ecd31c0972d02768efa44f72b8cf1cf8440b068e`、100 records） |
+| generated comparisons / eligible / ineligible | 654 / 654 / 0 |
+| pair-set identity（pair_id を文字順に改行連結した SHA-256） | `5f8123bdcb1e48a390c72d3eca95ccf3bcb5bacfeb7f090e26cf9b1ba45b4d9c` |
+| machine result projection identity（付録D） | `01db5392c42ffabbfeabdbcdb72ef9aa59d52634236e7f52be7d3e4707bf515b` |
+| method | exact 497 ／ tag 149 ／ partial 5 ／ vector 3 |
+| classification | 対応あり 497 ／ 要確認 157 |
+| network ON／OFF／`file://`（展開した package） | 上の値がすべて一致。TinySegmenter の外部要求は 0 |
+
+654 という件数そのものは仕様ではなく、canonical runtime での実測値である。旧 653（fallback 時代）は現行値ではない。
+
+#### 20.3.4 sample（S8.3 の再実行）
+
+- 手順は S8.3／付録A を**そのまま**適用した（新しい抽出規則は作っていない）。乱数・seed なし。pair_id の正準順序（`HumanEvaluationCore.comparePairIds`）、層キー `classification | method | confidence帯 | dictionary有無 | 数値条件有無`、層内件数 10 以下は全件採用、残りは件数比例、層内は `floor((i + 0.5) × 層内件数 / q)`。
+- 層（件数→採用）: exact・H・nonnum 233→19 ／ exact・H・num 264→21 ／ tag・nonnum 74→6 ／ tag・num 75→6 ／ partial・nonnum 1→1 ／ partial・num 4→4 ／ vector・nonnum 2→2 ／ vector・num 1→1（計 60）。
+- sample count 60、unique 60、eligible 60、duplicate 0、unknown 0。
+- sample identity（`requirement_trace_id<TAB>actual_trace_id` の TSV、SHA-256）: `e4413ceec2f1389ab4857986d51e0ea04495f30f694af812b91c5dcf4207e424`（2,618 bytes）。
+- `sample_pairs.txt`（pair_id を1行に1つ、LF 終端）: SHA-256 `f6f5e9520f92c905e861358d4fbccd4327b622c0819dd3832d8320123bd70bef`、3,759 bytes、60 行。
+- 再現性: release 形式と dev 形式、network ON と OFF、独立した複数回の生成で、ordered pair list・sample identity が完全一致。
+
+#### 20.3.5 Human package
+
+| 項目 | 値 |
+|---|---|
+| package | `pilot_1b_canonical_package.zip`（SHA-256 `7a9ee5525b67123bcddef97c55ee378d2f0e7f50c8d360f3a5fd3bd55447589c`、958,071 bytes、ZIP 内 41 entry（ファイル 37）、ZIP の整合性検査 OK） |
+| 内容 | HTML、`runtime/`（ローカル TinySegmenter、cytoscape、xlsx、各 core）、`data/`（JSON A／B、`sample_pairs.txt`）、`README_JA.txt`、`MANIFEST.txt`、`SHA256SUMS.txt`、ライセンス |
+| 保存先 | `/home/user/human_evaluation_pilot_0.1/pilot_1b_canonical_human_blind_small60/`（Pilot 1A／旧 Pilot 1B の directory とは別。Git 管理対象外） |
+| 旧 package | `pilot_1b_package.zip`（SHA-256 `f5808d8ac17007e9e31c5155bd259cc7dbb149e735a64312d8de56e6d73fc46e`）は **STALE**。使用しない・上書きしない |
+
+#### 20.3.6 Mandatory pre-check（評価を始める前に必ず行う）
+
+| 確認 | 期待値 |
+|---|---|
+| 形態素解析の表示 | 「TinySegmenter 使用中」（エラーなし） |
+| generated comparison count | 654 |
+| eligible／ineligible | 654／0 |
+| sample（読込／解決／未解決） | 60／60／0 |
+| Sample only | オン、位置 1 / 60 |
+| 読み込む `sample_pairs.txt` の SHA-256 | `f6f5e9520f92c905e861358d4fbccd4327b622c0819dd3832d8320123bd70bef` |
+| Human Evaluation entries | 0（evaluated 0、Pilot 1A artifact は未Load） |
+| evaluator | `Human-A` |
+| package のファイル | `SHA256SUMS.txt` と一致 |
+
+1つでも一致しなければ評価を始めない。sample の書き換え、解決できない pair の読み飛ばし、別 pair への置換は行わない。network の切断は要求しない（canonical runtime は network の有無で結果が変わらない）。
+
+#### 20.3.7 解釈の制限
+
+S20.2.7 と同じ。accuracy・precision・recall・F1・正解率として解釈しない。Pilot 1A との一致を評価に先立って示さない。
 
 ---
 
