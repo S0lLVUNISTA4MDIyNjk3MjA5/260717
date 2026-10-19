@@ -497,6 +497,24 @@
 </style>
 </head>
 <body>
+<!-- Pilot execution profile (null in the general tool; a Pilot package stamps its profile here at packaging time). When a profile is present the
+     Pilot matching universe is executed with the profile's REQUIRED scope regardless of any scope preference saved in this browser; the saved
+     preference itself is never read-modified or deleted. Read through window.__pilotExecutionProfile(); nothing here is a matching rule. -->
+<script type="application/json" id="pilotProfileJson">null</script>
+<script>
+(() => {
+  'use strict';
+  let cached, parsed = false;
+  window.__pilotExecutionProfile = () => {
+    if (parsed) return cached;
+    const el = typeof document.getElementById === 'function' ? document.getElementById('pilotProfileJson') : null;
+    if (!el) return null;                    // not parsed yet (or no DOM): do not cache
+    parsed = true;
+    try { const v = JSON.parse(el.textContent || 'null'); cached = v && typeof v === 'object' ? Object.freeze(v) : null; } catch (e) { cached = null; }
+    return cached;
+  };
+})();
+</script>
 <h1>JSON A/B トレース照合ツール V12.1.15</h1>
 
 <!-- ── 入力・実行 / 出力・保存 ── -->
@@ -15122,6 +15140,15 @@ ${h.name}`, type:'requirement', detail:srcA };
   let phase7SelectedId = '';
   let phase7ApplyScope = false; // 候補版は安全のため全件照合を既定にする
   let phase7ExceptionAsReview = true;
+  // Persisted PREFERENCE vs EFFECTIVE execution scope. phase7ApplyScope / phase7ExceptionAsReview hold the user's saved preference (localStorage
+  // v12_1_overview_ui); it is never rewritten here. Everything that can change a matching result reads the p7Effective* values below. In the general
+  // tool they equal the preference (unchanged behaviour). When a Pilot execution profile (window.__pilotExecutionProfile) requires FULL_SCOPE the
+  // effective values are fixed to "no overview narrowing", whatever is saved in this browser.
+  const p7Pilot = () => (typeof window.__pilotExecutionProfile === 'function' ? window.__pilotExecutionProfile() : null);
+  const p7PilotFullScope = () => { const pr = p7Pilot(); return !!pr && pr.required_matching_scope === 'FULL_SCOPE'; };
+  const p7EffectiveApplyScope = () => (p7PilotFullScope() ? false : phase7ApplyScope);
+  const p7EffectiveExceptionAsReview = () => (p7PilotFullScope() ? true : phase7ExceptionAsReview);
+  const p7EffectiveScopeMode = () => (p7EffectiveApplyScope() ? 'OVERVIEW_SCOPE_APPLIED' : 'FULL_SCOPE');
   let phase7Building = false;
   let phase7StaleOverviewAllowed = true;
 
@@ -15301,7 +15328,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       const outsideIncluded = !!(bMeta.key && scopesForA.included.size > 0 && !scopesForA.included.has(bMeta.key));
       const method = p7Clean(row?.['方式'] || autoCarrier?.['方式'] || row?.matchMethod || autoCarrier?.matchMethod);
       // Stage 2Rのspreadコピーで非列挙プロパティが失われても、範囲状態と方式から決定的に再構成する。
-      const reconstructedException = phase7ApplyScope && ['exact','code'].includes(method) && (scopeState === 'excluded' || outsideIncluded);
+      const reconstructedException = p7EffectiveApplyScope() && ['exact','code'].includes(method) && (scopeState === 'excluded' || outsideIncluded);
       const scopeException = !!(row?._scopeException || autoCarrier?._scopeException || reconstructedException);
       p7SetHidden(row, '_scopeException', scopeException);
       p7SetHidden(row, '_scopeState', scopeState);
@@ -15419,7 +15446,7 @@ ${h.name}`, type:'requirement', detail:srcA };
   }
 
   function p7ScopeSignature() {
-    if (!phase7ApplyScope) return 'SCOPE:ALL';
+    if (!p7EffectiveApplyScope()) return 'SCOPE:ALL';
     const values = phase7Relations.map(r => `${r.overviewRelationId}=${r.effectiveScopeState}`).sort();
     if (!values.length || values.every(v => v.endsWith('=undecided'))) return 'SCOPE:ALL';
     return `SCOPE:${p7Hash(values.join('|'))}:${values.join('|')}`;
@@ -15445,7 +15472,7 @@ ${h.name}`, type:'requirement', detail:srcA };
   const p7BaseCandidateEntries = candidateEntriesForSys;
   candidateEntriesForSys = function(sysItem, plmList) {
     const base = p7BaseCandidateEntries(sysItem,plmList) || [];
-    if (!phase7ApplyScope || !phase7Relations.length || !Array.isArray(plmList)) return base;
+    if (!p7EffectiveApplyScope() || !phase7Relations.length || !Array.isArray(plmList)) return base;
     const aIndex = phase7SysRows.indexOf(sysItem);
     const aMeta = p7GroupMeta(sysItem,'a',aIndex >= 0 ? aIndex : 0);
     const scopes = p7ScopesForA(aMeta.key);
@@ -15502,7 +15529,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       const bMeta = p7GroupMeta(src,'b',bi >= 0 ? bi : idx);
       const scope = p7ScopeForPair(aMeta.key,bMeta.key);
       const outsideIncluded = scopes.included.size > 0 && !scopes.included.has(bMeta.key);
-      const exception = phase7ApplyScope && (scope === 'excluded' || outsideIncluded) && ['exact','code'].includes(match.matchMethod);
+      const exception = p7EffectiveApplyScope() && (scope === 'excluded' || outsideIncluded) && ['exact','code'].includes(match.matchMethod);
       p7SetHidden(match,'_overviewRelationId',p7RelationId(aMeta.key,bMeta.key));
       p7SetHidden(match,'_overviewAGroupKey',aMeta.key);
       p7SetHidden(match,'_overviewBGroupKey',bMeta.key);
@@ -15518,7 +15545,7 @@ ${h.name}`, type:'requirement', detail:srcA };
     return match?._scopeException ? `${base} ／ 範囲外例外: 概要範囲外だが${match.matchMethod === 'code' ? 'コード' : '完全'}一致` : base;
   };
   const p7BaseMatchHasGate = matchHasGate;
-  matchHasGate = function(match) { return p7BaseMatchHasGate(match) || !!(phase7ExceptionAsReview && match?._scopeException); };
+  matchHasGate = function(match) { return p7BaseMatchHasGate(match) || !!(p7EffectiveExceptionAsReview() && match?._scopeException); };
 
   // タグ生成後・詳細照合前に概要提案と保存済み範囲を準備するフック。
   window.__phase7PrepareBeforeMatch = async function(sysRows,plmRows) {
@@ -15599,7 +15626,7 @@ ${h.name}`, type:'requirement', detail:srcA };
     });
     $('phase7ExceptionAsReview')?.addEventListener('change', e => {
       phase7ExceptionAsReview = !!e.target.checked; p7SaveUi(); invalidateMatchCache();
-      if (phase7ApplyScope && mergedResult?.sysList) { markTraceMatrixStale('範囲外例外の判定方法を変更しました。再照合してください。'); traceMatrixView='overview'; syncTraceViewSelector(); renderTraceMatrix(); }
+      if (p7EffectiveApplyScope() && mergedResult?.sysList) { markTraceMatrixStale('範囲外例外の判定方法を変更しました。再照合してください。'); traceMatrixView='overview'; syncTraceViewSelector(); renderTraceMatrix(); }
       p7UpdatePanel();
     });
     $('phase7ShowOverviewBtn')?.addEventListener('click', () => p7ReturnOverview());
@@ -15608,7 +15635,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       if (!Object.keys(phase7Decisions).length) return;
       if (!confirm('すべての手動範囲判断を削除し、自動提案へ戻しますか？詳細レビューと手動関係は削除されません。')) return;
       phase7Decisions = {}; p7SaveState(); p7BuildRelations(traceMatrixRows || []);
-      if (phase7ApplyScope) { invalidateMatchCache(); markTraceMatrixStale('概要範囲を自動提案へ戻しました。再照合してください。'); }
+      if (p7EffectiveApplyScope()) { invalidateMatchCache(); markTraceMatrixStale('概要範囲を自動提案へ戻しました。再照合してください。'); }
       traceMatrixView='overview'; syncTraceViewSelector(); renderTraceMatrix(); p7UpdatePanel();
     });
   }
@@ -15618,6 +15645,9 @@ ${h.name}`, type:'requirement', detail:srcA };
     const apply = $('phase7ApplyScope'), ex = $('phase7ExceptionAsReview');
     if (apply) apply.checked = phase7ApplyScope;
     if (ex) ex.checked = phase7ExceptionAsReview;
+    const pilotLocked = p7PilotFullScope();
+    if (apply) apply.disabled = pilotLocked;
+    if (ex) ex.disabled = pilotLocked;
     const selected = phase7RelationMap.get(phase7SelectedId);
     const crumb = $('phase7Breadcrumb');
     if (crumb) crumb.textContent = selected ? `全体 > ${selected.aGroupLabel} > ${selected.bGroupLabel}` : '全体';
@@ -15630,7 +15660,8 @@ ${h.name}`, type:'requirement', detail:srcA };
     const parts = [
       `概要関係 ${phase7Relations.length.toLocaleString()}件（Aグループ${phase7GroupIndex.a.size} / Bグループ${phase7GroupIndex.b.size}）`,
       `範囲: 限定${scopeCounts.included}・優先${scopeCounts.reference}・対象外${scopeCounts.excluded}・未決定${scopeCounts.undecided}`,
-      phase7ApplyScope ? '候補制御ON' : '全件照合（安全側・既定）',
+      pilotLocked ? `Pilot実行: 有効範囲=FULL_SCOPE（このブラウザの保存設定「概要範囲を照合へ適用」=${phase7ApplyScope ? 'ON' : 'OFF'} は保持されますが、Pilotの照合には適用されません）`
+        : (phase7ApplyScope ? '候補制御ON' : '全件照合（安全側・既定）'),
       stale ? '範囲または設定変更後のため再照合が必要' : '',
       phase7RestoreWarning
     ].filter(Boolean);
@@ -15693,7 +15724,7 @@ ${h.name}`, type:'requirement', detail:srcA };
     else return;
     p7SaveState();
     p7BuildRelations(traceMatrixRows || []);
-    if (phase7ApplyScope) {
+    if (p7EffectiveApplyScope()) {
       invalidateMatchCache();
       markTraceMatrixStale('概要範囲が変更されました。再照合してください。');
     }
@@ -15953,6 +15984,9 @@ ${h.name}`, type:'requirement', detail:srcA };
     scopeSignature:() => p7ScopeSignature(),
     state:() => ({ schemaVersion:2,datasetFingerprint:phase7DatasetFingerprint,groupingSignature:phase7GroupingSignature,decisions:JSON.parse(JSON.stringify(phase7Decisions)),applyScope:phase7ApplyScope,selectedOverviewRelationId:phase7SelectedId }),
     setApplyScope:value => { phase7ApplyScope=!!value; p7SaveUi(); return p7ScopeSignature(); },
+    // persisted preference vs effective execution scope (read-only observation; the preference is never modified by reading)
+    effective:() => ({ persisted:{ applyScope:phase7ApplyScope, exceptionAsReview:phase7ExceptionAsReview }, effective:{ applyScope:p7EffectiveApplyScope(), exceptionAsReview:p7EffectiveExceptionAsReview(), scopeMode:p7EffectiveScopeMode(), scopeSignature:p7ScopeSignature() },
+      pilotRequiredScope:(p7Pilot() && p7Pilot().required_matching_scope) || null, pilotLocked:p7PilotFullScope(), manualOverrideCount:Object.keys(phase7Decisions).length }),
     annotateRows:rows => p7AnnotateTraceRows(rows)
   });
 
@@ -16935,9 +16969,70 @@ ${h.name}`, type:'requirement', detail:srcA };
   const sample = { ids: [], fileName: '', loaded: 0, resolved: 0, unresolved: 0, reasons: null, valid: false, only: false, message: '' };
   let build = null;          // cached comparison build for one matching result
   let refreshSeq = 0;
+  let pilotUniverse = null;  // identity of the current matching universe, computed for the Pilot baseline gate
   const identityCache = new WeakMap();   // comparison -> { machine, source } promise
 
   const nowIso = () => new Date().toISOString();
+
+  // ---- Pilot baseline gate (fail-closed) ----
+  // Applies only when a Pilot execution profile is stamped into the page (window.__pilotExecutionProfile()). The profile carries the baseline the Pilot
+  // was defined against (required scope, comparison counts, pair-set / machine-projection identity, sample counts). Decision input is possible only
+  // while every one of them matches; nothing is ever corrected automatically and no saved preference is touched.
+  const bySortId = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
+  async function universeIdentity(comparisons) {
+    const d = deps(); if (!d) return null;
+    const rows = comparisons.map(c => [c.pair_id, c.eligible, c.projection]);
+    const text = JSON.stringify(rows.slice().sort((x, y) => bySortId(x[0], y[0])));
+    const ids = comparisons.map(c => c.pair_id).sort(bySortId);
+    return { comparisons: comparisons.length, eligible: comparisons.filter(c => c.eligible).length, ineligible: comparisons.filter(c => !c.eligible).length,
+      pair_set_identity: await d.rawSha256Utf8(ids.join('\n')), machine_projection_identity: await d.rawSha256Utf8(text) };
+  }
+  function pilotGate() {
+    const prof = typeof window.__pilotExecutionProfile === 'function' ? window.__pilotExecutionProfile() : null;
+    if (!prof) return { applicable: false, pass: true, code: '', rows: [], profile: null };
+    const base = prof.baseline && typeof prof.baseline === 'object' ? prof.baseline : null, sb = base && base.sample && typeof base.sample === 'object' ? base.sample : {};
+    const rows = [];
+    const add = (field, expected, actual) => rows.push({ field, expected, actual: actual === undefined || actual === null ? 'N/A' : actual, ok: expected !== undefined && expected === actual });
+    add('pilot_profile', 'valid', prof.pilot_id && base && prof.required_matching_scope === 'FULL_SCOPE' ? 'valid' : 'invalid');
+    let eff = null; try { eff = window.__phase7Diagnostics && window.__phase7Diagnostics.effective(); } catch (_) { eff = null; }
+    add('effective_scope', prof.required_matching_scope, eff ? eff.effective.scopeMode : null);
+    const u = pilotUniverse, r = sample.reasons || null;
+    add('comparisons', base && base.comparisons, u ? u.comparisons : null);
+    add('eligible', base && base.eligible, u ? u.eligible : null);
+    add('ineligible', base && base.ineligible, u ? u.ineligible : null);
+    add('pair_set_identity', base && base.pair_set_identity, u ? u.pair_set_identity : null);
+    add('machine_projection_identity', base && base.machine_projection_identity, u ? u.machine_projection_identity : null);
+    add('sample_loaded', sb.loaded, sample.ids.length ? sample.loaded : 0);
+    add('sample_resolved', sb.resolved, sample.ids.length ? sample.resolved : 0);
+    add('sample_unresolved', sb.unresolved, sample.ids.length ? sample.unresolved : null);
+    add('sample_duplicates', sb.duplicates, r ? r.duplicate : null);
+    add('sample_ineligible', sb.ineligible, r ? r.ineligible : null);
+    const pass = rows.every(x => x.ok);
+    return { applicable: true, pass, code: pass ? '' : 'PILOT_BASELINE_MISMATCH', rows, profile: prof, scope: eff };
+  }
+  const pilotGateAllows = () => pilotGate().pass;
+  const canDecide = () => view.available && pilotGateAllows();
+  function renderPilotGate() {
+    const tab = el('tabHumanEval'); if (!tab) return;
+    let box = el('hePilotGate');
+    const g = pilotGate();
+    if (!g.applicable) { if (box) box.style.display = 'none'; return; }
+    if (!box) { box = document.createElement('div'); box.id = 'hePilotGate'; box.setAttribute('role', 'status'); tab.insertBefore(box, tab.firstChild); }
+    box.style.cssText = 'display:block;margin:8px 0;padding:8px 12px;border-radius:8px;font:13px/1.6 sans-serif;border:2px solid ' + (g.pass ? '#166534' : '#b91c1c') + ';background:' + (g.pass ? '#f0fdf4' : '#fef2f2') + ';color:' + (g.pass ? '#14532d' : '#7f1d1d');
+    box.textContent = '';
+    const head = document.createElement('div'); head.style.fontWeight = '700';
+    head.textContent = g.pass ? 'Pilot baseline PASS（' + g.profile.pilot_id + '）' : g.code + ' — 評価入力は無効です（CORRECT / INCORRECT / UNSURE / category / Apply）';
+    box.appendChild(head);
+    const eff = g.scope;
+    const scopeLine = document.createElement('div'); scopeLine.textContent = 'Effective scope: ' + (eff ? eff.effective.scopeMode : 'N/A') + ' ／ Pilot required scope: ' + g.profile.required_matching_scope
+      + ' ／ Persisted overview scope (browser setting): ' + (eff ? (eff.persisted.applyScope ? 'ON' : 'OFF') + (eff.pilotLocked && eff.persisted.applyScope ? '（保持。Pilotの照合には適用されません）' : '') : 'N/A');
+    box.appendChild(scopeLine);
+    if (!g.pass) {
+      const hint = document.createElement('div'); hint.textContent = '不一致の項目（expected / actual）:'; box.appendChild(hint);
+      g.rows.filter(x => !x.ok).forEach(x => { const d = document.createElement('div'); d.style.marginLeft = '12px'; d.textContent = x.field + ': expected ' + x.expected + ' / actual ' + x.actual; box.appendChild(d); });
+      const note = document.createElement('div'); note.textContent = 'この状態で評価を始めないでください。設定や sample を自動で書き換えることはしません。sample 関連の不一致のみの場合は「Sample pair listを読込」で data/sample_pairs.txt を読み込んでください。'; box.appendChild(note);
+    }
+  }
 
   // ---- current-result availability: explicit, derived only from existing runtime state variables ----
   function currentResultState() {
@@ -17061,6 +17156,10 @@ ${h.name}`, type:'requirement', detail:srcA };
       UNSURE: cur.filter(x => x.entry.decision === 'UNSURE').length,
       STALE: items.filter(x => x.status === 'STALE').length, ORPHANED: items.filter(x => x.status === 'ORPHANED').length,
       ineligible: items.filter(x => x.kind === 'ineligible').length } : null;
+    let uni = null;
+    if (cr.available && typeof window.__pilotExecutionProfile === 'function' && window.__pilotExecutionProfile()) { try { uni = await universeIdentity(cmps); } catch (_) { uni = null; } }
+    if (seq !== refreshSeq) return view;
+    pilotUniverse = uni;
     view = { available: cr.available, reason: cr.reason, items, statusByPair, counts };
     resolveSample();
     updateDatasetWarning();
@@ -17097,7 +17196,7 @@ ${h.name}`, type:'requirement', detail:srcA };
 
   async function commit() {
     const item = selectedItem();
-    if (!item || item.kind !== 'eligible' || !view.available) return;
+    if (!item || item.kind !== 'eligible' || !canDecide()) return;
     const d = draftFor(item);
     if (!d.decision) { setMessage('decision を選択してください。'); return; }
     if (d.decision === 'INCORRECT' && !d.category) { setMessage('INCORRECT では issue category の選択が必要です（選択すると確定します）。'); render(); return; }
@@ -17206,6 +17305,7 @@ ${h.name}`, type:'requirement', detail:srcA };
     el('heSkipBtn').disabled = !(idx >= 0 && idx < list.length - 1);
     el('heClearAllBtn').disabled = state.entries.size === 0;
     renderSampleBar(list, idx);
+    renderPilotGate();
     el('heStatus').textContent = state.message || (view.available ? '' : view.reason + ' 保存済みの評価は変更されません。');
     const w = el('heWarning'); w.style.display = state.warning ? 'block' : 'none'; w.textContent = state.warning;
     renderDetail(selectedItem());
@@ -17259,7 +17359,7 @@ ${h.name}`, type:'requirement', detail:srcA };
     renderSource(el('heSrcA'), item.cmp ? item.cmp.aRow : null, p ? p.matched_a_field : '');
     renderSource(el('heSrcB'), item.cmp ? item.cmp.bRow : null, p ? p.matched_b_field : '');
     el('heSaved').textContent = e ? ('保存済み: ' + e.decision + (e.issue_category ? ' / ' + e.issue_category : '') + ' / evaluated_at ' + e.evaluated_at + (e.evaluator ? ' / ' + e.evaluator : '') + (e.note ? ' / note: ' + e.note : '')) : '保存済みの評価はありません。';
-    const editable = item.kind === 'eligible' && view.available;
+    const editable = item.kind === 'eligible' && canDecide();
     const d = editable ? draftFor(item) : { decision: e ? e.decision : null, category: e ? e.issue_category : null, note: e && e.note != null ? e.note : '', evaluator: e && e.evaluator != null ? e.evaluator : '' };
     document.querySelectorAll('input[name="heDecision"]').forEach(r => { r.checked = d.decision === r.value; r.disabled = !editable; });
     const cat = el('heCategory'); cat.value = d.decision === 'INCORRECT' && d.category ? d.category : ''; cat.disabled = !editable || d.decision !== 'INCORRECT';
@@ -17328,19 +17428,19 @@ ${h.name}`, type:'requirement', detail:srcA };
     el('heNextBtn').addEventListener('click', () => move(1));
     el('heSkipBtn').addEventListener('click', () => move(1));   // Skip changes no evaluation state at all
     document.querySelectorAll('input[name="heDecision"]').forEach(r => r.addEventListener('change', async () => {
-      const item = selectedItem(); if (!item || item.kind !== 'eligible' || !view.available) return;
+      const item = selectedItem(); if (!item || item.kind !== 'eligible' || !canDecide()) return;
       const d = draftFor(item); d.decision = r.value; d.touched = true;
       if (d.decision !== 'INCORRECT') d.category = null;
       if (d.decision === 'INCORRECT' && !d.category) { setMessage('INCORRECT では issue category の選択が必要です（選択すると確定します）。'); render(); return; }
       await commit();
     }));
     el('heCategory').addEventListener('change', async e => {
-      const item = selectedItem(); if (!item || item.kind !== 'eligible' || !view.available) return;
+      const item = selectedItem(); if (!item || item.kind !== 'eligible' || !canDecide()) return;
       const d = draftFor(item); d.category = e.target.value || null; d.touched = true;
       if (d.decision === 'INCORRECT' && d.category) await commit(); else render();
     });
-    el('heNote').addEventListener('input', e => { const item = selectedItem(); if (!item || item.kind !== 'eligible') return; const d = draftFor(item); d.note = e.target.value; d.touched = true; renderApplyOnly(item); });
-    el('heEvaluator').addEventListener('input', e => { const item = selectedItem(); if (!item || item.kind !== 'eligible') return; const d = draftFor(item); d.evaluator = e.target.value; d.touched = true; renderApplyOnly(item); });
+    el('heNote').addEventListener('input', e => { const item = selectedItem(); if (!item || item.kind !== 'eligible') return; if (!canDecide()) { const cur = state.drafts.get(item.key); e.target.value = cur ? cur.note : (item.entry && item.entry.note != null ? item.entry.note : ''); return; } const d = draftFor(item); d.note = e.target.value; d.touched = true; renderApplyOnly(item); });
+    el('heEvaluator').addEventListener('input', e => { const item = selectedItem(); if (!item || item.kind !== 'eligible') return; if (!canDecide()) { const cur = state.drafts.get(item.key); e.target.value = cur ? cur.evaluator : (item.entry && item.entry.evaluator != null ? item.entry.evaluator : ''); return; } const d = draftFor(item); d.evaluator = e.target.value; d.touched = true; renderApplyOnly(item); });
     el('heApplyBtn').addEventListener('click', () => commit());
     el('heSaveBtn').addEventListener('click', () => save());
     el('heLoadBtn').addEventListener('click', () => el('heLoadInput').click());
@@ -17365,7 +17465,7 @@ ${h.name}`, type:'requirement', detail:srcA };
   }
   function renderApplyOnly(item) {
     const d = draftFor(item); const apply = el('heApplyBtn');
-    apply.disabled = !d.decision || (d.decision === 'INCORRECT' && !d.category);
+    apply.disabled = !canDecide() || !d.decision || (d.decision === 'INCORRECT' && !d.category);
   }
 
   // A read-only overlay must never break the host page (e.g. a host with only part of the DOM): if the UI cannot be wired, it stays inert.
@@ -17378,9 +17478,374 @@ ${h.name}`, type:'requirement', detail:srcA };
     view: () => ({ available: view.available, reason: view.reason, counts: view.counts && { ...view.counts },
       items: view.items.map(x => ({ key: x.key, kind: x.kind, status: x.status, reason: x.reason, pair_id: x.cmp ? x.cmp.pair_id : (x.entry ? x.entry.pair_id : null) })) }),
     sample: () => ({ ids: sample.ids.slice(), loaded: sample.loaded, resolved: sample.resolved, unresolved: sample.unresolved, valid: sample.valid, only: sample.only, message: sample.message }),
+    pilotGate: () => { const g = pilotGate(); return { applicable: g.applicable, pass: g.pass, code: g.code, rows: g.rows.map(x => ({ ...x })) }; },
     state: () => ({ dirty: state.dirty, selectedKey: state.selectedKey, filter: state.filter, message: state.message, warning: state.warning, entryCount: state.entries.size }),
     projections: () => (view.available && build ? build.comparisons.map(c => ({ aId: c.aId, bId: c.bId, eligible: c.eligible, reason: c.reason, pair_id: c.pair_id, input: { ...c.input }, projection: { ...c.projection } })) : [])
   });
+})();
+</script>
+<!-- ── Build / Runtime identity strip + read-only diagnostics export (observation only) ──
+     Shows which tool / matching logic / build / tokenizer is running and exports a read-only diagnostics JSON
+     (schema matching-runtime-diagnostics/0.1). It reads existing state only; it never changes matching input, logic,
+     result, Human Evaluation, Trace Review or any stored state, and it persists nothing (no localStorage / no artifact). -->
+<script type="application/json" id="buildIdentityJson">{"build_revision":"UNSTAMPED-SOURCE","source_commit":null,"behavior_baseline_commit":null,"dirty":null,"purpose":null,"declared_runtime_assets":{}}</script>
+<script>
+(() => {
+  'use strict';
+  const SCHEMA = 'matching-runtime-diagnostics/0.1';
+  const $id = id => document.getElementById(id);
+  const safe = (fn, fallback = null) => { try { const v = fn(); return v === undefined ? fallback : v; } catch (e) { return fallback; } };
+
+  // ---------- SHA-256 (WebCrypto when available, pure-JS fallback so the diagnostics never depend on it) ----------
+  const K = new Uint32Array([0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
+  function sha256Js(bytes) {
+    const H = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]);
+    const l = bytes.length, bitLen = l * 8, padLen = ((l + 9 + 63) & ~63);
+    const buf = new Uint8Array(padLen); buf.set(bytes); buf[l] = 0x80;
+    const dv = new DataView(buf.buffer); dv.setUint32(padLen - 8, Math.floor(bitLen / 0x100000000)); dv.setUint32(padLen - 4, bitLen >>> 0);
+    const w = new Uint32Array(64), rotr = (x, n) => (x >>> n) | (x << (32 - n));
+    for (let o = 0; o < padLen; o += 64) {
+      for (let i = 0; i < 16; i++) w[i] = dv.getUint32(o + i * 4);
+      for (let i = 16; i < 64; i++) { const s0 = rotr(w[i-15],7) ^ rotr(w[i-15],18) ^ (w[i-15] >>> 3), s1 = rotr(w[i-2],17) ^ rotr(w[i-2],19) ^ (w[i-2] >>> 10); w[i] = (w[i-16] + s0 + w[i-7] + s1) >>> 0; }
+      let [a,b,c,d,e,f,g,h] = H;
+      for (let i = 0; i < 64; i++) {
+        const S1 = rotr(e,6) ^ rotr(e,11) ^ rotr(e,25), ch = (e & f) ^ (~e & g), t1 = (h + S1 + ch + K[i] + w[i]) >>> 0;
+        const S0 = rotr(a,2) ^ rotr(a,13) ^ rotr(a,22), mj = (a & b) ^ (a & c) ^ (b & c), t2 = (S0 + mj) >>> 0;
+        h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+      }
+      H[0] = (H[0]+a)>>>0; H[1] = (H[1]+b)>>>0; H[2] = (H[2]+c)>>>0; H[3] = (H[3]+d)>>>0; H[4] = (H[4]+e)>>>0; H[5] = (H[5]+f)>>>0; H[6] = (H[6]+g)>>>0; H[7] = (H[7]+h)>>>0;
+    }
+    return Array.from(H).map(x => x.toString(16).padStart(8, '0')).join('');
+  }
+  async function sha256Bytes(bytes) {
+    try { if (crypto && crypto.subtle) { const d = await crypto.subtle.digest('SHA-256', bytes); return Array.from(new Uint8Array(d)).map(b => b.toString(16).padStart(2, '0')).join(''); } } catch (e) { /* fall through */ }
+    return sha256Js(bytes);
+  }
+  const sha256Text = s => sha256Bytes(new TextEncoder().encode(String(s)));
+
+  // ---------- build identity (stamped at build time; never computed from the running page) ----------
+  const build = safe(() => JSON.parse($id('buildIdentityJson').textContent), {}) || {};
+  const toolVersion = () => { const h = document.querySelector('body > h1'); const m = h && /V\s*([0-9][0-9A-Za-z.\-]*)/.exec(h.textContent || ''); return m ? m[1] : null; };
+  const matchingVersion = () => safe(() => matchLogic.version, null);
+  const tokDiag = () => safe(() => window.__matchingTokenizerDiagnostics.status(), null);
+  const tokVersion = () => { const s = tokDiag(); const src = s && s.scriptSrcs && s.scriptSrcs[0]; const m = src && /tiny-segmenter-([0-9][0-9.]*)\.js/.exec(src); return m ? m[1] : null; };
+  let tokFingerprint = null;
+  async function tokenizerFingerprint() {
+    if (tokFingerprint) return tokFingerprint;
+    tokFingerprint = (safe(() => typeof TinySegmenter === 'function', false)) ? await sha256Text(Function.prototype.toString.call(TinySegmenter)) : null;
+    return tokFingerprint;
+  }
+
+  // ---------- browser environment ----------
+  async function browserEnvironment() {
+    const nav = navigator, uad = nav.userAgentData || null;
+    let high = null;
+    if (uad && uad.getHighEntropyValues) high = await uad.getHighEntropyValues(['platformVersion', 'uaFullVersion', 'architecture', 'bitness', 'fullVersionList']).catch(() => null);
+    const dtf = safe(() => Intl.DateTimeFormat().resolvedOptions(), {});
+    const col = safe(() => new Intl.Collator('ja').resolvedOptions(), {});
+    return {
+      user_agent: nav.userAgent, platform: nav.platform || null, vendor: nav.vendor || null,
+      user_agent_data: uad ? { brands: uad.brands || null, mobile: uad.mobile, platform: uad.platform, high_entropy: high } : null,
+      language: nav.language || null, languages: Array.from(nav.languages || []),
+      resolved_locale: dtf.locale || null, time_zone: dtf.timeZone || null,
+      collator_ja: { locale: col.locale || null, usage: col.usage || null, sensitivity: col.sensitivity || null },
+      hardware_concurrency: nav.hardwareConcurrency || null, device_memory: nav.deviceMemory || null,
+      screen: { width: safe(() => screen.width), height: safe(() => screen.height), device_pixel_ratio: safe(() => window.devicePixelRatio) },
+      location_protocol: safe(() => location.protocol), is_secure_context: safe(() => window.isSecureContext),
+      webcrypto_subtle: safe(() => !!(crypto && crypto.subtle), false), do_not_track_matching_input: 'locale / time zone / screen are observation only and are never used by matching'
+    };
+  }
+  // fixed observation probes (never fed into matching)
+  function environmentProbes() {
+    const words = ['あ','ア','ー','a','A','Z','z','１','1','温度','圧力','確認','結果','一覧','ポンプ','ﾎﾟﾝﾌﾟ','Ｐ','P-101','p-101','10','2','II','Ⅱ'];
+    const stable = [{ k: 'b', i: 0 }, { k: 'a', i: 1 }, { k: 'b', i: 2 }, { k: 'a', i: 3 }, { k: 'a', i: 4 }, { k: 'b', i: 5 }, { k: 'a', i: 6 }, { k: 'b', i: 7 }, { k: 'a', i: 8 }, { k: 'b', i: 9 }, { k: 'a', i: 10 }, { k: 'b', i: 11 }].sort((x, y) => (x.k < y.k ? -1 : x.k > y.k ? 1 : 0)).map(x => x.i).join(',');
+    return {
+      locale_compare_ja_sorted: safe(() => words.slice().sort((a, b) => a.localeCompare(b, 'ja'))),
+      locale_compare_default_sorted: safe(() => words.slice().sort((a, b) => a.localeCompare(b))),
+      code_point_sorted: words.slice().sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+      locale_compare_pairs_ja: safe(() => [['あ', 'ア'], ['ー', 'あ'], ['a', 'A'], ['1', '１'], ['温度', '圧力'], ['確認', '結果']].map(p => [p[0], p[1], p[0].localeCompare(p[1], 'ja')])),
+      normalize_nfkc: safe(() => ['ﾎﾟﾝﾌﾟ', 'Ｐ－１０１', '㈱', '①', 'ｱｲｳ'].map(s => s.normalize('NFKC'))),
+      lower_case: safe(() => ({ lower: 'İI'.toLowerCase(), locale_lower: 'İI'.toLocaleLowerCase(), upper: 'ıi'.toUpperCase() })),
+      array_sort_stability: stable,
+      regex_unicode: safe(() => ({ han: /\p{Script=Han}/u.test('温'), kata: /\p{Script=Katakana}/u.test('ア') })),
+      math: safe(() => ({ log10: Math.log(10), exp1: Math.exp(1), pow_2_half: Math.pow(2, 0.5), sqrt2: Math.sqrt(2), atan2: Math.atan2(1, 3), cos1: Math.cos(1), ratio: (0.1 + 0.2), tofixed2: (1.005).toFixed(2), tofixed3: (2.0005).toFixed(3) }))
+    };
+  }
+
+  // ---------- persisted-state inventory (READ-ONLY observation: key names, sizes and hashes only - never the stored values) ----------
+  async function persistedStateInventory() {
+    const out = { local_storage_available: false, keys: [], in_memory: null };
+    try {
+      const n = localStorage.length; out.local_storage_available = true;
+      for (let i = 0; i < n; i++) { const k = localStorage.key(i); const v = localStorage.getItem(k) || ''; out.keys.push({ key: k, chars: v.length, sha256: await sha256Text(v) }); }
+      out.keys.sort((x, y) => bySort(x.key, y.key));
+    } catch (e) { out.error = String(e && e.name || e); }
+    // small non-sensitive booleans of the result-affecting preference are exported as readable values (not only as a hash)
+    out.result_affecting_preferences = safe(() => { const sc = window.__phase7Diagnostics.effective(); return { 'v12_1_overview_ui.applyScope': sc.persisted.applyScope, 'v12_1_overview_ui.exceptionAsReview': sc.persisted.exceptionAsReview, 'v12_1_overview_scope_state_v2.manual_decisions': sc.manualOverrideCount }; }, null);
+    out.in_memory = {
+      trace_review_entries: safe(() => Object.keys(traceReviewStore || {}).length),
+      ml_model_enabled: safe(() => !!(matchLogic.mlModel && matchLogic.mlModel.enabled)), ml_model_has_weights: safe(() => !!(matchLogic.mlModel && matchLogic.mlModel.weights)),
+      trace_tags_dirty: safe(() => !!traceTagState.dirty), trace_matrix_stale: safe(() => traceMatrixStale),
+      manual_relations_and_replacement_history: 'not readable from this module (see localStorage key sizes above)'
+    };
+    return out;
+  }
+
+  // ---------- inputs ----------
+  const fileCache = new Map();
+  async function fileIdentity(inputId) {
+    const el = $id(inputId), f = el && el.files && el.files[0];
+    if (!f) return { selected: false };
+    const key = inputId + '|' + f.name + '|' + f.size + '|' + f.lastModified;
+    if (fileCache.has(key)) return fileCache.get(key);
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const r = { selected: true, filename: f.name, byte_length: f.size, sha256: await sha256Bytes(bytes) };
+    fileCache.set(key, r); return r;
+  }
+  async function inputIdentity() {
+    const a = await fileIdentity('sysFile'), b = await fileIdentity('plmFile');
+    a.record_count = safe(() => mergedResult.sysList.length, null); b.record_count = safe(() => mergedResult.plmList.length, null);
+    return { A: a, B: b };
+  }
+
+  // ---------- canonical effective matching configuration (identity input) ----------
+  // The identity of "which matching behaviour is active" is computed from a PURE projection that contains only values able to change a matching result.
+  // Volatile / descriptive fields are excluded (timestamps such as mlModel.lastSyncAt, free-text descriptions, input-derived row counts) and keys are sorted,
+  // so the same semantics always yield the same hash regardless of time, reload or key order.
+  const VOLATILE_KEYS = new Set(['lastSyncAt', 'trainedAt', 'generatedAt', 'importedAt', 'updatedAt', 'autoReason', 'description', 'explicitTagRowsA', 'explicitTagRowsB']);
+  function canonValue(v) {
+    if (Array.isArray(v)) return v.map(canonValue);
+    if (v && typeof v === 'object') { const o = {}; Object.keys(v).sort().forEach(k => { if (!VOLATILE_KEYS.has(k)) o[k] = canonValue(v[k]); }); return o; }
+    return v;
+  }
+  const canonJson = v => JSON.stringify(canonValue(v));
+  const scopeState = () => safe(() => window.__phase7Diagnostics.effective(), null);
+  function manualOverrideSignature(sc) {
+    if (!sc || !sc.effective.applyScope) return null;      // manual scope decisions only matter while a scope is applied
+    const dec = safe(() => window.__phase7Diagnostics.state().decisions, {}) || {};
+    return Object.keys(dec).sort().map(k => k + '=' + (dec[k] && dec[k].manualScopeOverride)).join('|');
+  }
+  // Dictionary part of the matching behaviour. Source audit: applyApprovedDictionaryTags() returns before touching any row unless
+  // approvedDictionaryRuntime.active, and approvedDictionaryTermsForRow() (the only reader of the nested allowlist) is called only from there, so while the
+  // dictionary is inactive neither the Snapshot nor the allowlist can influence a result (and revision / lastErrorCode never can). While active, the matching
+  // result is a function of the Snapshot's dictionary payload (dictionary_payload_sha256; dictionary_id / dictionary_version are payload fields) and of the
+  // ordered nested allowlist; wrapper_integrity_sha256 covers snapshot_id, snapshot_version, scope and provenance as well. The session counter `revision`,
+  // `lastErrorCode` and bind time are session state, not behaviour, and are kept out (they stay visible in dictionary_session as diagnostics).
+  function dictionaryEffective() {
+    const rt = safe(() => approvedDictionaryRuntime, null);
+    if (!rt || rt.active !== true) return { active: false };
+    const b = rt.snapshotBinding || {};
+    return {
+      active: true,
+      snapshot_identity: { snapshot_id: b.snapshot_id === undefined ? null : b.snapshot_id, dictionary_payload_sha256: b.dictionary_payload_sha256 === undefined ? null : b.dictionary_payload_sha256, wrapper_integrity_sha256: b.wrapper_integrity_sha256 === undefined ? null : b.wrapper_integrity_sha256 },
+      nested_allowlist: safe(() => approvedDictNestedAllowlist.map(i => ({ origin: i.origin, field: i.field })), [])   // ORDERED: order is not proven irrelevant, so it is not sorted
+    };
+  }
+  function canonicalEffectiveConfiguration(fp) {
+    const sc = scopeState();
+    return {
+      matching_compatibility_id: matchingVersion(),
+      tokenizer: { implementation: safe(() => tokDiag().implementation, null), version: tokVersion(), function_source_sha256: fp || null },
+      matching_logic: safe(() => JSON.parse(JSON.stringify(matchLogic)), null),
+      active_key_pairs: safe(() => JSON.parse(JSON.stringify(activeKeyPairs())), null),
+      performance: safe(() => normalizePerformanceSettings(), null), tag_settings: safe(() => normalizeTagSettings(), null),
+      dictionary_effective: dictionaryEffective(),
+      effective_scope: sc ? { mode: sc.effective.scopeMode, apply_scope: sc.effective.applyScope, exception_as_review: sc.effective.exceptionAsReview, scope_signature: sc.effective.scopeSignature, manual_override_signature: manualOverrideSignature(sc) } : null
+    };
+  }
+  async function scopeIdentity() {
+    const sc = scopeState(); if (!sc) return { available: false };
+    const eff = { mode: sc.effective.scopeMode, apply_scope: sc.effective.applyScope, exception_as_review: sc.effective.exceptionAsReview, scope_signature: sc.effective.scopeSignature, manual_override_signature: manualOverrideSignature(sc) };
+    const gate = safe(() => window.__humanEvaluationDiagnostics.pilotGate(), null);
+    return { available: true,
+      persisted: { overview_apply_scope: sc.persisted.applyScope, overview_exception_as_review: sc.persisted.exceptionAsReview, manual_scope_decision_count: sc.manualOverrideCount },
+      effective: { scope_mode: eff.mode, apply_scope: eff.apply_scope, exception_as_review: eff.exception_as_review, scope_signature: eff.scope_signature, manual_override_signature: eff.manual_override_signature },
+      pilot_required_scope: sc.pilotRequiredScope, pilot_scope_locked: sc.pilotLocked, persisted_preference_applied_to_matching: !sc.pilotLocked && sc.persisted.applyScope,
+      effective_scope_identity_sha256: await sha256Text(canonJson(eff)), pilot_baseline_gate: gate };
+  }
+
+  // ---------- matching configuration (read-only copy of what is active) ----------
+  async function matchingConfiguration() {
+    const ml = safe(() => JSON.parse(JSON.stringify(matchLogic)), null);
+    const fpNow = await tokenizerFingerprint();
+    const canon = canonicalEffectiveConfiguration(fpNow);
+    return {
+      effective_matching_configuration_sha256: await sha256Text(canonJson(canon)),
+      dictionary_semantic_identity_components: canonValue(canon.dictionary_effective),
+      canonical_effective_matching_configuration: canonValue(canon),
+      identity_exclusions: Array.from(VOLATILE_KEYS).sort().concat(['generated_at (diagnostics envelope)', 'browser / OS / locale / time zone / hardware (observation only)']),
+      matching_logic_version: matchingVersion(), active_trace_profile: safe(() => matchLogic.traceProfile, null),
+      minConfidence: safe(() => matchLogic.minConfidence), minKeywordLength: safe(() => matchLogic.minKeywordLength),
+      fuzzyThreshold: safe(() => matchLogic.fuzzyThreshold), vectorThreshold: safe(() => matchLogic.vectorThreshold),
+      performance: safe(() => normalizePerformanceSettings()), tag_settings: safe(() => normalizeTagSettings()),
+      key_pairs: safe(() => matchLogic.keyPairs), candidate_generation: safe(() => matchLogic.candidateGeneration), generic_fast_load: safe(() => matchLogic.genericFastLoad),
+      dictionary_session: safe(() => ({ active: approvedDictionaryRuntime.active, revision: approvedDictionaryRuntime.revision, snapshot_loaded: !!approvedDictionaryRuntime.snapshotWrapper, note: 'DIAGNOSTIC / SESSION STATE ONLY: revision is a bind counter and is not part of any identity' })),
+      full_match_logic_sha256: ml ? await sha256Text(JSON.stringify(ml)) : null,
+      full_match_logic_sha256_status: 'LEGACY / NON-SEMANTIC: hashes the raw matchLogic including the volatile mlModel.lastSyncAt, so it changes on every run. Use effective_matching_configuration_sha256.',
+      full_match_logic: ml
+    };
+  }
+
+  // ---------- result identity + comparison projection ----------
+  const bySort = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
+  async function resultIdentity() {
+    const d = safe(() => window.__humanEvaluationDiagnostics, null);
+    if (!d || !safe(() => d.view().available, false)) return { available: false };
+    const P = d.projections();
+    const text = JSON.stringify(P.map(p => [p.pair_id, p.eligible, p.projection]).sort((x, y) => bySort(x[0], y[0])));
+    const ids = P.map(p => p.pair_id).sort(bySort);
+    const tally = f => P.filter(p => p.eligible).reduce((m, p) => { const k = f(p); m[k] = (m[k] || 0) + 1; return m; }, {});
+    const sorted = P.slice().sort((x, y) => bySort(x.pair_id, y.pair_id));
+    const pairSet = await sha256Text(ids.join('\n')), machine = await sha256Text(text), sc = scopeState();
+    const scopeMode = sc ? sc.effective.scopeMode : null, scopeSig = sc ? sc.effective.scopeSignature : null;
+    return {
+      available: true, comparisons: P.length, eligible: P.filter(p => p.eligible).length, ineligible: P.filter(p => !p.eligible).length,
+      pair_set_identity: pairSet, machine_projection_identity: machine,
+      effective_scope_mode: scopeMode, effective_scope_signature: scopeSig,
+      result_binding_sha256: await sha256Text(canonJson({ pair_set_identity: pairSet, machine_projection_identity: machine, effective_scope_mode: scopeMode, effective_scope_signature: scopeSig })),
+      method_counts: tally(p => p.projection.method), classification_counts: tally(p => p.projection.classification),
+      match_status: safe(() => mergedResult.metadata.matchStatus), match_run_seq: safe(() => matchRunSeq),
+      dataset: { a_records: safe(() => mergedResult.sysList.length), b_records: safe(() => mergedResult.plmList.length), trace_profile_id: safe(() => mergedResult.metadata.traceProfileId) },
+      comparison_projection: sorted.map(p => ({ pair_id: p.pair_id, a_id: p.input && p.input.requirement_trace_id, b_id: p.input && p.input.actual_trace_id, eligible: p.eligible, reason: p.reason || null,
+        method: p.projection && p.projection.method, confidence: p.projection && p.projection.confidence, classification: p.projection && p.projection.classification,
+        matched_a_field: p.projection && p.projection.matched_a_field, matched_b_field: p.projection && p.projection.matched_b_field,
+        dictionary_contribution: p.projection && p.projection.dictionary_contribution, evidence: p.projection && p.projection.evidence }))
+    };
+  }
+  async function sampleStatus() {
+    const d = safe(() => window.__humanEvaluationDiagnostics, null); if (!d) return null;
+    return safe(() => JSON.parse(JSON.stringify(d.sample())), null);
+  }
+  // tokenizer outputs for every distinct text value of the loaded A/B records (observation only; uses the tool's own read-only tokenizer accessor)
+  async function tokenizerOutputs() {
+    const tk = safe(() => window.__matchingTokenizerDiagnostics, null);
+    if (!tk || !tk.tokenize) return { available: false };
+    const values = new Set();
+    const rows = [].concat(safe(() => mergedResult.sysList, []) || [], safe(() => mergedResult.plmList, []) || []);
+    rows.forEach(r => Object.keys(r || {}).forEach(k => { if (k[0] === '_') return; const v = r[k]; if (typeof v === 'string' && v.length > 1 && v.length <= 600) values.add(v); }));
+    const items = [];
+    Array.from(values).sort(bySort).forEach(v => { let t; try { t = tk.tokenize(v); } catch (e) { t = 'ERROR:' + (e && e.code || e && e.message); } items.push([v, t]); });
+    return { available: true, distinct_values: items.length, outputs_sha256: await sha256Text(JSON.stringify(items)), items };
+  }
+
+  // ---------- permanent identity model: separate identities, never one merged version string ----------
+  async function identityModel(c) {
+    const runtime = canonJson({ implementation: c.ts && c.ts.implementation, version: tokVersion(), declared_asset_sha256: c.declaredTs ? c.declared[c.declaredTs] : null, function_source_sha256: c.fp || null });
+    const behaviorId = 'mb1:' + String(build.behavior_baseline_commit || 'UNSTAMPED').slice(0, 12) + ':' + String(c.config.effective_matching_configuration_sha256 || '').slice(0, 16);
+    return {
+      tool_version: toolVersion(), matching_compatibility_id: matchingVersion(), matching_behavior_id: behaviorId,
+      product_commit: build.source_commit || null, product_dirty: build.dirty === undefined ? null : build.dirty, build_revision: build.build_revision || null,
+      runtime_component_identity_sha256: await sha256Text(runtime), effective_configuration_identity_sha256: c.config.effective_matching_configuration_sha256,
+      effective_scope_identity_sha256: c.scopeId.available ? c.scopeId.effective_scope_identity_sha256 : null,
+      input_identity_sha256: await sha256Text(canonJson({ A: c.inputs.A && c.inputs.A.sha256 || null, B: c.inputs.B && c.inputs.B.sha256 || null })),
+      result_identity_sha256: c.result.available ? c.result.result_binding_sha256 : null,
+      note: 'Each element identifies a different thing. matchLogic.version is a compatibility label, not the Tool version; no element is derived from time, locale, browser or OS.'
+    };
+  }
+
+  // ---------- assemble ----------
+  async function collect() {
+    const [scopeId, browser, inputs, config, result, tokOut, fp, sample, persisted] = await Promise.all([scopeIdentity(), browserEnvironment(), inputIdentity(), matchingConfiguration(), resultIdentity(), tokenizerOutputs(), tokenizerFingerprint(), sampleStatus(), persistedStateInventory()]);
+    const ts = tokDiag();
+    const declared = build.declared_runtime_assets || {};
+    const declaredTs = Object.keys(declared).find(k => /tiny-segmenter/.test(k));
+    const comparison = result.comparison_projection; delete result.comparison_projection;
+    return {
+      schema: SCHEMA, generated_at: new Date().toISOString(), purpose: build.purpose || null,
+      build_identity: { tool_version: toolVersion(), matching_logic_version: matchingVersion(), build_revision: build.build_revision || null, source_commit: build.source_commit || null,
+        behavior_baseline_commit: build.behavior_baseline_commit || null, dirty: build.dirty === undefined ? null : build.dirty, page_title: document.title, html_file: safe(() => decodeURIComponent(location.pathname.split('/').pop())), declared_runtime_assets: declared },
+      runtime_identity: { tokenizer_implementation: ts && ts.implementation, tokenizer_version: tokVersion(), tokenizer_ready: ts && ts.ready, tokenizer_error_code: ts && ts.code, tokenizer_script_path: ts && ts.scriptSrcs && ts.scriptSrcs[0],
+        tokenizer_declared_asset_sha256: declaredTs ? declared[declaredTs] : null, tokenizer_function_source_sha256: fp, external_tokenizer_dependency: !!(ts && ts.scriptSrcs && ts.scriptSrcs.some(s => /^https?:/i.test(s))),
+        tokenizer_outputs: tokOut },
+      browser_environment: Object.assign(browser, { probes: environmentProbes() }),
+      scope_identity: scopeId,
+      pilot_execution: safe(() => { const pr = window.__pilotExecutionProfile && window.__pilotExecutionProfile(); return pr ? { pilot_id: pr.pilot_id, required_matching_scope: pr.required_matching_scope, baseline: pr.baseline, gate: window.__humanEvaluationDiagnostics.pilotGate() } : null; }, null),
+      identity_model: await identityModel({ inputs, config, result, fp, ts, declared, declaredTs, scopeId }),
+      input_identity: inputs, matching_configuration: config, persisted_state_inventory: persisted, result_identity: result,
+      human_evaluation_context: { sample: sample, evaluation_entries: safe(() => window.__humanEvaluationDiagnostics.entries().length, null), note: 'counts only; no decision content is exported' },
+      comparison_projection: comparison || []
+    };
+  }
+
+  // ---------- UI ----------
+  // A host without a full DOM (e.g. a script sandbox that only stubs part of it) must never be broken by this observation-only panel: the strip stays inert there.
+  try {
+  const css = document.createElement('style');
+  css.textContent = '#identityStrip{margin:6px 0 10px;padding:6px 10px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#334155;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,"Noto Sans Mono CJK JP",monospace}'
+    + '#identityStrip .row{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}#identityStrip b{color:#0f172a}#identityStrip .ok{color:#166534;font-weight:700}#identityStrip .bad{color:#b91c1c;font-weight:700}'
+    + '#identityStrip button{font:12px sans-serif;padding:2px 9px;border:1px solid #94a3b8;border-radius:6px;background:#fff;color:#1e293b;cursor:pointer}'
+    + '#identityStrip .diagonly{margin-top:4px;padding:3px 8px;border:2px solid #b91c1c;border-radius:6px;background:#fef2f2;color:#991b1b;font:700 13px sans-serif}'
+    + '#identityDetail{margin-top:8px;border-top:1px dashed #cbd5e1;padding-top:6px;max-height:420px;overflow:auto}#identityDetail h4{margin:8px 0 2px;font:700 12px sans-serif;color:#0f172a}'
+    + '#identityDetail table{border-collapse:collapse;width:100%}#identityDetail td{border:1px solid #e2e8f0;padding:1px 6px;vertical-align:top;word-break:break-all}#identityDetail td:first-child{white-space:nowrap;color:#475569;width:210px}';
+  document.head.appendChild(css);
+  const strip = document.createElement('div'); strip.id = 'identityStrip'; strip.setAttribute('aria-label', 'Build / Runtime identity');
+  strip.innerHTML = '<div class="row" id="identityRow"></div><div id="identityDiagOnly"></div><div class="row" id="identityResult" style="margin-top:2px;color:#475569"></div><div id="identityDetail" hidden></div>';
+  const anchor = document.querySelector('body > .card'); (anchor ? anchor.parentNode : document.body).insertBefore(strip, anchor || document.body.firstChild);
+  } catch (e) { /* identity strip unavailable in this host */ }
+  let detailOpen = false, lastResultKey = null, lastResult = null;
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const short = s => (s ? String(s).slice(0, 8) : '—');
+  function renderStrip() {
+    const ts = tokDiag(), ready = !!(ts && ts.ready);
+    const buildLabel = (build.build_revision || 'UNSTAMPED') + (build.dirty === true ? ' (dirty)' : build.dirty === false ? '' : '');
+    $id('identityRow').innerHTML = '<span id="identityMain" style="display:contents"></span>'
+      + '<button type="button" id="identityToggle">' + (detailOpen ? '▲ 詳細を閉じる' : '▼ 詳細') + '</button><button type="button" id="identitySave">診断JSONを保存</button>';
+    $id('identityDiagOnly').innerHTML = build.purpose ? '<div class="diagonly">' + esc(build.purpose) + '</div>' : '';
+    $id('identityToggle').onclick = () => { detailOpen = !detailOpen; $id('identityDetail').hidden = !detailOpen; renderStrip(); if (detailOpen) refreshDetail(); };
+    $id('identitySave').onclick = saveDiagnostics;
+    updateMain();
+    renderResultLine();
+  }
+  // Tool | Matching | Build | Runtime | Scope | Pilot baseline - refreshed live (scope and gate can change without a new matching run)
+  let lastMain = '';
+  function updateMain() {
+    const ts = tokDiag(), ready = !!(ts && ts.ready);
+    const buildLabel = (build.build_revision || 'UNSTAMPED') + (build.dirty === true ? ' (dirty)' : '');
+    const sc = scopeState(), gate = safe(() => window.__humanEvaluationDiagnostics.pilotGate(), null);
+    const html = '<span>Tool <b>' + esc(toolVersion() || '?') + '</b></span><span>Matching <b>' + esc(matchingVersion() || '?') + '</b></span><span>Build <b>' + esc(buildLabel) + '</b></span>'
+      + '<span>TinySegmenter <b>' + esc(tokVersion() || '?') + '</b> <span class="' + (ready ? 'ok' : 'bad') + '">' + (ready ? 'READY' : 'NOT READY') + '</span></span>'
+      + '<span>Scope <b>' + esc(sc ? sc.effective.scopeMode : '?') + '</b>' + (sc && sc.pilotLocked ? ' (Pilot固定' + (sc.persisted.applyScope ? '・保存設定ONは未適用' : '') + ')' : '') + '</span>'
+      + (gate && gate.applicable ? '<span>Pilot baseline <span class="' + (gate.pass ? 'ok' : 'bad') + '">' + (gate.pass ? 'PASS' : 'PILOT_BASELINE_MISMATCH') + '</span></span>' : '');
+    if (html !== lastMain) { lastMain = html; const m = $id('identityMain'); if (m) m.innerHTML = html; if (detailOpen) refreshDetail(); }
+  }
+  function renderResultLine() {
+    const r = lastResult, el = $id('identityResult');
+    el.innerHTML = r && r.available ? '<span>Result <b>' + r.comparisons + '</b> comparisons (eligible ' + r.eligible + ' / ineligible ' + r.ineligible + ')</span><span>pair-set <b>' + short(r.pair_set_identity) + '</b></span><span>machine <b>' + short(r.machine_projection_identity) + '</b></span>'
+      : '<span>Result: 照合の完了後に表示されます</span>';
+  }
+  async function pollResult() {
+    try {
+      updateMain();
+      const d = window.__humanEvaluationDiagnostics;
+      const key = safe(() => String(matchRunSeq) + '|' + (mergedResult && mergedResult.metadata && mergedResult.metadata.matchStatus) + '|' + (d && d.view().available), null);
+      if (key !== lastResultKey) { lastResultKey = key; const r = await resultIdentity(); delete r.comparison_projection; lastResult = r; renderResultLine(); if (detailOpen) refreshDetail(); }
+    } catch (e) { /* observation only */ }
+  }
+  const row = (k, v) => '<tr><td>' + esc(k) + '</td><td>' + esc(typeof v === 'object' && v !== null ? JSON.stringify(v) : v) + '</td></tr>';
+  const section = (title, rows) => '<h4>' + esc(title) + '</h4><table>' + rows.map(r => row(r[0], r[1])).join('') + '</table>';
+  async function refreshDetail() {
+    const dg = await collect(); const b = dg.build_identity, rt = dg.runtime_identity, br = dg.browser_environment, inp = dg.input_identity, cf = dg.matching_configuration, rs = dg.result_identity;
+    const f = x => (x && x.selected) ? (x.filename + ' / ' + x.byte_length + ' bytes / ' + x.record_count + ' records / sha256 ' + x.sha256) : '未選択';
+    $id('identityDetail').innerHTML =
+      section('Product', [['Tool version', b.tool_version], ['Matching logic version', b.matching_logic_version], ['Product behavior baseline commit', b.behavior_baseline_commit], ['Build source commit', b.source_commit], ['Build / package revision', b.build_revision], ['Dirty / clean build', b.dirty === true ? 'DIRTY' : b.dirty === false ? 'clean' : '未記録'], ['HTML file', b.html_file]])
+      + section('Runtime', [['Tokenizer', rt.tokenizer_implementation + ' ' + (rt.tokenizer_version || '?')], ['Tokenizer ready', rt.tokenizer_ready], ['Tokenizer script path', rt.tokenizer_script_path], ['Tokenizer asset SHA-256 (declared at build)', rt.tokenizer_declared_asset_sha256], ['Tokenizer function SHA-256 (observed)', rt.tokenizer_function_source_sha256], ['External tokenizer dependency', rt.external_tokenizer_dependency ? 'YES' : 'NO']])
+      + section('Browser', [['User agent', br.user_agent], ['Platform', br.platform], ['Language', br.language], ['Languages', br.languages], ['Resolved locale', br.resolved_locale], ['Time zone (observation only)', br.time_zone]])
+      + section('Scope', dg.scope_identity && dg.scope_identity.available ? [['Persisted overview scope (browser setting)', dg.scope_identity.persisted.overview_apply_scope ? 'ON' : 'OFF'], ['Persisted exceptionAsReview', dg.scope_identity.persisted.overview_exception_as_review], ['Effective scope', dg.scope_identity.effective.scope_mode], ['Effective applyScope / exceptionAsReview', dg.scope_identity.effective.apply_scope + ' / ' + dg.scope_identity.effective.exception_as_review], ['Scope / grouping signature', dg.scope_identity.effective.scope_signature], ['Pilot required scope', dg.scope_identity.pilot_required_scope || '（Pilot実行ではない）'], ['Persisted preference applied to matching', dg.scope_identity.persisted_preference_applied_to_matching ? 'YES' : 'NO'], ['Effective scope identity', dg.scope_identity.effective_scope_identity_sha256]] : [['状態', '取得できません']])
+      + section('Inputs', [['A', f(inp.A)], ['B', f(inp.B)]])
+      + section('Matching Configuration', [['Trace profile', cf.active_trace_profile], ['minConfidence / minKeywordLength', cf.minConfidence + ' / ' + cf.minKeywordLength], ['fuzzyThreshold / vectorThreshold', cf.fuzzyThreshold + ' / ' + cf.vectorThreshold], ['Performance caps', cf.performance], ['Tag matching', cf.tag_settings && (cf.tag_settings.matchingMode + ' (use for matching: ' + cf.tag_settings.useForMatching + ')')], ['Dictionary semantic identity', cf.dictionary_semantic_identity_components], ['Dictionary session (diagnostic only)', cf.dictionary_session], ['Effective configuration identity', cf.effective_matching_configuration_sha256], ['Full logic SHA-256 (legacy, volatile)', cf.full_match_logic_sha256]])
+      + section('Result Identity', rs.available ? [['Comparisons / eligible / ineligible', rs.comparisons + ' / ' + rs.eligible + ' / ' + rs.ineligible], ['Pair-set identity', rs.pair_set_identity], ['Machine projection identity', rs.machine_projection_identity], ['Methods', rs.method_counts], ['Classifications', rs.classification_counts], ['Effective scope (result)', rs.effective_scope_mode + ' / ' + rs.effective_scope_signature], ['Result binding identity', rs.result_binding_sha256], ['Pilot baseline', dg.pilot_execution ? (dg.pilot_execution.gate.pass ? 'PASS' : 'PILOT_BASELINE_MISMATCH') : '（Pilot実行ではない）']] : [['状態', '照合の完了後に表示されます']])
+      + section('Identity model', Object.entries(dg.identity_model));
+  }
+  async function saveDiagnostics() {
+    const btn = $id('identitySave'); const old = btn.textContent; btn.disabled = true; btn.textContent = '作成中…';
+    try {
+      const dg = await collect();
+      const blob = new Blob([JSON.stringify(dg, null, 1)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = 'matching_runtime_diagnostics.json'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } finally { btn.disabled = false; btn.textContent = old; }
+  }
+  window.__runtimeDiagnostics = Object.freeze({ schema: SCHEMA, collect, status: () => ({ tool: toolVersion(), matching: matchingVersion(), build: build.build_revision || null, tokenizer_ready: !!(tokDiag() && tokDiag().ready) }) });
+  try { if ($id('identityRow')) { renderStrip(); pollResult(); setInterval(pollResult, 1500); } } catch (e) { /* inert without the strip */ }
 })();
 </script>
 </body>
