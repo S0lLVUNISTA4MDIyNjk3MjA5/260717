@@ -113,7 +113,7 @@ function rc2Record(comparisonId, satisfied, state, suffix) {
 
 function makeRecordSet() {
   return deepFreeze({
-    schema_version: 'trace-comparison/1.0-rc2',
+    schema_version: 'trace-comparison/1.0-rc3',
     generated_at: '2026-07-28T00:00:00.000Z',
     generator: { tool: 'json_ab_trace_matching_tool_v12.1.15.html', version: '12.1.15' },
     source: { requirement_trace_file: 'requirement.json', actual_trace_file: 'actual.json' },
@@ -512,7 +512,7 @@ async function run() {
       ...session,
       snapshot_identity: {
         value: `b4-snapshot-v1:${'1'.repeat(64)}`,
-        schema_version: 'trace-comparison/1.0-rc2',
+        schema_version: 'trace-comparison/1.0-rc3',
         record_set_digest: `SHA-256:${'2'.repeat(64)}`
       }
     });

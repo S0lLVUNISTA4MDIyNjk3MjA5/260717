@@ -82,7 +82,7 @@ async function main() {
   assert(['trace_title', 'trace_text', 'trace_content'].every(f => first.ra.some(r => r.field === f && r.val.length > 0)) && ['trace_title', 'trace_text', 'trace_content'].every(f => first.rb.some(r => r.field === f && r.val.length > 0)), 'medium body fields (trace_title / trace_text / trace_content) are displayed on both sides');
   assert(!first.ra.some(r => r.field.startsWith('_')) && !first.rb.some(r => r.field.startsWith('_')), 'internal "_" fields are not displayed');
   const mp = await T(page, '#heMrMethod'), maf = await T(page, '#heMrAField'), mbf = await T(page, '#heMrBField');
-  assert(mp === 'exact' && maf === 'trace_title' && mbf === 'trace_title' && first.ra.filter(r => r.matched).map(r => r.field).join() === 'trace_title' && first.rb.filter(r => r.matched).map(r => r.field).join() === 'trace_title', 'matched A / B field (trace_title) is visually identified in the original records');
+  assert(mp === 'title_candidate' && maf === 'trace_title' && mbf === 'trace_title' && first.ra.filter(r => r.matched).map(r => r.field).join() === 'trace_title' && first.rb.filter(r => r.matched).map(r => r.field).join() === 'trace_title', 'matched A / B field (trace_title) is visually identified in the original records');
   // a tag-matched comparison has no matched field -> nothing highlighted
   const tagPair = await page.evaluate(() => window.__humanEvaluationDiagnostics.projections().find(p => p.eligible && p.projection.method === 'tag').pair_id);
   await page.locator(`#heList .he-item[data-key="${tagPair}"]`).click();

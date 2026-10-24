@@ -59,7 +59,7 @@ async function waitForMatchingIdle(page) {
     mini:typeof globalThis.JsonSchemaMinivalidator?.validate === 'function',
     validator:typeof globalThis.TraceComparisonRecordSetValidator?.validateTraceComparisonRecordSet === 'function',
   }));
-  check('必要なbrowser globalが実HTMLで存在する', globals.core && globals.schema === 'trace-comparison/1.0-rc2' && globals.mini && globals.validator, globals);
+  check('必要なbrowser globalが実HTMLで存在する', globals.core && globals.schema === 'trace-comparison/1.0-rc3' && globals.mini && globals.validator, globals);
   check('ページ読込だけでは生成・ダウンロードされない', downloads.length === 0, downloads.length);
 
   await page.setInputFiles('#sysFile', files.requirementTrace);
@@ -140,7 +140,7 @@ async function waitForMatchingIdle(page) {
   const artifactComparisons = Array.isArray(artifact.comparisons) ? artifact.comparisons : [];
   check('valid入力の1クリックでダウンロードが1件だけ発生する', downloads.length === 1, downloads.length);
   check('保存JSONはruntime envelopeではなくrecord_set単体',
-    artifact.schema_version === 'trace-comparison/1.0-rc2' && Array.isArray(artifact.comparisons)
+    artifact.schema_version === 'trace-comparison/1.0-rc3' && Array.isArray(artifact.comparisons)
       && !Object.hasOwn(artifact, 'ready') && !Object.hasOwn(artifact, 'result_complete') && !Object.hasOwn(artifact, 'record_set'),
     Object.keys(artifact));
   check('正常artifactのcomparisonsは空でない', artifactComparisons.length > 0, {
@@ -166,9 +166,9 @@ async function waitForMatchingIdle(page) {
     keys:Object.keys(value), schemaVersion:value?.schema_version,
     hasEnvelopeKeys:Object.hasOwn(value || {}, 'ready') || Object.hasOwn(value || {}, 'result_complete') || Object.hasOwn(value || {}, 'record_set'),
   })));
-  check('browser validatorへ渡した値はrecord_set単体', validatorInputs.length === 1 && validatorInputs[0].schemaVersion === 'trace-comparison/1.0-rc2' && !validatorInputs[0].hasEnvelopeKeys, validatorInputs);
+  check('browser validatorへ渡した値はrecord_set単体', validatorInputs.length === 1 && validatorInputs[0].schemaVersion === 'trace-comparison/1.0-rc3' && !validatorInputs[0].hasEnvelopeKeys, validatorInputs);
   check('generated_atはcanonical UTC timestamp', /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(artifact.generated_at), artifact.generated_at);
-  check('schema_versionはtrace-comparison/1.0-rc2', artifact.schema_version === 'trace-comparison/1.0-rc2', artifact.schema_version);
+  check('schema_versionはtrace-comparison/1.0-rc3', artifact.schema_version === 'trace-comparison/1.0-rc3', artifact.schema_version);
 
   await page.evaluate(() => {
     globalThis.__traceComparisonOriginalPipeline = runAsyncMatchPipeline;

@@ -181,8 +181,9 @@ async function main() {
     const pump = await rowBCountAndExpand(page, 0); // 冷却水ポンプ - present-but-unused demo
     assert(pump.bCount === '1', `Present-but-unused demo: 冷却水ポンプ row has exactly ONE matched edge (bCount=${pump.bCount})`);
     const pumpText = (pump.expand[0] || '');
-    // Checkpoint 2-G: same label-text update as above (照合方法 (method): 完全一致 (exact)).
-    assert(pumpText.includes('照合方法 (method): 完全一致 (exact)'), 'Present-but-unused demo: edge method is exact (title match), NOT tag', pumpText);
+    // Priority 1 / Option C v1 (explicit test migration, INV-28): a unique-on-both-sides trace_title equality is a title CANDIDATE (UNCONFIRMED,
+    // uniqueness != semantic confirmation), no longer 'exact' (was: 照合方法 (method): 完全一致 (exact)). Still NOT tag.
+    assert(pumpText.includes('照合方法 (method): タイトル一致候補 (title_candidate)') && !pumpText.includes('タグ一致'), 'Present-but-unused demo: edge method is title_candidate (title match, unconfirmed), NOT tag', pumpText);
     assert(pumpText.includes('辞書解決あり・この照合には未使用'), 'Present-but-unused demo: dictionary line correctly shows 辞書解決あり・この照合には未使用 (present but unused), never 辞書寄与あり', pumpText);
 
     // Detail/Graph/Excel consistency (task requirement §9/§19-22): the SAME accepted-edge count

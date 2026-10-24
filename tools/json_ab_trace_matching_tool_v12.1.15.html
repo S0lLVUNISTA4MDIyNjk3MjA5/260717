@@ -3466,6 +3466,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     'vector':       'ベクトル類似 (vector)',
     'tag':          'タグ一致 (tag)',
     'hier':         '階層判定 (hier)',
+    'title_candidate': 'タイトル一致候補 (title_candidate)',
     'none':         '一致なし (none)',
   });
   function matchingMethodDisplayLabel(method) {
@@ -7651,6 +7652,53 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   }
 
   // ── 1キーワード × 1JSON B項目 × 1キー指定ペアの照合 ──
+  // ===== Priority 1 / Option C v1 (trace_title exact redesign; contract v0.3, Human-approved) =====
+  // `trace_title` whole-field equality is CANDIDATE DISCOVERY evidence, never semantic confirmation (INV-01/21/33): it is
+  // labelled method='title_candidate' (classification 要確認, public confidence null, UNCONFIRMED) on every path. The
+  // disposition (AMBIGUOUS/UNIQUE/UNKNOWN + A/B record counts) is computed HERE ONLY (INV-22). Missing metadata is UNKNOWN,
+  // never "unique" and never `exact` (INV-19, fail-closed). Scope is `trace_title` on both sides only (INV-34).
+  const TITLE_CANDIDATE_METHOD = 'title_candidate';
+  // R2 (MAJOR-01): when the run-scoped ambiguity metadata is unavailable the title candidate universe CANNOT be reconstructed (497 emitted /
+  // 108 absent / 7 existing non-exact edges). Emitting every title-equal pair would build an alternate universe, so the comparison result is NOT
+  // constructed at all: matchPlmParts() refuses (RUN_CONTEXT_REQUIRED) and a fresh canonical matching run is required. Cached results of the
+  // displayed run are untouched. Score-only callers (ML pair listing, diagnostics) are not comparison constructors and simply see no title score.
+  const TRACE_TITLE_RUN_CONTEXT_REQUIRED = 'TRACE_TITLE_RUN_CONTEXT_REQUIRED';
+  let titleContextMisses = 0;
+  function runContextRequiredError() {
+    const e = new Error('タイトル照合の実行コンテキストがありません。新しい照合実行（再照合）が必要です。');
+    e.code = TRACE_TITLE_RUN_CONTEXT_REQUIRED;
+    return e;
+  }
+  function isRunContextRequiredError(e) { return !!e && e.code === TRACE_TITLE_RUN_CONTEXT_REQUIRED; }
+  // A refused recomputation (export / view built after the match cache was invalidated) is reported once, never swallowed into a partial result.
+  function reportRunContextRequired(e) { try { console.warn('[title_candidate] ' + e.message); alert(e.message); } catch (_e) { /* no UI */ } }
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('error', ev => { if (isRunContextRequiredError(ev.error)) { ev.preventDefault(); reportRunContextRequired(ev.error); } });
+    window.addEventListener('unhandledrejection', ev => { if (isRunContextRequiredError(ev.reason)) { ev.preventDefault(); reportRunContextRequired(ev.reason); } });
+  }
+  function isTraceTitlePair(pair) {
+    return !!pair && pair.sysField === 'trace_title' && pair.plmField === 'trace_title';
+  }
+  function traceTitleEqualityDisposition(normalizedValue, pair) {
+    if (!normalizedValue || !isTraceTitlePair(pair)) return null;
+    const unknown = () => { titleContextMisses++; return { ambiguity:'UNKNOWN', aRecords:null, bRecords:null }; };
+    const ctx = activeBoilerplateContext;
+    if (!ctx) return unknown();
+    const sysIdx = valueUniquenessIndexForField(ctx.sysList, pair.sysField);
+    const plmIdx = valueUniquenessIndexForField(ctx.plmList, pair.plmField);
+    if (!sysIdx || !plmIdx || !sysIdx.detail || !plmIdx.detail) return unknown();
+    const aD = sysIdx.detail.get(normalizedValue), bD = plmIdx.detail.get(normalizedValue);
+    const aN = aD ? aD.occurrenceRowCount : 0, bN = bD ? bD.occurrenceRowCount : 0;
+    if (!(aN >= 1) || !(bN >= 1)) return unknown();
+    return { ambiguity: (aN > 1 || bN > 1) ? 'AMBIGUOUS' : 'UNIQUE', aRecords:aN, bRecords:bN };
+  }
+  // Deterministic candidate preference. Numerically greater wins as before; a title_candidate additionally wins an equal-score tie
+  // (SRC-PREC-1: a compatibility precedence, NOT a statement of semantic strength).
+  function outranksCandidate(r, best) {
+    return r.score > best.score
+      || (r.method === TITLE_CANDIDATE_METHOD && best.method !== TITLE_CANDIDATE_METHOD && r.score > 0 && r.score >= best.score);
+  }
+
   function calcPairMatch(keyword, plm, pair, keywordMeta = null) {
     const kw = normalizeForMatch(keyword);
     const targetRaw = plm?.[pair.plmField];
@@ -7665,7 +7713,12 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     // either side (see exactValueIsAmbiguousOnEitherSide() and the Checkpoint 2-D design note).
     // Computed unconditionally (cheap - index is built once per run and cached) so every method
     // branch below gets the SAME answer without recomputing it per branch.
-    const exactAmbiguous = exactHit && exactValueIsAmbiguousOnEitherSide(kw, pair);
+    // Option C v1: trace_title equality is routed through traceTitleEqualityDisposition() (one decision point). AMBIGUOUS equality stays
+    // un-emitted on this RC3 path (scope control, INV-10); UNIQUE equality is emitted as title_candidate, never as exact. UNKNOWN (metadata
+    // unavailable) is NEVER emitted here and is counted so that matchPlmParts() refuses to build a comparison result (R2, MAJOR-01).
+    const titleDisposition = exactHit ? traceTitleEqualityDisposition(kw, pair) : null;
+    const exactAmbiguous = titleDisposition ? titleDisposition.ambiguity !== 'UNIQUE' : (exactHit && exactValueIsAmbiguousOnEitherSide(kw, pair));
+    const exactMethod = titleDisposition ? TITLE_CANDIDATE_METHOD : 'exact';
     const targetHasKw = kw.length >= minLen && target.includes(kw);
     const kwHasTarget = target.length >= minLen && kw.includes(target);
     const containsHit = exactHit || targetHasKw || kwHasTarget;
@@ -7688,18 +7741,19 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     const mode = pair.method || 'auto';
     // source:"full" はexactと明示的なcodeペアだけに使い、長文全文のfuzzy/vector/partial計算を避ける。
     if (keywordMeta?.source === 'full') {
-      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);
+      if (exactHit && !exactAmbiguous) cand.push([exactMethod, 1.0]);
       if (mode === 'code' && (containsHit || codeHit) && isStructuredCodeEvidence(keyword, keywordMeta)) cand.push(['code', getScore('code')]);
       for (const [m, s] of cand) {
         if (s > best.score) { best.score = s; best.method = m; }
       }
+      if (cand.some(([m]) => m === TITLE_CANDIDATE_METHOD)) { best.score = 1.0; best.method = TITLE_CANDIDATE_METHOD; best.titleDisposition = titleDisposition; }
       best.features = f;
       return best;
     }
     if (mode === 'exact') {
-      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);
+      if (exactHit && !exactAmbiguous) cand.push([exactMethod, 1.0]);
     } else if (mode === 'contains') {
-      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);
+      if (exactHit && !exactAmbiguous) cand.push([exactMethod, 1.0]);
       // HE-1 Remediation Checkpoint 2-D (RC3): an exactHit that IS ambiguous must not fall through
       // to a 'partial' consolation credit either - that would just re-admit the same non-unique
       // full-value evidence under a different method label. containsHit is guaranteed true here
@@ -7707,15 +7761,15 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       // containment, OR for the (exactHit && exactAmbiguous) case which must stay unaccepted.
       else if (containsHit && !exactHit && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !keywordOnlyInSharedHeading(keywordMeta, kw, target, targetRaw)) cand.push(['partial', getScore('partial')]);
     } else if (mode === 'code') {
-      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);
+      if (exactHit && !exactAmbiguous) cand.push([exactMethod, 1.0]);
       if ((containsHit || codeHit) && isStructuredCodeEvidence(keyword, keywordMeta)) cand.push(['code', getScore('code')]);
     } else if (mode === 'model') {
-      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);
+      if (exactHit && !exactAmbiguous) cand.push([exactMethod, 1.0]);
       if (containsHit) cand.push(['model', getScore('model')]);
     } else if (mode === 'synonym') {
       if (f.synonym) cand.push([f.autoSynonym ? 'auto-synonym' : 'synonym', getScore(f.autoSynonym ? 'auto-synonym' : 'synonym')]);
     } else if (mode === 'fuzzy') {
-      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);
+      if (exactHit && !exactAmbiguous) cand.push([exactMethod, 1.0]);
       // RISK-FUZZY-01 remediation (Checkpoint 2-C): 'fuzzy'/'vector' previously had NO
       // boilerplate-segment guard at all, unlike 'partial'/'code' (Checkpoint 2-A/2-A.1) - a
       // near-constant heading shared across most/all rows on either side could single-handedly
@@ -7731,7 +7785,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       const vs = vectorConfidenceFromFeatures(f);
       if (vs > 0 && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !sharedPrefixDominatesSimilarity(kw, target) && !boilerplateContentDominatesSimilarity(keyword, targetRaw, pair) && !similarityIsAmbiguousAcrossCandidates(keyword, pair, f.bigramSim)) cand.push(['vector', vs]);
     } else { // auto
-      if (exactHit && !exactAmbiguous) cand.push(['exact', 1.0]);
+      if (exactHit && !exactAmbiguous) cand.push([exactMethod, 1.0]);
       if ((containsHit || codeHit) && fieldLooksLike(pair.plmField, 'code') && isStructuredCodeEvidence(keyword, keywordMeta)) cand.push(['code', getScore('code')]);
       if (containsHit && fieldLooksLike(pair.plmField, 'model')) cand.push(['model', getScore('model')]);
       if (codeHit && !fieldLooksLike(pair.plmField, 'code') && !segmentIsBoilerplateForPair(keyword, pair, keywordMeta) && !codeHitIsBoilerplateForPair(keyword, plm, pair)) cand.push(['partial', getScore('partial')]);
@@ -7750,6 +7804,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     for (const [m, s] of cand) {
       if (s > best.score) { best.score = s; best.method = m; }
     }
+    if (cand.some(([m]) => m === TITLE_CANDIDATE_METHOD)) { best.score = 1.0; best.method = TITLE_CANDIDATE_METHOD; best.titleDisposition = titleDisposition; }
     best.features = f;
     return best;
   }
@@ -8053,7 +8108,8 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         const kw = normalizeForMatch(m.matchedKeyword);
         const val = normalizeForMatch(m?.[m._matchedPlmField]);
         const bKey = normalizeForMatch(matchStableBKey(m));
-        const partialEvidence = !(m.matchMethod === 'exact' || m.matchMethod === 'code') || (!!kw && !!val && val !== kw && val.includes(kw));
+        // INV-29: keyed on the whole-field-equality PROPERTY (provenance flag), not on a method label.
+        const partialEvidence = !(m.matchMethod === 'exact' || m.matchMethod === 'code' || m._wholeFieldEquality === true) || (!!kw && !!val && val !== kw && val.includes(kw));
         if (!partialEvidence) continue;
         for (const rk of related) {
           const kws = aIndex.keywordsByRow.get(rk);
@@ -8188,18 +8244,18 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
           for (const entry of entries) {
             const r = calcPairMatch(entry.text, plm, pair, entry);
             noteStructured(entry, r);
-            if (r.score > chunkBest.score) chunkBest = { ...r, keyword: entry.text };
+            if (outranksCandidate(r, chunkBest)) chunkBest = { ...r, keyword: entry.text };
             if (perf.earlyExitOnExact && chunkBest.score >= maxScore) break;
           }
           if (chunkBest.score > 0) chunkDetails.push({ index:ch.index, text:ch.text, conf:chunkBest.score, method:chunkBest.method, keyword:chunkBest.keyword, field:pair.sysField });
-          if (chunkBest.score > best.score) best = { ...chunkBest, keyword:chunkBest.keyword, pair, chunk:ch, chunkMatches:[] };
+          if (outranksCandidate(chunkBest, best)) best = { ...chunkBest, keyword:chunkBest.keyword, pair, chunk:ch, chunkMatches:[] };
         }
       } else {
         const entries = keywordEntriesForSysField(sysItem, pair.sysField);
         for (const entry of entries) {
           const r = calcPairMatch(entry.text, plm, pair, entry);
           noteStructured(entry, r);
-          if (r.score > best.score) best = { ...r, keyword: entry.text, pair, chunk:null, chunkMatches:[] };
+          if (outranksCandidate(r, best)) best = { ...r, keyword: entry.text, pair, chunk:null, chunkMatches:[] };
           if (perf.earlyExitOnExact && best.score >= maxScore) {
             if (!hasAnyChunkPath) break outerPairs;
             break;
@@ -8228,7 +8284,14 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       for (const entry of entries) {
         const kw = normalizeForMatch(entry.text);
         if (!kw) continue;
-        if (kw === target && 1 > best.score) best = { score:1, method:'exact', keyword:entry.text, features:null, pair, chunk:null, chunkMatches:[] };
+        if (kw === target && 1 > best.score) {
+          // Option C v1: the tag-sharing deterministic path no longer bypasses title ambiguity semantics (root cause of the 497 exact pairs).
+          const td = traceTitleEqualityDisposition(kw, pair);
+          if (!td || td.ambiguity !== 'UNKNOWN') { // UNKNOWN: counted, never emitted (matchPlmParts refuses; R2 MAJOR-01)
+            best = { score:1, method: td ? TITLE_CANDIDATE_METHOD : 'exact', keyword:entry.text, features:null, pair, chunk:null, chunkMatches:[] };
+            if (td) best.titleDisposition = td;
+          }
+        }
         if (codePair) {
           const r = calcPairMatch(entry.text, plm, { ...pair, method:'code' }, entry);
           if (r.score > best.score) best = { ...r, keyword:entry.text, pair, chunk:null, chunkMatches:[] };
@@ -8629,6 +8692,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     const pairsKey = activeKeyPairsKey();
     if (cached && cached.plmList === plmList && cached.pairsKey === pairsKey) return cached.result;
 
+    const titleMissesBefore = titleContextMisses;
     const useML = mlEnabled();
     const tagSettings = normalizeTagSettings();
     const tagIndex = tagSettings.enabled && tagSettings.useForMatching && !traceTagState.dirty ? buildTagIndex(plmList) : null;
@@ -8651,9 +8715,12 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         conventionalBest = bestMatchForPlm(sysItem, plm);
       }
       // 同点時は従来方式を優先し、方式・matchedKeywordの回帰を抑える。
-      const best = tagBest.score > conventionalBest.score
+      // Option C v1 (SRC-PREC-1, INV-08): for the same pair a title_candidate stays primary over tag by an explicit categorical precedence,
+      // NOT by a numeric comparison; tag sharing is recorded as co-evidence and never confirms (INV-05).
+      const best = (conventionalBest.method !== TITLE_CANDIDATE_METHOD && tagBest.score > conventionalBest.score)
         ? { ...tagBest, chunk:null, chunkMatches:[] }
         : conventionalBest;
+      if (best.method === TITLE_CANDIDATE_METHOD) best.coEvidence = tagBest.skipFuzzy ? 'tag' : 'none';
 
       let conf = best.score;
       // タグ自体はML特徴量へ追加しない。従来特徴量を持つ場合だけML確率へ置換する。
@@ -8665,10 +8732,15 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         const fg = applyFieldGates(sysItem, plm, conf);
         conf = fg.conf;
         const nk = normalizeForMatch(best.keyword);
-        if (nk && (best.method === 'exact' || best.method === 'code')) exactKeywords.add(nk);
+        // TR-1 (pair-set compatibility ONLY, INV-13/32): a title_candidate anchors the same weak-candidate suppression `exact` did. No ranking implied.
+        if (nk && (best.method === 'exact' || best.method === 'code' || best.method === TITLE_CANDIDATE_METHOD)) exactKeywords.add(nk);
         candidates.push({ plm, best, conf, gates:fg.gates, idx:sourceIndex.get(plm) ?? candidate.rowIndex ?? 0, candidateSources:candidate.sources || {} });
       }
     }
+
+    // R2 (MAJOR-01): a title-equal pair was seen while the run-scoped ambiguity metadata was unavailable -> the 497/108/7 boundary cannot be
+    // reconstructed for this row. No comparison result is built (nothing is cached or emitted); a fresh canonical run is required.
+    if (titleContextMisses !== titleMissesBefore) throw runContextRequiredError();
 
     // HE-1 Remediation Checkpoint 2-D (RC1, per-row structured-identity dominance): once THIS sys
     // row's true identity is already confirmed by structured evidence (an exact/code match, or any
@@ -8692,12 +8764,15 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
       (c.best.structuredScore || 0) >= matchLogic.minConfidence;
     const rowHasStructuredIdentityMatch = candidates.some(c =>
       c.conf >= matchLogic.minConfidence && c.best.score > 0 && candidateIsStructured(c));
+    // TR-1 anchor (dedicated predicate): title_candidate is NOT structured identity evidence (it is unconfirmed), it only preserves the pair set.
+    const isTitleAnchor = c => c.best.method === TITLE_CANDIDATE_METHOD;
+    const rowHasTitleAnchor = candidates.some(c => c.conf >= matchLogic.minConfidence && c.best.score > 0 && isTitleAnchor(c));
 
     const matches = [];
     for (const c of candidates) {
       const nk = normalizeForMatch(c.best.keyword);
-      if (nk && exactKeywords.has(nk) && !(c.best.method === 'exact' || c.best.method === 'code')) continue;
-      if (rowHasStructuredIdentityMatch && !(c.best.method === 'exact' || c.best.method === 'code' || c.best.method === 'tag') && !candidateIsStructured(c)) continue;
+      if (nk && exactKeywords.has(nk) && !(c.best.method === 'exact' || c.best.method === 'code' || isTitleAnchor(c))) continue;
+      if ((rowHasStructuredIdentityMatch || rowHasTitleAnchor) && !(c.best.method === 'exact' || c.best.method === 'code' || c.best.method === 'tag' || isTitleAnchor(c)) && !candidateIsStructured(c)) continue;
       if (c.conf >= matchLogic.minConfidence && c.best.score > 0) {
         const m = { ...c.plm, matchedKeyword:c.best.keyword, confidence:c.conf,
           matchMethod:c.best.method, _features:c.best.features,
@@ -8707,6 +8782,11 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         if (Array.isArray(c.best.chunkMatches) && c.best.chunkMatches.length) setHiddenRowProp(m, '_chunkMatches', c.best.chunkMatches);
         if (c.best.evidence) setHiddenRowProp(m, '_tagEvidence', c.best.evidence);
         setHiddenRowProp(m, '_candidateSources', { ...(c.candidateSources || {}) });
+        if (c.best.method === TITLE_CANDIDATE_METHOD) {
+          // provenance flags: whole-field equality (G2 predicate, INV-29) + the ambiguity facts for the canonical evidence block.
+          setHiddenRowProp(m, '_wholeFieldEquality', true);
+          setHiddenRowProp(m, '_titleDisposition', { ...(c.best.titleDisposition || { ambiguity:'UNKNOWN', aRecords:null, bRecords:null }), coEvidence: c.best.coEvidence === 'tag' ? 'tag' : 'none' });
+        }
         setMatchGates(m, c.gates || []);
         matches.push(m);
       }
@@ -9798,7 +9878,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         if (!pd) return;
         t += `${IN}${IN}satisfy ${useId} by ${pd.useId} {\n`;
         t += `${IN}${IN}${IN}@MatchEvidence {\n`;
-        t += `${IN}${IN}${IN}${IN}confidence = ${(plm.confidence ?? 0).toFixed(2)};\n`;
+        { const pubConf = matchPublicConfidence(plm); if (pubConf !== null) t += `${IN}${IN}${IN}${IN}confidence = ${pubConf.toFixed(2)};\n`; }
         t += `${IN}${IN}${IN}${IN}method = ${sysmlStr(plm.matchMethod || 'none')};\n`;
         t += `${IN}${IN}${IN}${IN}keyword = ${sysmlStr(plm.matchedKeyword || '')};\n`;
         t += `${IN}${IN}${IN}}\n`;
@@ -9970,9 +10050,11 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         // STRING値を先頭に配置（一部のReqIFパーサ実装がREAL/BOOLEAN値を未サポートのため。順序は標準上意味を持たない）
         L.push(valStr('_a_method', plm.matchMethod || 'none'));
         L.push(valStr('_a_keyword', plm.matchedKeyword || ''));
-        L.push(`          <ATTRIBUTE-VALUE-REAL THE-VALUE="${(plm.confidence ?? 0).toFixed(2)}">`);
+        if (matchPublicConfidence(plm) !== null) { // N/A confidence (title_candidate): attribute omitted, never 0.00
+        L.push(`          <ATTRIBUTE-VALUE-REAL THE-VALUE="${matchPublicConfidence(plm).toFixed(2)}">`);
         L.push(`            <DEFINITION><ATTRIBUTE-DEFINITION-REAL-REF>_a_conf</ATTRIBUTE-DEFINITION-REAL-REF></DEFINITION>`);
         L.push(`          </ATTRIBUTE-VALUE-REAL>`);
+        }
         L.push(`          <ATTRIBUTE-VALUE-BOOLEAN THE-VALUE="${reviewed}">`);
         L.push(`            <DEFINITION><ATTRIBUTE-DEFINITION-BOOLEAN-REF>_a_reviewed</ATTRIBUTE-DEFINITION-BOOLEAN-REF></DEFINITION>`);
         L.push(`          </ATTRIBUTE-VALUE-BOOLEAN>`);
@@ -10097,7 +10179,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
           type: 'plmt:ImpactTrace',
           traceFrom: iri('req', 'SYS-' + num),
           traceTo: pid,
-          confidence: Number((plm.confidence ?? 0).toFixed(2)),
+          confidence: publicConfidenceRounded(plm),
           method: plm.matchMethod || 'none',
           keyword: plm.matchedKeyword || '',
           reviewed: isReviewedMatch(`REQ-${num}`, plm)
@@ -10166,7 +10248,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
           nodes.push({id:partId, type:'part', label:plmDisplayName(plm, pidx), data:plm});
         }
         const eid = `${reqId}-${partId}`;
-        if (!edges.some(e => e.id === eid)) edges.push({id:eid, source:reqId, target:partId, type:'affects', confidence:plm.confidence, matchMethod:plm.matchMethod});
+        if (!edges.some(e => e.id === eid)) edges.push({id:eid, source:reqId, target:partId, type:'affects', confidence:matchPublicConfidence(plm), matchMethod:plm.matchMethod});
       });
     });
     return {nodes, edges};
@@ -10868,9 +10950,42 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   };
 
   function traceJudgement(method, confidence) {
+    if (method === TITLE_CANDIDATE_METHOD) return '要確認'; // INV-01/04: candidate source never implies confirmation
     if (method === 'exact' || method === 'code') return '対応あり';
     if (!method || method === 'none') return '未対応';
     return '要確認';
+  }
+
+  // Option C v1 public confidence (INV-07/26): title_candidate has NO calibrated correspondence-strength measure -> null (N/A). The internal
+  // m.confidence stays the non-exported candidate_order_key used by emission/gate arithmetic and is never exported or displayed for it.
+  function matchPublicConfidence(m) {
+    if (!m || m.matchMethod === TITLE_CANDIDATE_METHOD) return null;
+    return m.confidence || 0;
+  }
+  function publicConfidenceRounded(m) {
+    const c = matchPublicConfidence(m);
+    return c === null ? null : Number(c.toFixed(2));
+  }
+  // Row-level value: null = N/A (title_candidate); legacy blank/''/undefined keep their previous numeric reading (0).
+  function rowConfidenceOrNull(r) {
+    if (r && r['方式'] === TITLE_CANDIDATE_METHOD) return null; // pair/review rows render N/A as '' - the method is the unambiguous marker
+    const v = r ? r['信頼度'] : undefined;
+    return v === null ? null : (Number(v) || 0);
+  }
+  // Aggregate: no items -> 0 (as before); items but no defined confidence -> null (rendered blank); otherwise the max of defined values.
+  function maxConfidenceSummary(values) {
+    if (!values.length) return 0;
+    const defined = values.filter(v => v !== null && v !== undefined);
+    return defined.length ? Math.max(...defined) : null;
+  }
+  const confSuffix = c => (c === null || c === undefined) ? '' : ` (${Number(c).toFixed(2)})`;
+  const confSuffixRaw = c => (c === null || c === undefined) ? '' : ` (${c})`;
+  function titleCandidateEvidenceBlock(match) {
+    if (!match || match.matchMethod !== TITLE_CANDIDATE_METHOD) return '';
+    const d = match._titleDisposition || { ambiguity:'UNKNOWN', aRecords:null, bRecords:null, coEvidence:'none' };
+    const known = d.ambiguity === 'AMBIGUOUS' || d.ambiguity === 'UNIQUE';
+    const cnt = v => (known && Number.isSafeInteger(v) && v >= 0) ? String(v) : 'NA';
+    return `title_candidate: ambiguity=${known ? d.ambiguity : 'UNKNOWN'}, a_records=${cnt(d.aRecords)}, b_records=${cnt(d.bRecords)}, co_evidence=${d.coEvidence === 'tag' ? 'tag' : 'none'}, confirmation=UNCONFIRMED`;
   }
 
   function matchHasGate(match) {
@@ -10896,6 +11011,8 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   function traceEvidenceForMatch(match) {
     const base = `${match._matchedSysField || 'A'}→${match._matchedPlmField || 'B'} / ${match.matchedKeyword || ''}`;
     const extras = [];
+    const tcBlock = titleCandidateEvidenceBlock(match);
+    if (tcBlock) extras.push(tcBlock);
     if (match?._tagEvidence?.text) extras.push(match._tagEvidence.text);
     const ch = match?._matchedChunk;
     if (ch && ch.text) extras.push(`該当文[${ch.index}]: 「${truncateEvidenceText(ch.text)}」`);
@@ -11022,7 +11139,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
           'B_ID': bId,
           'B_表示名': plmDisplayName(m, mi),
           'B_照合値': normalizeText(m?.[m._matchedPlmField]) || plmModelText(m),
-          '信頼度': Number((m.confidence || 0).toFixed(2)),
+          '信頼度': publicConfidenceRounded(m),
           '方式': m.matchMethod,
           '根拠': traceEvidenceForMatch(m),
           'レビュー判定': review.label || '',
@@ -11030,7 +11147,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         };
         rows.push(setTraceComparisonRelationship(row, {
           source:'matching_engine', match_method:m.matchMethod,
-          match_confidence:Number((m.confidence || 0).toFixed(2)), review_category:category,
+          match_confidence:publicConfidenceRounded(m), review_category:category,
           linked_at:null
         }));
       });
@@ -11279,7 +11396,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
   function buildDetailRows(sysList, plmList) {
     return sysList.map((item,idx) => {
       const matches = matchPlmParts(item, plmList);
-      const maxC = matches.length ? Math.max(...matches.map(m=>m.confidence||0)) : 0;
+      const maxC = maxConfidenceSummary(matches.map(m => matchPublicConfidence(m)));
       return {
         '_reqId': sysRowId(item, idx),
         '_nodeId': sysRowId(item, idx),
@@ -11290,11 +11407,11 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         '任意区分': '',
         '照合元キー値': sysAffectedText(item),
         '照合JSON B件数': matches.length,
-        '最大信頼度': Number(maxC.toFixed(2)),
+        '最大信頼度': maxC === null ? '' : Number(maxC.toFixed(2)),
         '照合JSON B表示名一覧': matches.map((m,i)=>plmDisplayName(m,i)).join('\n'),
         '照合JSON Bキー一覧': matches.map((m,i)=>plmUniqueKey(m,i)).join('\n'),
         '照合JSON B補助値一覧': matches.map(m=>plmModelText(m)).filter(Boolean).join('\n'),
-        '照合根拠': matches.map(m=>`${m.matchMethod}: ${m._matchedSysField || 'sys'}→${m._matchedPlmField || 'plm'} "${m.matchedKeyword}" (${(m.confidence||0).toFixed(2)})`).join('\n')
+        '照合根拠': matches.map(m=>`${m.matchMethod}: ${m._matchedSysField || 'sys'}→${m._matchedPlmField || 'plm'} "${m.matchedKeyword}"${confSuffix(matchPublicConfidence(m))}`).join('\n')
       };
     });
   }
@@ -11318,7 +11435,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         const key = plmUniqueKey(m, 0);
         const e = map.get(key);
         if (e) e.hits.push({ reqId, name: sysDisplayName(item, idx), item,
-          keyword: m.matchedKeyword, confidence: m.confidence, method: m.matchMethod, sysField: m._matchedSysField, plmField: m._matchedPlmField });
+          keyword: m.matchedKeyword, confidence: matchPublicConfidence(m), method: m.matchMethod, sysField: m._matchedSysField, plmField: m._matchedPlmField });
       });
     });
     return map;
@@ -11329,7 +11446,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     const rows = []; let no = 0;
     rev.forEach(({ plm, hits }, key) => {
       no++;
-      const maxC = hits.length ? Math.max(...hits.map(h=>h.confidence||0)) : 0;
+      const maxC = maxConfidenceSummary(hits.map(h => h.confidence));
       rows.push({
         '_nodeId': 'PARTC-' + ncName(key),
         'No': no,
@@ -11339,10 +11456,10 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
         '階層情報': '',
         '数量・重量情報': '',
         '照合JSON A件数': hits.length,
-        '最大信頼度': Number(maxC.toFixed(2)),
+        '最大信頼度': maxC === null ? '' : Number(maxC.toFixed(2)),
         '照合JSON A一覧': hits.map(h=>`${h.reqId}: ${h.name}`).join('\n'),
         '照合キーワード一覧': hits.map(h=>h.keyword||'').join('\n'),
-        '照合根拠': hits.map(h=>`${h.method}: ${h.sysField || 'sys'}→${h.plmField || 'plm'} "${h.keyword}" (${(h.confidence||0).toFixed(2)})`).join('\n')
+        '照合根拠': hits.map(h=>`${h.method}: ${h.sysField || 'sys'}→${h.plmField || 'plm'} "${h.keyword}"${confSuffix(h.confidence)}`).join('\n')
       });
     });
     return rows;
@@ -11446,7 +11563,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
     return `<tr class="detail-expand-row" data-parent-idx="${parentIdx}" data-target-id="${escapeHtml(edge.targetId)}">
       <td class="detail-expand-cell" colspan="${colCount}" style="background:#f8fafc;border-left:3px solid #93c5fd;padding:8px 14px;font-size:12.5px;line-height:1.7;">
         <div><strong>↳ 接続先:</strong> ${escapeHtml(edge.targetLabel)} <span style="color:#64748b;">(${escapeHtml(edge.targetId)})</span>
-          &nbsp;/&nbsp; <strong>信頼度 (confidence):</strong> ${escapeHtml(formatCell(edge.confidence))}
+          &nbsp;/&nbsp; <strong>信頼度 (confidence):</strong> ${escapeHtml(edge.confidence == null || edge.confidence === '' ? 'N/A' : formatCell(edge.confidence))}
           &nbsp;/&nbsp; <strong>照合方法 (method):</strong> ${escapeHtml(matchingMethodDisplayLabel(formatCell(edge.method)))}
           &nbsp;<button type="button" onclick="highlightGraphFromTable('${escapeHtml(edge.targetId)}')" title="Graphで接続先ノードをハイライト" style="padding:1px 6px;font-size:10.5px;border:1px solid #93c5fd;border-radius:4px;background:#fff;color:#1d4ed8;cursor:pointer;">Graphで表示</button></div>
         <div><strong>照合根拠:</strong> ${escapeHtml(edge.evidenceLine)}</div>
@@ -11947,7 +12064,7 @@ A. 提出書類・見出し・説明文など、照合対象外の行がB側に�
           if (bParent) partData.parent = bParent;
           elements.push({ data:partData });
         }
-        elements.push({ data:{ id:`${reqId}-${partId}`, source:reqId, target:partId, label:`affects (${plm.confidence.toFixed(2)})`, type:'dependency', confidence:plm.confidence, matchMethod:plm.matchMethod } });
+        elements.push({ data:{ id:`${reqId}-${partId}`, source:reqId, target:partId, label:`affects${confSuffix(matchPublicConfidence(plm))}`, type:'dependency', confidence:matchPublicConfidence(plm), matchMethod:plm.matchMethod } });
       });
     });
     plmList.forEach((plm, idx) => {
@@ -11995,7 +12112,7 @@ ${h.name}`, type:'requirement', detail:srcA };
           elements.push({ data:reqData });
         }
         elements.push({ data:{ id:`${pid}-${h.reqId}`, source:pid, target:h.reqId,
-          label:`affected-by (${(h.confidence||0).toFixed(2)})`, type:'dependency',
+          label:`affected-by${confSuffix(h.confidence)}`, type:'dependency',
           confidence:h.confidence, matchMethod:h.method } });
       });
     });
@@ -12282,6 +12399,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       <marker id="ag" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#16a34a"/></marker>
       <marker id="ay" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#eab308"/></marker>
       <marker id="ar" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#ef4444"/></marker>
+      <marker id="an" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker>
       <marker id="ab" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/></marker>
       <marker id="ap" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#7c3aed"/></marker>
     </defs>\n`;
@@ -12294,14 +12412,15 @@ ${h.name}`, type:'requirement', detail:srcA };
       const sNode=cy.getElementById(edge.data('source')), tNode=cy.getElementById(edge.data('target'));
       const s=sNode.length ? point(sNode) : null, t=tNode.length ? point(tNode) : null;
       if (!s||!t) return;
-      const c=Number(edge.data('confidence'))||0;
-      let stroke=c>=0.9?'#16a34a':c>=0.75?'#eab308':'#ef4444', mk=c>=0.9?'ag':c>=0.75?'ay':'ar', dash='';
+      const cRaw=edge.data('confidence'), cNA=(cRaw===null||cRaw===undefined);
+      const c=Number(cRaw)||0;
+      let stroke=cNA?'#64748b':c>=0.9?'#16a34a':c>=0.75?'#eab308':'#ef4444', mk=cNA?'an':c>=0.9?'ag':c>=0.75?'ay':'ar', dash='';
       if (edge.data('excluded')==='yes') { stroke='#ef4444'; mk='ar'; dash='8 5'; }
       else if (edge.data('effectiveSource')==='manual') { stroke='#7c3aed'; mk='ap'; }
       else if (edge.data('effectiveJudgement')==='部分対応') { stroke='#2563eb'; mk='ab'; dash='8 5'; }
       else if (edge.data('effectiveJudgement')==='要確認') { stroke='#eab308'; mk='ay'; dash='3 4'; }
       const dashAttr=dash ? ` stroke-dasharray="${dash}"` : '';
-      svg+=`<path d="M ${s.x} ${s.y} Q ${(s.x+t.x)/2} ${(s.y+t.y)/2-24} ${t.x} ${t.y}" fill="none" stroke="${stroke}" stroke-width="${c>=0.9?4:c>=0.75?3:2}"${dashAttr} marker-end="url(#${mk})"/>\n`;
+      svg+=`<path d="M ${s.x} ${s.y} Q ${(s.x+t.x)/2} ${(s.y+t.y)/2-24} ${t.x} ${t.y}" fill="none" stroke="${stroke}" stroke-width="${cNA?2:c>=0.9?4:c>=0.75?3:2}"${dashAttr} marker-end="url(#${mk})"/>\n`;
     });
     const drawNode=n=>{
       const p=point(n);
@@ -13046,7 +13165,7 @@ ${h.name}`, type:'requirement', detail:srcA };
     if (!row) return null;
     return {
       judgement:normalizeText(row['機械判定'] || ''),
-      confidence:row['信頼度'] === '' ? null : Number(row['信頼度']),
+      confidence:(row['信頼度'] === '' || row['信頼度'] === null || row['信頼度'] === undefined) ? null : Number(row['信頼度']),
       method:normalizeText(row['方式'] || '')
     };
   }
@@ -13482,8 +13601,8 @@ ${h.name}`, type:'requirement', detail:srcA };
       else if (cat === '対象外') o.scope += 1;
       else if (cat === 'A未対応') o.missing += 1;
       else if (cat === 'B未参照') o.unref += 1;
-      const conf = Number(r['信頼度']);
-      if (Number.isFinite(conf) && conf > o.maxConf) { o.maxConf = conf; o.evidence = r['根拠'] || ''; }
+      const conf = rowConfidenceOrNull(r);
+      if (conf !== null && Number.isFinite(conf) && conf > o.maxConf) { o.maxConf = conf; o.evidence = r['根拠'] || ''; }
     });
     return [...map.values()].map(o => ({
       '_aGroupKey':o.aKey, '_bGroupKey':o.bKey,
@@ -13546,7 +13665,7 @@ ${h.name}`, type:'requirement', detail:srcA };
         method:normalizeText(row['方式'] || 'none'), evidenceText,
         sharedTags, sharedCodes:[...(tag.displayCodes || [])], sharedCount:Number(tag.sharedCount) || sharedTags.length,
         aCount:Number(tag.aCount) || 0, bCount:Number(tag.bCount) || 0, tagDice:Number(tag.dice) || 0,
-        skipFuzzy:tag.skipFuzzy === true, confidence:Number(row['信頼度']) || 0
+        skipFuzzy:tag.skipFuzzy === true, confidence:rowConfidenceOrNull(row)
       },
       decision:{
         status:normalizeText(row['有効判定'] || row['分類'] || ''),
@@ -13563,7 +13682,7 @@ ${h.name}`, type:'requirement', detail:srcA };
     if (!p) return '';
     const tagText = p.evidence.sharedTags.length ? ` / 共有タグ: ${p.evidence.sharedTags.join(', ')}` : '';
     const diceText = p.evidence.sharedTags.length ? ` / Dice ${p.evidence.tagDice.toFixed(2)}` : '';
-    return `${p.evidence.method}: ${p.evidence.evidenceText} (${p.evidence.confidence}) [${p.decision.source}]${tagText}${diceText}`;
+    return `${p.evidence.method}: ${p.evidence.evidenceText} ${confSuffixRaw(p.evidence.confidence)} [${p.decision.source}]${tagText}${diceText}`;
   }
 
   // ── HE-1 Remediation Checkpoint 2-B: per-edge Dictionary Explainability ──
@@ -13657,14 +13776,14 @@ ${h.name}`, type:'requirement', detail:srcA };
       const effective = all.filter(r => r._effectiveActive);
       const excluded = all.filter(r => r._isExcluded);
       const current = currentActiveFromRows(all);
-      const maxC = current.length ? Math.max(...current.map(r => Number(r['信頼度']) || 0)) : 0;
-      const bestMatch = current.reduce((best, r) => (Number(r['信頼度']) || 0) > (best ? Number(best['信頼度']) || 0 : -1) ? r : best, null);
+      const maxC = maxConfidenceSummary(current.map(r => rowConfidenceOrNull(r)));
+      const bestMatch = current.reduce((best, r) => (rowConfidenceOrNull(r) !== null && rowConfidenceOrNull(r) > (best ? rowConfidenceOrNull(best) : -1)) ? r : best, null);
       return {
         '_reqId':aId, '_nodeId':aId, '_edgeRows':buildEdgeExpandEntries(current, true), 'No':idx+1,
         'JSON A表示名':sysDisplayName(item, idx),
         '照合JSON B件数':current.length,
         '照合JSON B表示名一覧':numberedLines(current.map(r => r['B_表示名'])),
-        '最大信頼度':Number(maxC.toFixed(2)),
+        '最大信頼度':maxC === null ? '' : Number(maxC.toFixed(2)),
         '最大信頼度の照合先':bestMatch ? bestMatch['B_表示名'] || bestMatch['B_ID'] || '' : '',
         '照合根拠':numberedLines(current.map(presentationEvidenceLine)),
         '選択JSON A値':sysAffectedText(item), '照合元キー値':sysAffectedText(item),
@@ -13694,14 +13813,14 @@ ${h.name}`, type:'requirement', detail:srcA };
       const effective = all.filter(r => r._effectiveActive);
       const excluded = all.filter(r => r._isExcluded);
       const current = currentActiveFromRows(all);
-      const maxC = current.length ? Math.max(...current.map(r => Number(r['信頼度']) || 0)) : 0;
-      const bestMatch = current.reduce((best, r) => (Number(r['信頼度']) || 0) > (best ? Number(best['信頼度']) || 0 : -1) ? r : best, null);
+      const maxC = maxConfidenceSummary(current.map(r => rowConfidenceOrNull(r)));
+      const bestMatch = current.reduce((best, r) => (rowConfidenceOrNull(r) !== null && rowConfidenceOrNull(r) > (best ? rowConfidenceOrNull(best) : -1)) ? r : best, null);
       return {
         '_nodeId':'PARTC-' + ncName(bId), '_edgeRows':buildEdgeExpandEntries(current, false), 'No':idx+1,
         'JSON B表示名':plmDisplayName(item, idx),
         '照合JSON A件数':current.length,
         '照合JSON A一覧':numberedLines(current.map(r => `${r['A_ID']}: ${r['A_表示名']}`)),
-        '最大信頼度':Number(maxC.toFixed(2)),
+        '最大信頼度':maxC === null ? '' : Number(maxC.toFixed(2)),
         '最大信頼度の照合先':bestMatch ? bestMatch['A_表示名'] || bestMatch['A_ID'] || '' : '',
         '照合根拠':numberedLines(current.map(presentationEvidenceLine)),
         'JSON Bキー':bId, '補助表示値':plmModelText(item),
@@ -13725,7 +13844,7 @@ ${h.name}`, type:'requirement', detail:srcA };
     (plmList || []).forEach((plm, idx) => map.set(plmUniqueKey(plm, idx), { plm, hits:[] }));
     activeRowsForMode().forEach(r => {
       const entry = map.get(r['B_ID']); if (!entry) return;
-      entry.hits.push({ reqId:r['A_ID'], name:r['A_表示名'], keyword:r['根拠'], confidence:Number(r['信頼度']) || 0, method:r['方式'], review:r['レビュー判定'], effective:r['有効判定'] });
+      entry.hits.push({ reqId:r['A_ID'], name:r['A_表示名'], keyword:r['根拠'], confidence:rowConfidenceOrNull(r), method:r['方式'], review:r['レビュー判定'], effective:r['有効判定'] });
     });
     return map;
   };
@@ -13771,7 +13890,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       const label = effectiveMode === 'diff' ? `${autoJ}→${effJ}` : effectiveMode === 'auto' ? `${autoJ} (${r['信頼度'] || '-'})` : `${effJ} [${r['有効ソース']}]`;
       elements.push({ data:{
         id:`E-${ncName(r._reviewKey || `${a}-${r['B_ID']}`)}-${idx}`, source, target, label, type:'dependency',
-        confidence:Number(r['信頼度']) || 0, matchMethod:r['方式'] || '', autoJudgement:autoJ,
+        confidence:rowConfidenceOrNull(r), matchMethod:r['方式'] || '', autoJudgement:autoJ,
         reviewJudgement:r['レビュー判定'] || '', reviewComment:r['レビューコメント'] || '', reviewReasonCode:r['レビュー理由'] || '',
         effectiveActive:r._effectiveActive ? 'yes' : 'no', effectiveJudgement:effJ, effectiveSource:r._effectiveSource || 'auto',
         excluded:r._isExcluded ? 'yes' : 'no', sharedTags:presentation?.evidence.sharedTags.join(', ') || '',
@@ -14812,7 +14931,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       const props = [
         propertyValue('pairKey', pairKey), propertyValue('outputRelationMode', settings.relationMode),
         propertyValue('autoExists', !!row._autoExists), propertyValue('autoJudgement', row['機械判定']),
-        propertyValue('autoConfidence', row['信頼度'] === '' ? null : safeNumber(row['信頼度'], 0)), propertyValue('autoMethod', row['方式']),
+        propertyValue('autoConfidence', (row['信頼度'] === '' || row['信頼度'] === null || row['信頼度'] === undefined) ? null : safeNumber(row['信頼度'], 0)), propertyValue('autoMethod', row['方式']),
         propertyValue('matchedKeywordOrEvidence', row['根拠']), propertyValue('reviewJudgement', row['レビュー判定']),
         propertyValue('reviewReasonCode', row['レビュー理由']), propertyValue('reviewComment', row['レビューコメント']),
         propertyValue('effectiveActive', !!row._effectiveActive), propertyValue('effectiveJudgement', row['有効判定']),
@@ -15810,10 +15929,10 @@ ${h.name}`, type:'requirement', detail:srcA };
     return base.filter(row => aIds.has(row._reqId)).map(row => {
       const all = pairRows.filter(r => r['A_ID'] === row._reqId);
       const current = active.filter(r => r['A_ID'] === row._reqId);
-      const maxC = current.length ? Math.max(...current.map(r => Number(r['信頼度']) || 0)) : 0;
+      const maxC = maxConfidenceSummary(current.map(r => rowConfidenceOrNull(r)));
       const next = { ...row,
         '概要Aグループ':selected.aGroupLabel,'概要Bグループ':selected.bGroupLabel,'概要範囲':SCOPE_LABELS[selected.effectiveScopeState],
-        '照合JSON B件数':current.length,'有効照合件数':current.filter(r=>r._effectiveActive).length,'最大信頼度':Number(maxC.toFixed(2)),
+        '照合JSON B件数':current.length,'有効照合件数':current.filter(r=>r._effectiveActive).length,'最大信頼度':maxC === null ? '' : Number(maxC.toFixed(2)),
         '照合JSON B表示名一覧':current.map(r=>r['B_表示名']).join('\n'),'照合JSON Bキー一覧':current.map(r=>r['B_ID']).join('\n'),
         '共有タグ':current.map(r=>relationPresentation(r)?.evidence.sharedTags.join(', ') || '').filter(Boolean).join('\n'),
         '判定理由':current.map(r=>relationPresentation(r)?.decision.reasonText || '').filter(Boolean).join('\n'),
@@ -15836,10 +15955,10 @@ ${h.name}`, type:'requirement', detail:srcA };
     return base.filter(row => bIds.has(row['JSON Bキー'])).map(row => {
       const all = pairRows.filter(r => r['B_ID'] === row['JSON Bキー']);
       const current = active.filter(r => r['B_ID'] === row['JSON Bキー']);
-      const maxC = current.length ? Math.max(...current.map(r => Number(r['信頼度']) || 0)) : 0;
+      const maxC = maxConfidenceSummary(current.map(r => rowConfidenceOrNull(r)));
       const next = { ...row,
         '概要Aグループ':selected.aGroupLabel,'概要Bグループ':selected.bGroupLabel,'概要範囲':SCOPE_LABELS[selected.effectiveScopeState],
-        '照合JSON A件数':current.length,'有効照合件数':current.filter(r=>r._effectiveActive).length,'最大信頼度':Number(maxC.toFixed(2)),
+        '照合JSON A件数':current.length,'有効照合件数':current.filter(r=>r._effectiveActive).length,'最大信頼度':maxC === null ? '' : Number(maxC.toFixed(2)),
         '照合JSON A一覧':current.map(r=>`${r['A_ID']}: ${r['A_表示名']}`).join('\n'),
         '共有タグ':current.map(r=>relationPresentation(r)?.evidence.sharedTags.join(', ') || '').filter(Boolean).join('\n'),
         '判定理由':current.map(r=>relationPresentation(r)?.decision.reasonText || '').filter(Boolean).join('\n'),
@@ -17059,7 +17178,7 @@ ${h.name}`, type:'requirement', detail:srcA };
         const bId = plmUniqueKey(m, mi);
         const bRow = bByKey.get(bId) || null;
         const classification = matchHasGate(m) ? '要確認' : traceJudgement(m.matchMethod, m.confidence);
-        const confidence = Number((m.confidence || 0).toFixed(2));
+        const confidence = publicConfidenceRounded(m);
         const evidence = traceEvidenceForMatch(m);
         const rowLike = { A_ID: aId, B_ID: bId, '方式': m.matchMethod, '根拠': evidence, '信頼度': confidence, '分類': classification,
           _tagEvidence: m._tagEvidence ? JSON.parse(JSON.stringify(m._tagEvidence)) : null };
@@ -17091,7 +17210,9 @@ ${h.name}`, type:'requirement', detail:srcA };
     if (shown.size !== comparisons.length) return false;
     return comparisons.every(c => {
       const r = shown.get(c.aId + '\u0000' + c.bId);
-      return !!r && r['方式'] === c.projection.method && r['信頼度'] === c.projection.confidence && r['根拠'] === c.projection.evidence && r['分類'] === c.projection.classification;
+      // N/A confidence (null) may appear as null or '' in a displayed row (blank cell); a numeric confidence must still match exactly.
+      const confSame = c.projection.confidence === null ? (r && (r['信頼度'] === null || r['信頼度'] === '' || r['信頼度'] === undefined)) : (!!r && r['信頼度'] === c.projection.confidence);
+      return !!r && r['方式'] === c.projection.method && confSame && r['根拠'] === c.projection.evidence && r['分類'] === c.projection.classification;
     });
   }
 
@@ -17118,7 +17239,7 @@ ${h.name}`, type:'requirement', detail:srcA };
       try {
         const b = buildComparisons();
         if (b.consistent) cmps = b.comparisons; else { cr.available = false; cr.reason = '照合設定が変更されています。再照合が必要です。'; }
-      } catch (err) { cr.available = false; cr.reason = '現在の照合結果を読み取れませんでした。'; }
+      } catch (err) { cr.available = false; cr.reason = isRunContextRequiredError(err) ? '照合の実行コンテキストがありません。再照合（新しい照合実行）が必要です。' : '現在の照合結果を読み取れませんでした。'; }
     }
     const entries = sortedEntries();
     const byPair = new Map();
@@ -17352,7 +17473,7 @@ ${h.name}`, type:'requirement', detail:srcA };
     el('heEntryStatus').textContent = item.kind === 'ineligible' ? 'PERSISTENT_EVALUATION_UNAVAILABLE（' + item.reason + '）' : (item.status || '未評価');
     const un = el('heUnavailable'); un.style.display = item.kind === 'ineligible' ? 'block' : 'none';
     const p = item.cmp ? item.cmp.projection : null;
-    el('heMrClass').textContent = p ? p.classification : '-'; el('heMrConf').textContent = p ? String(p.confidence) : '-';
+    el('heMrClass').textContent = p ? p.classification : '-'; el('heMrConf').textContent = p ? (p.confidence === null ? 'N/A' : String(p.confidence)) : '-';
     el('heMrMethod').textContent = p ? p.method : '-'; el('heMrEvidence').textContent = p ? p.evidence : (e ? e.machine_result.display.evidence + '（保存時の表示）' : '-');
     el('heMrAField').textContent = p ? p.matched_a_field : '-'; el('heMrBField').textContent = p ? p.matched_b_field : '-';
     el('heMrDict').textContent = p ? p.dictionary_contribution : '-';

@@ -30,7 +30,11 @@
   'use strict';
 
   const SCHEMA_ID_PREFIX = 'human-evaluation-persistence/';
-  const ARTIFACT_SCHEMA_VERSION = SCHEMA_ID_PREFIX + '0.1';
+  // Option C v1 (Priority 1): 0.2 allows a machine-result confidence of null (N/A: no calibrated measure, e.g. title_candidate). 0.1 artifacts
+  // (finite-number confidence only) stay READABLE so their entries derive STALE instead of the artifact failing to load (INV-16/25); new artifacts
+  // are always written as 0.2. No migration: a decoded 0.1 artifact keeps its own version and entries.
+  const ARTIFACT_SCHEMA_VERSION = SCHEMA_ID_PREFIX + '0.2';
+  const LEGACY_ARTIFACT_SCHEMA_VERSION = SCHEMA_ID_PREFIX + '0.1';
   const MAX_SERIALIZED_BYTES = 8388608; // 8 MiB (Contract S15.1)
   const PAIR_ID_PREFIX = 'hev-pair-v1:';
   const FINGERPRINT_PREFIX = 'hev-sha256:';
@@ -212,33 +216,33 @@
   function isValidEvaluator(value) { return value === null || (typeof value === 'string' && value.length > 0 && codePointCount(value, EVALUATOR_MAX_CODE_POINTS) <= EVALUATOR_MAX_CODE_POINTS); }
 
   // full machine-result projection: exact 7 keys, no truncation, no extra keys.
-  function validateMachineProjection(p, code, path) {
+  function validateMachineProjection(p, code, path, allowNullConfidence = true) {
     if (!isPlainObject(p) || !hasExactKeys(p, MACHINE_PROJECTION_KEYS)) fail(code, path);
     for (const k of ['classification', 'method', 'evidence', 'matched_a_field', 'matched_b_field']) {
       if (typeof p[k] !== 'string') fail(code, path + '.' + k);
     }
-    if (!isFiniteNumber(p.confidence)) fail(code, path + '.confidence');
+    if (!(isFiniteNumber(p.confidence) || (allowNullConfidence && p.confidence === null))) fail(code, path + '.confidence');
     if (typeof p.dictionary_contribution !== 'string' || !DICTIONARY_CONTRIBUTIONS.includes(p.dictionary_contribution)) {
       fail(code, path + '.dictionary_contribution');
     }
   }
 
-  function validateDisplay(d, path) {
+  function validateDisplay(d, path, allowNullConfidence = true) {
     const code = CODES.MACHINE_RESULT_INVALID;
     if (!isPlainObject(d) || !hasExactKeys(d, DISPLAY_KEYS)) fail(code, path);
     for (const k of ['classification', 'matched_a_field', 'matched_b_field', 'method']) {
       if (typeof d[k] !== 'string' || codePointCount(d[k], DISPLAY_STRING_MAX_CODE_POINTS) > DISPLAY_STRING_MAX_CODE_POINTS) fail(code, path + '.' + k);
     }
     if (typeof d.evidence !== 'string' || codePointCount(d.evidence, DISPLAY_EVIDENCE_MAX_CODE_POINTS) > DISPLAY_EVIDENCE_MAX_CODE_POINTS) fail(code, path + '.evidence');
-    if (!isFiniteNumber(d.confidence)) fail(code, path + '.confidence');
+    if (!(isFiniteNumber(d.confidence) || (allowNullConfidence && d.confidence === null))) fail(code, path + '.confidence');
     if (typeof d.dictionary_contribution !== 'string' || !DICTIONARY_CONTRIBUTIONS.includes(d.dictionary_contribution)) fail(code, path + '.dictionary_contribution');
     if (typeof d.truncated !== 'boolean') fail(code, path + '.truncated');
   }
 
-  function validateMachineResult(mr, path) {
+  function validateMachineResult(mr, path, allowNullConfidence = true) {
     if (!isPlainObject(mr) || !hasExactKeys(mr, MACHINE_RESULT_KEYS)) fail(CODES.MACHINE_RESULT_INVALID, path);
     if (typeof mr.identity !== 'string' || !FINGERPRINT_PATTERN.test(mr.identity)) fail(CODES.MACHINE_RESULT_INVALID, path + '.identity');
-    validateDisplay(mr.display, path + '.display');
+    validateDisplay(mr.display, path + '.display', allowNullConfidence);
   }
 
   function validateSourceIdentity(si, path) {
@@ -261,7 +265,7 @@
   }
 
   // stage 1 (shape + semantic) of one entry. pair_id is deliberately NOT judged here (stage 2 regenerates it).
-  function validateEntrySemantics(e, path) {
+  function validateEntrySemantics(e, path, allowNullConfidence = true) {
     if (!isPlainObject(e) || !hasExactKeys(e, ENTRY_KEYS)) fail(CODES.ENTRY_INVALID, path);
     if (!isValidTraceId(e.requirement_trace_id)) fail(CODES.ENTRY_INVALID, path + '.requirement_trace_id');
     if (!isValidTraceId(e.actual_trace_id)) fail(CODES.ENTRY_INVALID, path + '.actual_trace_id');
@@ -269,7 +273,7 @@
     if (!isValidNote(e.note)) fail(CODES.ENTRY_INVALID, path + '.note');
     if (!isValidEvaluator(e.evaluator)) fail(CODES.ENTRY_INVALID, path + '.evaluator');
     if (!isCanonicalTimestamp(e.evaluated_at)) fail(CODES.ENTRY_INVALID, path + '.evaluated_at');
-    validateMachineResult(e.machine_result, path + '.machine_result');
+    validateMachineResult(e.machine_result, path + '.machine_result', allowNullConfidence);
     validateSourceIdentity(e.source_identity, path + '.source_identity');
   }
 
@@ -314,10 +318,11 @@
     if (!isPlainObject(obj) || !hasExactKeys(obj, ROOT_KEYS)) fail(CODES.ROOT_INVALID, '$');
     const schema = obj.artifact_schema_version;
     if (typeof schema !== 'string' || !schema.startsWith(SCHEMA_ID_PREFIX)) fail(CODES.ROOT_INVALID, '$.artifact_schema_version');
-    if (schema !== ARTIFACT_SCHEMA_VERSION) fail(CODES.UNSUPPORTED_VERSION, '$.artifact_schema_version');
+    if (schema !== ARTIFACT_SCHEMA_VERSION && schema !== LEGACY_ARTIFACT_SCHEMA_VERSION) fail(CODES.UNSUPPORTED_VERSION, '$.artifact_schema_version');
+    const allowNullConfidence = schema === ARTIFACT_SCHEMA_VERSION;
     validateDatasetContext(obj.dataset_context, '$.dataset_context');
     if (!Array.isArray(obj.evaluations)) fail(CODES.ROOT_INVALID, '$.evaluations');
-    obj.evaluations.forEach((e, i) => validateEntrySemantics(e, '$.evaluations[' + i + ']'));
+    obj.evaluations.forEach((e, i) => validateEntrySemantics(e, '$.evaluations[' + i + ']', allowNullConfidence));
     obj.evaluations.forEach((e, i) => {
       if (e.pair_id !== encodePairId(e.requirement_trace_id, e.actual_trace_id)) fail(CODES.PAIR_IDENTITY_MISMATCH, '$.evaluations[' + i + '].pair_id');
     });
@@ -328,7 +333,7 @@
     });
     const evaluations = obj.evaluations.map(normalizeEntry).sort((a, b) => comparePairIds(a.pair_id, b.pair_id));
     return deepFreeze({
-      artifact_schema_version: ARTIFACT_SCHEMA_VERSION,
+      artifact_schema_version: schema,
       dataset_context: normalizeDatasetContext(obj.dataset_context),
       evaluations
     });
@@ -634,7 +639,7 @@
   }
 
   return Object.freeze({
-    ARTIFACT_SCHEMA_VERSION, MAX_SERIALIZED_BYTES, PAIR_ID_PREFIX, FINGERPRINT_PREFIX,
+    ARTIFACT_SCHEMA_VERSION, LEGACY_ARTIFACT_SCHEMA_VERSION, MAX_SERIALIZED_BYTES, PAIR_ID_PREFIX, FINGERPRINT_PREFIX,
     NOTE_MAX_CODE_POINTS, EVALUATOR_MAX_CODE_POINTS,
     DECISIONS, ISSUE_CATEGORIES, DICTIONARY_CONTRIBUTIONS, STATUS, INELIGIBLE_REASONS, CODES,
     ROOT_KEYS, ENTRY_KEYS, MACHINE_PROJECTION_KEYS, DISPLAY_KEYS,

@@ -123,7 +123,7 @@ async function main() {
   const parity = await page.evaluate(() => {
     const rows = (traceMatrixRows || []).filter(r => r.A_ID && r.B_ID);
     const P = window.__humanEvaluationDiagnostics.projections();
-    return P.length === rows.length && P.every(p => { const r = rows.find(x => x.A_ID === p.aId && x.B_ID === p.bId); return r && r['分類'] === p.projection.classification && r['信頼度'] === p.projection.confidence && r['方式'] === p.projection.method && r['根拠'] === p.projection.evidence; });
+    return P.length === rows.length && P.every(p => { const r = rows.find(x => x.A_ID === p.aId && x.B_ID === p.bId); return r && r['分類'] === p.projection.classification && (p.projection.confidence === null ? (r['信頼度'] === null || r['信頼度'] === '') : r['信頼度'] === p.projection.confidence) && r['方式'] === p.projection.method && r['根拠'] === p.projection.evidence; });
   });
   assert(parity === true, 'adapter machine result equals the displayed traceMatrixRows machine fields (classification / confidence / method / evidence)');
   assert(elig.every(p => p.projection.dictionary_contribution === 'none' && Object.keys(p.projection).length === 7), 'machine projection has exactly the 7 contract fields, dictionary_contribution none without Snapshot');
@@ -356,8 +356,11 @@ async function main() {
   d = await diag(); await goTab(); d = await diag();
   assert(d.view.available === false && d.view.items.every(x => x.status === 'NO_CURRENT_RESULT'), 'matching config changed without rerun => NO_CURRENT_RESULT (display snapshot of the run is not reused)');
   await page.evaluate(() => { matchLogic.keyPairs = JSON.parse(window.__heSavedKeyPairs); invalidateMatchCache(); });
-  await goTab();
-  assert((await diag()).view.available === true, 'restoring the config restores the current result');
+  // Priority 1 / Option C v1 (explicit test migration, INV-28; R2): invalidateMatchCache() also drops the run's population context, and a trace_title candidate
+  // recomputed OUTSIDE a run is REFUSED (the 497 / 108 / 7 boundary cannot be reconstructed, INV-19) - the comparison result is not rebuilt. Restoring the config
+  // therefore requires the same re-run the product asks for, after which the current result is available again.
+  await rerun(); await page.waitForTimeout(2500); await goTab();
+  assert((await diag()).view.available === true, 'restoring the config and re-running restores the current result');
   const tBefore = (await diag()).entries.map(e => e.evaluated_at).join();
   const set = await page.evaluate(async w => await globalThis.PrivateDictionaryMatchingSession.setSnapshot(w), wrapper);
   assert(set && set.active === true, 'Snapshot activation (marks the matrix stale)');

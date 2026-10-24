@@ -1,6 +1,6 @@
 // Phase B-3b（quantity_sidecar_binding_core.jsのgenerateTraceComparisonRecordSet()）の回帰テスト。
 // shadow_mode_integration_design.md 3.4節の最後の段階、trace_comparison_schema_v1.md
-// `trace-comparison/1.0-rc2`を対象にする。
+// `trace-comparison/1.0-rc3`を対象にする。
 //
 // B-2.6b(generateAutomaticJudgementResults())を内部で再計算し、外部から中間結果を受け取らない。
 // 幾何比較・auto applicability・自動判定の再計算は一切行わず、正式レコード形への写像・ID生成・
@@ -102,7 +102,7 @@ function generate(binding, relations, overrides) {
     const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'schema');
     const result = generate(binding, relations);
     check('ready:trueかつresult_complete:trueに到達する(1)', result.ready === true && result.result_complete === true, result);
-    check('record_set.schema_versionが"trace-comparison/1.0-rc2"である(1)', result.record_set?.schema_version === 'trace-comparison/1.0-rc2', result.record_set);
+    check('record_set.schema_versionが"trace-comparison/1.0-rc3"である(1)', result.record_set?.schema_version === 'trace-comparison/1.0-rc3', result.record_set);
     check('旧rc1と異なる文字列であることの確認(1)', result.record_set?.schema_version !== 'trace-comparison/1.0-rc1');
   }
 
@@ -323,6 +323,30 @@ function generate(binding, relations, overrides) {
       result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_relationship_metadata_invalid'
         && d.failed_invariants?.includes('match_confidence_invalid')), result);
   }
+  // rc3 (Priority 1 / Option C v1): title_candidate <=> match_confidence null (N/A, no substitute number)
+  {
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'titlecand-null',
+      { relationshipOverrides:{ source:'matching_engine', match_method:'title_candidate', match_confidence:null, review_category:'要確認' } });
+    const result = generate(binding, relations);
+    check('rc3: source:matching_engine + title_candidate + match_confidence:null は成功し、record_setにnullのまま出る(15)',
+      result.ready === true && result.record_set.comparisons.every(c => c.relationship.match_method === 'title_candidate' && c.relationship.match_confidence === null), result.diagnostics);
+  }
+  {
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'titlecand-number',
+      { relationshipOverrides:{ source:'matching_engine', match_method:'title_candidate', match_confidence:0.88, review_category:'要確認' } });
+    const result = generate(binding, relations);
+    check('rc3: title_candidateに数値信頼度(0.88)を付けるとfail closedする(置換数値は禁止)(15)',
+      result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_relationship_metadata_invalid'
+        && d.failed_invariants?.includes('match_confidence_must_be_null_for_title_candidate')), result);
+  }
+  {
+    const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'tag-null',
+      { relationshipOverrides:{ source:'matching_engine', match_method:'tag', match_confidence:null, review_category:'要確認' } });
+    const result = generate(binding, relations);
+    check('rc3: title_candidate以外のmatching_engineでmatch_confidence:nullはfail closedする(match_confidence_missing)(15)',
+      result.ready === false && result.diagnostics.some(d => d.code === 'trace_comparison_relationship_metadata_invalid'
+        && d.failed_invariants?.includes('match_confidence_missing')), result);
+  }
   {
     const { binding, relations } = await pairBinding('acceptable_region', 'achieved_point', iv(0, true, 50, true), pt(25), 'manual-lenient',
       { relationshipOverrides:{ source:'manual', match_method:undefined, match_confidence:undefined, review_category:undefined, linked_at:undefined } });
@@ -490,7 +514,7 @@ function generate(binding, relations, overrides) {
   }
 
   // ══════════════ 19. 旧rc1 fixtureをrc2として誤って通さない ══════════════
-  check('旧rc1文書の既存fixtureファイルとschema_versionが異なることの確認(19)', 'trace-comparison/1.0-rc2' !== 'trace-comparison/1.0-rc1');
+  check('旧rc1文書の既存fixtureファイルとschema_versionが異なることの確認(19)', 'trace-comparison/1.0-rc3' !== 'trace-comparison/1.0-rc1');
 
   // ══════════════ 20/21/22/23/24. bindSide()のsource_trace_file保持 ══════════════
   {

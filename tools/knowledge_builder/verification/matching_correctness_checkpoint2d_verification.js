@@ -304,7 +304,8 @@ function setEq(actual, expectedPairs, label) {
     const page = await browser.newPage(); await installVendorRoutes(page);
     const edges = await loadAndDump(page, tmpJson(A), tmpJson(B));
     const e1 = edges.filter(e => e.a === 'E1-A1');
-    assert(e1.length === 1 && e1[0].method === 'exact' && e1[0].conf === 1, `E1 a population-unique exact title still matches at exact/1.0 (actual: ${JSON.stringify(e1)})`);
+    // Priority 1 / Option C v1 (explicit test migration, INV-28): a population-unique title is STILL matched, but as a title_candidate (uniqueness != semantic confirmation); conf is the internal candidate_order_key, never exported.
+    assert(e1.length === 1 && e1[0].method === 'title_candidate' && e1[0].conf === 1, `E1 a population-unique title still matches (as title_candidate, unconfirmed) (actual: ${JSON.stringify(e1)})`);
     await page.close();
   }
   {
@@ -336,7 +337,7 @@ function setEq(actual, expectedPairs, label) {
     const page = await browser.newPage(); await installVendorRoutes(page);
     const edges = await loadAndDump(page, tmpJson(A), tmpJson(B));
     const e4 = edges.filter(e => e.a === 'E4-A1');
-    assert(e4.length === 1 && e4[0].method === 'exact', `E4 no cross-field code-system-disagreement veto exists: a unique title still matches even when A/B use entirely unrelated code vocabularies (actual: ${JSON.stringify(e4)})`);
+    assert(e4.length === 1 && e4[0].method === 'title_candidate', `E4 no cross-field code-system-disagreement veto exists: a unique title still matches even when A/B use entirely unrelated code vocabularies (actual: ${JSON.stringify(e4)})`);
     await page.close();
   }
 

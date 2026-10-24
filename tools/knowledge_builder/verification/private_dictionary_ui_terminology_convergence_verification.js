@@ -410,6 +410,19 @@ function compatibilityChecks() {
   }
   assert(coresClean, `AJ all 10 protected pure cores have zero diff against pre-head ${PRE_HEAD_SHA}${dirtyCores.length ? ' (dirty: ' + dirtyCores.join(', ') + ')' : ''}`);
 
+  // Priority 1 Option C v1 (Guard Formalization R2 closure, Human-authorized): the accepted rc3 record-set contract (Human decision D-1) changes exactly two of
+  // these four files. PRIOR_PROTECTED_CORE_SHA256 is the historical protected content (pre-head blob; kept and re-verified on every run).
+  // OPTION_C_RC3_PROTECTED_CORE_SHA256 is the exact accepted rc3 content: those two files must equal it byte-for-byte (one extra or removed line, another
+  // schema version or a widened null-confidence rule fails). The other two files keep the original zero-diff check against the pre-head.
+  const PRIOR_PROTECTED_CORE_SHA256 = {
+    'trace_comparison_review_state_core.js': '61bd4a27eb6fda80266c9237eead286b9f473511958bb42ac8107bc7b5e29841',
+    'trace_comparison_review_session_core.js': 'c1809c0bd26fd5975e7347d0fc84246470c4776237a2dabb07908f67d39ae2c6',
+  };
+  const OPTION_C_RC3_PROTECTED_CORE_SHA256 = {
+    'trace_comparison_review_state_core.js': '5cddd5cebeef7109822d92f1a7c8d43cbb48c29f907c16d3d2085bd122267813',
+    'trace_comparison_review_session_core.js': '07c531fd0d820011f045ce9e4ad282da88d03809a428d3b21049c718cf8d32d7',
+  };
+  const protectedCoreSha256 = b => require('crypto').createHash('sha256').update(b).digest('hex');
   const comparisonReviewFiles = [
     'trace_comparison_review_state_core.js', 'trace_comparison_review_session_core.js',
     'trace_comparison_review_projection_core.js', 'trace_comparison_review_export_core.js',
@@ -417,12 +430,21 @@ function compatibilityChecks() {
   let reviewCoreClean = true; const dirtyReview = [];
   for (const file of comparisonReviewFiles) {
     const rel = path.join('tools', file);
-    let diffOutput;
-    try { diffOutput = execSync(`git diff --stat ${PRE_HEAD_SHA} -- ${rel}`, { cwd: REPO_ROOT }).toString().trim(); }
-    catch (e) { diffOutput = `ERROR: ${e.message}`; }
-    if (diffOutput !== '') { reviewCoreClean = false; dirtyReview.push(file); }
+    let ok;
+    if (Object.prototype.hasOwnProperty.call(OPTION_C_RC3_PROTECTED_CORE_SHA256, file)) {
+      let prior, cur;
+      try { prior = protectedCoreSha256(execSync(`git show ${PRE_HEAD_SHA}:tools/${file}`, { cwd: REPO_ROOT, maxBuffer: 1 << 26 })); } catch (e) { prior = `ERROR: ${e.message}`; }
+      try { cur = protectedCoreSha256(fs.readFileSync(path.join(REPO_ROOT, rel))); } catch (e) { cur = `ERROR: ${e.message}`; }
+      ok = prior === PRIOR_PROTECTED_CORE_SHA256[file] && cur === OPTION_C_RC3_PROTECTED_CORE_SHA256[file];
+    } else {
+      let diffOutput;
+      try { diffOutput = execSync(`git diff --stat ${PRE_HEAD_SHA} -- ${rel}`, { cwd: REPO_ROOT }).toString().trim(); }
+      catch (e) { diffOutput = `ERROR: ${e.message}`; }
+      ok = diffOutput === '';
+    }
+    if (!ok) { reviewCoreClean = false; dirtyReview.push(file); }
   }
-  assert(reviewCoreClean, `AI comparison review core files have zero diff against pre-head${dirtyReview.length ? ' (dirty: ' + dirtyReview.join(', ') + ')' : ''}`);
+  assert(reviewCoreClean, `AI comparison review core files have zero diff against pre-head, except the two rc3 files, which equal exactly the accepted Option C v1 content (historical pre-head content re-verified)${dirtyReview.length ? ' (dirty: ' + dirtyReview.join(', ') + ')' : ''}`);
 
   // review_state.js itself (P2-A3's own review-decision core, S31.1: must not change) - zero diff.
   let reviewStateDiff;

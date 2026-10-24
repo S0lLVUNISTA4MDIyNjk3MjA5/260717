@@ -16,7 +16,7 @@
  *      match_logic.json re-imports) are read from the SAME source text but are
  *      deliberately NOT in this list, and are asserted to survive unchanged
  *      (see the post-replacement sanity checks below). Schema versions
- *      ("trace-comparison/1.0-rc2", "quantity-annotation/1.0-rc1") and B-4b
+ *      ("trace-comparison/1.0-rc3", "quantity-annotation/1.0-rc1") and B-4b
  *      core API versions are untouched entirely -- nothing in this script
  *      references them.
  *   2. Insert a small alpha-release notice directly after the (now-updated)

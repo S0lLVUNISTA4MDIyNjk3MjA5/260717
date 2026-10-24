@@ -2516,7 +2516,7 @@
   // auto applicability・自動判定の再計算は一切行わない。写像・ID生成・provenance集約・
   // 初期review状態の付加・not_analyzedの保持のみ) ──
 
-  const TRACE_COMPARISON_SCHEMA_VERSION = 'trace-comparison/1.0-rc2';
+  const TRACE_COMPARISON_SCHEMA_VERSION = 'trace-comparison/1.0-rc3';
   const CANONICAL_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
   const QUANTITY_ID_PATTERN = /^q-[0-9a-f]{32}$/;
   const DATASET_SIGNATURE_PATTERN = /^QA-SHA256:[0-9a-f]{64}$/;
@@ -2567,7 +2567,10 @@
     if (relationship.linked_at !== null && !isCanonicalTimestamp(relationship.linked_at)) issues.push('linked_at_invalid');
     if (relationship.source === 'matching_engine') {
       if (relationship.match_method === null) issues.push('match_method_missing');
-      if (relationship.match_confidence === null) issues.push('match_confidence_missing');
+      // rc3 (Option C v1): title_candidate <=> null confidence (N/A, no calibrated measure); any other engine method requires a number.
+      if (relationship.match_method === 'title_candidate') {
+        if (relationship.match_confidence !== null) issues.push('match_confidence_must_be_null_for_title_candidate');
+      } else if (relationship.match_confidence === null) issues.push('match_confidence_missing');
       if (relationship.review_category === null) issues.push('review_category_missing');
     }
     return issues;

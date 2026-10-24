@@ -29,6 +29,13 @@ const BASELINE_COMMIT = 'd5fcaa3ec71a278f3775bfbdbf4fa0ad731858d1';
 // Measured (not copied) on the BASELINE tool with TinySegmenter available (CDN served from the vendored npm bytes), medium dataset.
 const PRIOR_AVAILABLE = { comparisons: 654, identity: '01db5392c42ffabbfeabdbcdb72ef9aa59d52634236e7f52be7d3e4707bf515b', pairSetSha: '5f8123bdcb1e48a390c72d3eca95ccf3bcb5bacfeb7f090e26cf9b1ba45b4d9c',
   method: { exact: 497, tag: 149, partial: 5, vector: 3 }, classification: { '対応あり': 497, '要確認': 157 } };
+// Option C v1 (trace_title equality = candidate evidence, Contract v0.3): the canonical machine projection intentionally changed for exactly the 497 title-equal pairs
+// (exact -> title_candidate, 対応あり -> 要確認, confidence 1.0 -> null, evidence, machine_result.identity). Pair set and comparison count are unchanged.
+// Values below were recomputed from the accepted R2 working tree and the canonical medium A/B inputs (AUTHORIZED_MACHINE_PROJECTION_REBASELINE).
+// PRIOR_AVAILABLE above stays as the historical pre-Option-C record (still used for the unchanged comparison count / pair set and for the live baseline check).
+const OPTION_C_CANONICAL = { identity: 'df312e190a9cc4c6bfa8553e58aee7fbf0def6888dce9080cc71b19ac9cb33f5',
+  method: { title_candidate: 497, tag: 149, partial: 5, vector: 3 }, classification: { '要確認': 654 } };
+const normCounts = o => JSON.stringify(Object.keys(o).sort().map(k => [k, o[k]]));
 const TS_TOKENS = ['出荷', '検査', '試験', '成績', '書'];   // real TinySegmenter output for 出荷検査試験成績書 (the char-type fallback would return one chunk)
 
 const checks = [];
@@ -127,8 +134,8 @@ async function main() {
     // ---------- G. parity with the previous TinySegmenter-available path ----------
     check('G1 parity vs previous TinySegmenter-available path (pinned): comparison count', off.res.n === PRIOR_AVAILABLE.comparisons && off.res.elig === PRIOR_AVAILABLE.comparisons && off.res.inel === 0, [off.res.n, off.res.elig, off.res.inel]);
     check('G2 parity (pinned): pair set', pairSetSha(off.res.ids) === PRIOR_AVAILABLE.pairSetSha, pairSetSha(off.res.ids));
-    check('G3 parity (pinned): machine projection identity', off.res.identity === PRIOR_AVAILABLE.identity, off.res.identity);
-    check('G4 parity (pinned): method / classification distribution', JSON.stringify(off.res.method) === JSON.stringify(PRIOR_AVAILABLE.method) && JSON.stringify(off.res.classification) === JSON.stringify(PRIOR_AVAILABLE.classification), [off.res.method, off.res.classification]);
+    check('G3 parity (pinned, Option C canonical): machine projection identity', off.res.identity === OPTION_C_CANONICAL.identity, off.res.identity);
+    check('G4 parity (pinned, Option C canonical): method / classification distribution', JSON.stringify(off.res.method) === JSON.stringify(OPTION_C_CANONICAL.method) && JSON.stringify(off.res.classification) === JSON.stringify(OPTION_C_CANONICAL.classification), [off.res.method, off.res.classification]);
   }
 
   // ---------- G5. live parity against the baseline commit, if its blob is available ----------
@@ -153,8 +160,16 @@ async function main() {
       await ctx.close();
       check('G5 live baseline (d5fcaa3, TinySegmenter available): produced a result', !!base.res && base.diag === null, base.res && base.res.n);
       if (base.res && off.res) {
-        check('G6 live parity: comparison count / pair set / machine projection identity equal the previous TinySegmenter-available path',
-          base.res.n === off.res.n && pairSetSha(base.res.ids) === pairSetSha(off.res.ids) && base.res.identity === off.res.identity, [base.res.n, off.res.n, base.res.identity, off.res.identity]);
+        // Option C: the live baseline (d5fcaa3, pre-Option-C product) must still reproduce the historical identity, the comparison count and the pair set must be equal,
+        // and the only distribution change is exactly exact(497) -> title_candidate(497) with 対応あり(497) folded into 要確認 (654 = 497 + 157).
+        const baseM = base.res.method, baseC = base.res.classification;
+        const expectM = Object.assign({}, baseM); if (expectM.exact !== undefined) { expectM.title_candidate = expectM.exact; delete expectM.exact; }
+        check('G6 live parity (Option C): comparison count and pair set equal the previous TinySegmenter-available path; the live baseline reproduces the historical identity; the candidate equals the Option C canonical identity',
+          base.res.n === off.res.n && pairSetSha(base.res.ids) === pairSetSha(off.res.ids) && base.res.identity === PRIOR_AVAILABLE.identity && off.res.identity === OPTION_C_CANONICAL.identity,
+          [base.res.n, off.res.n, base.res.identity, off.res.identity]);
+        check('G6b live parity (Option C): the only distribution change is exact -> title_candidate (same count) and 対応あり -> 要確認 (all pairs 要確認)',
+          normCounts(expectM) === normCounts(off.res.method) && baseM.exact === 497 && (baseC['対応あり'] || 0) === 497 && off.res.classification['要確認'] === (baseC['対応あり'] || 0) + (baseC['要確認'] || 0) && !off.res.classification['対応あり'],
+          [baseM, baseC, off.res.method, off.res.classification]);
       }
     } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   } else {

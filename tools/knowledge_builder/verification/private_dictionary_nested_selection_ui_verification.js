@@ -509,8 +509,14 @@ async function main() {
     // Canonical TinySegmenter False-Positive Remediation (Human-authorized matching change) legitimately extends exactly these three functions
     // (keyword-level shared-heading guard, structured-identity dominance independent of tie order). They are NOT exempted from the identity check:
     // each is pinned to the SHA-256 of its authorized source, so any further change (or a revert) still fails this test. Everything else stays byte-identical.
-    const FP_REMEDIATED = { bestMatchForPlm: 'e3f890c3a4df2cca012befc6b5f06669e0d4a2709d43521a4c9574f4ffcbc7c2', calcPairMatch: '2490344b9d428f4802f43866f29ad2d3979d5431a7a03a8c2d68ff255a190e8f', matchPlmParts: '2157376e75fa61eb443949231626bdf341e0ff26372ae34f6f292ce512e33156' };
-    const fpPinned = n => Object.prototype.hasOwnProperty.call(FP_REMEDIATED, n) && crypto.createHash('sha256').update(fnSrc(cur, n) || '').digest('hex') === FP_REMEDIATED[n];
+    // Historical record (kept, not used by any assertion): the Canonical-FP-remediation sources that were pinned before Option C v1.
+    const FP_REMEDIATED_PRE_OPTION_C = { bestMatchForPlm: 'e3f890c3a4df2cca012befc6b5f06669e0d4a2709d43521a4c9574f4ffcbc7c2', calcPairMatch: '2490344b9d428f4802f43866f29ad2d3979d5431a7a03a8c2d68ff255a190e8f', matchPlmParts: '2157376e75fa61eb443949231626bdf341e0ff26372ae34f6f292ce512e33156' };
+    // Priority 1 Option C v1 (trace_title equality = candidate evidence; Contract v0.3; Human-accepted R2 implementation + limited rebaseline) legitimately extends
+    // these same three functions and exactly three more (OPTION_C_PINNED). Nothing is exempted: each function is pinned to the SHA-256 of its accepted final source,
+    // so any further change (or a revert) still fails. Guard-formalization traceability: OPTION_C_GUARD_FUNCTION_HASH_CHANGES.tsv.
+    const FP_REMEDIATED = { bestMatchForPlm: 'd3c10fce28170898b6537fa688153f87c28c0b3c091449680744ecb7b5682d63', calcPairMatch: 'f338e68a729e490f8d47dcf290650faa5f2d85f05fc13aea587435adf32395b4', matchPlmParts: 'b97945705651a113b63c2517c9530cd16919c08e72a7ce170901e068d0cf4171' };
+    const OPTION_C_PINNED = { bestDeterministicMatchForPlm: '8b0ea581ab328acddf0f8775d17ac489cea7217284e353a3fa59f0529b0a92b2', applyHierarchyGate: '1e3b8dd99048afd128046259d86e44e63877678d7305d10b2439a455465b0ad8', buildTraceMatrixRows: 'e504b6274b919db04761c92af1f15f37fff514054e2770a83621aea965522c25' };
+    const fpPinned = n => [FP_REMEDIATED, OPTION_C_PINNED].some(T => Object.prototype.hasOwnProperty.call(T, n) && crypto.createHash('sha256').update(fnSrc(cur, n) || '').digest('hex') === T[n]);
     assert(Object.keys(FP_REMEDIATED).every(n => fpPinned(n) && fnSrc(baselineHtml, n) !== fnSrc(cur, n)), 'FP the three false-positive-remediation functions (bestMatchForPlm, calcPairMatch, matchPlmParts) differ from the baseline and equal their pinned authorized SHA-256');
     const changed = identical.filter(n => fnSrc(baselineHtml, n) !== fnSrc(cur, n) && !fpPinned(n));
     assert(changed.length === 0, `I2 matching, scoring, ranking, composeFinalTags (maxTagsPerRow), key-pair selection, term extraction, sidecar, projection and queue code are byte-identical to the baseline (changed: ${changed.join(',') || 'none'})`);

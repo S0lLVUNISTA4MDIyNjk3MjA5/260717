@@ -62,7 +62,7 @@ async function main() {
   ok(Object.isFrozen(Core) && Object.isFrozen(Core.DECISIONS) && Object.isFrozen(Core.CODES) && Object.isFrozen(Core.STATUS), 'A6 exported API and constants are frozen (no mutable singleton)');
   ok(!Core.DECISIONS.includes('SKIP') && JSON.stringify(Core.DECISIONS) === '["CORRECT","INCORRECT","UNSURE"]', 'A7 persistent decisions are exactly CORRECT / INCORRECT / UNSURE (no SKIP)');
   ok(JSON.stringify(Core.ISSUE_CATEGORIES) === '["WRONG_MATCH","WRONG_FIELD","DICTIONARY","QUANTITY","INSUFFICIENT_EVIDENCE","OTHER"]', 'A8 issue categories are the six approved values (no MISSING_MATCH)');
-  ok(Core.MAX_SERIALIZED_BYTES === 8388608 && Core.ARTIFACT_SCHEMA_VERSION === 'human-evaluation-persistence/0.1', 'A9 8 MiB limit and schema id');
+  ok(Core.MAX_SERIALIZED_BYTES === 8388608 && Core.ARTIFACT_SCHEMA_VERSION === 'human-evaluation-persistence/0.2' && Core.LEGACY_ARTIFACT_SCHEMA_VERSION === 'human-evaluation-persistence/0.1', 'A9 8 MiB limit and schema id (0.2 current; 0.1 stays readable - Option C v1, null confidence allowed from 0.2)');
   // A10 permanent Core isolation boundary and integration direction (product -> Core, never Core -> product DOM / runtime).
   // (Replaces the Core-implementation-slice assumption "not connected yet"; it must hold before and after the product integrates the Core.)
   const PRODUCT_TOKENS = ['tabHumanEval', 'getElementById', 'querySelector', 'addEventListener', 'createElement', 'textContent', 'innerHTML', '__humanEvaluation',
@@ -251,7 +251,7 @@ async function main() {
   // ===== E. persistence =====
   const bytesOf = t => Buffer.byteLength(t, 'utf8');
   const emptyText = ser(state([]));
-  ok(emptyText === '{"artifact_schema_version":"human-evaluation-persistence/0.1","dataset_context":null,"evaluations":[]}', 'E1 empty artifact exact bytes');
+  ok(emptyText === '{"artifact_schema_version":"human-evaluation-persistence/0.2","dataset_context":null,"evaluations":[]}', 'E1 empty artifact exact bytes');
   ok(dec(emptyText).evaluations.length === 0 && dec(emptyText).dataset_context === null, 'E2 empty evaluations is valid (zero saved evaluations)');
   const one = ser(state([E1]));
   const back1 = dec(one);
@@ -291,7 +291,7 @@ async function main() {
   for (const [label, t] of [['array', '[]'], ['null', 'null'], ['number', '5'], ['string', '"x"'], ['true', 'true']]) throwsCode(() => dec(t), C.ROOT_INVALID, `E20 wrong root type (${label})`);
   throwsCode(() => dec(mut(a => { a.artifact_schema_version = 'other-artifact/0.1'; })), C.ROOT_INVALID, 'E21 foreign schema id');
   throwsCode(() => dec(mut(a => { a.artifact_schema_version = 5; })), C.ROOT_INVALID, 'E22 non-string schema id');
-  for (const v of ['human-evaluation-persistence/0.2', 'human-evaluation-persistence/1.0', 'human-evaluation-persistence/', 'human-evaluation-persistence/0.1.1']) throwsCode(() => dec(mut(a => { a.artifact_schema_version = v; })), C.UNSUPPORTED_VERSION, `E23 unsupported version ${v} (no best-effort read)`);
+  for (const v of ['human-evaluation-persistence/0.3', 'human-evaluation-persistence/1.0', 'human-evaluation-persistence/', 'human-evaluation-persistence/0.1.1']) throwsCode(() => dec(mut(a => { a.artifact_schema_version = v; })), C.UNSUPPORTED_VERSION, `E23 unsupported version ${v} (no best-effort read)`);
   throwsCode(() => dec('{"artifact_schema_version"'), C.SERIALIZED_INVALID, 'E24 malformed JSON');
   throwsCode(() => dec(one + ' garbage'), C.SERIALIZED_INVALID, 'E25 trailing garbage');
   ok(code(() => dec(one + ' \n\t ')) === null, 'E26 trailing whitespace is tolerated on read');

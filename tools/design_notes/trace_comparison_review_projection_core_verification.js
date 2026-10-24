@@ -45,7 +45,7 @@ function makeLiveSourceMarker() {
 function makeSnapshotIdentity() {
   return {
     value: `b4-snapshot-v1:${HEX64_D}`,
-    schema_version: 'trace-comparison/1.0-rc2',
+    schema_version: 'trace-comparison/1.0-rc3',
     record_set_digest: `SHA-256:${HEX64_C}`
   };
 }

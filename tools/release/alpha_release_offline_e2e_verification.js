@@ -632,7 +632,7 @@ async function runAllScenarios(browser, tempDir, files) {
   const schemaCheck = await page.evaluate(() => ({
     traceComparisonSchemaId: globalThis.TraceComparisonSchemaV2?.$id ?? null,
   }));
-  check('[E] Schema $id (trace-comparison/1.0-rc2)が変更されていない', schemaCheck.traceComparisonSchemaId === 'trace-comparison/1.0-rc2', schemaCheck);
+  check('[E] Schema $id (trace-comparison/1.0-rc3)が変更されていない', schemaCheck.traceComparisonSchemaId === 'trace-comparison/1.0-rc3', schemaCheck);
 
   // ═══════════════════ 共通: エラー/ネットワーク集計 ═══════════════════
   check('全経路でpage errorが0件', pageErrors.length === 0, pageErrors);

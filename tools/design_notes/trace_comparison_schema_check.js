@@ -96,7 +96,7 @@ function baseComparisonRecord(overrides) {
 
 function baseRecordSet(comparisonsOverride) {
   return {
-    schema_version: 'trace-comparison/1.0-rc2',
+    schema_version: 'trace-comparison/1.0-rc3',
     generated_at: '2026-07-22T00:00:00.000Z',
     generator: { tool: 't', version: '1' },
     source: { requirement_trace_file: 'req.json', actual_trace_file: 'act.json' },
@@ -124,7 +124,7 @@ check('baseline: comparisons 0件のrecord_setも有効', ok(baseRecordSet([])))
 {
   const rc1Fixture = readJson('runtime_fixtures/trace_comparison_example_verified.json');
   check('旧rc1文書の実fixtureはrc2 Schemaで拒否される', !ok(rc1Fixture));
-  const rc1SchemaVersionSwapped = Object.assign({}, rc1Fixture, { schema_version: 'trace-comparison/1.0-rc2' });
+  const rc1SchemaVersionSwapped = Object.assign({}, rc1Fixture, { schema_version: 'trace-comparison/1.0-rc3' });
   check('rc1文書のschema_versionだけをrc2へ書き換えても、他フィールドの構造不一致で拒否される', !ok(rc1SchemaVersionSwapped));
 }
 
@@ -176,6 +176,16 @@ check('unit_conversion_plan: conversion_required:trueなのにconversion_operati
 // ══════════════ relationship: sourceで判別可能なoneOf ══════════════
 check('relationship: matching_engineでmatch_method:nullは拒否する(必須項目欠落)', !ok(baseRecordSet([baseComparisonRecord({
   relationship: { source: 'matching_engine', match_method: null, match_confidence: 0.8, review_category: 'x', linked_at: null },
+})])));
+// ══════════════ rc3 (Priority 1 / Option C v1): title_candidate has no calibrated confidence -> match_confidence null (N/A) ══════════════
+check('relationship rc3: matching_engine + title_candidate + match_confidence:null は許可する', ok(baseRecordSet([baseComparisonRecord({
+  relationship: { source: 'matching_engine', match_method: 'title_candidate', match_confidence: null, review_category: '要確認', linked_at: null },
+})])));
+check('relationship rc3: matching_engineで他のmethod(tag)のmatch_confidence:nullは拒否する(置換数値なしのN/Aはtitle_candidateだけ)', !ok(baseRecordSet([baseComparisonRecord({
+  relationship: { source: 'matching_engine', match_method: 'tag', match_confidence: null, review_category: '要確認', linked_at: null },
+})])));
+check('relationship rc3: title_candidateでも数値branchの範囲外(1.5)は拒否する(0.88等の数値をtitle_candidateへ付けることはsidecar/review coreが別途拒否)', !ok(baseRecordSet([baseComparisonRecord({
+  relationship: { source: 'matching_engine', match_method: 'title_candidate', match_confidence: 1.5, review_category: '要確認', linked_at: null },
 })])));
 check('relationship: manualで3項目すべてnullは許可する', ok(baseRecordSet([baseComparisonRecord({
   relationship: { source: 'manual', match_method: null, match_confidence: null, review_category: null, linked_at: null },

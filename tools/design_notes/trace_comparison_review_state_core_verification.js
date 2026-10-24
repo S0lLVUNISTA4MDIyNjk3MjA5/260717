@@ -56,7 +56,7 @@ function marker() {
   };
 }
 function snapshot() {
-  return { value:`b4-snapshot-v1:${hex('1')}`, schema_version:'trace-comparison/1.0-rc2', record_set_digest:`SHA-256:${hex('2')}` };
+  return { value:`b4-snapshot-v1:${hex('1')}`, schema_version:'trace-comparison/1.0-rc3', record_set_digest:`SHA-256:${hex('2')}` };
 }
 const at = '2026-07-23T03:04:05.678Z';
 function make(ids = ['cmp-v1:a', 'cmp-v1:b']) {

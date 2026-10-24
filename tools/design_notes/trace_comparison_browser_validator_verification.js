@@ -214,7 +214,7 @@ const CASES = [
     validatorKeys: Object.keys(globalThis.TraceComparisonRecordSetValidator || {}).sort(),
   }));
   check('4スクリプトを順序読み込みすると所定global APIが公開される',
-    globals.core && globals.schema === 'trace-comparison/1.0-rc2'
+    globals.core && globals.schema === 'trace-comparison/1.0-rc3'
       && JSON.stringify(globals.miniKeys) === JSON.stringify(['validate'])
       && JSON.stringify(globals.validatorKeys) === JSON.stringify([
         'decodeUtf8NetstringElements', 'isRealCanonicalTimestamp', 'validateTraceComparisonRecordSet',

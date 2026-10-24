@@ -62,7 +62,7 @@ function bindingStub(overrides = {}) {
 }
 function recordSetStub(generatedAt = at, matchingSignature = 'matching-1', ids = ['cmp-v1:test']) {
   return {
-    schema_version:'trace-comparison/1.0-rc2', generated_at:generatedAt,
+    schema_version:'trace-comparison/1.0-rc3', generated_at:generatedAt,
     provenance:{ requirement_dataset_signature:reqSig, actual_dataset_signature:actSig },
     display_context:{ matching_dataset_signature:matchingSignature },
     comparisons:ids.map(comparison_id => ({
@@ -316,6 +316,19 @@ test('relation rejects sparse array', async () => {
 });
 test('relation rejects confidence outside range', async () => {
   const item = relation(); item.relationship.match_confidence = 2;
+  assert(!(await sessionCore.prepareRelationSnapshot([item])).ok);
+});
+test('relation rc3: title_candidate accepts match_confidence null (N/A) and keeps it null', async () => {
+  const item = relation(); item.relationship.match_method = 'title_candidate'; item.relationship.match_confidence = null; item.relationship.review_category = '要確認';
+  const r = await sessionCore.prepareRelationSnapshot([item]);
+  assert(r.ok);
+});
+test('relation rc3: title_candidate rejects a substitute numeric confidence', async () => {
+  const item = relation(); item.relationship.match_method = 'title_candidate'; item.relationship.match_confidence = 0.88; item.relationship.review_category = '要確認';
+  assert(!(await sessionCore.prepareRelationSnapshot([item])).ok);
+});
+test('relation rc3: a non-title_candidate engine relation still rejects match_confidence null', async () => {
+  const item = relation(); item.relationship.match_confidence = null;
   assert(!(await sessionCore.prepareRelationSnapshot([item])).ok);
 });
 test('relation rejects noncanonical linked_at', async () => {

@@ -8,8 +8,8 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function() {
   return {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "trace-comparison/1.0-rc2",
-  "title": "trace-comparison/1.0-rc2",
+  "$id": "trace-comparison/1.0-rc3",
+  "title": "trace-comparison/1.0-rc3",
   "description": "generateTraceComparisonRecordSet()(quantity_sidecar_binding_core.js Phase B-3b)が返す{ready,result_complete,diagnostics,record_set}のうち、record_setだけを検証対象にする(runtime envelope自体はSchema対象外、trace_comparison_record_set_validator.jsへ渡す前にrecord_setを取り出すこと)。設計根拠はshadow_mode_integration_design.md 3.4節を参照。$defs.analysis/quantityRecord/intervalBound/evidenceItem/ruleset_versionはquantity_annotation_schema_v1.jsonの同名定義を複製したもの(analysisはcontent_hash必須フィールドを追加、他は同一。乖離はtrace_comparison_schema_drift_check.jsが検査する)。",
   "type": "object",
   "additionalProperties": false,
@@ -26,7 +26,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "trace-comparison/1.0-rc2"
+      "const": "trace-comparison/1.0-rc3"
     },
     "generated_at": {
       "type": "string",
@@ -324,6 +324,40 @@
               "type": "number",
               "minimum": 0,
               "maximum": 1
+            },
+            "review_category": {
+              "type": "string",
+              "minLength": 1
+            },
+            "linked_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            }
+          }
+        },
+        {
+          "description": "rc3 (Priority 1 / Option C v1): an UNCONFIRMED title_candidate has NO calibrated correspondence-strength measure, so match_confidence is null (N/A), never a substitute number. The cores additionally require match_method=title_candidate <=> match_confidence=null for matching_engine relations.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "match_method",
+            "match_confidence",
+            "review_category",
+            "linked_at"
+          ],
+          "properties": {
+            "source": {
+              "const": "matching_engine"
+            },
+            "match_method": {
+              "const": "title_candidate"
+            },
+            "match_confidence": {
+              "type": "null"
             },
             "review_category": {
               "type": "string",
