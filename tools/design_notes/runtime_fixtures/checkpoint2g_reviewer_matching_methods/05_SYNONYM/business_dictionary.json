@@ -1,0 +1,12 @@
+{
+  "synonymMap": {
+    "非常停止スイッチ": [
+      "EMO",
+      "Emergency Off"
+    ],
+    "冷却水ポンプ": [
+      "CWP",
+      "Cooling Water Pump"
+    ]
+  }
+}

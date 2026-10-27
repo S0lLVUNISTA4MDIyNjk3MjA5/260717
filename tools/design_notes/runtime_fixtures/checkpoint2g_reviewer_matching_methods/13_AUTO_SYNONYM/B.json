@@ -1,0 +1,26 @@
+{
+  "file_name": "13_AUTO_SYNONYM_B.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "2.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "AS-B1",
+      "term": "循環冷却水ポンプ",
+      "display_name": "納入側 循環冷却水ポンプ"
+    },
+    {
+      "trace_id": "AS-B2",
+      "term": "給気送風機",
+      "display_name": "納入側 給気送風機"
+    },
+    {
+      "trace_id": "AS-B3",
+      "term": "差圧監視用スイッチ",
+      "display_name": "納入側 差圧スイッチ"
+    }
+  ]
+}

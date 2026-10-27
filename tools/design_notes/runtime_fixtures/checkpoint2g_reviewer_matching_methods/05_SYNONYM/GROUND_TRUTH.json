@@ -1,0 +1,29 @@
+{
+  "case_id": "05_SYNONYM",
+  "title": "同義語一致 (synonym)",
+  "manual_key_pairs": [
+    {
+      "sysField": "term",
+      "plmField": "term",
+      "method": "synonym",
+      "enabled": true
+    }
+  ],
+  "expected": {
+    "accepted_edges": [
+      [
+        "SYN-A1",
+        "SYN-B1"
+      ],
+      [
+        "SYN-A2",
+        "SYN-B2"
+      ]
+    ],
+    "expected_result_method": "synonym",
+    "wrong_edges": 0
+  },
+  "notes": [
+    "業務辞書を読み込んでから再照合。Private Dictionary Snapshotとは別の既存synonym機能。"
+  ]
+}

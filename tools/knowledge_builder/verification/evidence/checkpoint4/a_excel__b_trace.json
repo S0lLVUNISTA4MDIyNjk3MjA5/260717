@@ -1,0 +1,2391 @@
+{
+  "schema_version": "knowledge-data/0.1",
+  "dataset_id": "kd-785d7ea4c8a1825d29520d5c74681c5c",
+  "generated_at": "2026-08-02T21:26:18.181Z",
+  "generator": {
+    "tool": "knowledge_builder_tool",
+    "version": "0.2.0-alpha"
+  },
+  "provenance": {
+    "hash_algorithm": "SHA-256",
+    "id_hash_algorithm": "SHA-256/128",
+    "normalization": "v12-normalize-v1",
+    "ruleset_version": {}
+  },
+  "sources": [
+    {
+      "source_document_id": "sd-60f9a6d8e393b779c24f2c1211337faa",
+      "file_name": "matrix_doc_a.xlsx",
+      "producer": "excel",
+      "content_digest": "8850bbf152c57a37e7f0c7d766c22d78c86c4095adba29ef5d8dac0aa47ad6d5",
+      "document_number": null,
+      "revision": null,
+      "ingested_at": "2026-08-02T21:26:16.881Z",
+      "extensions": {}
+    },
+    {
+      "source_document_id": "sd-cf8fbf60b0aafaeaa5adbe77701d1ae2",
+      "file_name": "matrix_doc_b_trace.json",
+      "producer": "pdf",
+      "content_digest": "777c94e968c0d87b4a398f36d4a46f3de89eba29d1666cafc35267a2dd21d4c3",
+      "document_number": null,
+      "revision": null,
+      "ingested_at": "2026-08-02T21:26:16.881Z",
+      "extensions": {}
+    }
+  ],
+  "tag_vocabulary": {
+    "schema": "trace-tag-vocabulary/1.0",
+    "vocabulary_id": "trace-domain-ja",
+    "vocabulary_version": "1.0.0",
+    "allowed_tags": [
+      "安全",
+      "性能",
+      "機能",
+      "品質",
+      "インターフェース",
+      "製造",
+      "検査",
+      "保守"
+    ],
+    "aliases": {},
+    "vocabulary_sha256": "4602f1c47116ab18e39a53bfe38c8d753dae61a8806674672c9638a0a0f4305f"
+  },
+  "nodes": [
+    {
+      "node_id": "kn-9f4f1c09925cf8cf33a26abb7aeebe80",
+      "node_type": "document",
+      "text": "matrix_doc_a.xlsx",
+      "title": "matrix_doc_a.xlsx",
+      "tags": [],
+      "unregistered_tags": [],
+      "semantics": {
+        "subject": {
+          "text": null,
+          "concept_id": null
+        },
+        "property": {
+          "text": null,
+          "concept_id": null
+        },
+        "statement_type": "information",
+        "derived_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "extensions": {}
+      },
+      "quantities": [],
+      "parent_node_id": null,
+      "provenance": {
+        "source_document_id": "sd-60f9a6d8e393b779c24f2c1211337faa",
+        "producer": "excel",
+        "locator": {
+          "kind": "excel",
+          "sheet": "matrix_doc_a.xlsx",
+          "row": 0,
+          "source_path": "$.document"
+        },
+        "verbatim": {
+          "source_record": {
+            "title": "matrix_doc_a.xlsx"
+          },
+          "source_record_display": null,
+          "source_row": 0
+        },
+        "extensions": {}
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "b2cc035c4858cc413162f595db6382c010ed5c859d129b329af8c3a64dc4e48c",
+        "updated_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "export_binding": null,
+      "confidence": 1,
+      "extensions": {}
+    },
+    {
+      "node_id": "kn-a1f5957c6c0a06ca6fc327ae23dcfc80",
+      "node_type": "section",
+      "text": "matrix",
+      "title": "matrix",
+      "tags": [],
+      "unregistered_tags": [],
+      "semantics": {
+        "subject": {
+          "text": null,
+          "concept_id": null
+        },
+        "property": {
+          "text": null,
+          "concept_id": null
+        },
+        "statement_type": "information",
+        "derived_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "extensions": {}
+      },
+      "quantities": [],
+      "parent_node_id": "kn-9f4f1c09925cf8cf33a26abb7aeebe80",
+      "provenance": {
+        "source_document_id": "sd-60f9a6d8e393b779c24f2c1211337faa",
+        "producer": "excel",
+        "locator": {
+          "kind": "excel",
+          "sheet": "matrix",
+          "row": 0,
+          "source_path": "$.section[matrix]"
+        },
+        "verbatim": {
+          "source_record": {
+            "title": "matrix"
+          },
+          "source_record_display": null,
+          "source_row": 0
+        },
+        "extensions": {
+          "sheet_index": 0,
+          "physical_used_range": "A1:C4",
+          "meaningful_used_range": "A1:C4",
+          "header_row": 1,
+          "data_start_row": 2
+        }
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "aa373b8875e9a91b8f586b361563f1e88223077b4b374e558109cb466613ac62",
+        "updated_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "export_binding": null,
+      "confidence": 1,
+      "extensions": {}
+    },
+    {
+      "node_id": "kn-050f9321e582b12b8ae99cada7a38f8a",
+      "node_type": "statement",
+      "text": "項目: 表面温度 / 内容: 通常運転時の表面温度は60度以下とする / 区分: 温度管理",
+      "title": "表面温度",
+      "tags": [],
+      "unregistered_tags": [],
+      "semantics": {
+        "subject": {
+          "text": null,
+          "concept_id": null
+        },
+        "property": {
+          "text": null,
+          "concept_id": null
+        },
+        "statement_type": "information",
+        "derived_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "extensions": {}
+      },
+      "quantities": [],
+      "parent_node_id": "kn-a1f5957c6c0a06ca6fc327ae23dcfc80",
+      "provenance": {
+        "source_document_id": "sd-60f9a6d8e393b779c24f2c1211337faa",
+        "producer": "excel",
+        "locator": {
+          "kind": "excel",
+          "sheet": "matrix",
+          "row": 2,
+          "source_path": "$.rows[2]"
+        },
+        "verbatim": {
+          "source_record": {
+            "項目": "表面温度",
+            "内容": "通常運転時の表面温度は60度以下とする",
+            "区分": "温度管理"
+          },
+          "source_record_display": {
+            "項目": "表面温度",
+            "内容": "通常運転時の表面温度は60度以下とする",
+            "区分": "温度管理"
+          },
+          "source_row": 2
+        },
+        "extensions": {
+          "sheet_index": 0,
+          "cell_range": "A2:C2",
+          "column_headers": [
+            "項目",
+            "内容",
+            "区分"
+          ],
+          "formulas": {
+            "項目": null,
+            "内容": null,
+            "区分": null
+          },
+          "input_mode": "excel-direct",
+          "physical_used_range": "A1:C4",
+          "meaningful_used_range": "A1:C4",
+          "header_row": 1,
+          "data_start_row": 2,
+          "warnings": []
+        }
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "acc4a1b2b3f85b3a15d145f2d032d424435a1560ffe534b416ef47607dba02f1",
+        "updated_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "export_binding": null,
+      "confidence": 1,
+      "extensions": {}
+    },
+    {
+      "node_id": "kn-8e95de3233335688333a3d8b4e5374f5",
+      "node_type": "statement",
+      "text": "項目: 動作音 / 内容: 通常運転時の動作音は45dB以下とする / 区分: 静音性",
+      "title": "動作音",
+      "tags": [],
+      "unregistered_tags": [],
+      "semantics": {
+        "subject": {
+          "text": null,
+          "concept_id": null
+        },
+        "property": {
+          "text": null,
+          "concept_id": null
+        },
+        "statement_type": "information",
+        "derived_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "extensions": {}
+      },
+      "quantities": [],
+      "parent_node_id": "kn-a1f5957c6c0a06ca6fc327ae23dcfc80",
+      "provenance": {
+        "source_document_id": "sd-60f9a6d8e393b779c24f2c1211337faa",
+        "producer": "excel",
+        "locator": {
+          "kind": "excel",
+          "sheet": "matrix",
+          "row": 3,
+          "source_path": "$.rows[3]"
+        },
+        "verbatim": {
+          "source_record": {
+            "項目": "動作音",
+            "内容": "通常運転時の動作音は45dB以下とする",
+            "区分": "静音性"
+          },
+          "source_record_display": {
+            "項目": "動作音",
+            "内容": "通常運転時の動作音は45dB以下とする",
+            "区分": "静音性"
+          },
+          "source_row": 3
+        },
+        "extensions": {
+          "sheet_index": 0,
+          "cell_range": "A3:C3",
+          "column_headers": [
+            "項目",
+            "内容",
+            "区分"
+          ],
+          "formulas": {
+            "項目": null,
+            "内容": null,
+            "区分": null
+          },
+          "input_mode": "excel-direct",
+          "physical_used_range": "A1:C4",
+          "meaningful_used_range": "A1:C4",
+          "header_row": 1,
+          "data_start_row": 2,
+          "warnings": []
+        }
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "a2b7bbfefcbba504a5bc97af7d8ac7e9a101c9aa0a73c4fd74dfefeee5d9c404",
+        "updated_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "export_binding": null,
+      "confidence": 1,
+      "extensions": {}
+    },
+    {
+      "node_id": "kn-77475835c9f354bc654fcf067ac53829",
+      "node_type": "statement",
+      "text": "項目: 設置環境 / 内容: 屋内の乾燥した場所に設置することを前提とする / 区分: 設置条件",
+      "title": "設置環境",
+      "tags": [],
+      "unregistered_tags": [],
+      "semantics": {
+        "subject": {
+          "text": null,
+          "concept_id": null
+        },
+        "property": {
+          "text": null,
+          "concept_id": null
+        },
+        "statement_type": "information",
+        "derived_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "extensions": {}
+      },
+      "quantities": [],
+      "parent_node_id": "kn-a1f5957c6c0a06ca6fc327ae23dcfc80",
+      "provenance": {
+        "source_document_id": "sd-60f9a6d8e393b779c24f2c1211337faa",
+        "producer": "excel",
+        "locator": {
+          "kind": "excel",
+          "sheet": "matrix",
+          "row": 4,
+          "source_path": "$.rows[4]"
+        },
+        "verbatim": {
+          "source_record": {
+            "項目": "設置環境",
+            "内容": "屋内の乾燥した場所に設置することを前提とする",
+            "区分": "設置条件"
+          },
+          "source_record_display": {
+            "項目": "設置環境",
+            "内容": "屋内の乾燥した場所に設置することを前提とする",
+            "区分": "設置条件"
+          },
+          "source_row": 4
+        },
+        "extensions": {
+          "sheet_index": 0,
+          "cell_range": "A4:C4",
+          "column_headers": [
+            "項目",
+            "内容",
+            "区分"
+          ],
+          "formulas": {
+            "項目": null,
+            "内容": null,
+            "区分": null
+          },
+          "input_mode": "excel-direct",
+          "physical_used_range": "A1:C4",
+          "meaningful_used_range": "A1:C4",
+          "header_row": 1,
+          "data_start_row": 2,
+          "warnings": []
+        }
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "cd74efd60ae95e4ec3b97cc046affde292a31a9c6c20b5e6e0732305e8fe8dbc",
+        "updated_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "export_binding": null,
+      "confidence": 1,
+      "extensions": {}
+    },
+    {
+      "node_id": "kn-435ecb6db2db153c7f42d71f4065ebd6",
+      "node_type": "document",
+      "text": "マトリクス評価",
+      "title": "マトリクス評価",
+      "tags": [],
+      "unregistered_tags": [],
+      "semantics": {
+        "subject": {
+          "text": null,
+          "concept_id": null
+        },
+        "property": {
+          "text": null,
+          "concept_id": null
+        },
+        "statement_type": "information",
+        "derived_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "extensions": {}
+      },
+      "quantities": [],
+      "parent_node_id": null,
+      "provenance": {
+        "source_document_id": "sd-cf8fbf60b0aafaeaa5adbe77701d1ae2",
+        "producer": "pdf",
+        "locator": {
+          "kind": "pdf",
+          "page": null,
+          "source_path": "$.document",
+          "section_id": null,
+          "section_number": null,
+          "section_title": null,
+          "block_id": null
+        },
+        "verbatim": {
+          "source_raw_text": "マトリクス評価"
+        },
+        "extensions": {}
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "b0dcd0917b983ccf7464437ac388bab0a2443d23829e0fce4f4d8a56b9e6c484",
+        "updated_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "export_binding": null,
+      "confidence": 1,
+      "extensions": {}
+    },
+    {
+      "node_id": "kn-8eb9c43a46c943817ca95f856953563d",
+      "node_type": "section",
+      "text": "マトリクス項目",
+      "title": "マトリクス項目",
+      "tags": [],
+      "unregistered_tags": [],
+      "semantics": {
+        "subject": {
+          "text": null,
+          "concept_id": null
+        },
+        "property": {
+          "text": null,
+          "concept_id": null
+        },
+        "statement_type": "information",
+        "derived_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "extensions": {}
+      },
+      "quantities": [],
+      "parent_node_id": "kn-435ecb6db2db153c7f42d71f4065ebd6",
+      "provenance": {
+        "source_document_id": "sd-cf8fbf60b0aafaeaa5adbe77701d1ae2",
+        "producer": "pdf",
+        "locator": {
+          "kind": "pdf",
+          "page": null,
+          "source_path": "$.section[sec-matrix-1]",
+          "section_id": "sec-matrix-1",
+          "section_number": null,
+          "section_title": "マトリクス項目",
+          "block_id": null
+        },
+        "verbatim": {
+          "source_raw_text": "マトリクス項目"
+        },
+        "extensions": {}
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "8ab9483496d6437ef746a54471966764a8bb41b65281e90e204bad261531bd4e",
+        "updated_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "export_binding": null,
+      "confidence": 1,
+      "extensions": {}
+    },
+    {
+      "node_id": "kn-2aed27ea1a409b9c5ae4865388e923a8",
+      "node_type": "design_item",
+      "text": "項目: 筐体表面温度 / 内容: 通常運転時の筐体表面温度を60度以下に維持する設計とする / 区分: 温度管理",
+      "title": "筐体表面温度",
+      "tags": [],
+      "unregistered_tags": [],
+      "semantics": {
+        "subject": {
+          "text": null,
+          "concept_id": null
+        },
+        "property": {
+          "text": null,
+          "concept_id": null
+        },
+        "statement_type": "information",
+        "derived_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "extensions": {}
+      },
+      "quantities": [],
+      "parent_node_id": "kn-8eb9c43a46c943817ca95f856953563d",
+      "provenance": {
+        "source_document_id": "sd-cf8fbf60b0aafaeaa5adbe77701d1ae2",
+        "producer": "pdf",
+        "locator": {
+          "kind": "pdf",
+          "page": 1,
+          "source_path": "$.sections[0].content[0]",
+          "section_id": "sec-matrix-1",
+          "section_number": "1.1",
+          "section_title": "マトリクス項目",
+          "block_id": "block-matrix-1"
+        },
+        "verbatim": {
+          "source_raw_text": "項目: 筐体表面温度 / 内容: 通常運転時の筐体表面温度を60度以下に維持する設計とする / 区分: 温度管理"
+        },
+        "extensions": {}
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "c0a015644192e54bb3efb4eb98635780706ec3159fa6019d18959c8e18cd3f6e",
+        "updated_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "export_binding": {
+        "trace_id": "matrix-b-1",
+        "content_hash": "16b342af483bfc80373eaf6f7ac9a1d0d02c55b7690ae1b58b4f5d8b06e67c65"
+      },
+      "confidence": 1,
+      "extensions": {}
+    },
+    {
+      "node_id": "kn-ec7ce77033f66c0af28020035b258b74",
+      "node_type": "design_item",
+      "text": "項目: 運転音 / 内容: 通常運転時の運転音を45dB以下に抑える設計とする / 区分: 静音性",
+      "title": "運転音",
+      "tags": [],
+      "unregistered_tags": [],
+      "semantics": {
+        "subject": {
+          "text": null,
+          "concept_id": null
+        },
+        "property": {
+          "text": null,
+          "concept_id": null
+        },
+        "statement_type": "information",
+        "derived_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "extensions": {}
+      },
+      "quantities": [],
+      "parent_node_id": "kn-8eb9c43a46c943817ca95f856953563d",
+      "provenance": {
+        "source_document_id": "sd-cf8fbf60b0aafaeaa5adbe77701d1ae2",
+        "producer": "pdf",
+        "locator": {
+          "kind": "pdf",
+          "page": 1,
+          "source_path": "$.sections[0].content[1]",
+          "section_id": "sec-matrix-1",
+          "section_number": "1.1",
+          "section_title": "マトリクス項目",
+          "block_id": "block-matrix-2"
+        },
+        "verbatim": {
+          "source_raw_text": "項目: 運転音 / 内容: 通常運転時の運転音を45dB以下に抑える設計とする / 区分: 静音性"
+        },
+        "extensions": {}
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "9c0e68efbd0962059ed7d0d27ad97169b98eae55482a58b9f306bdafcc7c230c",
+        "updated_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "export_binding": {
+        "trace_id": "matrix-b-2",
+        "content_hash": "192626247d711e83eb9dca2f52ecbcbf7fb9f06ad997df7fddc28a0e9e81b3ac"
+      },
+      "confidence": 1,
+      "extensions": {}
+    },
+    {
+      "node_id": "kn-2a9d1b16e7d4e3ccba41e3b8ea2fa4c4",
+      "node_type": "design_item",
+      "text": "項目: 設置場所 / 内容: 屋内の乾燥した場所への設置を前提とした構造とする / 区分: 設置条件",
+      "title": "設置場所",
+      "tags": [],
+      "unregistered_tags": [],
+      "semantics": {
+        "subject": {
+          "text": null,
+          "concept_id": null
+        },
+        "property": {
+          "text": null,
+          "concept_id": null
+        },
+        "statement_type": "information",
+        "derived_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "extensions": {}
+      },
+      "quantities": [],
+      "parent_node_id": "kn-8eb9c43a46c943817ca95f856953563d",
+      "provenance": {
+        "source_document_id": "sd-cf8fbf60b0aafaeaa5adbe77701d1ae2",
+        "producer": "pdf",
+        "locator": {
+          "kind": "pdf",
+          "page": 1,
+          "source_path": "$.sections[0].content[2]",
+          "section_id": "sec-matrix-1",
+          "section_number": "1.1",
+          "section_title": "マトリクス項目",
+          "block_id": "block-matrix-3"
+        },
+        "verbatim": {
+          "source_raw_text": "項目: 設置場所 / 内容: 屋内の乾燥した場所への設置を前提とした構造とする / 区分: 設置条件"
+        },
+        "extensions": {}
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "5a3f5d9c6da70162dbdc958ea4ff10afac00ae1af98329abd89a36da74912ff8",
+        "updated_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "export_binding": {
+        "trace_id": "matrix-b-3",
+        "content_hash": "9f40b6cdad181aa41431c86b240fdf6576ddc89180fb9dfdc9c4959a09211305"
+      },
+      "confidence": 1,
+      "extensions": {}
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "ke-3593d35cedb64105120c0fd2f3d62e39",
+      "source_node_id": "kn-9f4f1c09925cf8cf33a26abb7aeebe80",
+      "target_node_id": "kn-a1f5957c6c0a06ca6fc327ae23dcfc80",
+      "relation_category": "structural",
+      "relation_type": "contains",
+      "lifecycle": "active",
+      "confidence": 1,
+      "evidence": {
+        "matching_profile_id": null,
+        "features": [
+          {
+            "feature": "hierarchy",
+            "detail": {
+              "parent": "kn-9f4f1c09925cf8cf33a26abb7aeebe80",
+              "child": "kn-a1f5957c6c0a06ca6fc327ae23dcfc80"
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "generated_at": "2026-08-02T21:26:16.881Z",
+        "engine": "excel-direct-adapter",
+        "source_node_knowledge_hash": "b2cc035c4858cc413162f595db6382c010ed5c859d129b329af8c3a64dc4e48c",
+        "target_node_knowledge_hash": "aa373b8875e9a91b8f586b361563f1e88223077b4b374e558109cb466613ac62"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "30ecbf0f161839e0285ed28e77bc4ae6a1d725f8d3de0559e9dcdd30b187b816",
+        "updated_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-1dc36fc4dc8e5451e7ecb624fd583221",
+      "source_node_id": "kn-a1f5957c6c0a06ca6fc327ae23dcfc80",
+      "target_node_id": "kn-050f9321e582b12b8ae99cada7a38f8a",
+      "relation_category": "structural",
+      "relation_type": "contains",
+      "lifecycle": "active",
+      "confidence": 1,
+      "evidence": {
+        "matching_profile_id": null,
+        "features": [
+          {
+            "feature": "hierarchy",
+            "detail": {
+              "parent": "kn-a1f5957c6c0a06ca6fc327ae23dcfc80",
+              "child": "kn-050f9321e582b12b8ae99cada7a38f8a"
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "generated_at": "2026-08-02T21:26:16.881Z",
+        "engine": "excel-direct-adapter",
+        "source_node_knowledge_hash": "aa373b8875e9a91b8f586b361563f1e88223077b4b374e558109cb466613ac62",
+        "target_node_knowledge_hash": "acc4a1b2b3f85b3a15d145f2d032d424435a1560ffe534b416ef47607dba02f1"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "74e989da02261a234ca416dceafbf386a66999d3c719392df5f5ebdeefb09e17",
+        "updated_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-747f473c6e18edd489a646ea79649b49",
+      "source_node_id": "kn-a1f5957c6c0a06ca6fc327ae23dcfc80",
+      "target_node_id": "kn-8e95de3233335688333a3d8b4e5374f5",
+      "relation_category": "structural",
+      "relation_type": "contains",
+      "lifecycle": "active",
+      "confidence": 1,
+      "evidence": {
+        "matching_profile_id": null,
+        "features": [
+          {
+            "feature": "hierarchy",
+            "detail": {
+              "parent": "kn-a1f5957c6c0a06ca6fc327ae23dcfc80",
+              "child": "kn-8e95de3233335688333a3d8b4e5374f5"
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "generated_at": "2026-08-02T21:26:16.881Z",
+        "engine": "excel-direct-adapter",
+        "source_node_knowledge_hash": "aa373b8875e9a91b8f586b361563f1e88223077b4b374e558109cb466613ac62",
+        "target_node_knowledge_hash": "a2b7bbfefcbba504a5bc97af7d8ac7e9a101c9aa0a73c4fd74dfefeee5d9c404"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "c6a225f0e325538e79ba3fb266361fc41995de2426511a73bfbdfc30d9a42873",
+        "updated_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-c220389bf9a878bbef4802c815159d5f",
+      "source_node_id": "kn-a1f5957c6c0a06ca6fc327ae23dcfc80",
+      "target_node_id": "kn-77475835c9f354bc654fcf067ac53829",
+      "relation_category": "structural",
+      "relation_type": "contains",
+      "lifecycle": "active",
+      "confidence": 1,
+      "evidence": {
+        "matching_profile_id": null,
+        "features": [
+          {
+            "feature": "hierarchy",
+            "detail": {
+              "parent": "kn-a1f5957c6c0a06ca6fc327ae23dcfc80",
+              "child": "kn-77475835c9f354bc654fcf067ac53829"
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "generated_at": "2026-08-02T21:26:16.881Z",
+        "engine": "excel-direct-adapter",
+        "source_node_knowledge_hash": "aa373b8875e9a91b8f586b361563f1e88223077b4b374e558109cb466613ac62",
+        "target_node_knowledge_hash": "cd74efd60ae95e4ec3b97cc046affde292a31a9c6c20b5e6e0732305e8fe8dbc"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "f828e6379e7bb54e4b14a5b3593842854463f2dc8e0c1005a9439bfd5eb6920a",
+        "updated_by": {
+          "type": "ai",
+          "id": "excel-direct-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-e6cffdfa9aaccff47954983af6184c5a",
+      "source_node_id": "kn-435ecb6db2db153c7f42d71f4065ebd6",
+      "target_node_id": "kn-8eb9c43a46c943817ca95f856953563d",
+      "relation_category": "structural",
+      "relation_type": "contains",
+      "lifecycle": "active",
+      "confidence": 1,
+      "evidence": {
+        "matching_profile_id": null,
+        "features": [
+          {
+            "feature": "hierarchy",
+            "detail": {
+              "parent": "kn-435ecb6db2db153c7f42d71f4065ebd6",
+              "child": "kn-8eb9c43a46c943817ca95f856953563d"
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "generated_at": "2026-08-02T21:26:16.881Z",
+        "engine": "trace-json-adapter",
+        "source_node_knowledge_hash": "b0dcd0917b983ccf7464437ac388bab0a2443d23829e0fce4f4d8a56b9e6c484",
+        "target_node_knowledge_hash": "8ab9483496d6437ef746a54471966764a8bb41b65281e90e204bad261531bd4e"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "b0f1ad03e264e947af55ee36e38663d6641ad8c31612f6a238d237e80d84d865",
+        "updated_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-5bc0f9d12bc18d581dc10f61b0775789",
+      "source_node_id": "kn-8eb9c43a46c943817ca95f856953563d",
+      "target_node_id": "kn-2aed27ea1a409b9c5ae4865388e923a8",
+      "relation_category": "structural",
+      "relation_type": "contains",
+      "lifecycle": "active",
+      "confidence": 1,
+      "evidence": {
+        "matching_profile_id": null,
+        "features": [
+          {
+            "feature": "hierarchy",
+            "detail": {
+              "parent": "kn-8eb9c43a46c943817ca95f856953563d",
+              "child": "kn-2aed27ea1a409b9c5ae4865388e923a8"
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "generated_at": "2026-08-02T21:26:16.881Z",
+        "engine": "trace-json-adapter",
+        "source_node_knowledge_hash": "8ab9483496d6437ef746a54471966764a8bb41b65281e90e204bad261531bd4e",
+        "target_node_knowledge_hash": "c0a015644192e54bb3efb4eb98635780706ec3159fa6019d18959c8e18cd3f6e"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "603c1fc08a15f273682569a8d354a45e027e7653a3838d5f0ae4b1d64b31b948",
+        "updated_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-3bc6ce7232f9dd82d89ba90a1c424ece",
+      "source_node_id": "kn-8eb9c43a46c943817ca95f856953563d",
+      "target_node_id": "kn-ec7ce77033f66c0af28020035b258b74",
+      "relation_category": "structural",
+      "relation_type": "contains",
+      "lifecycle": "active",
+      "confidence": 1,
+      "evidence": {
+        "matching_profile_id": null,
+        "features": [
+          {
+            "feature": "hierarchy",
+            "detail": {
+              "parent": "kn-8eb9c43a46c943817ca95f856953563d",
+              "child": "kn-ec7ce77033f66c0af28020035b258b74"
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "generated_at": "2026-08-02T21:26:16.881Z",
+        "engine": "trace-json-adapter",
+        "source_node_knowledge_hash": "8ab9483496d6437ef746a54471966764a8bb41b65281e90e204bad261531bd4e",
+        "target_node_knowledge_hash": "9c0e68efbd0962059ed7d0d27ad97169b98eae55482a58b9f306bdafcc7c230c"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "c582d10f9472e6dbc0a0ee73d51ae03a5bcda3f13686fa75b42fabe4fcb5e341",
+        "updated_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-3bc207e243bef33d5db962f387800262",
+      "source_node_id": "kn-8eb9c43a46c943817ca95f856953563d",
+      "target_node_id": "kn-2a9d1b16e7d4e3ccba41e3b8ea2fa4c4",
+      "relation_category": "structural",
+      "relation_type": "contains",
+      "lifecycle": "active",
+      "confidence": 1,
+      "evidence": {
+        "matching_profile_id": null,
+        "features": [
+          {
+            "feature": "hierarchy",
+            "detail": {
+              "parent": "kn-8eb9c43a46c943817ca95f856953563d",
+              "child": "kn-2a9d1b16e7d4e3ccba41e3b8ea2fa4c4"
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "generated_at": "2026-08-02T21:26:16.881Z",
+        "engine": "trace-json-adapter",
+        "source_node_knowledge_hash": "8ab9483496d6437ef746a54471966764a8bb41b65281e90e204bad261531bd4e",
+        "target_node_knowledge_hash": "5a3f5d9c6da70162dbdc958ea4ff10afac00ae1af98329abd89a36da74912ff8"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "1e906abb4d383d7cc5905d41d28c32f8804d7739eb06ef09d914f3a7f7a3c563",
+        "updated_by": {
+          "type": "ai",
+          "id": "trace-json-adapter"
+        },
+        "updated_at": "2026-08-02T21:26:16.881Z"
+      },
+      "review": {
+        "human": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "not_applicable",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-0bcfaf6d523e5af632afc6bf257dc7a1",
+      "source_node_id": "kn-050f9321e582b12b8ae99cada7a38f8a",
+      "target_node_id": "kn-2aed27ea1a409b9c5ae4865388e923a8",
+      "relation_category": "semantic",
+      "relation_type": "related_to",
+      "lifecycle": "candidate",
+      "confidence": 0.473,
+      "evidence": {
+        "matching_profile_id": "mp-alpha0.1-textsim-tagoverlap",
+        "features": [
+          {
+            "feature": "text_similarity",
+            "detail": {
+              "score": 0.788
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "generated_at": "2026-08-02T21:26:16.963Z",
+        "engine": "relation-candidate-engine",
+        "source_node_knowledge_hash": "acc4a1b2b3f85b3a15d145f2d032d424435a1560ffe534b416ef47607dba02f1",
+        "target_node_knowledge_hash": "c0a015644192e54bb3efb4eb98635780706ec3159fa6019d18959c8e18cd3f6e"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "5480502336f089937899239666cf4ebce27fbb9742a225be9c7bef9ad70e5152",
+        "updated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "updated_at": "2026-08-02T21:26:16.963Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-6a0710491366c5d10115bb0ccb12f4b5",
+      "source_node_id": "kn-050f9321e582b12b8ae99cada7a38f8a",
+      "target_node_id": "kn-ec7ce77033f66c0af28020035b258b74",
+      "relation_category": "semantic",
+      "relation_type": "related_to",
+      "lifecycle": "candidate",
+      "confidence": 0.326,
+      "evidence": {
+        "matching_profile_id": "mp-alpha0.1-textsim-tagoverlap",
+        "features": [
+          {
+            "feature": "text_similarity",
+            "detail": {
+              "score": 0.543
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "generated_at": "2026-08-02T21:26:16.963Z",
+        "engine": "relation-candidate-engine",
+        "source_node_knowledge_hash": "acc4a1b2b3f85b3a15d145f2d032d424435a1560ffe534b416ef47607dba02f1",
+        "target_node_knowledge_hash": "9c0e68efbd0962059ed7d0d27ad97169b98eae55482a58b9f306bdafcc7c230c"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "39a7be719b5e4cd2c29959be7fc65ef580a2a9d7949dae9b0a23ede90c85732d",
+        "updated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "updated_at": "2026-08-02T21:26:16.963Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-4227e15ac1f7ee8eeb3bd5d8e37eaa96",
+      "source_node_id": "kn-050f9321e582b12b8ae99cada7a38f8a",
+      "target_node_id": "kn-2a9d1b16e7d4e3ccba41e3b8ea2fa4c4",
+      "relation_category": "semantic",
+      "relation_type": "related_to",
+      "lifecycle": "candidate",
+      "confidence": 0.232,
+      "evidence": {
+        "matching_profile_id": "mp-alpha0.1-textsim-tagoverlap",
+        "features": [
+          {
+            "feature": "text_similarity",
+            "detail": {
+              "score": 0.387
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "generated_at": "2026-08-02T21:26:16.963Z",
+        "engine": "relation-candidate-engine",
+        "source_node_knowledge_hash": "acc4a1b2b3f85b3a15d145f2d032d424435a1560ffe534b416ef47607dba02f1",
+        "target_node_knowledge_hash": "5a3f5d9c6da70162dbdc958ea4ff10afac00ae1af98329abd89a36da74912ff8"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "6ce7a41c653172eef5ddc56a59de97c297d37d4d4fe2e6fbf43933708393fe8f",
+        "updated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "updated_at": "2026-08-02T21:26:16.963Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-95a7f8581722bbaab6c3cb352f2209fa",
+      "source_node_id": "kn-8e95de3233335688333a3d8b4e5374f5",
+      "target_node_id": "kn-ec7ce77033f66c0af28020035b258b74",
+      "relation_category": "semantic",
+      "relation_type": "related_to",
+      "lifecycle": "candidate",
+      "confidence": 0.44,
+      "evidence": {
+        "matching_profile_id": "mp-alpha0.1-textsim-tagoverlap",
+        "features": [
+          {
+            "feature": "text_similarity",
+            "detail": {
+              "score": 0.733
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "generated_at": "2026-08-02T21:26:16.963Z",
+        "engine": "relation-candidate-engine",
+        "source_node_knowledge_hash": "a2b7bbfefcbba504a5bc97af7d8ac7e9a101c9aa0a73c4fd74dfefeee5d9c404",
+        "target_node_knowledge_hash": "9c0e68efbd0962059ed7d0d27ad97169b98eae55482a58b9f306bdafcc7c230c"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "d8f178a97a523fa03a9258af91b66c356191a481dd4a1adc3b6ab98512fd0319",
+        "updated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "updated_at": "2026-08-02T21:26:16.963Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-1e9070214803c4ca163f4e36dcaf8e04",
+      "source_node_id": "kn-8e95de3233335688333a3d8b4e5374f5",
+      "target_node_id": "kn-2aed27ea1a409b9c5ae4865388e923a8",
+      "relation_category": "semantic",
+      "relation_type": "related_to",
+      "lifecycle": "active",
+      "confidence": 0.309,
+      "evidence": {
+        "matching_profile_id": "mp-alpha0.1-textsim-tagoverlap",
+        "features": [
+          {
+            "feature": "text_similarity",
+            "detail": {
+              "score": 0.515
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "generated_at": "2026-08-02T21:26:16.963Z",
+        "engine": "relation-candidate-engine",
+        "source_node_knowledge_hash": "a2b7bbfefcbba504a5bc97af7d8ac7e9a101c9aa0a73c4fd74dfefeee5d9c404",
+        "target_node_knowledge_hash": "c0a015644192e54bb3efb4eb98635780706ec3159fa6019d18959c8e18cd3f6e"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "8435fd27b770746f2b2e40a225551ea4dcbcd0b95bfe4b7e1126d535f735edbf",
+        "updated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "updated_at": "2026-08-02T21:26:16.963Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-6ee58d983994cb2bfecdb981b27c7611",
+      "source_node_id": "kn-8e95de3233335688333a3d8b4e5374f5",
+      "target_node_id": "kn-2a9d1b16e7d4e3ccba41e3b8ea2fa4c4",
+      "relation_category": "semantic",
+      "relation_type": "related_to",
+      "lifecycle": "rejected",
+      "confidence": 0.237,
+      "evidence": {
+        "matching_profile_id": "mp-alpha0.1-textsim-tagoverlap",
+        "features": [
+          {
+            "feature": "text_similarity",
+            "detail": {
+              "score": 0.396
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "generated_at": "2026-08-02T21:26:16.963Z",
+        "engine": "relation-candidate-engine",
+        "source_node_knowledge_hash": "a2b7bbfefcbba504a5bc97af7d8ac7e9a101c9aa0a73c4fd74dfefeee5d9c404",
+        "target_node_knowledge_hash": "5a3f5d9c6da70162dbdc958ea4ff10afac00ae1af98329abd89a36da74912ff8"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "88cd3e81a79ec9b4e7a4330cfdd35f30de473479d63e21235723bba870e27c1e",
+        "updated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "updated_at": "2026-08-02T21:26:16.963Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-92412cb9032258444a5c0dce30622baa",
+      "source_node_id": "kn-77475835c9f354bc654fcf067ac53829",
+      "target_node_id": "kn-2a9d1b16e7d4e3ccba41e3b8ea2fa4c4",
+      "relation_category": "semantic",
+      "relation_type": "related_to",
+      "lifecycle": "candidate",
+      "confidence": 0.463,
+      "evidence": {
+        "matching_profile_id": "mp-alpha0.1-textsim-tagoverlap",
+        "features": [
+          {
+            "feature": "text_similarity",
+            "detail": {
+              "score": 0.771
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "generated_at": "2026-08-02T21:26:16.963Z",
+        "engine": "relation-candidate-engine",
+        "source_node_knowledge_hash": "cd74efd60ae95e4ec3b97cc046affde292a31a9c6c20b5e6e0732305e8fe8dbc",
+        "target_node_knowledge_hash": "5a3f5d9c6da70162dbdc958ea4ff10afac00ae1af98329abd89a36da74912ff8"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "dec9a99709a40325b84db81a50d8543908763a693f407ba50d9f24f94ff5b861",
+        "updated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "updated_at": "2026-08-02T21:26:16.963Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-1b6aec3bfe936d3a0297c190238b1aa2",
+      "source_node_id": "kn-77475835c9f354bc654fcf067ac53829",
+      "target_node_id": "kn-ec7ce77033f66c0af28020035b258b74",
+      "relation_category": "semantic",
+      "relation_type": "related_to",
+      "lifecycle": "candidate",
+      "confidence": 0.227,
+      "evidence": {
+        "matching_profile_id": "mp-alpha0.1-textsim-tagoverlap",
+        "features": [
+          {
+            "feature": "text_similarity",
+            "detail": {
+              "score": 0.379
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "generated_at": "2026-08-02T21:26:16.963Z",
+        "engine": "relation-candidate-engine",
+        "source_node_knowledge_hash": "cd74efd60ae95e4ec3b97cc046affde292a31a9c6c20b5e6e0732305e8fe8dbc",
+        "target_node_knowledge_hash": "9c0e68efbd0962059ed7d0d27ad97169b98eae55482a58b9f306bdafcc7c230c"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "ab0b71208f76e20b8e517562ebf8a81b18b4f46220f2643b616c3a120b1a76f1",
+        "updated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "updated_at": "2026-08-02T21:26:16.963Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    },
+    {
+      "edge_id": "ke-ffb71bb492b2a7c6d0ff8a905b9a10d8",
+      "source_node_id": "kn-77475835c9f354bc654fcf067ac53829",
+      "target_node_id": "kn-2aed27ea1a409b9c5ae4865388e923a8",
+      "relation_category": "semantic",
+      "relation_type": "related_to",
+      "lifecycle": "candidate",
+      "confidence": 0.224,
+      "evidence": {
+        "matching_profile_id": "mp-alpha0.1-textsim-tagoverlap",
+        "features": [
+          {
+            "feature": "text_similarity",
+            "detail": {
+              "score": 0.373
+            },
+            "effect": "supports"
+          }
+        ]
+      },
+      "generation": {
+        "generated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "generated_at": "2026-08-02T21:26:16.963Z",
+        "engine": "relation-candidate-engine",
+        "source_node_knowledge_hash": "cd74efd60ae95e4ec3b97cc046affde292a31a9c6c20b5e6e0732305e8fe8dbc",
+        "target_node_knowledge_hash": "c0a015644192e54bb3efb4eb98635780706ec3159fa6019d18959c8e18cd3f6e"
+      },
+      "revision": {
+        "content_revision": 1,
+        "knowledge_hash": "437bc17897d3bbde26a1bb55a71e61bb973172a9be6dc4ff473aac94bfb94297",
+        "updated_by": {
+          "type": "ai",
+          "id": "relation-candidate-engine"
+        },
+        "updated_at": "2026-08-02T21:26:16.963Z"
+      },
+      "review": {
+        "human": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null
+        },
+        "ai": {
+          "status": "unreviewed",
+          "verdict": null,
+          "actor": null,
+          "reviewed_at": null,
+          "note": null,
+          "reviewed_knowledge_hash": null,
+          "method": null,
+          "model": null
+        }
+      },
+      "extensions": {}
+    }
+  ],
+  "operations": [
+    {
+      "operation_id": "op-6b36aae7b4a9234b8558eb4026857d44",
+      "sequence": 1,
+      "command_type": "CREATE_NODE",
+      "actor": {
+        "type": "ai",
+        "id": "excel-direct-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.898Z",
+      "target_kind": "node",
+      "target_id": "kn-9f4f1c09925cf8cf33a26abb7aeebe80",
+      "before_hash": null,
+      "after_hash": "b2cc035c4858cc413162f595db6382c010ed5c859d129b329af8c3a64dc4e48c",
+      "params": {}
+    },
+    {
+      "operation_id": "op-70a23899a8c1cc562ae284ac9fa7ecaa",
+      "sequence": 2,
+      "command_type": "CREATE_NODE",
+      "actor": {
+        "type": "ai",
+        "id": "excel-direct-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.898Z",
+      "target_kind": "node",
+      "target_id": "kn-a1f5957c6c0a06ca6fc327ae23dcfc80",
+      "before_hash": null,
+      "after_hash": "aa373b8875e9a91b8f586b361563f1e88223077b4b374e558109cb466613ac62",
+      "params": {}
+    },
+    {
+      "operation_id": "op-da82de46c942d09913c999e56a5ae4ff",
+      "sequence": 3,
+      "command_type": "CREATE_NODE",
+      "actor": {
+        "type": "ai",
+        "id": "excel-direct-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.898Z",
+      "target_kind": "node",
+      "target_id": "kn-050f9321e582b12b8ae99cada7a38f8a",
+      "before_hash": null,
+      "after_hash": "acc4a1b2b3f85b3a15d145f2d032d424435a1560ffe534b416ef47607dba02f1",
+      "params": {}
+    },
+    {
+      "operation_id": "op-bd240e61539709ab1b095cf8b10f8fdd",
+      "sequence": 4,
+      "command_type": "CREATE_NODE",
+      "actor": {
+        "type": "ai",
+        "id": "excel-direct-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.898Z",
+      "target_kind": "node",
+      "target_id": "kn-8e95de3233335688333a3d8b4e5374f5",
+      "before_hash": null,
+      "after_hash": "a2b7bbfefcbba504a5bc97af7d8ac7e9a101c9aa0a73c4fd74dfefeee5d9c404",
+      "params": {}
+    },
+    {
+      "operation_id": "op-ce472d3ee2bcf2a3b4457101474542ac",
+      "sequence": 5,
+      "command_type": "CREATE_NODE",
+      "actor": {
+        "type": "ai",
+        "id": "excel-direct-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.898Z",
+      "target_kind": "node",
+      "target_id": "kn-77475835c9f354bc654fcf067ac53829",
+      "before_hash": null,
+      "after_hash": "cd74efd60ae95e4ec3b97cc046affde292a31a9c6c20b5e6e0732305e8fe8dbc",
+      "params": {}
+    },
+    {
+      "operation_id": "op-c0f0e9bc87cd283520db54a1d22e091e",
+      "sequence": 6,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "excel-direct-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.898Z",
+      "target_kind": "edge",
+      "target_id": "ke-3593d35cedb64105120c0fd2f3d62e39",
+      "before_hash": null,
+      "after_hash": "30ecbf0f161839e0285ed28e77bc4ae6a1d725f8d3de0559e9dcdd30b187b816",
+      "params": {}
+    },
+    {
+      "operation_id": "op-48a36a17c73323385e0d027fe49aa6f9",
+      "sequence": 7,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "excel-direct-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.898Z",
+      "target_kind": "edge",
+      "target_id": "ke-1dc36fc4dc8e5451e7ecb624fd583221",
+      "before_hash": null,
+      "after_hash": "74e989da02261a234ca416dceafbf386a66999d3c719392df5f5ebdeefb09e17",
+      "params": {}
+    },
+    {
+      "operation_id": "op-4fcff416820615de6ae46b939ec6d0e7",
+      "sequence": 8,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "excel-direct-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.898Z",
+      "target_kind": "edge",
+      "target_id": "ke-747f473c6e18edd489a646ea79649b49",
+      "before_hash": null,
+      "after_hash": "c6a225f0e325538e79ba3fb266361fc41995de2426511a73bfbdfc30d9a42873",
+      "params": {}
+    },
+    {
+      "operation_id": "op-d3cdc20fde69012d2a259e90807f5fd7",
+      "sequence": 9,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "excel-direct-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.899Z",
+      "target_kind": "edge",
+      "target_id": "ke-c220389bf9a878bbef4802c815159d5f",
+      "before_hash": null,
+      "after_hash": "f828e6379e7bb54e4b14a5b3593842854463f2dc8e0c1005a9439bfd5eb6920a",
+      "params": {}
+    },
+    {
+      "operation_id": "op-be02c5555e74cecf4be51cdc14bb62fb",
+      "sequence": 10,
+      "command_type": "CREATE_NODE",
+      "actor": {
+        "type": "ai",
+        "id": "trace-json-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.899Z",
+      "target_kind": "node",
+      "target_id": "kn-435ecb6db2db153c7f42d71f4065ebd6",
+      "before_hash": null,
+      "after_hash": "b0dcd0917b983ccf7464437ac388bab0a2443d23829e0fce4f4d8a56b9e6c484",
+      "params": {}
+    },
+    {
+      "operation_id": "op-c79c89af70b3ac2f231ca6fbd040d377",
+      "sequence": 11,
+      "command_type": "CREATE_NODE",
+      "actor": {
+        "type": "ai",
+        "id": "trace-json-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.899Z",
+      "target_kind": "node",
+      "target_id": "kn-8eb9c43a46c943817ca95f856953563d",
+      "before_hash": null,
+      "after_hash": "8ab9483496d6437ef746a54471966764a8bb41b65281e90e204bad261531bd4e",
+      "params": {}
+    },
+    {
+      "operation_id": "op-6a6941f14deb527ab8b4420dacef9f7c",
+      "sequence": 12,
+      "command_type": "CREATE_NODE",
+      "actor": {
+        "type": "ai",
+        "id": "trace-json-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.899Z",
+      "target_kind": "node",
+      "target_id": "kn-2aed27ea1a409b9c5ae4865388e923a8",
+      "before_hash": null,
+      "after_hash": "c0a015644192e54bb3efb4eb98635780706ec3159fa6019d18959c8e18cd3f6e",
+      "params": {}
+    },
+    {
+      "operation_id": "op-b4917d006f46962bbe3432077614c73c",
+      "sequence": 13,
+      "command_type": "CREATE_NODE",
+      "actor": {
+        "type": "ai",
+        "id": "trace-json-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.899Z",
+      "target_kind": "node",
+      "target_id": "kn-ec7ce77033f66c0af28020035b258b74",
+      "before_hash": null,
+      "after_hash": "9c0e68efbd0962059ed7d0d27ad97169b98eae55482a58b9f306bdafcc7c230c",
+      "params": {}
+    },
+    {
+      "operation_id": "op-9b220085691bd02a7d531dcd74ab4d13",
+      "sequence": 14,
+      "command_type": "CREATE_NODE",
+      "actor": {
+        "type": "ai",
+        "id": "trace-json-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.899Z",
+      "target_kind": "node",
+      "target_id": "kn-2a9d1b16e7d4e3ccba41e3b8ea2fa4c4",
+      "before_hash": null,
+      "after_hash": "5a3f5d9c6da70162dbdc958ea4ff10afac00ae1af98329abd89a36da74912ff8",
+      "params": {}
+    },
+    {
+      "operation_id": "op-332e93864892a4aeb2338532d94fd379",
+      "sequence": 15,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "trace-json-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.899Z",
+      "target_kind": "edge",
+      "target_id": "ke-e6cffdfa9aaccff47954983af6184c5a",
+      "before_hash": null,
+      "after_hash": "b0f1ad03e264e947af55ee36e38663d6641ad8c31612f6a238d237e80d84d865",
+      "params": {}
+    },
+    {
+      "operation_id": "op-1090c1c87e1db4f68dddc86d407459e2",
+      "sequence": 16,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "trace-json-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.899Z",
+      "target_kind": "edge",
+      "target_id": "ke-5bc0f9d12bc18d581dc10f61b0775789",
+      "before_hash": null,
+      "after_hash": "603c1fc08a15f273682569a8d354a45e027e7653a3838d5f0ae4b1d64b31b948",
+      "params": {}
+    },
+    {
+      "operation_id": "op-a3035c714fd2e75cf7312240504c35dd",
+      "sequence": 17,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "trace-json-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.899Z",
+      "target_kind": "edge",
+      "target_id": "ke-3bc6ce7232f9dd82d89ba90a1c424ece",
+      "before_hash": null,
+      "after_hash": "c582d10f9472e6dbc0a0ee73d51ae03a5bcda3f13686fa75b42fabe4fcb5e341",
+      "params": {}
+    },
+    {
+      "operation_id": "op-343ee885d2108c14678f31ea7365da97",
+      "sequence": 18,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "trace-json-adapter"
+      },
+      "occurred_at": "2026-08-02T21:26:16.899Z",
+      "target_kind": "edge",
+      "target_id": "ke-3bc207e243bef33d5db962f387800262",
+      "before_hash": null,
+      "after_hash": "1e906abb4d383d7cc5905d41d28c32f8804d7739eb06ef09d914f3a7f7a3c563",
+      "params": {}
+    },
+    {
+      "operation_id": "op-6ff2ab7d62fc5de61ba5176c3484336d",
+      "sequence": 19,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "relation-candidate-engine"
+      },
+      "occurred_at": "2026-08-02T21:26:16.965Z",
+      "target_kind": "edge",
+      "target_id": "ke-0bcfaf6d523e5af632afc6bf257dc7a1",
+      "before_hash": null,
+      "after_hash": "5480502336f089937899239666cf4ebce27fbb9742a225be9c7bef9ad70e5152",
+      "params": {}
+    },
+    {
+      "operation_id": "op-b809088a676cf42d6bfc980b07f96355",
+      "sequence": 20,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "relation-candidate-engine"
+      },
+      "occurred_at": "2026-08-02T21:26:16.965Z",
+      "target_kind": "edge",
+      "target_id": "ke-6a0710491366c5d10115bb0ccb12f4b5",
+      "before_hash": null,
+      "after_hash": "39a7be719b5e4cd2c29959be7fc65ef580a2a9d7949dae9b0a23ede90c85732d",
+      "params": {}
+    },
+    {
+      "operation_id": "op-0bbbd8d1d089bc272079e7ec28d2a96b",
+      "sequence": 21,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "relation-candidate-engine"
+      },
+      "occurred_at": "2026-08-02T21:26:16.965Z",
+      "target_kind": "edge",
+      "target_id": "ke-4227e15ac1f7ee8eeb3bd5d8e37eaa96",
+      "before_hash": null,
+      "after_hash": "6ce7a41c653172eef5ddc56a59de97c297d37d4d4fe2e6fbf43933708393fe8f",
+      "params": {}
+    },
+    {
+      "operation_id": "op-2a384f3d363ace797a3ecbb5e4e764ee",
+      "sequence": 22,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "relation-candidate-engine"
+      },
+      "occurred_at": "2026-08-02T21:26:16.965Z",
+      "target_kind": "edge",
+      "target_id": "ke-95a7f8581722bbaab6c3cb352f2209fa",
+      "before_hash": null,
+      "after_hash": "d8f178a97a523fa03a9258af91b66c356191a481dd4a1adc3b6ab98512fd0319",
+      "params": {}
+    },
+    {
+      "operation_id": "op-f6d5c148c98e7a0ff3e68d366be56f04",
+      "sequence": 23,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "relation-candidate-engine"
+      },
+      "occurred_at": "2026-08-02T21:26:16.965Z",
+      "target_kind": "edge",
+      "target_id": "ke-1e9070214803c4ca163f4e36dcaf8e04",
+      "before_hash": null,
+      "after_hash": "8435fd27b770746f2b2e40a225551ea4dcbcd0b95bfe4b7e1126d535f735edbf",
+      "params": {}
+    },
+    {
+      "operation_id": "op-1d0f28388f1c9ab67424b7d0eb50f8b5",
+      "sequence": 24,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "relation-candidate-engine"
+      },
+      "occurred_at": "2026-08-02T21:26:16.965Z",
+      "target_kind": "edge",
+      "target_id": "ke-6ee58d983994cb2bfecdb981b27c7611",
+      "before_hash": null,
+      "after_hash": "88cd3e81a79ec9b4e7a4330cfdd35f30de473479d63e21235723bba870e27c1e",
+      "params": {}
+    },
+    {
+      "operation_id": "op-9d997445cd17a478a59c819bb77f3d46",
+      "sequence": 25,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "relation-candidate-engine"
+      },
+      "occurred_at": "2026-08-02T21:26:16.965Z",
+      "target_kind": "edge",
+      "target_id": "ke-92412cb9032258444a5c0dce30622baa",
+      "before_hash": null,
+      "after_hash": "dec9a99709a40325b84db81a50d8543908763a693f407ba50d9f24f94ff5b861",
+      "params": {}
+    },
+    {
+      "operation_id": "op-0a7c70603babf3564134084b0e52dc6c",
+      "sequence": 26,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "relation-candidate-engine"
+      },
+      "occurred_at": "2026-08-02T21:26:16.965Z",
+      "target_kind": "edge",
+      "target_id": "ke-1b6aec3bfe936d3a0297c190238b1aa2",
+      "before_hash": null,
+      "after_hash": "ab0b71208f76e20b8e517562ebf8a81b18b4f46220f2643b616c3a120b1a76f1",
+      "params": {}
+    },
+    {
+      "operation_id": "op-26c63c8344b7126be3af5d1e5e4337fc",
+      "sequence": 27,
+      "command_type": "CREATE_EDGE",
+      "actor": {
+        "type": "ai",
+        "id": "relation-candidate-engine"
+      },
+      "occurred_at": "2026-08-02T21:26:16.965Z",
+      "target_kind": "edge",
+      "target_id": "ke-ffb71bb492b2a7c6d0ff8a905b9a10d8",
+      "before_hash": null,
+      "after_hash": "437bc17897d3bbde26a1bb55a71e61bb973172a9be6dc4ff473aac94bfb94297",
+      "params": {}
+    },
+    {
+      "operation_id": "op-1cc45aaabc7d90482ebe2853e015b3f6",
+      "sequence": 28,
+      "command_type": "PROMOTE_CANDIDATE",
+      "actor": {
+        "type": "human",
+        "id": "evaluator"
+      },
+      "occurred_at": "2026-08-02T21:26:17.314Z",
+      "target_kind": "edge",
+      "target_id": "ke-1e9070214803c4ca163f4e36dcaf8e04",
+      "before_hash": "8435fd27b770746f2b2e40a225551ea4dcbcd0b95bfe4b7e1126d535f735edbf",
+      "after_hash": "8435fd27b770746f2b2e40a225551ea4dcbcd0b95bfe4b7e1126d535f735edbf",
+      "params": {
+        "via": "individual"
+      }
+    },
+    {
+      "operation_id": "op-3bc924dd856631dc1dcff7571b5a930f",
+      "sequence": 29,
+      "command_type": "REJECT_CANDIDATE",
+      "actor": {
+        "type": "human",
+        "id": "evaluator"
+      },
+      "occurred_at": "2026-08-02T21:26:17.413Z",
+      "target_kind": "edge",
+      "target_id": "ke-6ee58d983994cb2bfecdb981b27c7611",
+      "before_hash": "88cd3e81a79ec9b4e7a4330cfdd35f30de473479d63e21235723bba870e27c1e",
+      "after_hash": "88cd3e81a79ec9b4e7a4330cfdd35f30de473479d63e21235723bba870e27c1e",
+      "params": {
+        "via": "individual"
+      }
+    }
+  ],
+  "diagnostics": [],
+  "extensions": {}
+}

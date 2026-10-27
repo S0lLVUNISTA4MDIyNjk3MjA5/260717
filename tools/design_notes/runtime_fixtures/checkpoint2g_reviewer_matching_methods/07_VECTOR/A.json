@@ -1,0 +1,26 @@
+{
+  "file_name": "07_VECTOR_A.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "VEC-A1",
+      "vector_text": "冷却水ポンプ運転状態を中央監視装置へ送信する",
+      "display_name": "要求側 ポンプ運転状態"
+    },
+    {
+      "trace_id": "VEC-A2",
+      "vector_text": "給気ファンの故障状態を監視システムへ通知する",
+      "display_name": "要求側 ファン故障"
+    },
+    {
+      "trace_id": "VEC-A3",
+      "vector_text": "室内温度の計測信号を制御盤へ入力する",
+      "display_name": "要求側 室温入力"
+    }
+  ]
+}

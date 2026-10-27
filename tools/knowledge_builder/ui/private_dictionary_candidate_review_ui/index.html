@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>非公開辞書候補レビュー</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div>
+        <h1>非公開辞書候補レビュー</h1>
+        <p class="sub">PDF・Excelをブラウザ内だけで解析します。外部送信はありません。</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span id="dirty-badge" class="dirty-badge" hidden>未保存の変更があります</span>
+      <button id="export-private-button" class="btn ghost" type="button" disabled title="レビュー結果を private Excel（LOCAL PRIVATE）として保存します">レビュー作業を保存（Save Review Progress）</button>
+      <button id="resume-button" class="btn ghost" type="button" disabled title="private Excel からレビュー状態のみを再開します">保存したレビュー作業を読み込んで再開（Resume from Saved File）</button>
+      <button id="export-shareable-button" class="btn ghost" type="button" disabled title="集計のみを含む共有用 Excel を保存します">共有用レビュー集計をExcel保存（Export Shareable Review Summary）</button>
+      <input id="resume-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+    </div>
+  </header>
+
+  <div class="privacy-bar" role="note">
+    <span class="lock" aria-hidden="true"></span>
+    <p><strong>この画面の内容は機密（LOCAL PRIVATE）です。</strong>
+       キーワード・出典・メモは外部送信禁止です。解析はすべてこのブラウザのメモリ内で行われ、ファイルはローカルサーバーへ送信されません。</p>
+  </div>
+
+  <!-- P2-A4 Checkpoint 14 (HUMAN-02, S31.7): always-visible (never
+       tooltip-only) explanation distinguishing the two save/export
+       workflows, placed next to the privacy notice they both relate to. -->
+  <div class="workbook-help" role="note">
+    <p><strong>作業継続用（非公開）:</strong>
+       「レビュー作業を保存」「保存したレビュー作業を読み込んで再開」は、レビュー担当者の判定・メモ・進捗を含む非公開ファイルの保存／読み込みです。外部への共有を想定していません。</p>
+    <p><strong>共有用（集計のみ）:</strong>
+       「共有用レビュー集計をExcel保存」は、キーワード・別名（alias）・file名・evidence・レビューメモを含まない件数集計のみのファイルです。作業を再開するための機能はありません。</p>
+  </div>
+
+  <p id="boot-error" class="boot-error" hidden></p>
+
+  <div id="workspace">
+
+    <!-- ============================ 入力 ============================ -->
+    <section class="workspace-block" aria-labelledby="input-title">
+      <div class="section-heading">
+        <div class="step">1</div>
+        <div><h2 id="input-title">解析する資料を選択</h2>
+          <p>PDF（.pdf）とExcel（.xlsx）を複数選択できます。選択した順に処理します。</p></div>
+      </div>
+
+      <div id="drop-zone" class="pickers">
+        <label class="picker" id="pdf-picker">
+          <input id="pdf-input" type="file" accept=".pdf,application/pdf" multiple>
+          <span class="file-icon pdf">PDF</span>
+          <strong>PDF仕様書</strong>
+          <span>クリックまたはドラッグ＆ドロップ</span>
+        </label>
+        <label class="picker" id="excel-picker">
+          <input id="excel-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple>
+          <span class="file-icon excel">XLSX</span>
+          <strong>Excel設計資料</strong>
+          <span>クリックまたはドラッグ＆ドロップ</span>
+        </label>
+      </div>
+
+      <div class="selection-head">
+        <span id="selection-summary" class="selection-summary">未選択</span>
+        <span id="limit-info" class="limit-info"></span>
+      </div>
+      <div id="file-list" class="file-list" aria-live="polite"></div>
+
+      <div class="action-row">
+        <button id="sample-button" class="button secondary" type="button">標準サンプルを読み込む</button>
+        <button id="clear-button" class="button secondary" type="button" disabled>選択をクリア</button>
+        <button id="run-button" class="button primary" type="button" disabled>
+          <span>解析開始</span><span aria-hidden="true">→</span>
+        </button>
+      </div>
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+      <p id="input-changed" class="input-changed" hidden>
+        入力が変更されています。再解析するまで、表示中の結果は前回入力のものです。
+      </p>
+    </section>
+
+    <!-- ============================ 結果 ============================ -->
+    <section id="results" class="results" hidden>
+
+      <section class="dashboard" aria-label="レビュー進捗">
+        <article class="stat"><span>候補総数</span><strong id="s-total">0</strong></article>
+        <article class="stat warn"><span>未判定（UNREVIEWED）</span><strong id="s-unreviewed">0</strong></article>
+        <article class="stat ok"><span>承認（ACCEPT）</span><strong id="s-accept">0</strong></article>
+        <article class="stat ng"><span>却下（REJECT）</span><strong id="s-reject">0</strong></article>
+        <article class="stat hold"><span>保留（UNCERTAIN）</span><strong id="s-uncertain">0</strong></article>
+        <article class="stat"><span>別名候補（Alias） / 未判定</span><strong id="s-alias">0</strong></article>
+        <article class="stat"><span>競合（Conflict） / 未解決</span><strong id="s-conflict">0</strong></article>
+        <article class="stat"><span>PDF / Excel 由来</span><strong id="s-source">0</strong></article>
+        <article class="stat progress-card">
+          <span>レビュー進捗</span>
+          <strong id="s-progress">0%</strong>
+          <div class="progress"><div id="s-progress-bar" class="progress-bar"></div></div>
+          <small id="s-progress-sub"></small>
+        </article>
+      </section>
+      <div id="rule-counts" class="rule-counts" aria-label="Rule別件数"></div>
+
+      <nav class="tabs" role="tablist">
+        <button class="tab is-active" role="tab" data-tab="candidates" aria-selected="true">候補<span class="tab-count" id="tc-candidates">0</span></button>
+        <button class="tab" role="tab" data-tab="aliases" aria-selected="false">別名（Alias）<span class="tab-count" id="tc-aliases">0</span></button>
+        <button class="tab" role="tab" data-tab="conflicts" aria-selected="false">競合（Conflict）<span class="tab-count alert" id="tc-conflicts">0</span></button>
+      </nav>
+
+      <!-- 候補タブ -->
+      <section id="panel-candidates" class="panel" role="tabpanel">
+        <div class="toolbar">
+          <div class="field grow">
+            <label for="q">キーワード検索</label>
+            <input id="q" type="search" placeholder="キーワード / 別名（alias）を検索" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="f-decision">判定</label>
+            <select id="f-decision">
+              <option value="ALL">すべて</option><option value="UNREVIEWED">未判定（UNREVIEWED）</option>
+              <option value="ACCEPT">承認（ACCEPT）</option><option value="REJECT">却下（REJECT）</option>
+              <option value="UNCERTAIN">保留（UNCERTAIN）</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="f-source">出典</label>
+            <select id="f-source">
+              <option value="ALL">すべて</option><option value="PDF">PDF由来</option><option value="EXCEL">Excel由来</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="f-rule">Rule</label>
+            <select id="f-rule"><option value="ALL">すべて</option></select>
+          </div>
+          <div class="field">
+            <label for="f-flag">属性</label>
+            <select id="f-flag">
+              <option value="ALL">すべて</option><option value="ALIAS">別名候補あり（Alias）</option><option value="CONFLICT">競合あり（Conflict）</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="f-sort">並び替え</label>
+            <select id="f-sort">
+              <option value="keyword">キーワード</option><option value="exposure">出現数（多い順）</option>
+              <option value="documents">文書数（多い順）</option><option value="conflict">競合優先（Conflict Priority）</option>
+              <option value="rule">Rule</option><option value="decision">判定</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="f-page">候補 表示件数</label>
+            <select id="f-page"><option>50</option><option>100</option><option>200</option></select>
+          </div>
+        </div>
+
+        <!-- P2-A4 Checkpoint 14 R1 (HUMAN-03, S31.8/S31.8R1): human-readable
+             filter explanations for every semantic filter (判定/出典/Rule/
+             属性), always visible (never tooltip-only). 並び替え（Sort）is
+             explained separately since it reorders rather than hides rows.
+             f-page is display-count pagination, not a filter, and is
+             intentionally out of HUMAN-03 scope (S31.8R1). Written directly
+             from the existing selectRows()/comparator logic in
+             table_view.js - the predicate/comparator itself is unchanged. -->
+        <p class="panel-note">
+          判定（Decision）: 「未判定（UNREVIEWED）」＝まだ人間の判断が確定していない候補のみ表示。「承認（ACCEPT）」「却下（REJECT）」「保留（UNCERTAIN）」＝それぞれの判定が確定した候補のみ表示。<br>
+          出典（Source）: 「PDF由来」＝PDF資料から抽出された候補のみ表示。「Excel由来」＝Excel資料から抽出された候補のみ表示。1つの候補が両方の出典から抽出されていれば、いずれの選択でも表示されます。<br>
+          Rule（抽出根拠）: 候補がどの抽出規則で見つかったかで絞り込みます。「構造KEY」＝表のキー列など構造的な項目名。「見出し」＝文書のセクション見出し。「繰返し値」＝表の値として複数箇所に繰り返し出現した値。「引用」＝本文中の引用符（"..."）で囲まれた語句。「括弧alias」＝「正式名称（略称）」のような括弧書きのalias表現。「定義alias」＝「〜を以下「X」という」等の定義表現。<br>
+          属性（Attribute）: 「別名候補あり（Alias）」＝別名候補を1件以上伴う正規語候補のみ表示。「競合あり（Conflict）」＝複数の正規語候補が競合する別名を伴う候補のみ表示。
+        </p>
+        <p class="panel-note">
+          並び替え（Sort）: 一覧の表示順のみを変更し、候補を絞り込む（非表示にする）ものではありません。「キーワード」＝五十音・アルファベット順。「出現数（多い順）」「文書数（多い順）」＝各件数が多い順。「競合優先（Conflict Priority）」＝競合件数が多い順。「Rule」＝抽出規則ID順。「判定」＝未判定→保留→却下→承認の順。
+        </p>
+
+        <div class="bulkbar">
+          <label class="check"><input type="checkbox" id="select-all"><span>表示中をすべて選択</span></label>
+          <span id="sel-count" class="sel-count">0件選択中</span>
+          <div class="bulk-actions">
+            <button class="btn sm ok" type="button" data-bulk="ACCEPT">一括承認（ACCEPT）</button>
+            <button class="btn sm ng" type="button" data-bulk="REJECT">一括却下（REJECT）</button>
+            <button class="btn sm hold" type="button" data-bulk="UNCERTAIN">一括保留（UNCERTAIN）</button>
+            <button class="btn sm ghost" type="button" data-bulk="UNREVIEWED">判定を戻す（未判定）</button>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="grid">
+            <thead><tr>
+              <th class="c-check"><span class="sr">選択</span></th>
+              <th class="c-decision">判定</th>
+              <th class="c-keyword">キーワード</th>
+              <th class="c-alias">別名（Alias）</th>
+              <th class="c-rule">Rule</th>
+              <th class="c-src">出典</th>
+              <th class="c-num">出現数</th>
+              <th class="c-num">文書数</th>
+              <th class="c-num">競合（Conflict）</th>
+              <th class="c-reason">理由</th>
+              <th class="c-note">メモ</th>
+              <th class="c-detail"><span class="sr">詳細</span></th>
+            </tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+          <p id="empty" class="empty" hidden>該当する候補がありません。</p>
+        </div>
+        <div class="pager">
+          <span id="pager-info"></span>
+          <nav id="candidate-pager" class="page-nav" aria-label="候補ページ送り"></nav>
+        </div>
+      </section>
+
+      <!-- Alias タブ -->
+      <section id="panel-aliases" class="panel" role="tabpanel" hidden>
+        <p class="panel-note">別名（alias）は正規語（canonical）とは<strong>別の人間判断</strong>です。正規語を承認（ACCEPT）しても別名は自動承認されません。</p>
+        <div class="table-wrap">
+          <table class="grid">
+            <thead><tr>
+              <th class="c-decision">判定</th><th class="c-keyword">別名（Alias）</th><th class="c-keyword">正規語（Canonical）</th>
+              <th class="c-rule">Rule</th><th class="c-src">Scope</th><th class="c-src">Status</th>
+              <th class="c-reason">理由</th><th class="c-note">メモ</th><th class="c-evidence">Evidence</th>
+            </tr></thead>
+            <tbody id="alias-rows"></tbody>
+          </table>
+          <p id="alias-empty" class="empty" hidden>別名（alias）候補はありません。</p>
+        </div>
+        <div class="pager">
+          <div class="field inline">
+            <label for="f-alias-page">Alias 表示件数</label>
+            <select id="f-alias-page"><option>50</option><option>100</option><option>200</option></select>
+          </div>
+          <nav id="alias-pager" class="page-nav" aria-label="別名（Alias）ページ送り"></nav>
+        </div>
+      </section>
+
+      <!-- Conflict タブ -->
+      <section id="panel-conflicts" class="panel" role="tabpanel" hidden>
+        <p class="panel-note">同じ別名（alias）が複数の正規語候補（canonical）を指しています。<strong>自動解決は行いません。</strong>件数に関わらず全件確認してください。</p>
+        <div id="conflict-list" class="conflict-list"></div>
+        <p id="conflict-empty" class="empty" hidden>alias conflict はありません。</p>
+        <div class="pager">
+          <div class="field inline">
+            <label for="f-conflict-page">Conflict 表示件数</label>
+            <select id="f-conflict-page"><option>50</option><option>100</option><option>200</option></select>
+          </div>
+          <nav id="conflict-pager" class="page-nav" aria-label="競合（Conflict）ページ送り"></nav>
+        </div>
+      </section>
+    </section>
+  </div>
+
+  <!-- 詳細パネル -->
+  <aside id="detail" class="detail" hidden aria-label="候補の詳細">
+    <div class="detail-head">
+      <div><span class="tag private">LOCAL PRIVATE</span><h2 id="d-term"></h2></div>
+      <button id="d-close" class="icon-btn" type="button" aria-label="閉じる">×</button>
+    </div>
+    <div class="detail-body">
+      <div id="d-meta" class="meta-grid"></div>
+      <section class="detail-sec"><h3>別名（Alias）候補</h3><div id="d-alias" class="chips"></div></section>
+      <section class="detail-sec"><h3>Evidence（出典）</h3><ul id="d-evidence" class="evidence"></ul></section>
+      <details class="detail-sec audit">
+        <summary>監査情報（ID）</summary>
+        <dl id="d-audit" class="audit-list"></dl>
+      </details>
+    </div>
+  </aside>
+  <div id="scrim" class="scrim" hidden></div>
+
+  <div id="confirm" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal-card">
+      <h2 id="confirm-title">一括承認（ACCEPT）の確認</h2>
+      <p id="confirm-text"></p>
+      <div class="modal-actions">
+        <button id="confirm-cancel" class="btn ghost" type="button">キャンセル</button>
+        <button id="confirm-ok" class="btn primary" type="button">承認（ACCEPT）にする</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden role="status"></div>
+
+  <footer class="footer">
+    <span>ローカル専用 / 外部送信なし / 生成候補はすべて SESSION・PROBATION（自動登録なし）</span>
+    <span id="review-workbook-limit-info"></span>
+  </footer>
+</div>
+
+<!-- 依存順を固定。P2-A2 の既存モジュールを無改変で使用する。 -->
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/pdfjs/cmaps-data.js"></script>
+<script src="vendor/pdfjs/fonts-data.js"></script>
+<script src="vendor/pdfjs/alpha-local-factories.js"></script>
+<script src="vendor/pdfjs/pdf.min.js"></script>
+<script src="core/quantity_sidecar_binding_core.js"></script>
+<script src="core/id_hash_utils.js"></script>
+<script src="core/pdf_direct_adapter.js"></script>
+<script src="core/excel_direct_adapter.js"></script>
+<script src="core/private_dictionary_rule_extraction_core.js"></script>
+<script src="bootstrap.js"></script>
+<script src="error_messages.js"></script>
+<script src="limits.js"></script>
+<script src="dom.js"></script>
+<script src="pagination.js"></script>
+<script src="review_state.js"></script>
+<script src="evidence_index.js"></script>
+<script src="input_selection.js"></script>
+<script src="browser_ingest.js"></script>
+<script src="dashboard.js"></script>
+<script src="table_view.js"></script>
+<script src="alias_view.js"></script>
+<script src="conflict_view.js"></script>
+<script src="evidence_panel.js"></script>
+<script src="workbook_contract.js"></script>
+<script src="workbook_cells.js"></script>
+<script src="workbook_validation.js"></script>
+<script src="private_review_export.js"></script>
+<script src="private_review_import.js"></script>
+<script src="shareable_summary_export.js"></script>
+<script src="workbook_download.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

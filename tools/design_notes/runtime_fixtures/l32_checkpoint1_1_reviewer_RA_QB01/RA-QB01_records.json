@@ -1,0 +1,15 @@
+[
+  {
+    "trace_id": "QB01-R1",
+    "property": "定格冷房能力",
+    "value": 5.6,
+    "unit": "kW"
+  },
+  {
+    "trace_id": "QB01-R2",
+    "property": "設計風量",
+    "value": 1200,
+    "unit": "m3/h",
+    "flow_unit": "m3/h"
+  }
+]

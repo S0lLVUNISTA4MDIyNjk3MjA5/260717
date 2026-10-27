@@ -1,0 +1,146 @@
+{
+  "schema": "p2a3-sample-expectations/0.1",
+  "note": "Measured from the fixed P2-A2 extraction core. Never hand-edit these values; rerun the generator.",
+  "extraction_schema_version": "private-dictionary-candidate-evaluation/0.1",
+  "cases": {
+    "standard/train_hvac_requirement_spec_sample.pdf+standard/train_hvac_design_review_sample.xlsx": {
+      "inputs": {
+        "pdf": [
+          "standard/train_hvac_requirement_spec_sample.pdf"
+        ],
+        "excel": [
+          "standard/train_hvac_design_review_sample.xlsx"
+        ]
+      },
+      "input_sha256": {
+        "standard/train_hvac_requirement_spec_sample.pdf": "941537e579b890c8be58efd7322011ca8571413a92e7b1a393cfcba53289e6d9",
+        "standard/train_hvac_design_review_sample.xlsx": "15dd556b181d3c6bb3b70e6ad3711d32d0fca5dcb21a40aa379b7d41454084b7"
+      },
+      "candidate_count": 40,
+      "alias_candidate_count": 6,
+      "conflict_count": 1,
+      "rejected_count": 84,
+      "document_count": 2,
+      "projection_unit_total": 325,
+      "counts_by_rule": {
+        "TERM_STRUCTURAL_KEY": 12,
+        "TERM_STRUCTURAL_HEADING": 7,
+        "TERM_REPEATED_VALUE": 15,
+        "TERM_EXPLICIT_QUOTED": 7,
+        "ALIAS_EXPLICIT_PARENTHETICAL": 6,
+        "ALIAS_EXPLICIT_DEFINED_AS": 8
+      },
+      "candidate_evaluation_sha256": "c576e7e1aee0308feb360fb9b0b5abd9d6c0a1c79b75a8b339cd273275385366",
+      "candidate_review_sha256": "e8356fb9aa9ae4ecf2118c1944fec33531a1f7896e53f266ed2c7c8c265c8f5e",
+      "shareable_summary_sha256": "8058f5d172b4006ff3a072ec7b770550b69cd9603f4a3c6d844be5e2ec76d759",
+      "display_check_terms": [
+        "温度制御装置",
+        "送風機制御装置",
+        "外気導入制御装置",
+        "車内設定温度",
+        "冷房能力",
+        "機器記号"
+      ],
+      "expected_newline_boundary_over_capture": 0
+    },
+    "edge_cases/alias_conflict_sample.pdf": {
+      "inputs": {
+        "pdf": [
+          "edge_cases/alias_conflict_sample.pdf"
+        ],
+        "excel": []
+      },
+      "input_sha256": {
+        "edge_cases/alias_conflict_sample.pdf": "092b6ae05da33e753aaa63140e162363d7ee4e3d7a3a2cef19e41c66cf8eb46e"
+      },
+      "candidate_count": 7,
+      "alias_candidate_count": 0,
+      "conflict_count": 2,
+      "rejected_count": 0,
+      "document_count": 1,
+      "projection_unit_total": 7,
+      "counts_by_rule": {
+        "TERM_STRUCTURAL_KEY": 0,
+        "TERM_STRUCTURAL_HEADING": 1,
+        "TERM_REPEATED_VALUE": 0,
+        "TERM_EXPLICIT_QUOTED": 4,
+        "ALIAS_EXPLICIT_PARENTHETICAL": 0,
+        "ALIAS_EXPLICIT_DEFINED_AS": 4
+      },
+      "candidate_evaluation_sha256": "1d9eb788e72143c515bba496bdae2ef7f625c1bbbc07ee02f0681a4a4930eca5",
+      "candidate_review_sha256": "39fefde8ad354c9ba3b81c024fe56b5e2e69bf322821e0f32a7bf96f3e6b966a",
+      "shareable_summary_sha256": "a87d82845659971805818bff24a1fa4a6605f4b435da84fae93b76dd57f81c50",
+      "display_check_terms": [
+        "制御弁A",
+        "制御弁B"
+      ],
+      "expected_newline_boundary_over_capture": 0
+    },
+    "edge_cases/newline_boundary_sample.pdf": {
+      "inputs": {
+        "pdf": [
+          "edge_cases/newline_boundary_sample.pdf"
+        ],
+        "excel": []
+      },
+      "input_sha256": {
+        "edge_cases/newline_boundary_sample.pdf": "48af4d58abb3ca4fe8bf7c9ca455596c5a9e2d607b8caea335d000a81002c310"
+      },
+      "candidate_count": 6,
+      "alias_candidate_count": 2,
+      "conflict_count": 0,
+      "rejected_count": 0,
+      "document_count": 1,
+      "projection_unit_total": 5,
+      "counts_by_rule": {
+        "TERM_STRUCTURAL_KEY": 0,
+        "TERM_STRUCTURAL_HEADING": 1,
+        "TERM_REPEATED_VALUE": 0,
+        "TERM_EXPLICIT_QUOTED": 3,
+        "ALIAS_EXPLICIT_PARENTHETICAL": 0,
+        "ALIAS_EXPLICIT_DEFINED_AS": 4
+      },
+      "candidate_evaluation_sha256": "06ad97f5d30a8696a4da71163e214572d599ba5aea850c948ce5c8613d2f93de",
+      "candidate_review_sha256": "502d1600483f56b17da8059864e93446fded461319fac577f9afada0da9cfb5c",
+      "shareable_summary_sha256": "11b04f304a53354df9f0ee42aae1dbbde9c90e24513e4aa9b4fad88c3785b812",
+      "display_check_terms": [
+        "Sample Heating Unit",
+        "Test rig note Reference Cooling Unit"
+      ],
+      "expected_newline_boundary_over_capture": 1
+    },
+    "edge_cases/multi_sheet_sample.xlsx": {
+      "inputs": {
+        "pdf": [],
+        "excel": [
+          "edge_cases/multi_sheet_sample.xlsx"
+        ]
+      },
+      "input_sha256": {
+        "edge_cases/multi_sheet_sample.xlsx": "bb0cb6ec97674dbe9c1f1171796253f27710158e36bd34811500d4775f3acc22"
+      },
+      "candidate_count": 8,
+      "alias_candidate_count": 0,
+      "conflict_count": 0,
+      "rejected_count": 12,
+      "document_count": 1,
+      "projection_unit_total": 46,
+      "counts_by_rule": {
+        "TERM_STRUCTURAL_KEY": 5,
+        "TERM_STRUCTURAL_HEADING": 0,
+        "TERM_REPEATED_VALUE": 3,
+        "TERM_EXPLICIT_QUOTED": 0,
+        "ALIAS_EXPLICIT_PARENTHETICAL": 0,
+        "ALIAS_EXPLICIT_DEFINED_AS": 0
+      },
+      "candidate_evaluation_sha256": "773fa91977f43b23087953dd24cde30df3255f1e75dbc95b4ff5d12fdf69ff8f",
+      "candidate_review_sha256": "71b0a5cca811e234508eabbbb71c8ddfdda7c644a33d4c7eaf82772666986f72",
+      "shareable_summary_sha256": "ae53ecbd067d2f7015490b311d611daf4607f69f5b106d396d450499cd253584",
+      "display_check_terms": [
+        "風量調整弁",
+        "温度検出器"
+      ],
+      "expected_newline_boundary_over_capture": 0
+    }
+  }
+}

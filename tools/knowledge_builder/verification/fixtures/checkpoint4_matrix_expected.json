@@ -1,0 +1,54 @@
+{
+  "_comment": "Alpha 0.2.0 Checkpoint 4 - expected values for the matrix_doc_a/matrix_doc_b fixtures (all 3 formats: .pdf/.xlsx/_trace.json). node.text/title/tags below are the ground truth this same content was designed to produce identically across PDF/Excel/Trace JSON input. Node IDs and Edge IDs are NOT included here - they vary by input format (locator.kind differs) and must never be used as cross-format comparison keys; knowledge_builder_input_matrix_checkpoint4.js compares node.text/title/tags directly instead. candidate_pairs below use JSON.stringify([sourceText, targetText]) as the comparison key, per the Checkpoint 4 instruction, to avoid delimiter collisions with the ' / ' already present inside the statement text itself.",
+  "known_constraint": "node.title cannot be made identical across all 3 formats simultaneously while node.text is also identical: excel_direct_adapter.js's deriveTitle() always returns the bare first-cell value (no header prefix), while deriveText() always prefixes every cell with its column header - so Excel's title and text are architecturally never equal to each other for a multi-field row. pdf_direct_adapter.js, by contrast, always sets title===text (both are the single merged-paragraph normalizedText). Given text is kept identical across formats (the field that actually drives Relation Candidate text-similarity matching), PDF's title necessarily equals PDF's own full composite text, while Excel's and Trace JSON's title (independently free to choose) were both set to just the item name, matching each other but not PDF's title. This is a discovered, pre-existing, non-blocking cross-format formatting difference rooted in each adapter's independent (protected, unmodified this round) title-derivation design - not a functional defect. tags are empty across all 3 formats for every matrix statement by deliberate fixture design: excel_direct_adapter.js's matchInitialTags() matches per-cell raw values, while pdf_direct_adapter.js's matchInitialTags() matches the entire merged-paragraph text as a single candidate value (never a substring) - so a composite multi-field statement can only get a non-empty, cross-format-matching tag set if the ENTIRE statement text equals a vocabulary tag verbatim, which is incompatible with the multi-field content needed for a meaningful text-similarity evaluation fixture. Tag-matching semantics themselves are already covered per-adapter by pdf_direct_adapter_verification.js fixture 10 and excel_direct_adapter_verification.js/knowledge_builder_excel_direct_checkpoint2c.js's custom-tag fixture; Checkpoint 4's job is cross-format input-matrix equivalence, not re-verifying each adapter's own tag-matching rule.",
+  "doc_a": {
+    "statements": [
+      { "item": "表面温度", "content": "通常運転時の表面温度は60度以下とする", "category": "温度管理",
+        "text": "項目: 表面温度 / 内容: 通常運転時の表面温度は60度以下とする / 区分: 温度管理",
+        "title_excel_trace": "表面温度", "tags": [] },
+      { "item": "動作音", "content": "通常運転時の動作音は45dB以下とする", "category": "静音性",
+        "text": "項目: 動作音 / 内容: 通常運転時の動作音は45dB以下とする / 区分: 静音性",
+        "title_excel_trace": "動作音", "tags": [] },
+      { "item": "設置環境", "content": "屋内の乾燥した場所に設置することを前提とする", "category": "設置条件",
+        "text": "項目: 設置環境 / 内容: 屋内の乾燥した場所に設置することを前提とする / 区分: 設置条件",
+        "title_excel_trace": "設置環境", "tags": [] }
+    ]
+  },
+  "doc_b": {
+    "statements": [
+      { "item": "筐体表面温度", "content": "通常運転時の筐体表面温度を60度以下に維持する設計とする", "category": "温度管理",
+        "text": "項目: 筐体表面温度 / 内容: 通常運転時の筐体表面温度を60度以下に維持する設計とする / 区分: 温度管理",
+        "title_excel_trace": "筐体表面温度", "tags": [] },
+      { "item": "運転音", "content": "通常運転時の運転音を45dB以下に抑える設計とする", "category": "静音性",
+        "text": "項目: 運転音 / 内容: 通常運転時の運転音を45dB以下に抑える設計とする / 区分: 静音性",
+        "title_excel_trace": "運転音", "tags": [] },
+      { "item": "設置場所", "content": "屋内の乾燥した場所への設置を前提とした構造とする", "category": "設置条件",
+        "text": "項目: 設置場所 / 内容: 屋内の乾燥した場所への設置を前提とした構造とする / 区分: 設置条件",
+        "title_excel_trace": "設置場所", "tags": [] }
+    ]
+  },
+  "expected_candidate_pair_count": 9,
+  "expected_clear_correspondence_pair_count": 3,
+  "clear_correspondence_pairs": [
+    { "source_text": "項目: 表面温度 / 内容: 通常運転時の表面温度は60度以下とする / 区分: 温度管理",
+      "target_text": "項目: 筐体表面温度 / 内容: 通常運転時の筐体表面温度を60度以下に維持する設計とする / 区分: 温度管理",
+      "relation_type": "related_to", "initial_lifecycle": "candidate" },
+    { "source_text": "項目: 動作音 / 内容: 通常運転時の動作音は45dB以下とする / 区分: 静音性",
+      "target_text": "項目: 運転音 / 内容: 通常運転時の運転音を45dB以下に抑える設計とする / 区分: 静音性",
+      "relation_type": "related_to", "initial_lifecycle": "candidate" },
+    { "source_text": "項目: 設置環境 / 内容: 屋内の乾燥した場所に設置することを前提とする / 区分: 設置条件",
+      "target_text": "項目: 設置場所 / 内容: 屋内の乾燥した場所への設置を前提とした構造とする / 区分: 設置条件",
+      "relation_type": "related_to", "initial_lifecycle": "candidate" }
+  ],
+  "all_candidate_pairs_all_source_x_target": [
+    ["項目: 表面温度 / 内容: 通常運転時の表面温度は60度以下とする / 区分: 温度管理", "項目: 筐体表面温度 / 内容: 通常運転時の筐体表面温度を60度以下に維持する設計とする / 区分: 温度管理"],
+    ["項目: 表面温度 / 内容: 通常運転時の表面温度は60度以下とする / 区分: 温度管理", "項目: 運転音 / 内容: 通常運転時の運転音を45dB以下に抑える設計とする / 区分: 静音性"],
+    ["項目: 表面温度 / 内容: 通常運転時の表面温度は60度以下とする / 区分: 温度管理", "項目: 設置場所 / 内容: 屋内の乾燥した場所への設置を前提とした構造とする / 区分: 設置条件"],
+    ["項目: 動作音 / 内容: 通常運転時の動作音は45dB以下とする / 区分: 静音性", "項目: 筐体表面温度 / 内容: 通常運転時の筐体表面温度を60度以下に維持する設計とする / 区分: 温度管理"],
+    ["項目: 動作音 / 内容: 通常運転時の動作音は45dB以下とする / 区分: 静音性", "項目: 運転音 / 内容: 通常運転時の運転音を45dB以下に抑える設計とする / 区分: 静音性"],
+    ["項目: 動作音 / 内容: 通常運転時の動作音は45dB以下とする / 区分: 静音性", "項目: 設置場所 / 内容: 屋内の乾燥した場所への設置を前提とした構造とする / 区分: 設置条件"],
+    ["項目: 設置環境 / 内容: 屋内の乾燥した場所に設置することを前提とする / 区分: 設置条件", "項目: 筐体表面温度 / 内容: 通常運転時の筐体表面温度を60度以下に維持する設計とする / 区分: 温度管理"],
+    ["項目: 設置環境 / 内容: 屋内の乾燥した場所に設置することを前提とする / 区分: 設置条件", "項目: 運転音 / 内容: 通常運転時の運転音を45dB以下に抑える設計とする / 区分: 静音性"],
+    ["項目: 設置環境 / 内容: 屋内の乾燥した場所に設置することを前提とする / 区分: 設置条件", "項目: 設置場所 / 内容: 屋内の乾燥した場所への設置を前提とした構造とする / 区分: 設置条件"]
+  ]
+}

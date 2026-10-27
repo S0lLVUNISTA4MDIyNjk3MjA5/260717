@@ -1,0 +1,26 @@
+{
+  "case_id": "08_TAG",
+  "title": "タグ一致 (tag)",
+  "manual_key_pairs": [
+    {
+      "setup": "通常のtext pairは意図的に非一致。タグ照合をONにする。"
+    }
+  ],
+  "expected": {
+    "accepted_edges": [
+      [
+        "TAG-A1",
+        "TAG-B1"
+      ],
+      [
+        "TAG-A2",
+        "TAG-B2"
+      ]
+    ],
+    "expected_result_method": "tag",
+    "wrong_edges": 0
+  },
+  "notes": [
+    "Private Dictionaryではなく明示tagsによるtag matchingの基本サンプル。"
+  ]
+}

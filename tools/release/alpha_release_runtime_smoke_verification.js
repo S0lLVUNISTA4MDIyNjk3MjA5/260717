@@ -7,9 +7,10 @@
  * which intentionally stub cytoscape/tiny-segmenter to keep those tests
  * focused on B-4b logic -- this file exists specifically to cover what those
  * suites do not: the vendored third-party libraries' own real behavior).
- * Also verifies the product's existing character-type-chunk fallback (already
- * implemented in the product HTML, not new code) actually engages when
- * TinySegmenter fails to load, via the observable #segmenterStatus text. */
+ * Also verifies the no-silent-fallback contract: when the local TinySegmenter
+ * fails to load, the product reports TOKENIZER_RUNTIME_UNAVAILABLE via the
+ * observable #segmenterStatus text and does not start matching (it never
+ * switches to a different tokenizer). */
 'use strict';
 
 const fs = require('fs');
@@ -118,23 +119,26 @@ async function main() {
     await page.close();
   }
 
-  // ── Existing character-type-chunk fallback (product code, unmodified): ──
-  // block only the tiny-segmenter script from loading (matching the product's
-  // own onerror="window.__tsLoadFailed=true" failure path) and confirm the
-  // product's own #segmenterStatus element reports the fallback, observed via
-  // the completed dist build's actual HTML -- not a new test hook.
+  // ── Local TinySegmenter missing: explicit runtime error, no silent tokenizer fallback. ──
+  // Block only the local tiny-segmenter script (the product's onerror path) and confirm the
+  // product reports TOKENIZER_RUNTIME_UNAVAILABLE (no char-type-chunk fallback) and refuses to start matching.
   {
     const page = await browser.newPage();
     const pageErrors = [];
-    const consoleErrors = [];
     page.on('pageerror', e => pageErrors.push(e.message));
-    page.on('console', msg => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
+    const dialogs = [];
+    page.on('dialog', d => { dialogs.push(d.message()); d.accept(); });
     await page.route('**/runtime/tiny-segmenter-0.2.0.js', route => route.abort());
     await page.goto('file://' + DIST_HTML_PATH, { waitUntil: 'load' });
     const statusText = await page.locator('#segmenterStatus').textContent();
-    check('Fallback: with TinySegmenter blocked, #segmenterStatus reports the char-type-chunk fallback',
-      /文字種チャンク（フォールバック）/.test(statusText || ''), statusText);
-    check('Fallback path: no page errors', pageErrors.length === 0, pageErrors);
+    check('Missing runtime: with the local TinySegmenter blocked, #segmenterStatus reports TOKENIZER_RUNTIME_UNAVAILABLE',
+      /TOKENIZER_RUNTIME_UNAVAILABLE/.test(statusText || ''), statusText);
+    check('Missing runtime: no silent char-type-chunk fallback is reported',
+      !/文字種チャンク|フォールバック/.test(statusText || ''), statusText);
+    const diag = await page.evaluate(() => window.__matchingTokenizerDiagnostics.status());
+    check('Missing runtime: diagnostics report ready=false / code TOKENIZER_RUNTIME_UNAVAILABLE', diag.ready === false && diag.code === 'TOKENIZER_RUNTIME_UNAVAILABLE', diag);
+    check('Missing runtime: tokenize() throws instead of falling back', await page.evaluate(() => { try { window.__matchingTokenizerDiagnostics.tokenize('照合'); return false; } catch (e) { return e.code === 'TOKENIZER_RUNTIME_UNAVAILABLE'; } }));
+    check('Missing runtime: no page errors', pageErrors.length === 0, pageErrors);
     await page.close();
   }
 

@@ -1,0 +1,28 @@
+[
+  {
+    "case_id": "case_01_pdf_excel",
+    "content_node_counts": [
+      12,
+      13
+    ],
+    "candidate_count": 7,
+    "graph_node_count": 25,
+    "diagnostics_error_count": 0,
+    "console_error_count": 0,
+    "external_network_request_count": 0,
+    "save_ok": true
+  },
+  {
+    "case_id": "case_02_pdf_pdf",
+    "content_node_counts": [
+      12,
+      13
+    ],
+    "candidate_count": 33,
+    "graph_node_count": 25,
+    "diagnostics_error_count": 0,
+    "console_error_count": 0,
+    "external_network_request_count": 0,
+    "save_ok": true
+  }
+]

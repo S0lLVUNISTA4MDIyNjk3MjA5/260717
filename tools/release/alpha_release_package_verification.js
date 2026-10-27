@@ -51,6 +51,20 @@ const EXPECTED_SELF_AUTHORED_RUNTIME = [
   { src: path.join(REPO_ROOT, 'tools', 'generated', 'trace_comparison_schema_v2.browser.js'), dest: 'trace_comparison_schema_v2.browser.js' },
   { src: path.join(REPO_ROOT, 'tools', 'design_notes', 'json_schema_minivalidator.js'), dest: 'json_schema_minivalidator.js' },
   { src: path.join(REPO_ROOT, 'tools', 'design_notes', 'trace_comparison_record_set_validator.js'), dest: 'trace_comparison_record_set_validator.js' },
+  // Nested Dictionary Selection persistence codec (Contract 0.3 S3.5) - the single, dependency-free private-dictionary file in the bundle.
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_nested_selection_persistence_core.js'), dest: 'private_dictionary_nested_selection_persistence_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'human_evaluation_core.js'), dest: 'human_evaluation_core.js' },
+  // Release Bundle Completeness: the 10 runtime cores the product HTML loads that were previously missing from the bundle.
+  { src: path.join(REPO_ROOT, 'tools', 'canonical_matching_field_registry_core.js'), dest: 'canonical_matching_field_registry_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'canonical_quantity_role_binding_core.js'), dest: 'canonical_quantity_role_binding_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'canonical_quantity_sidecar_context_core.js'), dest: 'canonical_quantity_sidecar_context_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'matching_partial_segment_significance_core.js'), dest: 'matching_partial_segment_significance_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'id_hash_utils.js'), dest: 'id_hash_utils.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_learning_core.js'), dest: 'private_dictionary_learning_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_snapshot_core.js'), dest: 'private_dictionary_snapshot_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_resolver_core.js'), dest: 'private_dictionary_resolver_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_snapshot_activation_core.js'), dest: 'private_dictionary_snapshot_activation_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_project_snapshot_pin_persistence_core.js'), dest: 'private_dictionary_project_snapshot_pin_persistence_core.js' },
 ];
 const EXPECTED_VENDOR_RUNTIME_DEST = {
   cytoscape: 'cytoscape-3.26.0.min.js',
@@ -199,7 +213,7 @@ function main() {
   const runtimeFiles = relFiles.filter(f => f.rel.startsWith('runtime/'));
   const licenseFiles = relFiles.filter(f => f.rel.startsWith('licenses/'));
   const docFiles = relFiles.filter(f => EXPECTED_DOC_FILES.includes(f.rel));
-  check('runtime/ has exactly 12 files', runtimeFiles.length === 12, `found ${runtimeFiles.length}`);
+  check('runtime/ has exactly 24 files (3 vendor + 21 self-authored)', runtimeFiles.length === 24, `found ${runtimeFiles.length}`);
   check('licenses/ has exactly 5 files', licenseFiles.length === 5, `found ${licenseFiles.length}`);
   check(`doc files present: exactly ${EXPECTED_DOC_FILES.length}`, docFiles.length === EXPECTED_DOC_FILES.length, `found ${docFiles.length}`);
   check('HTML file name matches expected exactly', actualRelSet.has(OUTPUT_HTML_NAME));
@@ -238,7 +252,17 @@ function main() {
   const htmlPath = path.join(OUTPUT_DIR, OUTPUT_HTML_NAME);
   const html = fs.readFileSync(htmlPath, 'utf8');
   const scriptSrcs = [...html.matchAll(/<script[^>]*\bsrc\s*=\s*"([^"]*)"/g)].map(m => m[1]);
-  check('exactly 12 <script src="..."> references', scriptSrcs.length === 12, `found ${scriptSrcs.length}`);
+  // Reference completeness invariant (Release Bundle Completeness): the product HTML is the runtime-dependency source of truth, so the
+  // set of <script src> must be EXACTLY the set of runtime/ files the bundle ships (3 vendor + 21 self-authored), every reference must
+  // resolve to a real file, and every shipped runtime script must be referenced (no orphan, no missing, no unexpected local src).
+  const expectedRuntimeRefs = new Set([
+    ...EXPECTED_SELF_AUTHORED_RUNTIME.map(e => `runtime/${e.dest}`),
+    ...Object.values(EXPECTED_VENDOR_RUNTIME_DEST).map(d => `runtime/${d}`),
+  ]);
+  check('exactly 24 <script src="..."> references (3 vendor + 21 self-authored)', scriptSrcs.length === 24, `found ${scriptSrcs.length}`);
+  check('every <script src> maps to an expected runtime file (no unexpected local src)', scriptSrcs.every(s => expectedRuntimeRefs.has(s)), scriptSrcs.filter(s => !expectedRuntimeRefs.has(s)).join(', '));
+  check('every expected runtime script is referenced by the HTML (no orphan)', [...expectedRuntimeRefs].every(r => scriptSrcs.includes(r)), [...expectedRuntimeRefs].filter(r => !scriptSrcs.includes(r)).join(', '));
+  check('no relative (non-runtime/, ./, ../) local script src remains', scriptSrcs.every(s => !/^(\.\/|\.\.\/|\/)/.test(s)), scriptSrcs.filter(s => /^(\.\/|\.\.\/|\/)/.test(s)).join(', '));
   check('all script src are under runtime/', scriptSrcs.every(s => s.startsWith('runtime/')), scriptSrcs.filter(s => !s.startsWith('runtime/')).join(', '));
   check('all script src resolve to existing files', scriptSrcs.every(s => fs.existsSync(path.join(OUTPUT_DIR, s))), scriptSrcs.filter(s => !fs.existsSync(path.join(OUTPUT_DIR, s))).join(', '));
   const dupSrcs = scriptSrcs.filter((s, i) => scriptSrcs.indexOf(s) !== i);

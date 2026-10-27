@@ -24,7 +24,7 @@
   const LIVE_SOURCE_MARKER_PREFIX = 'b4-live-source-v1:';
   const SNAPSHOT_IDENTITY_PREFIX = 'b4-snapshot-v1:';
   const BINDING_IDENTITY_PREFIX = 'b4-binding-v1:';
-  const SCHEMA_VERSION = 'trace-comparison/1.0-rc2';
+  const SCHEMA_VERSION = 'trace-comparison/1.0-rc3';
   const HEX64 = /^[0-9a-f]{64}$/;
   const DATASET_SIGNATURE = /^QA-SHA256:[0-9a-f]{64}$/;
   const EMPTY_DIAGNOSTICS = Object.freeze([]);
@@ -233,8 +233,13 @@
       throw coded('review_artifact_invalid');
     }
     if (relationship.source === 'matching_engine') {
+      // rc3 (Option C v1): a title_candidate has no calibrated confidence -> match_confidence MUST be null; every other engine method keeps a
+      // finite 0..1 confidence (INV-07/26: no substitute number for N/A).
+      const confidenceOk = method === 'title_candidate'
+        ? confidence === null
+        : (Number.isFinite(confidence) && confidence >= 0 && confidence <= 1);
       if (typeof method !== 'string' || method.length === 0
-        || !Number.isFinite(confidence) || confidence < 0 || confidence > 1
+        || !confidenceOk
         || typeof category !== 'string' || category.length === 0) {
         throw coded('review_artifact_invalid');
       }

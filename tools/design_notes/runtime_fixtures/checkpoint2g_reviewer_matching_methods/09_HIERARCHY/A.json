@@ -1,0 +1,16 @@
+{
+  "file_name": "09_HIERARCHY_A.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "HIER-A1",
+      "match_text": "P-101 冷却水ポンプ運転信号",
+      "display_name": "要求側 P-101運転信号"
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "fixture_id": "RA-QB01",
+  "purpose": "L3-2 Checkpoint 1.1 reviewer adversarial contract cases",
+  "cases": [
+    {
+      "id": "SIDE_EMPTY",
+      "side": "",
+      "expected": {
+        "ready": false,
+        "hints_count": 0,
+        "diagnostic_code": "invalid_side"
+      }
+    },
+    {
+      "id": "SIDE_NULL",
+      "side": null,
+      "expected": {
+        "ready": false,
+        "hints_count": 0,
+        "diagnostic_code": "invalid_side"
+      }
+    },
+    {
+      "id": "AMBIGUOUS_UNIT",
+      "identity": "QB01-R2",
+      "expected": {
+        "canonical_role": "unit",
+        "status": "ambiguous",
+        "candidate_fields": [
+          "flow_unit",
+          "unit"
+        ]
+      }
+    },
+    {
+      "id": "UNIQUE_NAMING",
+      "identity": "QB01-R1",
+      "expected": {
+        "canonical_role": "unit",
+        "recommended_status": "unique"
+      },
+      "reason": "Structural uniqueness must not be called resolved; Quantity Sidecar owns semantic resolution."
+    }
+  ],
+  "synthetic_registry_tests_required": [
+    {
+      "id": "MALFORMED_PROVENANCE",
+      "classifier_result": {
+        "classification": "MATCH_ELIGIBLE_WITH_CAUTION",
+        "role": "unit",
+        "source": {
+          "bad": "object"
+        },
+        "note": []
+      },
+      "expected": "malformed_classification; no hint"
+    },
+    {
+      "id": "DETECT_THROW",
+      "behavior": "detectRowsSchemaKind throws",
+      "expected": "batch fail-closed; no uncaught exception"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "file_name": "05_SYNONYM_B.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "SYN-B1",
+      "term": "EMO",
+      "display_name": "納入側 EMO"
+    },
+    {
+      "trace_id": "SYN-B2",
+      "term": "CWP",
+      "display_name": "納入側 CWP"
+    }
+  ]
+}

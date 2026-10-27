@@ -1,0 +1,26 @@
+{
+  "file_name": "07_VECTOR_B.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "VEC-B1",
+      "vector_text": "中央監視装置へ冷却水ポンプ運転ステータスを出力",
+      "display_name": "納入側 ポンプ状態"
+    },
+    {
+      "trace_id": "VEC-B2",
+      "vector_text": "監視システムへ給気ファン故障ステータスを出力",
+      "display_name": "納入側 ファン故障"
+    },
+    {
+      "trace_id": "VEC-B3",
+      "vector_text": "制御盤に室内温度の計測信号を取り込む",
+      "display_name": "納入側 温度入力"
+    }
+  ]
+}

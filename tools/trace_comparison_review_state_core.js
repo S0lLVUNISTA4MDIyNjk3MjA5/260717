@@ -125,7 +125,7 @@
   function validSnapshotIdentity(value) {
     return exactDataRecord(value, SNAPSHOT_KEYS)
       && matches(value.value, new RegExp(`^b4-snapshot-v1:${HEX64}$`))
-      && value.schema_version === 'trace-comparison/1.0-rc2'
+      && value.schema_version === 'trace-comparison/1.0-rc3'
       && matches(value.record_set_digest, new RegExp(`^SHA-256:${HEX64}$`));
   }
 

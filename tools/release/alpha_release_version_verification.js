@@ -97,7 +97,7 @@ function main() {
     countOccurrences(html, 'V12.1.15: 既定の照合キー選定') === 1);
   check("unrelated legacy identifier 'V11.9 Trace Profile IO' untouched",
     html.includes("'ツール':'V11.9 Trace Profile IO'"));
-  check("Schema \\$id 'trace-comparison/1.0-rc2' untouched (not present in HTML; checked separately below)", true);
+  check("Schema \\$id 'trace-comparison/1.0-rc3' untouched (not present in HTML; checked separately below)", true);
 
   // ── no stray old-version string outside the one allowed historical comment ──
   const bareOldVersionCount = countOccurrences(html, 'V12.1.15');
@@ -117,8 +117,8 @@ function main() {
   }
   const schemaJsonPath = path.join(REPO_ROOT, 'tools', 'design_notes', 'trace_comparison_schema_v2.json');
   const schemaJson = JSON.parse(fs.readFileSync(schemaJsonPath, 'utf8'));
-  check("Schema \\$id 'trace-comparison/1.0-rc2' unchanged in source design doc",
-    schemaJson.$id === 'trace-comparison/1.0-rc2', schemaJson.$id);
+  check("Schema \\$id 'trace-comparison/1.0-rc3' unchanged in source design doc",
+    schemaJson.$id === 'trace-comparison/1.0-rc3', schemaJson.$id);
 
   // ── doc files carry the new version ──
   const docChecks = [

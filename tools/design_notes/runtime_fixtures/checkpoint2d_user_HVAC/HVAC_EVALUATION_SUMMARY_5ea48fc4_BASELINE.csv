@@ -1,0 +1,9 @@
+test_id,direction,setting,expected_correct,actual_correct,actual_false,total_edges,result,note
+HVAC-R01,A_to_B,default,4,4,5,9,FAIL,正解と誤対応が同じ信頼度0.70
+HVAC-R02,B_to_A,default,4,4,5,9,FAIL,逆方向でも誤対応が残る
+HVAC-R03,A_to_A,self,5,5,8,13,FAIL,説明文を含む正しい自己対応5件
+HVAC-R04,B_to_B,self,4,4,8,12,FAIL,正しい自己対応4件
+HVAC-R05,A_to_B,minConfidence_0.71,4,0,0,0,FAIL,正しい対応もすべて消える
+HVAC-R06,A_to_B,manual_code,4,4,3,7,FAIL,code方式でもOU-1とOU-2等を誤対応
+HVAC-R07,B_to_A,manual_code,4,4,2,6,FAIL,逆方向code方式でも誤対応
+

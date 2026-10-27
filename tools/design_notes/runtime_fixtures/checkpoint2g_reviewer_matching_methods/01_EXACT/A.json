@@ -1,0 +1,21 @@
+{
+  "file_name": "01_EXACT_A.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "EX-A1",
+      "match_name": "非常停止スイッチ",
+      "display_name": "要求側 非常停止スイッチ"
+    },
+    {
+      "trace_id": "EX-A2",
+      "match_name": "冷却水ポンプ",
+      "display_name": "要求側 冷却水ポンプ"
+    }
+  ]
+}

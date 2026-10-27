@@ -1,0 +1,29 @@
+{
+  "case_id": "04_MODEL",
+  "title": "モデル名一致 (model)",
+  "manual_key_pairs": [
+    {
+      "sysField": "model_name",
+      "plmField": "model_name",
+      "method": "model",
+      "enabled": true
+    }
+  ],
+  "expected": {
+    "accepted_edges": [
+      [
+        "MODEL-A1",
+        "MODEL-B1"
+      ],
+      [
+        "MODEL-A2",
+        "MODEL-B2"
+      ]
+    ],
+    "expected_result_method": "model",
+    "wrong_edges": 0
+  },
+  "notes": [
+    "field名をmodel_nameとし、完全一致ではないcontains形状にしてmodel creditを観察する。"
+  ]
+}

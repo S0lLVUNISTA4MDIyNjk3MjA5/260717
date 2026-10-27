@@ -3,8 +3,8 @@
 /*
  * Alpha Release Gate 1 - Checkpoint 2: version harmonization + user docs.
  *
- * Copies the product HTML plus its already-approved runtime dependencies (9
- * self-authored cores + 3 vendored third-party libraries, 12 files total) into
+ * Copies the product HTML plus its already-approved runtime dependencies (21
+ * self-authored cores + 3 vendored third-party libraries, 24 files total) into
  * dist/, and produces a version-harmonized distribution copy:
  *
  *   1. Apply an exact, individually-verified set of string replacements to the
@@ -16,12 +16,12 @@
  *      match_logic.json re-imports) are read from the SAME source text but are
  *      deliberately NOT in this list, and are asserted to survive unchanged
  *      (see the post-replacement sanity checks below). Schema versions
- *      ("trace-comparison/1.0-rc2", "quantity-annotation/1.0-rc1") and B-4b
+ *      ("trace-comparison/1.0-rc3", "quantity-annotation/1.0-rc1") and B-4b
  *      core API versions are untouched entirely -- nothing in this script
  *      references them.
  *   2. Insert a small alpha-release notice directly after the (now-updated)
  *      <h1>, without any other UI redesign.
- *   3. Rewrite the 12 known <script src="..."> attributes to point at the
+ *   3. Rewrite the 24 known <script src="..."> attributes to point at the
  *      local runtime/ folder.
  *   4. Copy the vendor + self-authored runtime files, the 5 license texts, and
  *      the 4 user-facing docs (tools/release/docs/) into the output directory.
@@ -82,7 +82,7 @@ function replaceExact(source, oldValue, newValue, expectedCount) {
   return source.split(oldValue).join(newValue);
 }
 
-// Self-authored runtime: 7 tools/(generated) files + 2 design_notes files = 9.
+// Self-authored runtime: 7 tools/(generated) files + 2 design_notes files + 1 persistence codec + 10 release-completeness cores = 20.
 const SELF_AUTHORED_RUNTIME = [
   { src: path.join(REPO_ROOT, 'tools', 'trace_comparison_review_state_core.js'), dest: 'trace_comparison_review_state_core.js' },
   { src: path.join(REPO_ROOT, 'tools', 'trace_comparison_review_session_core.js'), dest: 'trace_comparison_review_session_core.js' },
@@ -93,6 +93,25 @@ const SELF_AUTHORED_RUNTIME = [
   { src: path.join(REPO_ROOT, 'tools', 'generated', 'trace_comparison_schema_v2.browser.js'), dest: 'trace_comparison_schema_v2.browser.js' },
   { src: path.join(REPO_ROOT, 'tools', 'design_notes', 'json_schema_minivalidator.js'), dest: 'json_schema_minivalidator.js' },
   { src: path.join(REPO_ROOT, 'tools', 'design_notes', 'trace_comparison_record_set_validator.js'), dest: 'trace_comparison_record_set_validator.js' },
+  // Nested Dictionary Selection persistence codec (Contract 0.3 S3.5): the ONE private-dictionary file shipped, because it has no
+  // dependency on any other core (see the header of the file). Lets the release bundle Save / Load the Selection settings artifact.
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_nested_selection_persistence_core.js'), dest: 'private_dictionary_nested_selection_persistence_core.js' },
+  // Human Evaluation 0.1 core (pure codec / identity / status engine); the product HTML injects canonicalJson / rawSha256Utf8 from the already-bundled QuantitySidecarBinding.
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'human_evaluation_core.js'), dest: 'human_evaluation_core.js' },
+  // Release Bundle Completeness: the remaining runtime cores the product HTML already loads via <script src> (HTML is the source of
+  // truth for runtime dependencies). Dependency closure: role_binding -> registry; sidecar_context -> role_binding + registry;
+  // id_hash_utils -> QuantitySidecarBinding; learning -> id_hash; snapshot -> learning; resolver -> snapshot + learning + id_hash;
+  // activation -> snapshot; pin persistence -> activation + id_hash. Copied byte-for-byte; no core is modified.
+  { src: path.join(REPO_ROOT, 'tools', 'canonical_matching_field_registry_core.js'), dest: 'canonical_matching_field_registry_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'canonical_quantity_role_binding_core.js'), dest: 'canonical_quantity_role_binding_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'canonical_quantity_sidecar_context_core.js'), dest: 'canonical_quantity_sidecar_context_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'matching_partial_segment_significance_core.js'), dest: 'matching_partial_segment_significance_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'id_hash_utils.js'), dest: 'id_hash_utils.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_learning_core.js'), dest: 'private_dictionary_learning_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_snapshot_core.js'), dest: 'private_dictionary_snapshot_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_resolver_core.js'), dest: 'private_dictionary_resolver_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_snapshot_activation_core.js'), dest: 'private_dictionary_snapshot_activation_core.js' },
+  { src: path.join(REPO_ROOT, 'tools', 'knowledge_builder', 'core', 'private_dictionary_project_snapshot_pin_persistence_core.js'), dest: 'private_dictionary_project_snapshot_pin_persistence_core.js' },
 ];
 
 const VENDOR_ENTRIES = [
@@ -113,11 +132,11 @@ const LICENSE_FILES = [
 const DOC_FILES = ['README_ja.md', 'KNOWN_LIMITATIONS.md', 'THIRD_PARTY_LICENSES.md', 'BROWSER_VALIDATION_REPORT.md', 'trace_matching_tool_detailed_operation_manual_v12.2.0_alpha.1.pdf'];
 
 // Exact <script src="..."> attribute value -> new local runtime/ relative path.
-// One entry per of the 12 runtime files; build fails if any doesn't match exactly once.
+// One entry per rewritten runtime file (24); build fails if any doesn't match exactly once.
 const SCRIPT_SRC_REWRITES = [
   ['https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js', 'runtime/cytoscape-3.26.0.min.js'],
   ['https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js', 'runtime/xlsx-0.18.5.full.min.js'],
-  ['https://unpkg.com/tiny-segmenter@0.2.0/dist/tiny-segmenter-0.2.0.js', 'runtime/tiny-segmenter-0.2.0.js'],
+  ['./release/vendor/tiny-segmenter-0.2.0/tiny-segmenter-0.2.0.js', 'runtime/tiny-segmenter-0.2.0.js'],
   ['./generated/quantity_annotation_schema_v1.browser.js', 'runtime/quantity_annotation_schema_v1.browser.js'],
   ['./quantity_sidecar_binding_core.js', 'runtime/quantity_sidecar_binding_core.js'],
   ['./generated/trace_comparison_schema_v2.browser.js', 'runtime/trace_comparison_schema_v2.browser.js'],
@@ -127,6 +146,18 @@ const SCRIPT_SRC_REWRITES = [
   ['./trace_comparison_review_session_core.js', 'runtime/trace_comparison_review_session_core.js'],
   ['./trace_comparison_review_projection_core.js', 'runtime/trace_comparison_review_projection_core.js'],
   ['./trace_comparison_review_export_core.js', 'runtime/trace_comparison_review_export_core.js'],
+  ['./knowledge_builder/core/private_dictionary_nested_selection_persistence_core.js', 'runtime/private_dictionary_nested_selection_persistence_core.js'],
+  ['./knowledge_builder/core/human_evaluation_core.js', 'runtime/human_evaluation_core.js'],
+  ['./canonical_matching_field_registry_core.js', 'runtime/canonical_matching_field_registry_core.js'],
+  ['./knowledge_builder/core/canonical_quantity_role_binding_core.js', 'runtime/canonical_quantity_role_binding_core.js'],
+  ['./knowledge_builder/core/canonical_quantity_sidecar_context_core.js', 'runtime/canonical_quantity_sidecar_context_core.js'],
+  ['./matching_partial_segment_significance_core.js', 'runtime/matching_partial_segment_significance_core.js'],
+  ['./knowledge_builder/core/id_hash_utils.js', 'runtime/id_hash_utils.js'],
+  ['./knowledge_builder/core/private_dictionary_learning_core.js', 'runtime/private_dictionary_learning_core.js'],
+  ['./knowledge_builder/core/private_dictionary_snapshot_core.js', 'runtime/private_dictionary_snapshot_core.js'],
+  ['./knowledge_builder/core/private_dictionary_resolver_core.js', 'runtime/private_dictionary_resolver_core.js'],
+  ['./knowledge_builder/core/private_dictionary_snapshot_activation_core.js', 'runtime/private_dictionary_snapshot_activation_core.js'],
+  ['./knowledge_builder/core/private_dictionary_project_snapshot_pin_persistence_core.js', 'runtime/private_dictionary_project_snapshot_pin_persistence_core.js'],
 ];
 
 // Category A only (product release version -> V12.2.0-alpha.1). Every entry's
@@ -307,12 +338,20 @@ function main() {
     1
   );
 
-  // ... then rewrite the 12 known script src attributes.
+  // ... then rewrite the 24 known script src attributes.
   for (const [from, to] of SCRIPT_SRC_REWRITES) {
     const needle = `src="${from}"`;
     const count = html.split(needle).length - 1;
     if (count !== 1) fail(`expected exactly 1 occurrence of ${needle}, found ${count}`);
     html = html.split(needle).join(`src="${to}"`);
+  }
+
+  // Fail closed (Release Bundle Completeness): every <script src> must now point into runtime/ and resolve to a file that was
+  // actually copied; a core added to the HTML but not to the copy list can no longer ship as a silent 404.
+  for (const m of html.matchAll(/<script\b[^>]*\bsrc\s*=\s*"([^"]*)"/g)) {
+    const srcValue = m[1];
+    if (!srcValue.startsWith('runtime/')) fail(`script src is not under runtime/ after rewrite: ${srcValue}`);
+    if (!fs.existsSync(path.join(OUTPUT_DIR, srcValue))) fail(`script src does not resolve to a bundled file: ${srcValue}`);
   }
 
   // Fail closed: no resource-loading tag may still reference an external URL.

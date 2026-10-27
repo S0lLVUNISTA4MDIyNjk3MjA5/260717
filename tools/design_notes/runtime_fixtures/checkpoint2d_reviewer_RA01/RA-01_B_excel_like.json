@@ -1,0 +1,296 @@
+{
+  "file_name": "reviewer_adversarial_B.xlsx",
+  "chapter_number": "TRACE",
+  "chapter_title": "Reviewer Adversarial Fixture",
+  "trace_format": "excel-row-trace-v1",
+  "schema_version": "1.1",
+  "generated_at": "2026-08-30T00:00:00.000Z",
+  "generator": {
+    "name": "Reviewer-authored adversarial fixture",
+    "version": "1.0"
+  },
+  "source": {
+    "file_name": "reviewer_adversarial_B.xlsx",
+    "sheet_name": "機器表"
+  },
+  "statistics": {
+    "records": 7,
+    "tagged_records": 0,
+    "reviewed_records": 7,
+    "excluded_records": 0
+  },
+  "_trace_adapter": {
+    "kind": "excel_row_export",
+    "source_file": "reviewer_adversarial_B.xlsx",
+    "source_sheet": "機器表",
+    "record_count": 7
+  },
+  "_trace_records": [
+    {
+      "trace_id": "B-FCU1",
+      "parent_id": "SHEET-RA01-B",
+      "trace_title": "4方向天井カセット形室内ユニット",
+      "trace_text": "4方向天井カセット形室内ユニット FCU-1 冷房5.6kW 暖房6.3kW 単相200V",
+      "trace_content": [
+        "4方向天井カセット形室内ユニット FCU-1 冷房5.6kW 暖房6.3kW 単相200V"
+      ],
+      "trace_category": "excel_row",
+      "trace_key_text": "設計確認一覧 空調機器 室内ユニット FCU-1 冷房能力 定格容量 200V",
+      "equipment_code": "FCU-1",
+      "equipment_code_name": "FCU-1 4方向天井カセット形室内ユニット",
+      "source_file": "reviewer_adversarial_B.xlsx",
+      "source_sheet": "機器表",
+      "source_row": 2,
+      "source_path": "$._trace_records[0]",
+      "source_section_id": "SHEET-RA01-B",
+      "source_section_title": "機器表",
+      "block_type": "excel_row",
+      "stable_uid": "RA01-B-1",
+      "content_hash": "ra01bhash01",
+      "id_scheme_version": "stable-excel-row-uid-v2",
+      "schema_version": "1.1",
+      "review_status": "reviewed",
+      "ai_reviewed": false,
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "機器記号": "FCU-1",
+        "機器名称": "4方向天井カセット形室内ユニット",
+        "確認内容": "4方向天井カセット形室内ユニット FCU-1 冷房5.6kW 暖房6.3kW 単相200V",
+        "_source": {
+          "file_name": "reviewer_adversarial_B.xlsx",
+          "sheet_name": "機器表",
+          "excel_row": 2
+        }
+      }
+    },
+    {
+      "trace_id": "B-OU1",
+      "parent_id": "SHEET-RA01-B",
+      "trace_title": "ビル用マルチエアコン室外ユニット",
+      "trace_text": "ビル用マルチエアコン室外ユニット OU-1 冷房28.0kW 暖房31.5kW 三相200V",
+      "trace_content": [
+        "ビル用マルチエアコン室外ユニット OU-1 冷房28.0kW 暖房31.5kW 三相200V"
+      ],
+      "trace_category": "excel_row",
+      "trace_key_text": "設計確認一覧 空調機器 室外ユニット OU-1 冷房能力 定格容量 200V",
+      "equipment_code": "OU-1",
+      "equipment_code_name": "OU-1 ビル用マルチエアコン室外ユニット",
+      "source_file": "reviewer_adversarial_B.xlsx",
+      "source_sheet": "機器表",
+      "source_row": 3,
+      "source_path": "$._trace_records[1]",
+      "source_section_id": "SHEET-RA01-B",
+      "source_section_title": "機器表",
+      "block_type": "excel_row",
+      "stable_uid": "RA01-B-2",
+      "content_hash": "ra01bhash02",
+      "id_scheme_version": "stable-excel-row-uid-v2",
+      "schema_version": "1.1",
+      "review_status": "reviewed",
+      "ai_reviewed": false,
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "機器記号": "OU-1",
+        "機器名称": "ビル用マルチエアコン室外ユニット",
+        "確認内容": "ビル用マルチエアコン室外ユニット OU-1 冷房28.0kW 暖房31.5kW 三相200V",
+        "_source": {
+          "file_name": "reviewer_adversarial_B.xlsx",
+          "sheet_name": "機器表",
+          "excel_row": 3
+        }
+      }
+    },
+    {
+      "trace_id": "B-OU2",
+      "parent_id": "SHEET-RA01-B",
+      "trace_title": "ビル用マルチエアコン室外ユニット",
+      "trace_text": "ビル用マルチエアコン室外ユニット OU-2 冷房33.5kW 暖房37.5kW 三相200V",
+      "trace_content": [
+        "ビル用マルチエアコン室外ユニット OU-2 冷房33.5kW 暖房37.5kW 三相200V"
+      ],
+      "trace_category": "excel_row",
+      "trace_key_text": "設計確認一覧 空調機器 室外ユニット OU-2 冷房能力 定格容量 200V",
+      "equipment_code": "OU-2",
+      "equipment_code_name": "OU-2 ビル用マルチエアコン室外ユニット",
+      "source_file": "reviewer_adversarial_B.xlsx",
+      "source_sheet": "機器表",
+      "source_row": 4,
+      "source_path": "$._trace_records[2]",
+      "source_section_id": "SHEET-RA01-B",
+      "source_section_title": "機器表",
+      "block_type": "excel_row",
+      "stable_uid": "RA01-B-3",
+      "content_hash": "ra01bhash03",
+      "id_scheme_version": "stable-excel-row-uid-v2",
+      "schema_version": "1.1",
+      "review_status": "reviewed",
+      "ai_reviewed": false,
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "機器記号": "OU-2",
+        "機器名称": "ビル用マルチエアコン室外ユニット",
+        "確認内容": "ビル用マルチエアコン室外ユニット OU-2 冷房33.5kW 暖房37.5kW 三相200V",
+        "_source": {
+          "file_name": "reviewer_adversarial_B.xlsx",
+          "sheet_name": "機器表",
+          "excel_row": 4
+        }
+      }
+    },
+    {
+      "trace_id": "B-IU2",
+      "parent_id": "SHEET-RA01-B",
+      "trace_title": "壁掛形室内ユニット",
+      "trace_text": "壁掛形室内ユニット IU-2 冷房2.8kW 暖房3.6kW 単相200V",
+      "trace_content": [
+        "壁掛形室内ユニット IU-2 冷房2.8kW 暖房3.6kW 単相200V"
+      ],
+      "trace_category": "excel_row",
+      "trace_key_text": "設計確認一覧 空調機器 室内ユニット IU-2 冷房能力 定格容量 200V",
+      "equipment_code": "IU-2",
+      "equipment_code_name": "IU-2 壁掛形室内ユニット",
+      "source_file": "reviewer_adversarial_B.xlsx",
+      "source_sheet": "機器表",
+      "source_row": 5,
+      "source_path": "$._trace_records[3]",
+      "source_section_id": "SHEET-RA01-B",
+      "source_section_title": "機器表",
+      "block_type": "excel_row",
+      "stable_uid": "RA01-B-4",
+      "content_hash": "ra01bhash04",
+      "id_scheme_version": "stable-excel-row-uid-v2",
+      "schema_version": "1.1",
+      "review_status": "reviewed",
+      "ai_reviewed": false,
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "機器記号": "IU-2",
+        "機器名称": "壁掛形室内ユニット",
+        "確認内容": "壁掛形室内ユニット IU-2 冷房2.8kW 暖房3.6kW 単相200V",
+        "_source": {
+          "file_name": "reviewer_adversarial_B.xlsx",
+          "sheet_name": "機器表",
+          "excel_row": 5
+        }
+      }
+    },
+    {
+      "trace_id": "B-VEU1",
+      "parent_id": "SHEET-RA01-B",
+      "trace_title": "全熱交換ユニット",
+      "trace_text": "全熱交換ユニット VEU-1 処理風量500m3/h 単相200V",
+      "trace_content": [
+        "全熱交換ユニット VEU-1 処理風量500m3/h 単相200V"
+      ],
+      "trace_category": "excel_row",
+      "trace_key_text": "設計確認一覧 空調機器 換気ユニット VEU-1 定格風量 200V",
+      "equipment_code": "VEU-1",
+      "equipment_code_name": "VEU-1 全熱交換ユニット",
+      "source_file": "reviewer_adversarial_B.xlsx",
+      "source_sheet": "機器表",
+      "source_row": 6,
+      "source_path": "$._trace_records[4]",
+      "source_section_id": "SHEET-RA01-B",
+      "source_section_title": "機器表",
+      "block_type": "excel_row",
+      "stable_uid": "RA01-B-5",
+      "content_hash": "ra01bhash05",
+      "id_scheme_version": "stable-excel-row-uid-v2",
+      "schema_version": "1.1",
+      "review_status": "reviewed",
+      "ai_reviewed": false,
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "機器記号": "VEU-1",
+        "機器名称": "全熱交換ユニット",
+        "確認内容": "全熱交換ユニット VEU-1 処理風量500m3/h 単相200V",
+        "_source": {
+          "file_name": "reviewer_adversarial_B.xlsx",
+          "sheet_name": "機器表",
+          "excel_row": 6
+        }
+      }
+    },
+    {
+      "trace_id": "B-CP1",
+      "parent_id": "SHEET-RA01-B",
+      "trace_title": "空調機制御盤",
+      "trace_text": "空調機制御盤 CP-1 絶縁抵抗1MΩ以上 制御電源200V",
+      "trace_content": [
+        "空調機制御盤 CP-1 絶縁抵抗1MΩ以上 制御電源200V"
+      ],
+      "trace_category": "excel_row",
+      "trace_key_text": "設計確認一覧 空調機器 制御ユニット CP-1 絶縁抵抗 以上 200V",
+      "equipment_code": "CP-1",
+      "equipment_code_name": "CP-1 空調機制御盤",
+      "source_file": "reviewer_adversarial_B.xlsx",
+      "source_sheet": "機器表",
+      "source_row": 7,
+      "source_path": "$._trace_records[5]",
+      "source_section_id": "SHEET-RA01-B",
+      "source_section_title": "機器表",
+      "block_type": "excel_row",
+      "stable_uid": "RA01-B-6",
+      "content_hash": "ra01bhash06",
+      "id_scheme_version": "stable-excel-row-uid-v2",
+      "schema_version": "1.1",
+      "review_status": "reviewed",
+      "ai_reviewed": false,
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "機器記号": "CP-1",
+        "機器名称": "空調機制御盤",
+        "確認内容": "空調機制御盤 CP-1 絶縁抵抗1MΩ以上 制御電源200V",
+        "_source": {
+          "file_name": "reviewer_adversarial_B.xlsx",
+          "sheet_name": "機器表",
+          "excel_row": 7
+        }
+      }
+    },
+    {
+      "trace_id": "B-DP1",
+      "parent_id": "SHEET-RA01-B",
+      "trace_title": "ドレン排水ポンプ",
+      "trace_text": "ドレン排水ポンプ DP-1 排水量12L/min 電源単相200V",
+      "trace_content": [
+        "ドレン排水ポンプ DP-1 排水量12L/min 電源単相200V"
+      ],
+      "trace_category": "excel_row",
+      "trace_key_text": "設計確認一覧 空調機器 排水 ユニット DP-1 定格容量 200V",
+      "equipment_code": "DP-1",
+      "equipment_code_name": "DP-1 ドレン排水ポンプ",
+      "source_file": "reviewer_adversarial_B.xlsx",
+      "source_sheet": "機器表",
+      "source_row": 8,
+      "source_path": "$._trace_records[6]",
+      "source_section_id": "SHEET-RA01-B",
+      "source_section_title": "機器表",
+      "block_type": "excel_row",
+      "stable_uid": "RA01-B-7",
+      "content_hash": "ra01bhash07",
+      "id_scheme_version": "stable-excel-row-uid-v2",
+      "schema_version": "1.1",
+      "review_status": "reviewed",
+      "ai_reviewed": false,
+      "tags": [],
+      "unregistered_tags": [],
+      "source_record": {
+        "機器記号": "DP-1",
+        "機器名称": "ドレン排水ポンプ",
+        "確認内容": "ドレン排水ポンプ DP-1 排水量12L/min 電源単相200V",
+        "_source": {
+          "file_name": "reviewer_adversarial_B.xlsx",
+          "sheet_name": "機器表",
+          "excel_row": 8
+        }
+      }
+    }
+  ]
+}

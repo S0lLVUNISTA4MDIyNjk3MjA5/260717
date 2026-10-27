@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><title>P2-A3 browser harness</title></head>
+<body>
+<!-- Machine-readable harness for the P2-A3 candidate review UI. Loads the same module set the
+     production page loads, drives the pipeline over the committed standard sample, and writes a
+     result object to #harness-result as JSON. No candidate text is written to the console. -->
+<pre id="harness-result">running</pre>
+<script src="/vendor/xlsx.full.min.js"></script>
+<script src="/vendor/pdfjs/cmaps-data.js"></script>
+<script src="/vendor/pdfjs/fonts-data.js"></script>
+<script src="/vendor/pdfjs/alpha-local-factories.js"></script>
+<script src="/vendor/pdfjs/pdf.min.js"></script>
+<script src="/core/quantity_sidecar_binding_core.js"></script>
+<script src="/core/id_hash_utils.js"></script>
+<script src="/core/pdf_direct_adapter.js"></script>
+<script src="/core/excel_direct_adapter.js"></script>
+<script src="/core/private_dictionary_rule_extraction_core.js"></script>
+<script src="/bootstrap.js"></script>
+<script src="/error_messages.js"></script>
+<script src="/limits.js"></script>
+<script src="/dom.js"></script>
+<script src="/review_state.js"></script>
+<script src="/evidence_index.js"></script>
+<script src="/input_selection.js"></script>
+<script src="/browser_ingest.js"></script>
+<script src="/harness_driver.js"></script>
+</body>
+</html>

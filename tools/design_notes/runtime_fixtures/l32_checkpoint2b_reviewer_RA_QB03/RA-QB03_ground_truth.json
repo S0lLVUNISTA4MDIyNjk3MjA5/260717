@@ -1,0 +1,209 @@
+{
+  "fixture_id": "RA-QB03",
+  "purpose": "Reviewer-owned Ground Truth for L3-2 Checkpoint 2-B controlled canonical property-context consumption.",
+  "policy": {
+    "eligible": "Only verified canonical_role=property, status=unique, usable=true, exactly one candidate, non-empty string raw_value may affect property keyword evidence.",
+    "fallback": "No eligible property context => semantic-equivalent legacy property resolution.",
+    "no_double_count": true,
+    "other_roles_no_effect": [
+      "value",
+      "unit",
+      "relation_condition"
+    ],
+    "authority": "QuantitySidecarBinding remains semantic authority."
+  },
+  "cases": [
+    {
+      "id": "QB03-01-CLEAN-UNIQUE",
+      "source_record": {
+        "property": "冷房能力",
+        "spec_value": "12 kW",
+        "note": "点検対象"
+      },
+      "quantity_source_field": "spec_value",
+      "quantity_dimension": "power",
+      "canonical_property": {
+        "status": "unique",
+        "raw_value": "冷房能力"
+      },
+      "expected": {
+        "top_concept_id": "performance.cooling_capacity",
+        "status": "resolved",
+        "confidence": 0.75,
+        "keyword_score_count": 1
+      }
+    },
+    {
+      "id": "QB03-02-NO-HINT-FALLBACK",
+      "source_record": {
+        "item_name": "冷房能力",
+        "spec_value": "12 kW"
+      },
+      "quantity_source_field": "spec_value",
+      "quantity_dimension": "power",
+      "canonical_property": null,
+      "expected": {
+        "canonical_effect": "none",
+        "result_equals_legacy": true
+      }
+    },
+    {
+      "id": "QB03-03-AMBIGUOUS-FALLBACK",
+      "source_record": {
+        "property": "冷房能力",
+        "design_property": "電源電圧",
+        "spec_value": "12 kW"
+      },
+      "quantity_source_field": "spec_value",
+      "quantity_dimension": "power",
+      "canonical_property": {
+        "status": "ambiguous",
+        "candidate_values": [
+          "冷房能力",
+          "電源電圧"
+        ]
+      },
+      "expected": {
+        "canonical_effect": "none",
+        "result_equals_legacy": true
+      }
+    },
+    {
+      "id": "QB03-04-NONSTRING-FALLBACK",
+      "source_record": {
+        "property": 123,
+        "item_name": "冷房能力",
+        "spec_value": "12 kW"
+      },
+      "quantity_source_field": "spec_value",
+      "quantity_dimension": "power",
+      "canonical_property": {
+        "status": "unique",
+        "raw_value": 123
+      },
+      "expected": {
+        "must_not_stringify_property": true,
+        "canonical_effect": "none",
+        "result_equals_legacy": true
+      }
+    },
+    {
+      "id": "QB03-05-BRIDGE-NOT-READY-FALLBACK",
+      "source_record": {
+        "item_name": "冷房能力",
+        "spec_value": "12 kW"
+      },
+      "quantity_source_field": "spec_value",
+      "quantity_dimension": "power",
+      "canonical_bridge": {
+        "ready": false,
+        "diagnostic": "canonical_binding_invalid"
+      },
+      "expected": {
+        "quantity_result_still_available": true,
+        "result_equals_legacy": true,
+        "canonical_effect": "none"
+      }
+    },
+    {
+      "id": "QB03-06-CONFLICT-ISOLATION",
+      "source_record": {
+        "property": "電源電圧",
+        "spec_value": "12 kW",
+        "note": "冷房能力"
+      },
+      "quantity_source_field": "spec_value",
+      "quantity_dimension": "power",
+      "canonical_property": {
+        "status": "unique",
+        "raw_value": "電源電圧"
+      },
+      "expected": {
+        "legacy_top_concept_id": "performance.cooling_capacity",
+        "legacy_status": "resolved",
+        "canonical_aware_status": "ambiguous",
+        "reason": "Unrelated free-text note must not provide property keyword evidence when a verified unique property field exists."
+      }
+    },
+    {
+      "id": "QB03-07-NO-SCORE-INFLATION",
+      "source_record": {
+        "property": "冷房能力",
+        "spec_value": "12 kW",
+        "note": "冷房能力"
+      },
+      "quantity_source_field": "spec_value",
+      "quantity_dimension": "power",
+      "canonical_property": {
+        "status": "unique",
+        "raw_value": "冷房能力"
+      },
+      "expected": {
+        "top_concept_id": "performance.cooling_capacity",
+        "confidence": 0.75,
+        "must_not_be": 0.99,
+        "keyword_score_count": 1
+      }
+    },
+    {
+      "id": "QB03-08-OTHER-ROLES-NO-EFFECT",
+      "source_record": {
+        "spec_value": "12 kW",
+        "unit": "kW",
+        "condition": ">="
+      },
+      "quantity_source_field": "spec_value",
+      "quantity_dimension": "power",
+      "canonical_contexts": [
+        {
+          "canonical_role": "value",
+          "status": "unique"
+        },
+        {
+          "canonical_role": "unit",
+          "status": "unique"
+        },
+        {
+          "canonical_role": "relation_condition",
+          "status": "unique"
+        }
+      ],
+      "expected": {
+        "canonical_effect_on_property_scoring": "none",
+        "result_equals_legacy": true
+      }
+    },
+    {
+      "id": "QB03-09-TAGS-PRESERVED",
+      "source_record": {
+        "property": "冷房能力",
+        "spec_value": "12 kW"
+      },
+      "tags": [
+        "冷房能力"
+      ],
+      "quantity_source_field": "spec_value",
+      "quantity_dimension": "power",
+      "canonical_property": {
+        "status": "unique",
+        "raw_value": "冷房能力"
+      },
+      "expected": {
+        "top_concept_id": "performance.cooling_capacity",
+        "confidence": 0.99,
+        "evidence_components": [
+          "dimension",
+          "keyword",
+          "tag"
+        ]
+      }
+    },
+    {
+      "id": "QB03-10-SIDE-SYMMETRY",
+      "expected": {
+        "same_policy_requirement_actual": true,
+        "no_sys_plm_branching": true
+      }
+    }
+  ]
+}

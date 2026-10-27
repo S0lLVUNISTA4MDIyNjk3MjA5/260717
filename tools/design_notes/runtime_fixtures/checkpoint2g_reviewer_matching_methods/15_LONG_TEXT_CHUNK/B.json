@@ -1,0 +1,16 @@
+{
+  "file_name": "15_LONG_TEXT_CHUNK_B.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "2.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "CH-B1",
+      "trace_text": "中央監視装置は冷却水ポンプP-401から運転ステータスを受信する。停止状態も個別に受信する。故障時には故障警報信号を受信して画面表示する。",
+      "display_name": "納入側 長文P-401"
+    }
+  ]
+}

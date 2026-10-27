@@ -1,0 +1,21 @@
+{
+  "file_name": "05_SYNONYM_A.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "SYN-A1",
+      "term": "非常停止スイッチ",
+      "display_name": "要求側 非常停止スイッチ"
+    },
+    {
+      "trace_id": "SYN-A2",
+      "term": "冷却水ポンプ",
+      "display_name": "要求側 冷却水ポンプ"
+    }
+  ]
+}

@@ -1,0 +1,241 @@
+{
+  "generated_at": "2026-08-02T21:26:23.459Z",
+  "total_pass": 740,
+  "total_fail": 0,
+  "cases": [
+    {
+      "case_id": "a_pdf__b_pdf",
+      "input_mode_a": "pdf",
+      "input_mode_b": "pdf",
+      "status": "PASS",
+      "source_producers": [
+        "pdf",
+        "pdf"
+      ],
+      "node_count": 10,
+      "statement_count_a": 3,
+      "statement_count_b": 3,
+      "structural_edge_count": 8,
+      "candidate_edge_count": 9,
+      "active_semantic_edge_count": 1,
+      "rejected_semantic_edge_count": 1,
+      "operation_count": 29,
+      "diagnostic_error_count": 0,
+      "console_error_count": 0,
+      "external_network_request_count": 0,
+      "schemes_used": [
+        "file"
+      ],
+      "saved_json_filename": "a_pdf__b_pdf.json",
+      "saved_json_sha256": "d3d59dd11416ceba2cf83756740ee15ec623e0633ea72699e4cb9af7eee0c95b"
+    },
+    {
+      "case_id": "a_pdf__b_excel",
+      "input_mode_a": "pdf",
+      "input_mode_b": "excel",
+      "status": "PASS",
+      "source_producers": [
+        "pdf",
+        "excel"
+      ],
+      "node_count": 10,
+      "statement_count_a": 3,
+      "statement_count_b": 3,
+      "structural_edge_count": 8,
+      "candidate_edge_count": 9,
+      "active_semantic_edge_count": 1,
+      "rejected_semantic_edge_count": 1,
+      "operation_count": 29,
+      "diagnostic_error_count": 0,
+      "console_error_count": 0,
+      "external_network_request_count": 0,
+      "schemes_used": [
+        "file"
+      ],
+      "saved_json_filename": "a_pdf__b_excel.json",
+      "saved_json_sha256": "c92f78f51f0503b266e28ec9b46829444a1b8bdab290a9550c30d209951f0b23"
+    },
+    {
+      "case_id": "a_pdf__b_trace",
+      "input_mode_a": "pdf",
+      "input_mode_b": "trace",
+      "status": "PASS",
+      "source_producers": [
+        "pdf",
+        "pdf"
+      ],
+      "node_count": 10,
+      "statement_count_a": 3,
+      "statement_count_b": 3,
+      "structural_edge_count": 8,
+      "candidate_edge_count": 9,
+      "active_semantic_edge_count": 1,
+      "rejected_semantic_edge_count": 1,
+      "operation_count": 29,
+      "diagnostic_error_count": 0,
+      "console_error_count": 0,
+      "external_network_request_count": 0,
+      "schemes_used": [
+        "file"
+      ],
+      "saved_json_filename": "a_pdf__b_trace.json",
+      "saved_json_sha256": "9bfc8eea84c8da86ea6c8d8619a1005c161102a31c4792fc03ce829e25a204ad"
+    },
+    {
+      "case_id": "a_excel__b_pdf",
+      "input_mode_a": "excel",
+      "input_mode_b": "pdf",
+      "status": "PASS",
+      "source_producers": [
+        "excel",
+        "pdf"
+      ],
+      "node_count": 10,
+      "statement_count_a": 3,
+      "statement_count_b": 3,
+      "structural_edge_count": 8,
+      "candidate_edge_count": 9,
+      "active_semantic_edge_count": 1,
+      "rejected_semantic_edge_count": 1,
+      "operation_count": 29,
+      "diagnostic_error_count": 0,
+      "console_error_count": 0,
+      "external_network_request_count": 0,
+      "schemes_used": [
+        "file"
+      ],
+      "saved_json_filename": "a_excel__b_pdf.json",
+      "saved_json_sha256": "63b2ccd0eb3c777163272bafa257e9135fffeabfbf0a796be34f3ffdd7cece5b"
+    },
+    {
+      "case_id": "a_excel__b_excel",
+      "input_mode_a": "excel",
+      "input_mode_b": "excel",
+      "status": "PASS",
+      "source_producers": [
+        "excel",
+        "excel"
+      ],
+      "node_count": 10,
+      "statement_count_a": 3,
+      "statement_count_b": 3,
+      "structural_edge_count": 8,
+      "candidate_edge_count": 9,
+      "active_semantic_edge_count": 1,
+      "rejected_semantic_edge_count": 1,
+      "operation_count": 29,
+      "diagnostic_error_count": 0,
+      "console_error_count": 0,
+      "external_network_request_count": 0,
+      "schemes_used": [
+        "file"
+      ],
+      "saved_json_filename": "a_excel__b_excel.json",
+      "saved_json_sha256": "202f428eedd696cd8fe8cd9f3e365b07134bc657cbb74fc9e4eec656d3ef5c5b"
+    },
+    {
+      "case_id": "a_excel__b_trace",
+      "input_mode_a": "excel",
+      "input_mode_b": "trace",
+      "status": "PASS",
+      "source_producers": [
+        "excel",
+        "pdf"
+      ],
+      "node_count": 10,
+      "statement_count_a": 3,
+      "statement_count_b": 3,
+      "structural_edge_count": 8,
+      "candidate_edge_count": 9,
+      "active_semantic_edge_count": 1,
+      "rejected_semantic_edge_count": 1,
+      "operation_count": 29,
+      "diagnostic_error_count": 0,
+      "console_error_count": 0,
+      "external_network_request_count": 0,
+      "schemes_used": [
+        "file"
+      ],
+      "saved_json_filename": "a_excel__b_trace.json",
+      "saved_json_sha256": "e69aa3f62cb8210013f61e4a1b0b10bf1dd136d40fda3a6799c3cb972ad708df"
+    },
+    {
+      "case_id": "a_trace__b_pdf",
+      "input_mode_a": "trace",
+      "input_mode_b": "pdf",
+      "status": "PASS",
+      "source_producers": [
+        "pdf",
+        "pdf"
+      ],
+      "node_count": 10,
+      "statement_count_a": 3,
+      "statement_count_b": 3,
+      "structural_edge_count": 8,
+      "candidate_edge_count": 9,
+      "active_semantic_edge_count": 1,
+      "rejected_semantic_edge_count": 1,
+      "operation_count": 29,
+      "diagnostic_error_count": 0,
+      "console_error_count": 0,
+      "external_network_request_count": 0,
+      "schemes_used": [
+        "file"
+      ],
+      "saved_json_filename": "a_trace__b_pdf.json",
+      "saved_json_sha256": "59a6e5cd7dd1111f61481aa479e78619f95d844e2c2278c00728203c0e1a5799"
+    },
+    {
+      "case_id": "a_trace__b_excel",
+      "input_mode_a": "trace",
+      "input_mode_b": "excel",
+      "status": "PASS",
+      "source_producers": [
+        "pdf",
+        "excel"
+      ],
+      "node_count": 10,
+      "statement_count_a": 3,
+      "statement_count_b": 3,
+      "structural_edge_count": 8,
+      "candidate_edge_count": 9,
+      "active_semantic_edge_count": 1,
+      "rejected_semantic_edge_count": 1,
+      "operation_count": 29,
+      "diagnostic_error_count": 0,
+      "console_error_count": 0,
+      "external_network_request_count": 0,
+      "schemes_used": [
+        "file"
+      ],
+      "saved_json_filename": "a_trace__b_excel.json",
+      "saved_json_sha256": "6f81703e13064fd9f080f99be1f4769cdc60bdea4b34c74dec3462dbab17ec7c"
+    },
+    {
+      "case_id": "a_trace__b_trace",
+      "input_mode_a": "trace",
+      "input_mode_b": "trace",
+      "status": "PASS",
+      "source_producers": [
+        "pdf",
+        "pdf"
+      ],
+      "node_count": 10,
+      "statement_count_a": 3,
+      "statement_count_b": 3,
+      "structural_edge_count": 8,
+      "candidate_edge_count": 9,
+      "active_semantic_edge_count": 1,
+      "rejected_semantic_edge_count": 1,
+      "operation_count": 29,
+      "diagnostic_error_count": 0,
+      "console_error_count": 0,
+      "external_network_request_count": 0,
+      "schemes_used": [
+        "file"
+      ],
+      "saved_json_filename": "a_trace__b_trace.json",
+      "saved_json_sha256": "5e1669dbc559988829e242d5978e6554d6f92e15802d5a183ee6c9ae81c018db"
+    }
+  ]
+}

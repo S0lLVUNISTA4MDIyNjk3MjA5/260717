@@ -1,0 +1,47 @@
+[
+  {
+    "case_id": "QB04-01-LIVE-CANONICAL",
+    "trace_id": "REQ-QB04-01",
+    "source_record": {
+      "property": "冷房能力",
+      "spec_value": "12 kW",
+      "note": "点検対象"
+    }
+  },
+  {
+    "case_id": "QB04-02-WHITESPACE-PROPERTY",
+    "trace_id": "REQ-QB04-02",
+    "source_record": {
+      "property": "   ",
+      "item_name": "冷房能力",
+      "spec_value": "12 kW"
+    }
+  },
+  {
+    "case_id": "QB04-03-AMBIGUOUS",
+    "trace_id": "REQ-QB04-03",
+    "source_record": {
+      "property": "冷房能力",
+      "design_property": "電源電圧",
+      "spec_value": "12 kW"
+    }
+  },
+  {
+    "case_id": "QB04-04-JAPANESE-HEADER",
+    "trace_id": "REQ-QB04-04",
+    "source_record": {
+      "設計項目": "冷房能力",
+      "仕様値": "12 kW",
+      "備考": "点検対象"
+    }
+  },
+  {
+    "case_id": "QB04-05-CONFLICT-ISOLATION",
+    "trace_id": "REQ-QB04-05",
+    "source_record": {
+      "property": "電源電圧",
+      "spec_value": "12 kW",
+      "note": "冷房能力"
+    }
+  }
+]

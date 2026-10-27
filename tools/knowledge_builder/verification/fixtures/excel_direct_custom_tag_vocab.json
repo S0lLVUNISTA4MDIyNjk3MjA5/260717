@@ -1,0 +1,9 @@
+{
+  "schema": "trace-tag-vocabulary/1.0",
+  "vocabulary_id": "custom-test-ja",
+  "vocabulary_version": "1.0.0",
+  "allowed_tags": [
+    "耐熱"
+  ],
+  "aliases": {}
+}

@@ -1,0 +1,2580 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge Data Builder α0.2.0（早期評価用）</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: "Segoe UI", "Hiragino Sans", sans-serif; margin: 0; padding: 0; background: #f6f7f9; color: #1b1f23; }
+  header { background: #202733; color: #fff; padding: 14px 20px; }
+  header h1 { margin: 0; font-size: 18px; }
+  header p { margin: 4px 0 0; font-size: 12px; color: #b9c2d0; }
+  .banner { background: #fff6d8; border-bottom: 1px solid #e0c95a; padding: 8px 20px; font-size: 12px; }
+  main { padding: 16px 20px 60px; max-width: 1450px; margin: 0 auto; }
+  section.panel { background: #fff; border: 1px solid #d8dde3; border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
+  section.panel > h2 { margin: 0 0 4px; font-size: 15px; }
+  section.panel > h2 .en { font-size: 11px; color: #8a929c; font-weight: 400; }
+  .explain { font-size: 12px; color: #444; background: #f4f6fb; border: 1px solid #e2e6ea; border-radius: 6px; padding: 8px 10px; margin: 6px 0 10px; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; font-size: 12px; }
+  .toolbar input[type=text], .toolbar input[type=number], .toolbar select { font-size: 12px; padding: 3px 6px; border: 1px solid #ccd2d9; border-radius: 4px; }
+  .toolbar input[type=number] { width: 60px; }
+  .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+  .field label { font-weight: 600; color: #333; }
+  button { cursor: pointer; border: 1px solid #4a6cf7; background: #4a6cf7; color: #fff; border-radius: 6px; padding: 7px 14px; font-size: 13px; }
+  button.secondary { background: #fff; color: #4a6cf7; }
+  button.small { padding: 3px 8px; font-size: 11px; border-radius: 4px; }
+  button.tiny { padding: 1px 6px; font-size: 10px; border-radius: 4px; }
+  button.danger { background: #fff; color: #c62828; border-color: #c62828; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { border: 1px solid #e2e6ea; padding: 5px 7px; text-align: left; vertical-align: top; }
+  th { background: #f0f2f5; position: sticky; top: 0; }
+  tbody tr:nth-child(even) { background: #fafbfc; }
+  tr.selected-row { background: #fff4d6 !important; }
+  tr.group-header-row td { background: #eef2fa; font-weight: 600; color: #33415c; }
+  table.simple-mode .detail-col { display: none; }
+  .table-scroll { max-height: 460px; overflow: auto; border: 1px solid #e2e6ea; border-radius: 6px; }
+  .tag-chip { display: inline-flex; align-items: center; gap: 4px; background: #eef1fb; border: 1px solid #c8d1f5; border-radius: 12px; padding: 1px 8px; font-size: 11px; margin: 1px 2px 1px 0; }
+  .tag-chip.matched { background: #fff3d6; border-color: #e0a800; font-weight: 600; }
+  .tag-chip button { border: none; background: none; color: #6675a3; padding: 0; font-size: 12px; border-radius: 0; }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+  .badge-candidate { background: #fff3d6; color: #8a6100; }
+  .badge-active { background: #dcf3df; color: #1f7a34; }
+  .badge-rejected { background: #f4d9d9; color: #a12727; }
+  .badge-stale { background: #ffe0e0; color: #b30000; margin-left: 4px; }
+  .badge-unedited { background: #fde7d0; color: #a15c00; }
+  .badge-edited { background: #dcecff; color: #1550a8; }
+  .lifecycle-en { font-size: 9px; color: #888; margin-left: 2px; }
+  textarea.edit-text { width: 100%; min-height: 44px; font: inherit; box-sizing: border-box; }
+  select.node-type-select { font-size: 11px; }
+  .evidence-pill { display: inline-block; background: #eef; border-radius: 4px; padding: 1px 5px; font-size: 10px; margin: 1px; }
+  #graphWrap { border: 1px solid #e2e6ea; border-radius: 6px; overflow: auto; background: #fff; }
+  .status-line { font-size: 12px; color: #555; margin-top: 6px; white-space: pre-wrap; }
+  .excel-sheet-list { border: 1px solid #e2e6ea; border-radius: 6px; padding: 6px; margin: 4px 0; max-height: 160px; overflow: auto; }
+  .excel-sheet-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 0; flex-wrap: wrap; }
+  .excel-sheet-row input[type="number"] { width: 48px; }
+  .excel-sheet-preview-block { border: 1px solid #e2e6ea; border-radius: 6px; padding: 6px; margin-top: 8px; }
+  .excel-sheet-preview-block h4 { margin: 0 0 4px; font-size: 12px; }
+  .muted { color: #8a929c; }
+  .doc-a { color: #1a56c4; } .doc-b { color: #1a8a3f; }
+  code.small { font-size: 10px; color: #777; }
+  .short-id { font-family: "SF Mono", Consolas, monospace; font-size: 10px; color: #33415c; background: #eef1fb; border-radius: 3px; padding: 0 4px; white-space: nowrap; }
+  .legend { font-size: 11px; color: #444; display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; padding-top: 8px; border-top: 1px solid #e2e6ea; }
+  .legend-swatch { display: inline-block; width: 18px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 4px; }
+  .legend-shape { display: inline-block; width: 10px; height: 10px; vertical-align: middle; margin-right: 4px; background: #888; }
+  .legend-shape.sq-lg { width: 12px; height: 12px; }
+  .legend-shape.sq-sm { width: 9px; height: 9px; }
+  .legend-shape.circle { border-radius: 50%; width: 8px; height: 8px; }
+  .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
+  .metric-card { background: #f7f8fb; border: 1px solid #e2e6ea; border-radius: 6px; padding: 8px 10px; }
+  .metric-card .value { font-size: 20px; font-weight: 700; color: #202733; }
+  .metric-card .label { font-size: 11px; color: #666; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border: 1px solid #ccd2d9; border-radius: 14px; font-size: 11px; cursor: pointer; background: #fff; color: #333; }
+  .chip.active { background: #4a6cf7; color: #fff; border-color: #4a6cf7; }
+  .chip .count { font-weight: 700; }
+  .filter-active-badge { background: #fff3d6; color: #8a6100; border-radius: 10px; padding: 1px 8px; font-size: 10px; font-weight: 600; }
+  .conf-high { color: #1f7a34; font-weight: 600; }
+  .conf-mid { color: #8a6100; font-weight: 600; }
+  .conf-low { color: #a12727; font-weight: 600; }
+  .group-toggle { cursor: pointer; user-select: none; }
+  .group-stats { font-weight: 400; color: #556; font-size: 11px; margin-left: 6px; }
+  .jump-target-row { outline: 2px solid #4a6cf7; outline-offset: -2px; }
+  .chip.disabled { opacity: .5; cursor: not-allowed; }
+  details#nodeAdvancedFilters summary { list-style: none; }
+  details#nodeAdvancedFilters summary::-webkit-details-marker { display: none; }
+  details#nodeAdvancedFilters summary::before { content: "▶ "; font-size: 10px; }
+  details#nodeAdvancedFilters[open] summary::before { content: "▼ "; }
+  .scope-banner { background: #fff6d8; border: 1px solid #e0c95a; border-radius: 6px; padding: 8px 10px; font-size: 12px; margin: 6px 0 10px; }
+  .detail-mini-table { border-collapse: collapse; width: 100%; font-size: 10px; margin-top: 6px; }
+  .detail-mini-table th, .detail-mini-table td { border: 1px solid #e2e6ea; padding: 3px 5px; text-align: left; }
+  .detail-mini-table th { background: #f0f2f5; }
+  select:disabled { opacity: .5; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Knowledge Data Builder — α0.2.0（早期評価用ビルド）</h1>
+  <p>Knowledge Data Contract 0.1 準拠 / 今回の改善テーマ: PDF・Excel・Trace JSONを直接読み込み、原文と出典を保持したKnowledge Nodeへ変換し、文書間の関連とKnowledge Graphを確認してKnowledge JSONとして保存する</p>
+</header>
+<div class="banner">
+  これは<strong>限定評価用の動作物</strong>です。正式な設計判断・成果物提出には使用しないでください。
+  評価目的: 文書A・文書Bの役割を固定せず、PDF・Excel・Trace JSONを組み合わせて読み込めるか、
+  変換結果の原文・出典を確認・修正できるか、Relation CandidateとKnowledge Graphを確認できるか、
+  保存したKnowledge JSONがKnowledge Data Contract 0.1に適合するかを評価します。
+</div>
+<main>
+
+<section class="panel" id="ingestPanel">
+  <h2>1. データを読み込む</h2>
+  <div class="explain">
+    既存のPDF/Excelツールが出力した「照合用JSON（trace JSON）」、または .pdf／.xlsx ファイルそのものを
+    直接読み込み、文書間の関連を確認します。文書A・文書Bは役割を固定していません(どちらもPDF／Excel／
+    Trace JSONのいずれでも指定できます)。
+  </div>
+  <div class="row" style="align-items:flex-start;">
+    <div class="field" id="docFieldA" style="min-width:300px; border:1px solid #e2e6ea; border-radius:6px; padding:8px;">
+      <label>文書A: 入力方式</label>
+      <select id="inputModeA"><option value="trace">Trace JSON</option><option value="excel">Excel(.xlsx)</option><option value="pdf">PDF(.pdf)</option></select>
+
+      <div id="traceBlockA">
+        <label>文書A（既存PDF/Excelツールが出力したTrace JSON）</label>
+        <input type="file" id="fileA" accept=".json">
+      </div>
+
+      <div id="excelBlockA" style="display:none;">
+        <label>文書A（.xlsxファイル）</label>
+        <input type="file" id="fileExcelA" accept=".xlsx">
+        <label>シート選択(1つ以上。既定は先頭の可視・非空シートのみ選択)</label>
+        <div id="sheetListA" class="excel-sheet-list"></div>
+        <button type="button" class="secondary small" id="btnPreviewExcelA" disabled>プレビュー取り込み</button>
+        <div class="status-line" id="excelStatusA"></div>
+        <div id="excelPreviewWrapA" style="display:none; max-height:320px; overflow:auto; margin-top:6px;"></div>
+      </div>
+
+      <div id="pdfBlockA" style="display:none;">
+        <label>文書A（.pdfファイル）</label>
+        <input type="file" id="filePdfA" accept=".pdf">
+        <button type="button" class="secondary small" id="btnPreviewPdfA" disabled>プレビュー取り込み</button>
+        <div class="status-line" id="pdfStatusA"></div>
+        <div id="pdfPreviewWrapA" style="display:none; max-height:320px; overflow:auto; margin-top:6px;"></div>
+      </div>
+    </div>
+
+    <div class="field" id="docFieldB" style="min-width:300px; border:1px solid #e2e6ea; border-radius:6px; padding:8px;">
+      <label>文書B: 入力方式</label>
+      <select id="inputModeB"><option value="trace">Trace JSON</option><option value="excel">Excel(.xlsx)</option><option value="pdf">PDF(.pdf)</option></select>
+
+      <div id="traceBlockB">
+        <label>文書B（既存PDF/Excelツールが出力したTrace JSON）</label>
+        <input type="file" id="fileB" accept=".json">
+      </div>
+
+      <div id="excelBlockB" style="display:none;">
+        <label>文書B（.xlsxファイル）</label>
+        <input type="file" id="fileExcelB" accept=".xlsx">
+        <label>シート選択(1つ以上。既定は先頭の可視・非空シートのみ選択)</label>
+        <div id="sheetListB" class="excel-sheet-list"></div>
+        <button type="button" class="secondary small" id="btnPreviewExcelB" disabled>プレビュー取り込み</button>
+        <div class="status-line" id="excelStatusB"></div>
+        <div id="excelPreviewWrapB" style="display:none; max-height:320px; overflow:auto; margin-top:6px;"></div>
+      </div>
+
+      <div id="pdfBlockB" style="display:none;">
+        <label>文書B（.pdfファイル）</label>
+        <input type="file" id="filePdfB" accept=".pdf">
+        <button type="button" class="secondary small" id="btnPreviewPdfB" disabled>プレビュー取り込み</button>
+        <div class="status-line" id="pdfStatusB"></div>
+        <div id="pdfPreviewWrapB" style="display:none; max-height:320px; overflow:auto; margin-top:6px;"></div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>共有タグ辞書（任意。未指定時は既定辞書 trace-domain-ja を使用）</label>
+      <input type="file" id="fileVocab" accept=".json">
+    </div>
+    <div class="field">
+      <button id="btnIngest">Knowledge Nodeを生成してStep 2へ</button>
+    </div>
+  </div>
+  <div class="status-line" id="ingestStatus"></div>
+</section>
+
+<section class="panel">
+  <h2>2. 変換結果を確認・修正 <span class="en">(Knowledge Nodes)</span></h2>
+  <div class="explain">
+    変換結果に明らかな誤りがある項目だけを修正します。該当する項目がなければ、この画面の作業は完了です。
+    <br><span class="muted" style="font-size:11px;">一覧の各行をKnowledge Nodeと呼びます。</span>
+  </div>
+  <div class="toolbar">
+    <input type="text" id="nodeSearch" placeholder="ID・本文・タイトル・タグで検索" style="min-width:220px;">
+    <label><input type="checkbox" id="nodeDetailMode"> 詳細表示</label>
+  </div>
+  <div class="muted" style="font-size:11px; margin: 2px 0 4px;">確認したい観点を1つ選んでください。該当件数が0件の観点は、修正の必要がないことを示します。</div>
+  <div class="toolbar" id="nodeConfirmMenuRow"></div>
+  <div class="status-line" id="nodeConfirmGuidance" style="margin: 2px 0 8px;"></div>
+  <details id="nodeAdvancedFilters">
+    <summary style="cursor:pointer; font-size:12px; color:#4a6cf7;">詳細な絞り込み</summary>
+    <div class="toolbar" style="margin-top:8px;">
+      <select id="nodeDocFilter">
+        <option value="all">文書: すべて</option>
+        <option value="A">文書A</option>
+        <option value="B">文書B</option>
+      </select>
+      <select id="nodeTypeFilter">
+        <option value="all">種別: すべて</option>
+        <option value="requirement">requirement</option>
+        <option value="design_item">design_item</option>
+        <option value="verification_item">verification_item</option>
+        <option value="statement">statement</option>
+        <option value="document">document</option>
+        <option value="section">section</option>
+      </select>
+      <select id="nodeTagFilter">
+        <option value="all">タグ: すべて</option>
+        <option value="__none__">(タグ未設定)</option>
+      </select>
+      <label><input type="checkbox" id="showStructural"> 文書の章・節などの構造ノードも表示</label>
+      <button id="btnNodeResetFilter" class="small secondary">フィルタ解除</button>
+      <span id="nodeFilterActiveBadge" class="filter-active-badge" style="display:none;">フィルタ適用中</span>
+    </div>
+    <div class="muted" style="font-size:11px; margin: 6px 0 4px;">個別の条件で絞り込みたい場合に使用してください。複数選択すると、すべての条件に当てはまる項目を表示します。</div>
+    <div class="toolbar" id="nodeQuickFilterRow"></div>
+  </details>
+  <div class="toolbar" style="margin-top:8px;">
+    <label><input type="checkbox" id="nodeSelectAll"> このページの全選択</label>
+    <span class="muted">選択中: <span id="nodeSelectedCount">0</span>件</span>
+    <select id="nodeBulkTagAdd"><option value="">選択Nodeへタグを一括追加...</option></select>
+    <button id="btnBulkAddTag" class="small secondary">追加</button>
+    <select id="nodeBulkTagRemove"><option value="">選択Nodeからタグを一括削除...</option></select>
+    <button id="btnBulkRemoveTag" class="small danger">削除</button>
+  </div>
+  <div class="row" style="margin-bottom:8px;">
+    <span class="muted" style="font-size:12px;">表示中: <span id="nodeCount">0</span>件 / 全<span id="nodeTotalCount">0</span>件</span>
+  </div>
+  <div class="table-scroll">
+    <table id="nodeTable">
+      <thead><tr>
+        <th></th><th>文書</th><th>種別</th><th>短縮ID</th><th>タイトル</th><th>本文</th><th>タグ</th>
+        <th class="detail-col">編集履歴</th><th class="detail-col">信頼度</th><th class="detail-col">出典</th><th class="detail-col">revision</th><th class="detail-col">stale関連</th>
+      </tr></thead>
+      <tbody id="nodeTableBody"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>3. 文書間の関連を確認 <span class="en">(Relations / Edges)</span></h2>
+  <div class="explain">
+    文書Aの各項目に対して、文書Bの関連候補を表示します。候補を開き、両方の本文と根拠を確認して、
+    「採用」または「却下」を選んでください。
+    <br><span class="muted" style="font-size:11px;">採用した関連はナレッジグラフに表示されます。</span>
+  </div>
+  <div class="scope-banner" id="edgeScopeBanner" style="display:none;"></div>
+  <div class="toolbar" style="margin-bottom:4px;">
+    <label style="font-size:12px; font-weight:600;">表示基準:
+      <select id="edgeGroupBasis">
+        <option value="A" selected>文書Aを基準に表示</option>
+        <option value="B">文書Bを基準に表示</option>
+      </select>
+    </label>
+    <span id="edgeBasisNote" class="muted" style="font-size:11px; display:none;">生成済みの関連候補を、文書Bの項目ごとにまとめて表示しています。</span>
+  </div>
+  <div class="row" style="margin-bottom:8px;">
+    <button id="btnGenerateCandidates" class="secondary">関連候補を自動生成</button>
+    <span class="muted" style="font-size:11px;">最初に「関連候補を自動生成」を押してください。</span>
+    <span class="status-line" id="candidateStatus" style="margin:0;"></span>
+  </div>
+  <div class="toolbar">
+    <select id="edgeStatusFilter">
+      <option value="candidate" selected>未処理候補のみ</option>
+      <option value="active">採用済みのみ</option>
+      <option value="rejected">却下済みのみ</option>
+      <option value="all">すべて</option>
+    </select>
+    <input type="text" id="edgeSearch" placeholder="ノードの本文・タイトル・タグで検索">
+    <label><input type="checkbox" id="edgeStaleOnly"> staleのみ表示</label>
+    <select id="edgeEvidenceFilter">
+      <option value="all">根拠: すべて</option>
+      <option value="tag_match">タグ一致あり</option>
+      <option value="text_similarity_only">文章類似のみ</option>
+    </select>
+  </div>
+  <div class="toolbar">
+    <label>信頼度 <input type="number" id="edgeConfMin" min="0" max="1" step="0.05" value="0"> 〜 <input type="number" id="edgeConfMax" min="0" max="1" step="0.05" value="1"></label>
+    <select id="edgeSort">
+      <option value="confidence">並べ替え: 信頼度順</option>
+      <option value="source_id">並べ替え: Source短縮ID順</option>
+      <option value="pending">並べ替え: 未処理優先</option>
+    </select>
+    <button id="btnEdgeResetFilter" class="small secondary">フィルタ解除</button>
+    <span id="edgeFilterActiveBadge" class="filter-active-badge" style="display:none;">フィルタ適用中</span>
+  </div>
+  <div class="toolbar">
+    <label><input type="checkbox" id="edgeSelectAll"> このページの全選択</label>
+    <span class="muted">選択中: <span id="edgeSelectedCount">0</span>件</span>
+    <button id="btnBulkAccept" class="small secondary">選択した候補を一括採用</button>
+    <button id="btnBulkReject" class="small danger">選択した候補を一括却下</button>
+    <button id="btnExpandAllGroups" class="small secondary">すべて展開</button>
+    <button id="btnCollapseAllGroups" class="small secondary">すべて折りたたむ</button>
+  </div>
+  <div class="row" style="margin-bottom:8px;">
+    <span class="muted" style="font-size:12px;">表示中: <span id="edgeCount">0</span>件 / 全<span id="edgeTotalCount">0</span>件（semantic edge）</span>
+  </div>
+  <div class="muted" style="font-size:11px; margin: 2px 0 6px;">信頼度は候補の並び順を決める参考値です。採用・却下は、本文と根拠を確認して判断してください。</div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr>
+        <th></th><th>状態</th><th>関係</th><th id="edgeColFocusHeader">文書Aの項目</th><th id="edgeColCandidateHeader">文書Bの関連候補</th><th>信頼度</th><th>根拠(evidence)</th><th>操作</th>
+      </tr></thead>
+      <tbody id="edgeTableBody"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>4. ナレッジグラフを確認 <span class="en">(Knowledge Graph)</span></h2>
+  <div class="explain">
+    ノード同士のつながりを図で確認します。初期状態では<strong>採用済みの文書間の関連だけ</strong>を表示し、
+    未処理候補・文書内の階層関係は非表示です。Nodeをクリックすると接続先が強調表示されます。
+    <br><span class="muted" style="font-size:11px;">「文書内の階層関係も表示」をONにすると、document/section単位で折りたたみ・展開でき、
+    折りたたんだ範囲の関連は集約線としてまとめて表示されます（元のNode/Edgeは失われません）。</span>
+  </div>
+  <div class="toolbar">
+    <label style="font-size:12px;"><input type="checkbox" id="graphShowActive" checked> 採用済み文書間関連を表示</label>
+    <label style="font-size:12px;"><input type="checkbox" id="graphShowCandidates"> 未処理候補も表示</label>
+    <label style="font-size:12px;"><input type="checkbox" id="graphShowStructural"> 文書内の階層関係も表示</label>
+    <label style="font-size:12px;">表示する細かさ:
+      <select id="graphGranularity" disabled>
+        <option value="document">文書単位</option>
+        <option value="section">章・節単位</option>
+        <option value="item" selected>個別項目</option>
+      </select>
+    </label>
+  </div>
+  <div class="toolbar">
+    <select id="graphDocFilter">
+      <option value="all">文書: すべて</option>
+      <option value="A">文書Aのみ</option>
+      <option value="B">文書Bのみ</option>
+    </select>
+    <select id="graphTypeFilter">
+      <option value="all">種別: すべて</option>
+      <option value="requirement">requirement</option>
+      <option value="design_item">design_item</option>
+      <option value="verification_item">verification_item</option>
+      <option value="statement">statement</option>
+      <option value="document">document</option>
+      <option value="section">section</option>
+    </select>
+    <select id="graphTagFilter"><option value="all">タグ: すべて</option></select>
+    <label style="font-size:12px;"><input type="checkbox" id="graphFocusMode"> 選択Nodeの周辺だけを表示</label>
+    <button id="btnGraphResetFilter" class="small secondary">フィルタ解除</button>
+    <span id="graphFilterActiveBadge" class="filter-active-badge" style="display:none;">フィルタ適用中</span>
+  </div>
+  <div class="row" style="margin-bottom:8px;">
+    <span class="muted" style="font-size:12px;">表示中Node: <span id="graphNodeCount">0</span>件 / 表示中Edge: <span id="graphEdgeCount">0</span>件</span>
+  </div>
+  <div id="graphWrap"><svg id="graphSvg" width="1300" height="600"></svg></div>
+  <div class="explain" id="graphSelectedInfo" style="display:none;"></div>
+  <div class="explain" id="graphAggregateInfo" style="display:none;"></div>
+  <div class="legend">
+    <span><span class="legend-swatch" style="border-color:#2e7d32;"></span>文書間の関連（採用済み）</span>
+    <span><span class="legend-swatch" style="border-color:#e0a800; border-top-style:dashed;"></span>文書間の関連（未処理候補）</span>
+    <span><span class="legend-swatch" style="border-color:#bbb;"></span>文書内の階層関係</span>
+    <span><span class="legend-swatch" style="border-color:#c62828; border-top-style:dashed;"></span>stale（要再確認）</span>
+    <span><span class="legend-shape" style="background:#4a6cf7;"></span><span class="legend-shape" style="background:#1f9d55;"></span>青=文書A / 緑=文書B</span>
+    <span><span class="legend-shape sq-lg" style="background:#888;"></span>document</span>
+    <span><span class="legend-shape sq-sm" style="background:#888;"></span>section</span>
+    <span><span class="legend-shape circle" style="background:#888;"></span>内容Node</span>
+    <span><span class="legend-swatch" style="border-color:#7a4fd1; border-top-width:4px;"></span>集約線（複数の関連をまとめて表示。正式なEdgeではありません）</span>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>5. ナレッジデータを保存</h2>
+  <button id="btnSave">Knowledge JSONを保存</button>
+  <span class="status-line" id="saveStatus" style="margin:0; display:inline-block;"></span>
+  <div class="muted" style="font-size:11px; margin-top:10px;">
+    作業量サマリ（件数が増えても人の操作件数を減らせているかの目安）。
+    「操作対象にしたNode数」は選択または修正したNodeの重複除外件数であり、内容を実際に確認したことの保証ではありません。
+  </div>
+  <div class="metrics-grid" id="metricsGrid"></div>
+</section>
+
+</main>
+
+<script src="../../quantity_sidecar_binding_core.js"></script>
+<script src="../core/id_hash_utils.js"></script>
+<script src="../core/trace_json_adapter.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="../core/excel_direct_adapter.js"></script>
+<!-- Checkpoint 3b: ローカルpdf.js(ui/vendor/pdfjs/)のみを使用する。CDN参照・外部networkは行わない。
+     読込順はNode側resolvePdfJs()と揃える: cmaps-data.js / fonts-data.js / alpha-local-factories.js
+     (file://でのCORS制限を避けるBase64埋め込みCMap/標準フォントのローカル読み込み) -> pdf.min.js。 -->
+<script src="vendor/pdfjs/cmaps-data.js"></script>
+<script src="vendor/pdfjs/fonts-data.js"></script>
+<script src="vendor/pdfjs/alpha-local-factories.js"></script>
+<script src="vendor/pdfjs/pdf.min.js"></script>
+<script src="../core/pdf_direct_adapter.js"></script>
+<script src="../core/relation_candidate_engine.js"></script>
+<script src="../core/knowledge_store.js"></script>
+<script>
+'use strict';
+
+// Checkpoint 3b: pdf_direct_adapter.js のブラウザ向けresolvePdfJs()はworkerSrcを設定しないため
+// (Node側は require.resolve() で解決するが、ブラウザには対応する仕組みがない)、
+// ここで一度だけ、ローカルのpdf.worker.min.js(CDNではない)を指すworkerSrcを設定する。
+if (window.pdfjsLib) {
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdfjs/pdf.worker.min.js';
+}
+
+const DEFAULT_TAG_VOCABULARY = {
+  schema: "trace-tag-vocabulary/1.0",
+  vocabulary_id: "trace-domain-ja",
+  vocabulary_version: "1.0.0",
+  allowed_tags: ["安全","性能","機能","品質","インターフェース","製造","検査","保守"],
+  aliases: {}
+};
+
+const LIFECYCLE_LABEL = { candidate: '候補', active: '採用済み', rejected: '却下' };
+const NODE_TYPES = ['document','section','requirement','design_item','verification_item','statement'];
+const LOW_CONFIDENCE_THRESHOLD = 0.7;
+const SHORT_TEXT_THRESHOLD = 10;
+
+let dataset = null;
+let docAId = null, docBId = null;
+const actorHuman = { type: 'human', id: 'evaluator' };
+
+// UI専用の選択・操作ログ(Knowledge Data Contract 0.1のschemaには含めない。保存JSONにも出力しない)。
+// 「操作対象にしたNode数」(選択または修正したNodeの重複除外件数)を集計するための補助。
+// 実際の内容確認を保証するものではない。一度選択されたNodeはチェックを外しても
+// "操作対象履歴"としては残す(単純な現在選択数ではなく延べ操作対象数にするため)。
+let selectedNodeIds = new Set();
+let nodeTouchLog = new Set();
+let selectedEdgeIds = new Set();
+
+// UI専用の画面表示ID(node_id -> "A-001"等)。取込のたびに再割当てされ、保存JSONには含めない。
+// 元Nodeの一意な特定は引き続きnode_id(node.node_id)で行う。短縮IDは画面表示専用の別名。
+let nodeShortIds = new Map();
+
+// Relation一覧: Source Node単位グループの展開状態(UI専用。既定は折りたたみ)。
+let expandedGroups = new Set();
+// Knowledge Graph: 選択中Node(UI専用。クリックで強調表示・周辺表示モードに使う)。
+let selectedGraphNodeId = null;
+// Node一覧: 詳細な絞り込み内の有効な条件の集合(UI専用)。
+let activeNodeQuickFilters = new Set();
+// Node一覧: 選択中の確認メニュー(UI専用。1つだけ選択可。null=未選択)。
+let selectedConfirmMenu = null;
+// Relation候補が一度でも生成されたか(UI専用。取込のたびにfalseへ戻る)。
+// 「関連づけ後に確認」メニューと詳細フィルタのRelation候補関連条件は、この値がtrueになるまで無効化する
+// (候補生成前は全content Nodeが"候補0件"になり誤解を招くため)。保存JSONには含めない。
+let candidatesGenerated = false;
+// Node一覧: 画面間ジャンプで強調表示する対象Node(UI専用)。
+let jumpHighlightNodeId = null;
+// Relation一覧: グループ化の基準(UI専用。'A'=文書A基準/既定, 'B'=文書B基準)。
+// 表示上のグループ化・列の並び順のみに影響し、edge.source_node_id/target_node_idは一切変更しない。
+let candidateGroupBasis = 'A';
+
+// ---- Knowledge Graph: 表示粒度・折りたたみ・集約(すべてUI専用。Knowledge Node/Edgeは一切変更しない) ----
+// 全体の表示粒度('document'|'section'|'item'。既定'item'=現行どおり全展開)。
+let graphGranularity = 'item';
+// 「文書内の階層関係も表示」を今回のNodeセットに対して一度でもONにしたか(初回ON時のみsection既定にするための判定)。
+let graphStructuralEverShown = false;
+// 折りたたまれているdocument/section Nodeのnode_id集合(UI専用)。粒度切替のたびに基準値へ再設定され、
+// その後は個別のトグル操作で上書きできる。ここに入っているNodeは「配下を折りたたみ中」を意味する
+// (Node自身が非表示になるわけではない)。
+let graphStructuralCollapsed = new Set();
+// Knowledge Graph: 選択中の集約Edge(UI専用。{ aId, bId, edges }形式。Nodeの選択とは排他)。
+let selectedAggregateInfo = null;
+// 折りたたみにより選択中Nodeが非表示になったため、代わりに祖先Nodeを選択状態にしたか(§17の案内文出し分け用)。
+let selectedGraphNodeIsCollapsedProxy = false;
+// Graphの「この範囲の関連候補を確認」からRelation画面へ渡す絞り込み範囲(UI専用)。
+// null=範囲指定なし。{ kind:'section', side:'A'|'B', nodeIds:Set<node_id>, label } または
+// { kind:'aggregate', edgeIds:Set<edge_id>, label }。
+let graphRelationScope = null;
+
+// ---- Alpha 0.2.0 Checkpoint 2: Excel直接入力(すべてUI専用。Knowledge JSONには一切含めない) ----
+// 文書A/Bそれぞれの入力方式('trace'|'excel'。既定'trace'=既存どおり)。
+let inputModeA = 'trace', inputModeB = 'trace';
+// Excel直接入力のプレビュー状態(UI専用)。ファイル未選択時はnull。
+// { file, arrayBuffer, contentDigest, workbook, sheetNames, extractions }
+// sheetNamesは inspectWorkbook() の {name,index,hidden,empty}[]。
+// extractionsは選択中の各シートのextractSheetRows()結果の配列(sheet index順)。
+// プレビュー取り込みボタンを押すまでnull(プレビューを取り込むまでStep 2へは進めない。
+// 是正Checkpoint 2b: シート選択・見出し行/データ開始行を変更した時点でもnullへ戻す)。
+let excelInputA = null, excelInputB = null;
+
+// ---- Alpha 0.2.0 Checkpoint 3b: PDF直接入力(すべてUI専用。Knowledge JSONには一切含めない) ----
+// PDF直接入力のプレビュー状態(UI専用)。ファイル未選択時はnull。
+// { file, arrayBuffer, contentDigest, layout, segmented, previewReady, previewVocabSignature }
+// layout/segmentedは pdf_direct_adapter.js の extractPdfLayout()/segmentPdfContent() の戻り値
+// (プレビュー時に1回だけ解析してキャッシュし、実際の取込時はこのsegmentedを再利用する。
+// PDFを2回解析しない)。previewVocabSignatureはプレビュー生成時点で使用した共有タグ辞書の
+// JSON文字列(取込直前に現在の辞書と一致するか照合するための識別情報)。
+// プレビュー取り込みボタンを押すまでpreviewReady=false(取込へは進めない)。
+let pdfInputA = null, pdfInputB = null;
+
+const NODE_QUICK_FILTERS = [
+  { key: 'untagged', label: 'タグ未設定', test: n => n.tags.length === 0 },
+  { key: 'unregistered', label: '未登録タグあり', test: n => (n.unregistered_tags || []).length > 0 },
+  { key: 'low_confidence', label: `低confidence(<${LOW_CONFIDENCE_THRESHOLD})`, test: n => n.confidence < LOW_CONFIDENCE_THRESHOLD },
+  { key: 'short_text', label: '本文が空/短い', test: n => (n.text || '').trim().length < SHORT_TEXT_THRESHOLD },
+  { key: 'edited', label: '変更あり', test: n => isNodeEdited(n) },
+  { key: 'no_candidates', label: 'Relation候補なし', test: n => nodeCandidateCount(n) === 0, requiresCandidates: true },
+  { key: 'has_stale', label: 'stale Relationあり', test: n => nodeStaleRelationCount(n) > 0, requiresCandidates: true },
+];
+
+// Node一覧: 「確認メニュー」(§4)。通常の利用者はここから1つ選ぶ。各itemのtestはOR条件。
+const CONFIRM_MENUS = [
+  {
+    key: 'tags', label: 'タグを確認',
+    description: 'タグの付け忘れや、共有タグ辞書にないタグを確認します。',
+    test: n => n.tags.length === 0 || (n.unregistered_tags || []).length > 0,
+  },
+  {
+    key: 'text', label: '本文を確認',
+    description: '取込内容が不足している可能性がある項目を確認します。',
+    test: n => (n.text || '').trim().length < SHORT_TEXT_THRESHOLD || n.confidence < LOW_CONFIDENCE_THRESHOLD,
+  },
+  {
+    key: 'changed', label: '変更した項目を見る',
+    description: '今回、自分が変更した項目を見直します。',
+    test: n => isNodeEdited(n),
+  },
+  {
+    key: 'after_relation', label: '関連づけ後に確認',
+    description: '関連候補を生成した後に、関連が見つからなかった項目や、変更によって再確認が必要になった項目を確認します。',
+    requiresCandidates: true,
+    test: n => nodeCandidateCount(n) === 0 || nodeStaleRelationCount(n) > 0,
+  },
+];
+
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function sha256HexOfFile(file) {
+  const buf = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest('SHA-256', buf);
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function readJsonFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => { try { resolve(JSON.parse(reader.result)); } catch (e) { reject(e); } };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file, 'UTF-8');
+  });
+}
+
+// ---- Alpha 0.2.0 Checkpoint 2: Excel直接入力 ----
+
+function excelInputRef(side) { return side === 'A' ? excelInputA : excelInputB; }
+function setExcelInputRef(side, value) { if (side === 'A') excelInputA = value; else excelInputB = value; }
+
+function setInputMode(side, mode) {
+  if (side === 'A') inputModeA = mode; else inputModeB = mode;
+  $('traceBlock' + side).style.display = mode === 'trace' ? '' : 'none';
+  $('excelBlock' + side).style.display = mode === 'excel' ? '' : 'none';
+  $('pdfBlock' + side).style.display = mode === 'pdf' ? '' : 'none';
+  // Checkpoint 3b: 入力方式を変更した場合、旧PDF状態(選択File・layout・segmented・previewReady等)を
+  // 無効化する(PDF以外へ切り替えた場合はもちろん、PDFへ切り替え直した場合もファイル選択からやり直す)。
+  if (mode !== 'pdf' && pdfInputRef(side)) {
+    setPdfInputRef(side, null);
+    $('filePdf' + side).value = '';
+    $('btnPreviewPdf' + side).disabled = true;
+    $('btnPreviewPdf' + side).textContent = 'プレビュー取り込み';
+    $('pdfStatus' + side).textContent = '';
+    renderPdfPreview(side);
+  }
+}
+
+// ファイル選択直後: inspectWorkbook()でシート一覧だけを読む(まだNode化しない。読み取り専用)。
+async function onExcelFileChange(side) {
+  const file = $('fileExcel' + side).files[0];
+  const sheetList = $('sheetList' + side);
+  const btnPreview = $('btnPreviewExcel' + side);
+  const status = $('excelStatus' + side);
+  setExcelInputRef(side, null);
+  sheetList.innerHTML = '';
+  renderExcelPreview(side);
+  btnPreview.disabled = true;
+  btnPreview.textContent = 'プレビュー取り込み';
+  if (!file) { status.textContent = ''; return; }
+
+  status.textContent = 'ファイルを解析中...';
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const contentDigest = await sha256HexOfFile(file);
+    const { workbook, sheetNames } = KnowledgeExcelDirectAdapter.inspectWorkbook(arrayBuffer);
+    setExcelInputRef(side, { file, arrayBuffer, contentDigest, workbook, sheetNames, extractions: null });
+    renderSheetList(side);
+    status.textContent = `シート${sheetNames.length}件を検出しました。取り込むシートを選択し(既定は先頭の可視・非空シートのみ)、見出し行・データ開始行を確認のうえ「プレビュー取り込み」を押してください。`;
+  } catch (e) {
+    status.textContent = `Excel解析エラー: ${e.message || e}`;
+  }
+}
+
+// 是正Checkpoint 2b: シート一覧をチェックボックスで表示する。空シートは選択不可(disabled)、
+// 非表示シートは一覧表示するが初期選択しない。初期選択は「先頭の非空・可視シート」だけ。
+// 是正Checkpoint 2c §1: 見出し行・データ開始行の初期値を保守的に自動推定して表示する。
+// 推定はあくまで初期値であり、利用者はいつでも数値を書き換えられる(disabledにしない)。
+// 低信頼/判定不能の場合は固定code(header_detection_low_confidence)を表示するだけで、
+// extractSheetRows()の列記号フォールバックはこの推定結果に関係なく常に効く。
+function headerDetectionWarningText(code) {
+  if (code === 'header_detection_low_confidence') return '見出し行を自動判定できませんでした(内容をご確認ください)';
+  return code;
+}
+
+// 是正Checkpoint 2c.1 §4: meaningful_range_too_largeは利用者向け固定エラーとして扱う
+// (console errorではなく、対象シートを選択不可にしてメッセージをバッジ表示する)。
+function meaningfulRangeErrorText(e) {
+  if (e && e.code === 'meaningful_range_too_large') return e.message;
+  return null;
+}
+
+function renderSheetList(side) {
+  const input = excelInputRef(side);
+  const container = $('sheetList' + side);
+  if (!input) { container.innerHTML = ''; updatePreviewButtonState(side); return; }
+
+  // まず各シートの推定結果(または大きすぎる実効範囲の固定エラー)を求めてから、
+  // 「選択可能な」シートの中から初期選択を決める(大きすぎるシートを既定選択にしない)。
+  const detections = input.sheetNames.map(s => {
+    if (s.empty) return { detected: null, rangeTooLargeText: null };
+    try {
+      return { detected: KnowledgeExcelDirectAdapter.detectHeaderAndDataStart(input.workbook, s.name), rangeTooLargeText: null };
+    } catch (e) {
+      const rangeTooLargeText = meaningfulRangeErrorText(e);
+      if (rangeTooLargeText) return { detected: null, rangeTooLargeText };
+      // 想定外のエラーは推定に失敗しても既定値(1/2)のまま利用者が修正できるようにする。
+      return { detected: null, rangeTooLargeText: null };
+    }
+  });
+
+  const firstSelectable = input.sheetNames.find((s, i) => !s.hidden && !s.empty && !detections[i].rangeTooLargeText);
+
+  container.innerHTML = input.sheetNames.map((s, i) => {
+    const { detected, rangeTooLargeText } = detections[i];
+    const checked = firstSelectable && s.index === firstSelectable.index;
+    const disabled = s.empty || !!rangeTooLargeText;
+    const badge = s.empty ? '<span class="muted">(空シートのため選択不可)</span>'
+      : (rangeTooLargeText ? `<span class="muted excel-sheet-range-too-large-badge">(${esc(rangeTooLargeText)})</span>`
+      : (s.hidden ? '<span class="muted">(非表示シート)</span>' : ''));
+    const d = detected || { headerRow: 1, dataStartRow: 2, confidence: 'high', code: null };
+    const detectionBadge = d.code
+      ? `<span class="muted excel-sheet-detect-badge">(${esc(headerDetectionWarningText(d.code))})</span>` : '';
+    return `<div class="excel-sheet-row" data-sheet-index="${s.index}" data-sheet-name="${esc(s.name)}">
+      <label><input type="checkbox" class="excel-sheet-check" data-side="${side}" data-sheet-index="${s.index}"${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}> ${esc(s.name)}</label>
+      ${badge}
+      <span>見出し行: <input type="number" class="excel-sheet-header" data-side="${side}" data-sheet-index="${s.index}" min="1" value="${d.headerRow}"${disabled ? ' disabled' : ''}></span>
+      <span>データ開始行: <input type="number" class="excel-sheet-datastart" data-side="${side}" data-sheet-index="${s.index}" min="1" value="${d.dataStartRow}"${disabled ? ' disabled' : ''}></span>
+      ${detectionBadge}
+    </div>`;
+  }).join('');
+  updatePreviewButtonState(side);
+}
+
+function checkedSheetIndexes(side) {
+  return [...document.querySelectorAll(`.excel-sheet-check[data-side="${side}"]:checked`)].map(el => Number(el.dataset.sheetIndex));
+}
+
+function updatePreviewButtonState(side) {
+  const input = excelInputRef(side);
+  $('btnPreviewExcel' + side).disabled = !input || checkedSheetIndexes(side).length === 0;
+}
+
+// シート選択・見出し行・データ開始行を変更した時点で、既存プレビュー結果は無効化する
+// (取り込み直すまでStep 2には進めない。プレビューと実際の設定の食い違いを防ぐ)。
+function onSheetSelectionChange(side) {
+  const input = excelInputRef(side);
+  if (input) input.extractions = null;
+  renderExcelPreview(side);
+  updatePreviewButtonState(side);
+  $('btnPreviewExcel' + side).textContent = 'プレビュー取り込み';
+  if (input) $('excelStatus' + side).textContent = 'シート選択または見出し行/データ開始行を変更しました。「プレビュー取り込み」を押してください。';
+}
+
+// 是正Checkpoint 2c §3: 共有タグ辞書ファイルが変更されたら、A/B両方の既存プレビューを無効化し、
+// 再プレビューを要求する(プレビューとNode生成が異なる辞書を参照したままにならないようにする)。
+function onVocabFileChange() {
+  for (const side of ['A', 'B']) {
+    const excelInput = excelInputRef(side);
+    if (excelInput && excelInput.extractions) {
+      excelInput.extractions = null;
+      renderExcelPreview(side);
+      updatePreviewButtonState(side);
+      $('btnPreviewExcel' + side).textContent = 'プレビュー取り込み';
+      $('excelStatus' + side).textContent = '共有タグ辞書が変更されました。「プレビュー取り込み」を押し直してください。';
+    }
+    // Checkpoint 3b: PDF側も同様に無効化する(古いタグに基づくプレビューのままStep 2へ進ませない)。
+    const pdfInput = pdfInputRef(side);
+    if (pdfInput && pdfInput.previewReady) {
+      pdfInput.previewReady = false;
+      pdfInput.segmented = null;
+      pdfInput.layout = null;
+      pdfInput.previewVocabSignature = null;
+      renderPdfPreview(side);
+      $('btnPreviewPdf' + side).textContent = 'プレビュー取り込み';
+      $('pdfStatus' + side).textContent = '共有タグ辞書が変更されました。「プレビュー取り込み」を押し直してください。';
+    }
+  }
+}
+
+// 是正Checkpoint 2c §3: プレビューとNode生成で必ず同じ辞書を使う。未指定時は既定辞書、
+// 指定時はそのファイルを読み直す(ingest()が実際の取込時に読むのと同じロジック)。
+async function activeTagVocabularyForPreview() {
+  const vocabFile = $('fileVocab').files[0];
+  if (!vocabFile) return DEFAULT_TAG_VOCABULARY;
+  return await readJsonFile(vocabFile);
+}
+
+// 「プレビュー取り込み」: チェックした各シートについてextractSheetRows()を実行し、
+// 結果を読み取り専用プレビューとして表示する。この時点ではまだKnowledge Node化しない(Step 2へは進まない)。
+// 是正Checkpoint 2b: いずれか1シートでも抽出に失敗したら、プレビュー全体を取込エラーとして扱う
+// (実際のKnowledge Node生成時の文書全体fail-closedと挙動を合わせる)。
+async function previewExcel(side) {
+  const input = excelInputRef(side);
+  const status = $('excelStatus' + side);
+  const btnPreview = $('btnPreviewExcel' + side);
+  if (!input) { status.textContent = 'Excelファイルを選択してください。'; return; }
+  const indexes = checkedSheetIndexes(side);
+  if (indexes.length === 0) { status.textContent = '取り込むシートを1つ以上選択してください。'; return; }
+  try {
+    const extractions = indexes.map(idx => {
+      const sheetMeta = input.sheetNames.find(s => s.index === idx);
+      const headerRow = Number(document.querySelector(`.excel-sheet-header[data-side="${side}"][data-sheet-index="${idx}"]`).value);
+      const dataStartRow = Number(document.querySelector(`.excel-sheet-datastart[data-side="${side}"][data-sheet-index="${idx}"]`).value);
+      return KnowledgeExcelDirectAdapter.extractSheetRows(input.workbook, sheetMeta.name, headerRow, dataStartRow);
+    });
+    // 決定性: プレビュー表示もsheet index順に揃える(実際のNode生成順と一致させる)。
+    extractions.sort((a, b) => a.sheetIndex - b.sheetIndex);
+    input.extractions = extractions;
+    // 是正Checkpoint 2c: DOM描画(非同期)を完了させてから完了ステータス文言を出す
+    // (先にステータスだけ更新すると、まだ表が描画されていない一瞬をテスト等が観測しうるため)。
+    await renderExcelPreview(side);
+    const totalNonEmpty = extractions.reduce((sum, e) => sum + e.nonEmptyRowCount, 0);
+    status.textContent = `プレビュー取り込み完了: ${extractions.length}シート、非空データ行 合計${totalNonEmpty}件。内容を確認し、問題なければ「Knowledge Nodeを生成してStep 2へ」を押してください。`;
+    btnPreview.textContent = 'プレビューを取り込み直す';
+  } catch (e) {
+    input.extractions = null;
+    await renderExcelPreview(side);
+    status.textContent = `プレビュー取り込みエラー: ${e.message || e}`;
+  }
+}
+
+// row.warnings(固定code)を表示用の固定日本語文へ変換する(是正Checkpoint 2a §2・2a.1)。
+function excelWarningText(w) {
+  if (w.code === 'formula_no_display_value') return `数式の表示値がありません(列: ${w.header})`;
+  if (w.code === 'raw_value_without_display') return `表示値のないセルの元データを使用しています(列: ${w.header})`;
+  return w.code;
+}
+
+// 読み取り専用プレビュー表示(編集不可): シート単位で区切って表示する(是正Checkpoint 2b)。
+// 各シートブロック内は従来どおりシート名・行番号・セル範囲・タイトル・本文抜粋・初期タグ・警告。
+// 是正Checkpoint 2c §3: プレビューとNode生成で同じ辞書を使うため、実際に選択されている
+// 共有タグ辞書ファイルを読み直す(未指定時のみ既定辞書を使う)。
+async function renderExcelPreview(side) {
+  const input = excelInputRef(side);
+  const wrap = $('excelPreviewWrap' + side);
+  if (!input || !input.extractions || !input.extractions.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  const previewVocab = await activeTagVocabularyForPreview();
+  wrap.innerHTML = input.extractions.map(extraction => {
+    const rowsHtml = extraction.rows.map(row => {
+      const nonBlank = row.cells.filter(KnowledgeExcelDirectAdapter.cellHasContent);
+      const title = row.isEmpty ? '' : KnowledgeExcelDirectAdapter.deriveTitle(nonBlank, row.rowNumber);
+      const text = row.isEmpty ? '' : KnowledgeExcelDirectAdapter.deriveText(nonBlank);
+      const tags = row.isEmpty ? [] : KnowledgeExcelDirectAdapter.matchInitialTags(nonBlank.map(c => KnowledgeExcelDirectAdapter.cellTextValue(c)), previewVocab);
+      const warnings = row.isEmpty ? ['空行のため取込対象外(Node化されません)'] : row.warnings.map(excelWarningText);
+      // タイトルはNode.titleとしては切り詰めないが(§3)、プレビュー表示だけは省略する。
+      const titleDisplay = KnowledgeExcelDirectAdapter.truncateForDisplay(title, 60);
+      return `<tr>
+        <td>${esc(extraction.sheetName)}</td>
+        <td>${row.rowNumber}</td>
+        <td>${esc(row.cellRange)}</td>
+        <td>${esc(titleDisplay)}</td>
+        <td>${esc(text.slice(0, 60))}${text.length > 60 ? '…' : ''}</td>
+        <td>${tags.map(t => `<span class="tag-chip">${esc(t)}</span>`).join('') || '<span class="muted">-</span>'}</td>
+        <td>${warnings.map(w => esc(w)).join('; ') || ''}</td>
+      </tr>`;
+    }).join('');
+    const fallbackCols = extraction.headers.filter((h, i) => extraction.headerIsFallback[i]);
+    const fallbackNote = fallbackCols.length
+      ? `<tr><td colspan="7" class="muted" style="font-size:11px;">見出し未指定のため列記号を使用した列: ${fallbackCols.map(esc).join(', ')}</td></tr>`
+      : '';
+    return `<div class="excel-sheet-preview-block">
+      <h4>シート「${esc(extraction.sheetName)}」(sheet index ${extraction.sheetIndex}) - 非空データ行 ${extraction.nonEmptyRowCount}件 / 全${extraction.rows.length}行</h4>
+      <table class="excel-preview-table" data-sheet-index="${extraction.sheetIndex}">
+        <thead><tr><th>シート名</th><th>行番号</th><th>セル範囲</th><th>タイトル</th><th>本文抜粋</th><th>初期タグ</th><th>警告</th></tr></thead>
+        <tbody>${rowsHtml}${fallbackNote}</tbody>
+      </table>
+    </div>`;
+  }).join('');
+  wrap.style.display = '';
+}
+
+// ---- Alpha 0.2.0 Checkpoint 3b: PDF直接入力 ----
+
+function pdfInputRef(side) { return side === 'A' ? pdfInputA : pdfInputB; }
+function setPdfInputRef(side, value) { if (side === 'A') pdfInputA = value; else pdfInputB = value; }
+
+// PDF Adapterの固定codeを利用者向けの固定日本語文へ変換する(§エラー表示。最低限11種)。
+// stack traceや内部例外はそのまま表示しない(該当しないcodeはe.message、それも無ければ文字列化のみ)。
+function pdfErrorText(e) {
+  const code = e && e.code;
+  const map = {
+    pdf_encrypted_or_password_required: 'このPDFは暗号化されているか、パスワードが必要です。パスワード保護のないPDFをご利用ください。',
+    pdf_parse_failed: 'PDFを解析できませんでした。ファイルが壊れていないかご確認ください。',
+    pdf_zero_pages: 'このPDFの総ページ数が0です。',
+    page_count_limit_exceeded: 'PDFの総ページ数が安全上限を超えています。',
+    text_item_limit_exceeded: '抽出したテキスト量が安全上限を超えています。',
+    extracted_char_limit_exceeded: '抽出した総文字数が安全上限を超えています。',
+    statement_count_limit_exceeded: '生成予定のstatement数が安全上限を超えています。',
+    no_extractable_text: '全ページでテキストを抽出できませんでした(画像・スキャンPDFの可能性があります。OCRは対象外です)。',
+    no_node_candidates: '抽出できたNode候補が0件です。',
+    pdf_text_position_unrecoverable: '一部の文字の位置情報を復元できないため、この文書の取込を中止しました。',
+    verbatim_or_page_unrecoverable: '一部の段落の原文またはページ位置を復元できないため、この文書の取込を中止しました。'
+  };
+  if (code && map[code]) return map[code];
+  return String((e && e.message) || e);
+}
+
+// 固定warning code(pdf_direct_adapter.jsが返すsegmented.warnings/para.warnings)を
+// 利用者向けの固定日本語文へ変換する(最低限4種。paragraph_split_incomplete_positionは
+// Checkpoint 3a.1でfail-closedへ置き換え済みで現行Adapterは発生させないが、念のため文言は残す)。
+function pdfWarningText(w) {
+  const map = {
+    page_extracted_text_empty: 'このページからテキストを抽出できませんでした(空白ページの可能性があります)',
+    heading_candidate_low_confidence: '見出しの可能性がありますが、見出しとしては採用していません(内容をご確認ください)',
+    heading_or_table_layout_detected: '横方向に離れたテキストを検出しました(表・複数列レイアウトの可能性。1つの本文として結合しています)',
+    paragraph_split_incomplete_position: '段落の一部の位置情報を復元できませんでした'
+  };
+  return (w && map[w.code]) || (w && w.code) || '';
+}
+
+// PDFファイル選択直後: まだ解析しない(ファイルとダイジェストだけ保持し、プレビュー取り込みボタンを
+// 押すまでextractPdfLayout()を呼ばない)。
+async function onPdfFileChange(side) {
+  const file = $('filePdf' + side).files[0];
+  const btnPreview = $('btnPreviewPdf' + side);
+  const status = $('pdfStatus' + side);
+  setPdfInputRef(side, null);
+  renderPdfPreview(side);
+  btnPreview.disabled = true;
+  btnPreview.textContent = 'プレビュー取り込み';
+  if (!file) { status.textContent = ''; return; }
+
+  status.textContent = 'ファイルを読み込み中...';
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const contentDigest = await sha256HexOfFile(file);
+    setPdfInputRef(side, { file, arrayBuffer, contentDigest, layout: null, segmented: null, previewReady: false, previewVocabSignature: null });
+    btnPreview.disabled = false;
+    status.textContent = 'ファイルを選択しました。「プレビュー取り込み」を押してください。';
+  } catch (e) {
+    status.textContent = `PDF読み込みエラー: ${e.message || e}`;
+  }
+}
+
+// 多重クリック防止(Checkpoint 3b): 処理中は対象側のファイル選択・プレビューボタンを一時的に無効化する。
+function setPdfControlsDisabled(side, disabled) {
+  $('filePdf' + side).disabled = disabled;
+  $('btnPreviewPdf' + side).disabled = disabled || !pdfInputRef(side);
+}
+
+// 「プレビュー取り込み」: extractPdfLayout(arrayBuffer) -> segmentPdfContent(layout) を1回だけ実行し、
+// 結果(segmented)をキャッシュする。これ以降、実際の取込(ingest)ではこのキャッシュを再利用し、
+// 同じPDFを2度解析しない(adaptPdfDirect()はここでもingest()でも呼ばない)。
+async function previewPdf(side) {
+  const input = pdfInputRef(side);
+  const status = $('pdfStatus' + side);
+  const btnPreview = $('btnPreviewPdf' + side);
+  if (!input) { status.textContent = 'PDFファイルを選択してください。'; return; }
+
+  setPdfControlsDisabled(side, true);
+  status.textContent = 'PDFを解析中...';
+  try {
+    const vocab = await activeTagVocabularyForPreview();
+    const layout = await KnowledgePdfDirectAdapter.extractPdfLayout(input.arrayBuffer);
+    const segmented = KnowledgePdfDirectAdapter.segmentPdfContent(layout);
+    input.layout = layout;
+    input.segmented = segmented;
+    input.previewReady = true;
+    input.previewVocabSignature = JSON.stringify(vocab);
+    await renderPdfPreview(side);
+    const totalStatements = segmented.sections.reduce((a, s) => a + s.paragraphs.length, 0);
+    status.textContent = `プレビュー取り込み完了: 総ページ数${layout.numPages} / section${segmented.sections.length}件 / ` +
+      `statement候補${totalStatements}件 / 警告${segmented.warnings.length}件。内容を確認し、問題なければ「Knowledge Nodeを生成してStep 2へ」を押してください。`;
+    btnPreview.textContent = 'プレビューを取り込み直す';
+  } catch (e) {
+    input.layout = null; input.segmented = null; input.previewReady = false; input.previewVocabSignature = null;
+    await renderPdfPreview(side);
+    status.textContent = `プレビュー取り込みエラー: ${pdfErrorText(e)}`;
+  } finally {
+    setPdfControlsDisabled(side, false);
+  }
+}
+
+// 読み取り専用プレビュー表示(編集不可): 概要(ファイル名・総ページ数・section数・statement候補数・
+// 警告件数)、警告一覧(page・block_id・内容)、statementごとの行(ページ・section名・synthetic「本文」
+// かどうか・本文抜粋・初期タグ・警告)を表示する。PDFビューア・ページ画像・サムネイルは追加しない。
+async function renderPdfPreview(side) {
+  const input = pdfInputRef(side);
+  const wrap = $('pdfPreviewWrap' + side);
+  if (!input || !input.previewReady || !input.segmented) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  const vocab = await activeTagVocabularyForPreview();
+  const segmented = input.segmented;
+  const totalStatements = segmented.sections.reduce((a, s) => a + s.paragraphs.length, 0);
+
+  const warningsHtml = segmented.warnings.length ? `<table class="pdf-preview-warnings">
+      <thead><tr><th>ページ</th><th>block_id</th><th>内容</th></tr></thead>
+      <tbody>${segmented.warnings.map(w => `<tr><td>${w.page != null ? w.page : '-'}</td><td>${esc(w.block_id || '-')}</td><td>${esc(pdfWarningText(w))}</td></tr>`).join('')}</tbody>
+    </table>` : '<div class="muted" style="font-size:11px;">警告はありません。</div>';
+
+  const rowsHtml = [];
+  for (const sec of segmented.sections) {
+    for (const para of sec.paragraphs) {
+      const tags = KnowledgePdfDirectAdapter.matchInitialTags([para.normalizedText], vocab);
+      const excerpt = para.normalizedText.slice(0, 60) + (para.normalizedText.length > 60 ? '…' : '');
+      const warnTexts = (para.warnings || []).map(pdfWarningText);
+      rowsHtml.push(`<tr class="pdf-preview-statement-row" data-page="${para.page}" data-synthetic="${sec.synthetic}">
+        <td>${para.page}</td>
+        <td>${esc(sec.title)}${sec.synthetic ? ' <span class="muted">(見出しなしの本文)</span>' : ''}</td>
+        <td>${sec.synthetic ? 'synthetic' : '通常'}</td>
+        <td>${esc(excerpt)}</td>
+        <td>${tags.map(t => `<span class="tag-chip">${esc(t)}</span>`).join('') || '<span class="muted">-</span>'}</td>
+        <td>${warnTexts.map(esc).join('; ') || ''}</td>
+      </tr>`);
+    }
+  }
+
+  wrap.innerHTML = `
+    <div class="pdf-preview-summary muted" style="font-size:12px; margin-bottom:6px;">
+      ファイル名: ${esc(input.file.name)} / 総ページ数: ${input.layout ? input.layout.numPages : '-'} /
+      section数: ${segmented.sections.length} / statement候補数: ${totalStatements} / 警告件数: ${segmented.warnings.length}
+    </div>
+    ${warningsHtml}
+    <table class="pdf-preview-statements" style="margin-top:6px;">
+      <thead><tr><th>ページ</th><th>section</th><th>種別</th><th>本文抜粋</th><th>初期タグ</th><th>警告</th></tr></thead>
+      <tbody>${rowsHtml.join('')}</tbody>
+    </table>`;
+  wrap.style.display = '';
+}
+
+function adapterIdForMode(mode) {
+  if (mode === 'excel') return 'excel-direct-adapter';
+  if (mode === 'pdf') return 'pdf-direct-adapter';
+  return 'trace-json-adapter';
+}
+
+// document/section/内容Node(直接入力)構築時に渡すtagVocabularyは、実際の取込(ingest)時点で
+// 共有タグ辞書ファイルを読み直した最終版を使う(プレビュー表示の簡易版とは別)。
+async function adaptDocument(side, mode, vocab, ingestedAt) {
+  try {
+    if (mode === 'trace') {
+      const file = $('file' + side).files[0];
+      if (!file) throw new Error('Trace JSONファイルが選択されていません。');
+      const trace = await readJsonFile(file);
+      const digest = await sha256HexOfFile(file);
+      const role = side === 'A' ? 'requirement' : 'design';
+      return await KnowledgeTraceJsonAdapter.adaptTraceJson(trace, { role, contentDigest: digest, ingestedAt });
+    }
+    if (mode === 'pdf') {
+      const input = pdfInputRef(side);
+      if (!input || !input.previewReady || !input.segmented) throw new Error('PDFのプレビュー取り込みが完了していません。先に「プレビュー取り込み」を行ってください。');
+      // Checkpoint 3b §取込: 現在の共有タグ辞書とプレビュー時の辞書が一致する場合だけ取込可能とする。
+      if (input.previewVocabSignature !== JSON.stringify(vocab)) throw new Error('共有タグ辞書がプレビュー時から変更されています。「プレビュー取り込み」を押し直してください。');
+      return await KnowledgePdfDirectAdapter.buildKnowledgeNodesFromPdf(input.segmented, {
+        fileName: input.file.name, contentDigest: input.contentDigest, ingestedAt, tagVocabulary: vocab
+      });
+    }
+    const input = excelInputRef(side);
+    if (!input || !input.extractions || !input.extractions.length) throw new Error('Excelのプレビュー取り込みが完了していません。先に「プレビュー取り込み」を行ってください。');
+    return await KnowledgeExcelDirectAdapter.buildKnowledgeNodesFromExcelSheets(input.extractions, {
+      fileName: input.file.name, contentDigest: input.contentDigest, ingestedAt, tagVocabulary: vocab
+    });
+  } catch (e) {
+    const modeLabel = mode === 'excel' ? 'Excel' : (mode === 'pdf' ? 'PDF' : 'Trace JSON');
+    const msg = mode === 'pdf' ? pdfErrorText(e) : (e.message || e);
+    throw new Error(`文書${side}(${modeLabel}): ${msg}`);
+  }
+}
+
+async function ingest() {
+  const modeA = inputModeA, modeB = inputModeB;
+  if (modeA === 'trace' && !$('fileA').files[0]) { $('ingestStatus').textContent = '文書AのTrace JSONファイルを選択してください。'; return; }
+  if (modeA === 'excel' && !(excelInputA && excelInputA.extractions && excelInputA.extractions.length)) { $('ingestStatus').textContent = '文書AのExcelプレビュー取り込みを先に行ってください。'; return; }
+  if (modeA === 'pdf' && !(pdfInputA && pdfInputA.previewReady && pdfInputA.segmented)) { $('ingestStatus').textContent = '文書AのPDFプレビュー取り込みを先に行ってください。'; return; }
+  if (modeB === 'trace' && !$('fileB').files[0]) { $('ingestStatus').textContent = '文書Bのtrace JSONファイルを選択してください。'; return; }
+  if (modeB === 'excel' && !(excelInputB && excelInputB.extractions && excelInputB.extractions.length)) { $('ingestStatus').textContent = '文書BのExcelプレビュー取り込みを先に行ってください。'; return; }
+  if (modeB === 'pdf' && !(pdfInputB && pdfInputB.previewReady && pdfInputB.segmented)) { $('ingestStatus').textContent = '文書BのPDFプレビュー取り込みを先に行ってください。'; return; }
+  if (dataset && !confirm('既存のNode/Relationはすべて破棄されます。取込を続けますか？')) return;
+
+  $('ingestStatus').textContent = '取込中...';
+  try {
+    const vocabFile = $('fileVocab').files[0];
+    const vocab = vocabFile ? await readJsonFile(vocabFile) : DEFAULT_TAG_VOCABULARY;
+    const ingestedAt = new Date().toISOString();
+
+    // 是正Checkpoint 3b.1: 原子性はAdapter処理の成功だけでは保証できない(setTagVocabulary/
+    // ingestAdapterResult/validationのいずれかが失敗しうる)。live変数のdatasetは一切書き換えず、
+    // ローカルのnextDatasetだけを組み立て、validateDataset()でerror診断が0件になって初めて
+    // dataset(および関連するUI専用状態一式)を置き換える(commit)。途中で失敗した場合、
+    // liveのdataset・Candidate・採否・Graph状態は一切変更されない。
+    const resultA = await adaptDocument('A', modeA, vocab, ingestedAt);
+    const resultB = await adaptDocument('B', modeB, vocab, ingestedAt);
+
+    const nextDataset = KnowledgeStore.createEmptyDataset({ tool: 'knowledge_builder_tool', version: '0.2.0-alpha' });
+    await KnowledgeStore.setTagVocabulary(nextDataset, vocab);
+    await KnowledgeStore.ingestAdapterResult(nextDataset, resultA, { type: 'ai', id: adapterIdForMode(modeA) });
+    await KnowledgeStore.ingestAdapterResult(nextDataset, resultB, { type: 'ai', id: adapterIdForMode(modeB) });
+
+    // 取込時のvalidation gate(是正Checkpoint 3b.1 §2): error診断が1件でもあればcommitしない
+    // (例: 同一PDFを文書A/Bへ指定した場合のnode_id/edge_id重複=duplicate_node_id等)。
+    // warningのみの場合はStep 2への進行を妨げない(既存の保存時finalizeDataset()と同じ扱い)。
+    const ingestDiagnostics = KnowledgeStore.validateDataset(nextDataset);
+    nextDataset.diagnostics = ingestDiagnostics;
+    const ingestErrors = ingestDiagnostics.filter(d => d.severity === 'error');
+    if (ingestErrors.length) {
+      const err = new Error(`検証エラー ${ingestErrors.length}件のため取込を中止しました: ${ingestErrors[0].detail}`);
+      err.code = 'ingest_validation_failed';
+      throw err;
+    }
+
+    // ここまで到達して初めてlive状態をまとめて置き換える(commit)。
+    dataset = nextDataset;
+    docAId = resultA.sourceDocument.source_document_id;
+    docBId = resultB.sourceDocument.source_document_id;
+
+    assignShortIds();
+    selectedNodeIds = new Set();
+    nodeTouchLog = new Set();
+    selectedEdgeIds = new Set();
+    expandedGroups = new Set();
+    selectedGraphNodeId = null;
+    activeNodeQuickFilters = new Set();
+    selectedConfirmMenu = null;
+    candidatesGenerated = false;
+    $('candidateStatus').textContent = '';
+    jumpHighlightNodeId = null;
+    candidateGroupBasis = 'A';
+    $('edgeGroupBasis').value = 'A';
+    graphGranularity = 'item';
+    graphStructuralEverShown = false;
+    graphStructuralCollapsed = new Set();
+    selectedAggregateInfo = null;
+    selectedGraphNodeIsCollapsedProxy = false;
+    graphRelationScope = null;
+    $('graphGranularity').value = 'item';
+    $('graphGranularity').disabled = !$('graphShowStructural').checked;
+    // 「文書内の階層関係も表示」が(前回セッションから)ONのまま再取込された場合も、
+    // 新しいNodeセットに対しては初回ONと同じ扱いにし、密集した全展開状態を避ける(§6・§20)。
+    if ($('graphShowStructural').checked) {
+      graphStructuralEverShown = true;
+      graphGranularity = 'section';
+      $('graphGranularity').value = 'section';
+      applyGranularityBaseline('section');
+    }
+    resetNodeFilters();
+    resetEdgeFilters();
+    resetGraphFilters();
+    populateNodeTagFilterOptions();
+    populateBulkTagSelects();
+    populateGraphTagFilterOptions();
+
+    $('ingestStatus').textContent =
+      `取込完了: 文書A「${resultA.sourceDocument.file_name}」Node ${resultA.nodes.length}件 / ` +
+      `文書B「${resultB.sourceDocument.file_name}」Node ${resultB.nodes.length}件`;
+    renderAll();
+  } catch (e) {
+    // 是正Checkpoint 3b.1 §3: 利用者入力・Adapter・validation由来の取込失敗はいずれも想定内の
+    // エラーであり、console.errorへは流さない(入力パネル内の固定文言表示のみで完結させる)。
+    // e.messageはAdapter/validateDataset双方とも常に固定の日本語文であり、stack traceは含まない。
+    $('ingestStatus').textContent = `取込エラー: ${e.message || e}`;
+  }
+}
+
+// ---- 短縮ID(画面表示専用。元Nodeの一意特定はnode_idで行う) ----
+function assignShortIds() {
+  nodeShortIds = new Map();
+  const a = dataset.nodes.filter(n => n.provenance.source_document_id === docAId);
+  const b = dataset.nodes.filter(n => n.provenance.source_document_id === docBId);
+  a.forEach((n, i) => nodeShortIds.set(n.node_id, `A-${String(i + 1).padStart(3, '0')}`));
+  b.forEach((n, i) => nodeShortIds.set(n.node_id, `B-${String(i + 1).padStart(3, '0')}`));
+}
+function shortId(node) { return node ? (nodeShortIds.get(node.node_id) || node.node_id.slice(0, 10)) : '?'; }
+
+function resetNodeFilters() {
+  $('nodeSearch').value = '';
+  $('nodeDocFilter').value = 'all';
+  $('nodeTypeFilter').value = 'all';
+  $('nodeTagFilter').value = 'all';
+  activeNodeQuickFilters = new Set();
+}
+function resetEdgeFilters() {
+  $('edgeSearch').value = '';
+  $('edgeStatusFilter').value = 'candidate';
+  $('edgeStaleOnly').checked = false;
+  $('edgeEvidenceFilter').value = 'all';
+  $('edgeConfMin').value = '0';
+  $('edgeConfMax').value = '1';
+  $('edgeSort').value = 'confidence';
+}
+function resetGraphFilters() {
+  $('graphDocFilter').value = 'all';
+  $('graphTypeFilter').value = 'all';
+  $('graphTagFilter').value = 'all';
+  $('graphFocusMode').checked = false;
+  selectedGraphNodeId = null;
+  selectedAggregateInfo = null;
+  selectedGraphNodeIsCollapsedProxy = false;
+}
+
+function contentNodes() {
+  return dataset ? dataset.nodes.filter(n => n.node_type !== 'document' && n.node_type !== 'section') : [];
+}
+
+function nodeLabel(node) {
+  const side = node.provenance.source_document_id === docAId ? 'A' : (node.provenance.source_document_id === docBId ? 'B' : '?');
+  return `[${side}] ${node.title || (node.export_binding ? node.export_binding.trace_id : node.node_id)}`;
+}
+
+function isNodeEdited(node) { return node.revision.content_revision > 1; }
+
+function nodeCandidateCount(node) {
+  if (!dataset) return 0;
+  return dataset.edges.filter(e => e.relation_category === 'semantic' &&
+    (e.source_node_id === node.node_id || e.target_node_id === node.node_id)).length;
+}
+function nodeStaleRelationCount(node) {
+  if (!dataset) return 0;
+  return dataset.edges.filter(e => e.relation_category === 'semantic' &&
+    (e.source_node_id === node.node_id || e.target_node_id === node.node_id) &&
+    KnowledgeStore.isEdgeStale(dataset, e)).length;
+}
+
+// ---- 文書階層(document/section)のUI専用ヘルパー(§1: Knowledge Node/Edgeは変更しない、表示専用の導出) ----
+
+// 構造Edge(relation_category:'structural', relation_type:'contains')から child_id -> parent_id のMapを作る。
+function structuralParentMap() {
+  const map = new Map();
+  if (!dataset) return map;
+  for (const e of dataset.edges) {
+    if (e.relation_category === 'structural' && e.relation_type === 'contains') map.set(e.target_node_id, e.source_node_id);
+  }
+  return map;
+}
+
+// 子Nodeを持つ構造Nodeか(§3: 折りたたみ対象は子Nodeを持つStructural Nodeに限定)。
+function structuralHasChildren(nodeId) {
+  if (!dataset) return false;
+  return dataset.edges.some(e => e.relation_category === 'structural' && e.relation_type === 'contains' && e.source_node_id === nodeId);
+}
+
+// rootNodeId配下(document/sectionを再帰的に辿った先)の内容Node(document/section以外)のnode_id集合。
+// §13.1のRelationドリルダウン範囲や、将来のNode一覧配下ジャンプで使う。
+function descendantContentNodeIds(rootNodeId) {
+  const result = new Set();
+  if (!dataset) return result;
+  const childrenMap = new Map();
+  for (const e of dataset.edges) {
+    if (e.relation_category === 'structural' && e.relation_type === 'contains') {
+      if (!childrenMap.has(e.source_node_id)) childrenMap.set(e.source_node_id, []);
+      childrenMap.get(e.source_node_id).push(e.target_node_id);
+    }
+  }
+  const stack = [rootNodeId];
+  while (stack.length) {
+    const cur = stack.pop();
+    for (const childId of (childrenMap.get(cur) || [])) {
+      const childNode = dataset.nodes.find(n => n.node_id === childId);
+      if (!childNode) continue;
+      if (childNode.node_type === 'document' || childNode.node_type === 'section') stack.push(childId);
+      else result.add(childId);
+    }
+  }
+  return result;
+}
+
+// nodeIdがvisibleNodeIdsに含まれるまで構造上の親を辿って解決する(§8: 可視Ancestorへの対応付け)。
+// visibleNodeIdsに含まれない祖先が尽きた場合はnullを返す(表示対象なし)。
+function resolveVisibleAncestor(nodeId, visibleNodeIds, parentMap) {
+  let cur = nodeId;
+  const guard = new Set(); // 循環防止(通常のTrace階層では発生しないが念のため)
+  while (cur && !visibleNodeIds.has(cur)) {
+    if (guard.has(cur)) return null;
+    guard.add(cur);
+    cur = parentMap.get(cur);
+  }
+  return cur || null;
+}
+
+function populateNodeTagFilterOptions() {
+  const allowed = (dataset && dataset.tag_vocabulary && dataset.tag_vocabulary.allowed_tags) || [];
+  const sel = $('nodeTagFilter');
+  sel.innerHTML = '<option value="all">タグ: すべて</option><option value="__none__">(タグ未設定)</option>';
+  for (const tag of allowed) {
+    const opt = document.createElement('option'); opt.value = tag; opt.textContent = tag;
+    sel.appendChild(opt);
+  }
+}
+function populateGraphTagFilterOptions() {
+  const allowed = (dataset && dataset.tag_vocabulary && dataset.tag_vocabulary.allowed_tags) || [];
+  const sel = $('graphTagFilter');
+  sel.innerHTML = '<option value="all">タグ: すべて</option>';
+  for (const tag of allowed) {
+    const opt = document.createElement('option'); opt.value = tag; opt.textContent = tag;
+    sel.appendChild(opt);
+  }
+}
+
+function populateBulkTagSelects() {
+  const allowed = (dataset && dataset.tag_vocabulary && dataset.tag_vocabulary.allowed_tags) || [];
+  for (const id of ['nodeBulkTagAdd', 'nodeBulkTagRemove']) {
+    const sel = $(id);
+    const placeholder = sel.options[0];
+    sel.innerHTML = '';
+    sel.appendChild(placeholder);
+    for (const tag of allowed) {
+      const opt = document.createElement('option'); opt.value = tag; opt.textContent = tag;
+      sel.appendChild(opt);
+    }
+  }
+}
+
+// ---- 2. ノード一覧 ----
+
+function isNodeFilterActive() {
+  return $('nodeSearch').value.trim() !== '' || $('nodeDocFilter').value !== 'all' ||
+    $('nodeTypeFilter').value !== 'all' || $('nodeTagFilter').value !== 'all' || activeNodeQuickFilters.size > 0;
+}
+
+function filteredNodes() {
+  if (!dataset) return [];
+  const showStructural = $('showStructural').checked;
+  let rows = dataset.nodes.filter(n => showStructural || (n.node_type !== 'document' && n.node_type !== 'section'));
+
+  const search = $('nodeSearch').value.trim();
+  if (search) {
+    rows = rows.filter(n => (n.title || '').includes(search) || (n.text || '').includes(search) ||
+      n.tags.some(t => t.includes(search)) || shortId(n).includes(search) || n.node_id.includes(search));
+  }
+  const docFilter = $('nodeDocFilter').value;
+  if (docFilter !== 'all') {
+    const targetDocId = docFilter === 'A' ? docAId : docBId;
+    rows = rows.filter(n => n.provenance.source_document_id === targetDocId);
+  }
+  const typeFilter = $('nodeTypeFilter').value;
+  if (typeFilter !== 'all') rows = rows.filter(n => n.node_type === typeFilter);
+
+  const tagFilter = $('nodeTagFilter').value;
+  if (tagFilter === '__none__') rows = rows.filter(n => n.tags.length === 0);
+  else if (tagFilter !== 'all') rows = rows.filter(n => n.tags.includes(tagFilter));
+
+  if (selectedConfirmMenu) {
+    const menu = CONFIRM_MENUS.find(m => m.key === selectedConfirmMenu);
+    if (menu && !(menu.requiresCandidates && !candidatesGenerated)) {
+      rows = rows.filter(n => {
+        if (n.node_type === 'document' || n.node_type === 'section') return false;
+        return menu.test(n);
+      });
+    }
+  }
+
+  if (activeNodeQuickFilters.size > 0) {
+    rows = rows.filter(n => {
+      if (n.node_type === 'document' || n.node_type === 'section') return false; // 詳細な絞り込みは内容Node対象
+      return NODE_QUICK_FILTERS.filter(f => activeNodeQuickFilters.has(f.key)).every(f => f.test(n));
+    });
+  }
+  return rows;
+}
+
+function renderNodeQuickFilterRow() {
+  const row = $('nodeQuickFilterRow');
+  row.innerHTML = '';
+  const rows = contentNodes();
+  for (const f of NODE_QUICK_FILTERS) {
+    const disabled = f.requiresCandidates && !candidatesGenerated;
+    const chip = document.createElement('span');
+    if (disabled) {
+      chip.className = 'chip disabled';
+      chip.textContent = f.label;
+      chip.title = '関連候補を生成した後に使用できます。';
+    } else {
+      const count = rows.filter(f.test).length;
+      chip.className = 'chip' + (activeNodeQuickFilters.has(f.key) ? ' active' : '');
+      chip.innerHTML = `${esc(f.label)} <span class="count">${count}</span>`;
+      chip.addEventListener('click', () => {
+        if (activeNodeQuickFilters.has(f.key)) activeNodeQuickFilters.delete(f.key);
+        else activeNodeQuickFilters.add(f.key);
+        renderNodeTable();
+      });
+    }
+    row.appendChild(chip);
+  }
+}
+
+function renderNodeConfirmMenuRow() {
+  const row = $('nodeConfirmMenuRow');
+  row.innerHTML = '';
+  const rows = contentNodes();
+  for (const m of CONFIRM_MENUS) {
+    const disabled = m.requiresCandidates && !candidatesGenerated;
+    const chip = document.createElement('span');
+    if (disabled) {
+      chip.className = 'chip disabled';
+      chip.textContent = `${m.label}（候補生成後）`;
+      chip.title = '関連候補を生成した後に使用できます。';
+    } else {
+      const count = rows.filter(m.test).length;
+      chip.className = 'chip' + (selectedConfirmMenu === m.key ? ' active' : '');
+      chip.innerHTML = `${esc(m.label)} <span class="count">${count}</span>`;
+      chip.addEventListener('click', () => {
+        selectedConfirmMenu = (selectedConfirmMenu === m.key) ? null : m.key;
+        renderNodeTable();
+      });
+    }
+    row.appendChild(chip);
+  }
+  renderNodeConfirmGuidance();
+}
+
+function renderNodeConfirmGuidance() {
+  const box = $('nodeConfirmGuidance');
+  const notes = [];
+  if (!candidatesGenerated) {
+    notes.push('「関連づけ後に確認」は、「3. 文書間の関連を確認」で関連候補を生成した後に使用できます。');
+  }
+  if (selectedConfirmMenu) {
+    const menu = CONFIRM_MENUS.find(m => m.key === selectedConfirmMenu);
+    if (menu && !(menu.requiresCandidates && !candidatesGenerated)) {
+      const count = contentNodes().filter(menu.test).length;
+      const guidance = count === 0
+        ? 'この確認項目に該当するデータはありません。次の「文書間の関連を確認」へ進めます。'
+        : `確認対象が${count}件あります。内容を確認し、修正が必要な項目だけ変更してください。`;
+      notes.push(`${menu.description} ${guidance}`);
+    }
+  }
+  box.textContent = notes.join(' ');
+}
+
+function updateNodeSelectionUi() {
+  $('nodeSelectedCount').textContent = String(selectedNodeIds.size);
+  const rows = filteredNodes();
+  $('nodeSelectAll').checked = rows.length > 0 && rows.every(n => selectedNodeIds.has(n.node_id));
+  $('nodeFilterActiveBadge').style.display = isNodeFilterActive() ? 'inline-block' : 'none';
+}
+
+function renderNodeTable() {
+  renderNodeQuickFilterRow();
+  renderNodeConfirmMenuRow();
+  const table = $('nodeTable');
+  table.className = $('nodeDetailMode').checked ? '' : 'simple-mode';
+
+  const tbody = $('nodeTableBody');
+  tbody.innerHTML = '';
+  if (!dataset) { $('nodeCount').textContent = '0'; $('nodeTotalCount').textContent = '0'; updateNodeSelectionUi(); return; }
+
+  const rows = filteredNodes();
+  $('nodeCount').textContent = String(rows.length);
+  $('nodeTotalCount').textContent = String(dataset.nodes.length);
+
+  for (const node of rows) {
+    const tr = document.createElement('tr');
+    tr.className = 'node-row' + (selectedNodeIds.has(node.node_id) ? ' selected-row' : '') +
+      (jumpHighlightNodeId === node.node_id ? ' jump-target-row' : '');
+    tr.dataset.nodeId = node.node_id;
+
+    const tdSel = document.createElement('td');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.className = 'node-select-checkbox';
+    cb.checked = selectedNodeIds.has(node.node_id);
+    cb.addEventListener('change', () => {
+      if (cb.checked) { selectedNodeIds.add(node.node_id); nodeTouchLog.add(node.node_id); }
+      else selectedNodeIds.delete(node.node_id);
+      renderNodeTable();
+      renderMetrics();
+    });
+    tdSel.appendChild(cb);
+    tr.appendChild(tdSel);
+
+    const side = node.provenance.source_document_id === docAId ? 'A' : 'B';
+    const sideClass = side === 'A' ? 'doc-a' : 'doc-b';
+    const tdSide = document.createElement('td');
+    tdSide.innerHTML = `<span class="${sideClass}"><strong>${side}</strong></span>`;
+    tr.appendChild(tdSide);
+
+    const tdType = document.createElement('td');
+    const sel = document.createElement('select');
+    sel.className = 'node-type-select';
+    for (const t of NODE_TYPES) {
+      const opt = document.createElement('option'); opt.value = t; opt.textContent = t;
+      if (t === node.node_type) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    sel.addEventListener('change', async () => {
+      await KnowledgeStore.setNodeType(dataset, node.node_id, sel.value, actorHuman);
+      renderAll();
+    });
+    tdType.appendChild(sel);
+    tr.appendChild(tdType);
+
+    const tdShortId = document.createElement('td');
+    tdShortId.innerHTML = `<span class="short-id" title="${esc(node.node_id)}">${esc(shortId(node))}</span>`;
+    tr.appendChild(tdShortId);
+
+    const tdTitle = document.createElement('td');
+    tdTitle.textContent = node.title || '';
+    tdTitle.title = node.title || '';
+    tr.appendChild(tdTitle);
+
+    const tdText = document.createElement('td');
+    const ta = document.createElement('textarea');
+    ta.className = 'edit-text';
+    ta.value = node.text;
+    ta.addEventListener('change', async () => {
+      await KnowledgeStore.updateNodeText(dataset, node.node_id, ta.value, actorHuman);
+      renderAll();
+    });
+    tdText.appendChild(ta);
+    tr.appendChild(tdText);
+
+    const tdTags = document.createElement('td');
+    tdTags.appendChild(renderTagEditor(node));
+    tr.appendChild(tdTags);
+
+    const tdEditHistory = document.createElement('td');
+    tdEditHistory.className = 'detail-col';
+    if (node.node_type === 'document' || node.node_type === 'section') {
+      tdEditHistory.innerHTML = '<span class="muted" style="font-size:10px;">構造Node</span>';
+    } else {
+      tdEditHistory.innerHTML = isNodeEdited(node)
+        ? '<span class="badge badge-edited">変更あり</span>'
+        : '<span class="badge badge-unedited">変更なし</span>';
+    }
+    tr.appendChild(tdEditHistory);
+
+    const tdConf = document.createElement('td');
+    tdConf.className = 'detail-col';
+    tdConf.textContent = node.confidence.toFixed(2);
+    tr.appendChild(tdConf);
+
+    const tdSrc = document.createElement('td');
+    tdSrc.className = 'detail-col';
+    const loc = node.provenance.locator;
+    const idLine = node.export_binding
+      ? `<code class="small">${esc(node.export_binding.trace_id)}</code>`
+      : `<span class="muted" style="font-size:10px;">(構造Node・legacy Trace非互換)</span>`;
+    tdSrc.innerHTML = `${idLine}<br><span class="muted" style="font-size:10px;">${esc(loc.kind === 'pdf' ? `p.${loc.page ?? '-'} ${loc.section_title ?? ''}` : `${loc.sheet ?? ''} row${loc.row ?? ''}`)}</span>`;
+    tr.appendChild(tdSrc);
+
+    const tdRev = document.createElement('td');
+    tdRev.className = 'detail-col';
+    tdRev.innerHTML = `rev.${node.revision.content_revision}<br><code class="small">${esc(node.revision.knowledge_hash.slice(0, 8))}…</code>`;
+    tr.appendChild(tdRev);
+
+    const tdStale = document.createElement('td');
+    tdStale.className = 'detail-col';
+    const staleCount = nodeStaleRelationCount(node);
+    tdStale.innerHTML = staleCount > 0 ? `<span class="badge badge-stale">stale ${staleCount}</span>` : '<span class="muted">0</span>';
+    tr.appendChild(tdStale);
+
+    tbody.appendChild(tr);
+  }
+  updateNodeSelectionUi();
+}
+
+function renderTagEditor(node) {
+  const wrap = document.createElement('div');
+  const allowed = (dataset.tag_vocabulary && dataset.tag_vocabulary.allowed_tags) || [];
+  for (const tag of node.tags) {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip';
+    chip.innerHTML = `${esc(tag)} `;
+    const rm = document.createElement('button');
+    rm.textContent = '×';
+    rm.title = 'タグを削除';
+    rm.addEventListener('click', async () => { await KnowledgeStore.removeTag(dataset, node.node_id, tag, actorHuman); renderAll(); });
+    chip.appendChild(rm);
+    wrap.appendChild(chip);
+  }
+  const addSel = document.createElement('select');
+  addSel.style.fontSize = '11px';
+  const optNone = document.createElement('option'); optNone.textContent = '+ タグ追加'; optNone.value = '';
+  addSel.appendChild(optNone);
+  for (const tag of allowed) {
+    if (node.tags.includes(tag)) continue;
+    const opt = document.createElement('option'); opt.value = tag; opt.textContent = tag;
+    addSel.appendChild(opt);
+  }
+  addSel.addEventListener('change', async () => {
+    if (!addSel.value) return;
+    await KnowledgeStore.addTag(dataset, node.node_id, addSel.value, actorHuman);
+    renderAll();
+  });
+  wrap.appendChild(addSel);
+  return wrap;
+}
+
+async function bulkAddTag() {
+  const tag = $('nodeBulkTagAdd').value;
+  if (!tag || selectedNodeIds.size === 0) return;
+  for (const nodeId of [...selectedNodeIds]) {
+    if (!KnowledgeStore.findNode(dataset, nodeId)) continue;
+    await KnowledgeStore.addTag(dataset, nodeId, tag, actorHuman);
+  }
+  $('nodeBulkTagAdd').value = '';
+  renderAll();
+}
+
+async function bulkRemoveTag() {
+  const tag = $('nodeBulkTagRemove').value;
+  if (!tag || selectedNodeIds.size === 0) return;
+  for (const nodeId of [...selectedNodeIds]) {
+    if (!KnowledgeStore.findNode(dataset, nodeId)) continue;
+    await KnowledgeStore.removeTag(dataset, nodeId, tag, actorHuman);
+  }
+  $('nodeBulkTagRemove').value = '';
+  renderAll();
+}
+
+function toggleAllNodeSelection() {
+  const rows = filteredNodes();
+  if ($('nodeSelectAll').checked) {
+    for (const n of rows) { selectedNodeIds.add(n.node_id); nodeTouchLog.add(n.node_id); }
+  } else {
+    for (const n of rows) selectedNodeIds.delete(n.node_id);
+  }
+  renderNodeTable();
+  renderMetrics();
+}
+
+function resetNodeFiltersAndRender() {
+  resetNodeFilters();
+  renderNodeTable();
+}
+
+// ---- 3. Relation一覧 ----
+
+async function generateCandidates() {
+  if (!dataset) return;
+  const contentA = dataset.nodes.filter(n => n.provenance.source_document_id === docAId && n.node_type !== 'document' && n.node_type !== 'section');
+  const contentB = dataset.nodes.filter(n => n.provenance.source_document_id === docBId && n.node_type !== 'document' && n.node_type !== 'section');
+  const existing = KnowledgeStore.existingSemanticPairKeys(dataset);
+  const candidates = await KnowledgeRelationCandidateEngine.generateCandidates(contentA, contentB, {
+    generatedAt: new Date().toISOString(), existingPairKeys: existing
+  });
+  await KnowledgeStore.addCandidateEdges(dataset, candidates, { type: 'ai', id: 'relation-candidate-engine' });
+  candidatesGenerated = true;
+  $('candidateStatus').textContent = `候補 ${candidates.length}件を生成しました。`;
+  renderAll();
+}
+
+function edgeNode(edge, which) {
+  return dataset.nodes.find(n => n.node_id === edge[which]);
+}
+
+function confidenceLabel(c) {
+  if (c >= 0.6) return { text: '高', cls: 'conf-high' };
+  if (c >= 0.3) return { text: '中', cls: 'conf-mid' };
+  return { text: '低', cls: 'conf-low' };
+}
+
+function edgeHasTagMatch(edge) {
+  return edge.evidence.features.some(f => f.feature === 'semantic_tag');
+}
+
+function isEdgeFilterActive() {
+  return $('edgeStatusFilter').value !== 'candidate' || $('edgeSearch').value.trim() !== '' ||
+    $('edgeStaleOnly').checked || $('edgeEvidenceFilter').value !== 'all' ||
+    Number($('edgeConfMin').value) > 0 || Number($('edgeConfMax').value) < 1 ||
+    $('edgeSort').value !== 'confidence';
+}
+
+function filteredEdges() {
+  if (!dataset) return [];
+  let rows = dataset.edges.filter(e => e.relation_category === 'semantic');
+  if (graphRelationScope) {
+    if (graphRelationScope.kind === 'section') {
+      rows = rows.filter(e => graphRelationScope.side === 'A'
+        ? graphRelationScope.nodeIds.has(e.source_node_id)
+        : graphRelationScope.nodeIds.has(e.target_node_id));
+    } else if (graphRelationScope.kind === 'aggregate') {
+      rows = rows.filter(e => graphRelationScope.edgeIds.has(e.edge_id));
+    }
+  }
+  const statusFilter = $('edgeStatusFilter').value;
+  if (statusFilter !== 'all') rows = rows.filter(e => e.lifecycle === statusFilter);
+  const search = $('edgeSearch').value.trim();
+  if (search) {
+    rows = rows.filter(e => {
+      const s = edgeNode(e, 'source_node_id'), t = edgeNode(e, 'target_node_id');
+      const hay = [s?.title, s?.text, ...(s?.tags || []), t?.title, t?.text, ...(t?.tags || [])].filter(Boolean).join(' ');
+      return hay.includes(search);
+    });
+  }
+  if ($('edgeStaleOnly').checked) rows = rows.filter(e => KnowledgeStore.isEdgeStale(dataset, e));
+  const evidenceFilter = $('edgeEvidenceFilter').value;
+  if (evidenceFilter === 'tag_match') rows = rows.filter(edgeHasTagMatch);
+  else if (evidenceFilter === 'text_similarity_only') rows = rows.filter(e => !edgeHasTagMatch(e));
+  const confMin = Number($('edgeConfMin').value) || 0;
+  const confMax = Number($('edgeConfMax').value ?? 1);
+  rows = rows.filter(e => e.confidence >= confMin && e.confidence <= (Number.isFinite(confMax) ? confMax : 1));
+  return rows;
+}
+
+// candidateGroupBasisに応じて、グループ化に使うNode(=focus Node)のIDをedgeから取り出す。
+// A基準: focus=source_node_id(文書A) / B基準: focus=target_node_id(文書B)。
+// edge.source_node_id/target_node_id自体は一切変更しない(表示上のグループ化のみ)。
+function groupFocusNodeId(edge) {
+  return candidateGroupBasis === 'A' ? edge.source_node_id : edge.target_node_id;
+}
+function allSemanticEdgesForGroupNode(nodeId) {
+  return dataset.edges.filter(e => e.relation_category === 'semantic' && groupFocusNodeId(e) === nodeId);
+}
+
+function updateEdgeSelectionUi() {
+  $('edgeSelectedCount').textContent = String(selectedEdgeIds.size);
+  const rows = filteredEdges();
+  $('edgeSelectAll').checked = rows.length > 0 && rows.every(e => selectedEdgeIds.has(e.edge_id));
+  $('edgeFilterActiveBadge').style.display = isEdgeFilterActive() ? 'inline-block' : 'none';
+}
+
+// Graphからの範囲指定バナー(§14)。範囲指定はA/B基準表示と独立(§15: edge_id/node_id集合は変えない)。
+function renderEdgeScopeBanner() {
+  const box = $('edgeScopeBanner');
+  if (!graphRelationScope || !dataset) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.style.display = 'block';
+  let bodyHtml;
+  if (graphRelationScope.kind === 'section') {
+    const count = dataset.edges.filter(e => e.relation_category === 'semantic' &&
+      (graphRelationScope.side === 'A' ? graphRelationScope.nodeIds.has(e.source_node_id) : graphRelationScope.nodeIds.has(e.target_node_id))).length;
+    bodyHtml = `${esc(graphRelationScope.label)}配下<br>対象Node ${graphRelationScope.nodeIds.size}件<br>対象Candidate ${count}件`;
+  } else {
+    bodyHtml = `${esc(graphRelationScope.label)}<br>対象Candidate ${graphRelationScope.edgeIds.size}件`;
+  }
+  box.innerHTML = `<strong>Graphからの確認範囲:</strong><br>${bodyHtml}<br>` +
+    `<button id="btnClearGraphScope" class="small secondary" style="margin-top:4px;">Graphからの範囲指定を解除</button>`;
+  $('btnClearGraphScope').addEventListener('click', () => { graphRelationScope = null; renderEdgeTable(); });
+}
+
+function renderEdgeTable() {
+  renderEdgeScopeBanner();
+  $('edgeColFocusHeader').textContent = candidateGroupBasis === 'A' ? '文書Aの項目' : '文書Bの項目';
+  $('edgeColCandidateHeader').textContent = candidateGroupBasis === 'A' ? '文書Bの関連候補' : '文書Aの関連候補';
+  $('edgeBasisNote').style.display = candidateGroupBasis === 'B' ? 'inline' : 'none';
+
+  const tbody = $('edgeTableBody');
+  tbody.innerHTML = '';
+  if (!dataset) { $('edgeCount').textContent = '0'; $('edgeTotalCount').textContent = '0'; updateEdgeSelectionUi(); return; }
+
+  const rows = filteredEdges();
+  $('edgeCount').textContent = String(rows.length);
+  $('edgeTotalCount').textContent = String(dataset.edges.filter(e => e.relation_category === 'semantic').length);
+
+  // 表示基準のNode単位でグループ化(折りたたみ可能)。グループ見出しには全体の内訳(未処理/採用/却下)を表示する。
+  // グループ化はedge.source_node_id/target_node_idの値そのものには影響しない(表示専用)。
+  const groups = new Map();
+  for (const edge of rows) {
+    const key = groupFocusNodeId(edge);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(edge);
+  }
+  let groupList = [...groups.entries()].map(([groupNodeId, edges]) => {
+    edges.sort((a, b) => b.confidence - a.confidence);
+    const allForGroup = allSemanticEdgesForGroupNode(groupNodeId);
+    const stats = {
+      total: allForGroup.length,
+      candidate: allForGroup.filter(e => e.lifecycle === 'candidate').length,
+      active: allForGroup.filter(e => e.lifecycle === 'active').length,
+      rejected: allForGroup.filter(e => e.lifecycle === 'rejected').length,
+    };
+    return { groupNodeId, edges, maxConf: Math.max(...edges.map(e => e.confidence)), stats };
+  });
+
+  const sortMode = $('edgeSort').value;
+  if (sortMode === 'source_id') {
+    groupList.sort((a, b) => shortId(dataset.nodes.find(n => n.node_id === a.groupNodeId)).localeCompare(shortId(dataset.nodes.find(n => n.node_id === b.groupNodeId))));
+  } else if (sortMode === 'pending') {
+    groupList.sort((a, b) => (b.stats.candidate - a.stats.candidate) || (b.maxConf - a.maxConf));
+  } else {
+    groupList.sort((a, b) => b.maxConf - a.maxConf);
+  }
+
+  const basisLabel = candidateGroupBasis === 'A' ? '文書Aの項目' : '文書Bの項目';
+
+  for (const group of groupList) {
+    const groupNode = dataset.nodes.find(n => n.node_id === group.groupNodeId);
+    const isExpanded = expandedGroups.has(group.groupNodeId);
+
+    const headerTr = document.createElement('tr');
+    headerTr.className = 'group-header-row';
+    const headerTd = document.createElement('td');
+    headerTd.colSpan = 8;
+    const toggleSpan = document.createElement('span');
+    toggleSpan.className = 'group-toggle';
+    toggleSpan.textContent = (isExpanded ? '▼ ' : '▶ ') +
+      `${basisLabel}: [${shortId(groupNode)}] ${groupNode ? groupNode.text.slice(0, 50) : group.groupNodeId}`;
+    toggleSpan.title = groupNode ? groupNode.node_id : group.groupNodeId;
+    toggleSpan.addEventListener('click', () => {
+      if (expandedGroups.has(group.groupNodeId)) expandedGroups.delete(group.groupNodeId);
+      else expandedGroups.add(group.groupNodeId);
+      renderEdgeTable();
+    });
+    headerTd.appendChild(toggleSpan);
+    const statsSpan = document.createElement('span');
+    statsSpan.className = 'group-stats';
+    statsSpan.textContent = `全${group.stats.total}件（未処理${group.stats.candidate}・採用${group.stats.active}・却下${group.stats.rejected}）`;
+    headerTd.appendChild(statsSpan);
+    if (group.stats.candidate > 0) {
+      const groupRejectBtn = document.createElement('button');
+      groupRejectBtn.className = 'tiny danger';
+      groupRejectBtn.style.marginLeft = '8px';
+      groupRejectBtn.textContent = 'このグループの候補をすべて却下';
+      groupRejectBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        for (const e of allSemanticEdgesForGroupNode(group.groupNodeId)) {
+          if (e.lifecycle === 'candidate') await KnowledgeStore.rejectCandidate(dataset, e.edge_id, actorHuman, 'bulk');
+        }
+        renderAll();
+      });
+      headerTd.appendChild(groupRejectBtn);
+    }
+    headerTr.appendChild(headerTd);
+    tbody.appendChild(headerTr);
+
+    if (!isExpanded) continue;
+
+    for (const edge of group.edges) {
+      const sourceNode = edgeNode(edge, 'source_node_id');
+      const target = edgeNode(edge, 'target_node_id');
+      const stale = KnowledgeStore.isEdgeStale(dataset, edge);
+      const tr = document.createElement('tr');
+      tr.className = 'edge-row' + (selectedEdgeIds.has(edge.edge_id) ? ' selected-row' : '');
+      tr.dataset.edgeId = edge.edge_id;
+
+      const tdSel = document.createElement('td');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.className = 'edge-select-checkbox';
+      cb.checked = selectedEdgeIds.has(edge.edge_id);
+      cb.addEventListener('change', () => {
+        if (cb.checked) selectedEdgeIds.add(edge.edge_id); else selectedEdgeIds.delete(edge.edge_id);
+        renderEdgeTable();
+      });
+      tdSel.appendChild(cb);
+      tr.appendChild(tdSel);
+
+      const tdState = document.createElement('td');
+      tdState.innerHTML = `<span class="badge badge-${edge.lifecycle}">${LIFECYCLE_LABEL[edge.lifecycle]}<span class="lifecycle-en">(${edge.lifecycle})</span></span>` +
+        (stale ? '<span class="badge badge-stale">stale</span>' : '');
+      tr.appendChild(tdState);
+
+      const tdRel = document.createElement('td');
+      tdRel.textContent = edge.relation_type;
+      tr.appendChild(tdRel);
+
+      // 実データのsource(A)/target(B)は変えない。表示上の列の並びだけを基準に合わせて入れ替える。
+      const tdSrc = document.createElement('td');
+      tdSrc.innerHTML = `<span class="short-id" title="${esc(sourceNode ? sourceNode.node_id : '')}">${esc(shortId(sourceNode))}</span> ` +
+        renderTagChipsHtml(sourceNode, edge) + `<br>${esc(sourceNode ? sourceNode.text.slice(0, 40) : '(不明)')}`;
+
+      const tdTgt = document.createElement('td');
+      tdTgt.innerHTML = `<span class="short-id" title="${esc(target ? target.node_id : '')}">${esc(shortId(target))}</span> ` +
+        renderTagChipsHtml(target, edge) + `<br>${esc(target ? target.text.slice(0, 40) : '(不明)')}`;
+
+      if (candidateGroupBasis === 'A') { tr.appendChild(tdSrc); tr.appendChild(tdTgt); }
+      else { tr.appendChild(tdTgt); tr.appendChild(tdSrc); }
+
+      const tdConf = document.createElement('td');
+      const cl = confidenceLabel(edge.confidence);
+      tdConf.innerHTML = `${edge.confidence.toFixed(2)} <span class="${cl.cls}">(${cl.text})</span>`;
+      tr.appendChild(tdConf);
+
+      const tdEv = document.createElement('td');
+      tdEv.innerHTML = edge.evidence.features.map(f => {
+        const detail = f.feature === 'semantic_tag' ? (f.detail.matched || []).join(',')
+          : f.feature === 'text_similarity' ? `score=${f.detail.score}` : JSON.stringify(f.detail);
+        return `<span class="evidence-pill">${esc(f.feature)}(${esc(detail)})</span>`;
+      }).join(' ');
+      tr.appendChild(tdEv);
+
+      const tdOps = document.createElement('td');
+      const acceptBtn = document.createElement('button');
+      acceptBtn.className = 'small'; acceptBtn.textContent = '採用';
+      acceptBtn.disabled = edge.lifecycle === 'active';
+      acceptBtn.addEventListener('click', async () => { await KnowledgeStore.promoteCandidate(dataset, edge.edge_id, actorHuman, 'individual'); renderAll(); });
+      const rejectBtn = document.createElement('button');
+      rejectBtn.className = 'small danger'; rejectBtn.textContent = '却下';
+      rejectBtn.disabled = edge.lifecycle === 'rejected';
+      rejectBtn.addEventListener('click', async () => { await KnowledgeStore.rejectCandidate(dataset, edge.edge_id, actorHuman, 'individual'); renderAll(); });
+      tdOps.appendChild(acceptBtn); tdOps.appendChild(rejectBtn);
+      tr.appendChild(tdOps);
+
+      tbody.appendChild(tr);
+    }
+  }
+  updateEdgeSelectionUi();
+}
+
+function renderTagChipsHtml(node, edge) {
+  if (!node || !node.tags.length) return '';
+  const matchedFeature = edge.evidence.features.find(f => f.feature === 'semantic_tag');
+  const matched = new Set(matchedFeature ? matchedFeature.detail.matched || [] : []);
+  return node.tags.map(t => `<span class="tag-chip${matched.has(t) ? ' matched' : ''}">${esc(t)}</span>`).join('');
+}
+
+function toggleAllEdgeSelection() {
+  const rows = filteredEdges();
+  if ($('edgeSelectAll').checked) rows.forEach(e => selectedEdgeIds.add(e.edge_id));
+  else rows.forEach(e => selectedEdgeIds.delete(e.edge_id));
+  renderEdgeTable();
+}
+
+async function bulkAcceptEdges() {
+  if (selectedEdgeIds.size === 0) return;
+  for (const edgeId of [...selectedEdgeIds]) {
+    if (!KnowledgeStore.findEdge(dataset, edgeId)) continue;
+    await KnowledgeStore.promoteCandidate(dataset, edgeId, actorHuman, 'bulk');
+  }
+  selectedEdgeIds.clear();
+  renderAll();
+}
+
+async function bulkRejectEdges() {
+  if (selectedEdgeIds.size === 0) return;
+  for (const edgeId of [...selectedEdgeIds]) {
+    if (!KnowledgeStore.findEdge(dataset, edgeId)) continue;
+    await KnowledgeStore.rejectCandidate(dataset, edgeId, actorHuman, 'bulk');
+  }
+  selectedEdgeIds.clear();
+  renderAll();
+}
+
+function expandAllGroups() {
+  expandedGroups = new Set(filteredEdges().map(groupFocusNodeId));
+  renderEdgeTable();
+}
+function collapseAllGroups() {
+  expandedGroups = new Set();
+  renderEdgeTable();
+}
+function resetEdgeFiltersAndRender() {
+  resetEdgeFilters();
+  renderEdgeTable();
+}
+
+// ---- 4. Knowledge Graph ----
+
+function nodeTypeDepth(node) {
+  if (node.node_type === 'document') return 0;
+  if (node.node_type === 'section') return 1;
+  return 2;
+}
+function nodeShapeSize(node) {
+  if (node.node_type === 'document') return { shape: 'rect', size: 12 };
+  if (node.node_type === 'section') return { shape: 'rect', size: 9 };
+  return { shape: 'circle', size: 6 };
+}
+function nodeColor(node) {
+  return node.provenance.source_document_id === docAId ? '#4a6cf7' : '#1f9d55';
+}
+
+function isGraphFilterActive() {
+  return $('graphDocFilter').value !== 'all' || $('graphTypeFilter').value !== 'all' ||
+    $('graphTagFilter').value !== 'all' || $('graphFocusMode').checked;
+}
+
+function graphCandidateNodes() {
+  if (!dataset) return [];
+  const showStructural = $('graphShowStructural').checked;
+  let rows = dataset.nodes.filter(n => showStructural || (n.node_type !== 'document' && n.node_type !== 'section'));
+  const docFilter = $('graphDocFilter').value;
+  if (docFilter !== 'all') {
+    const targetDocId = docFilter === 'A' ? docAId : docBId;
+    rows = rows.filter(n => n.provenance.source_document_id === targetDocId);
+  }
+  const typeFilter = $('graphTypeFilter').value;
+  if (typeFilter !== 'all') rows = rows.filter(n => n.node_type === typeFilter);
+  // タグフィルタはここでは適用しない(document/sectionは通常タグを持たないため、単純にtagを
+  // 要求すると可視Ancestorが失われGraphが空になる不具合があった)。実際の適用は
+  // graphApplyTagFilter()で、内容Nodeへタグ条件を適用したうえでAncestorを補って行う。
+  return rows;
+}
+
+// タグフィルタ適用時の対象semantic edge集合を明示的に求める(不具合修正の処理順1-2)。
+// 1. baseNodes中の内容Nodeにタグ条件を適用する
+// 2. 一致した内容Nodeに関係するsemantic Edge(相手方がbaseNodesに含まれるもの)を対象とする
+// tagFilter==='all'の場合はnullを返す(呼び出し側で「制限なし」を表す)。
+// ここで確定したedge_id集合だけがGraph上のNode/Edge計算全体で使われるため、後続のAncestor解決が
+// 無関係な祖先を経由して他のNode/Edgeを巻き込むことはない。
+function graphTagFilterEligibleEdgeIds(baseNodes) {
+  const tagFilter = $('graphTagFilter').value;
+  if (tagFilter === 'all' || !dataset) return null;
+  const baseContentIds = new Set(baseNodes
+    .filter(n => n.node_type !== 'document' && n.node_type !== 'section')
+    .map(n => n.node_id));
+  const taggedIds = new Set(baseNodes
+    .filter(n => n.node_type !== 'document' && n.node_type !== 'section' && n.tags.includes(tagFilter))
+    .map(n => n.node_id));
+  const eligible = new Set();
+  for (const e of dataset.edges) {
+    if (e.relation_category !== 'semantic') continue;
+    if (!baseContentIds.has(e.source_node_id) || !baseContentIds.has(e.target_node_id)) continue;
+    if (taggedIds.has(e.source_node_id) || taggedIds.has(e.target_node_id)) eligible.add(e.edge_id);
+  }
+  return eligible;
+}
+
+// タグフィルタで一致した内容Node・そのsemantic Edge相手・双方のdocument/section Ancestorを
+// 表示対象へ追加する(不具合修正: 章・節/文書単位とタグフィルタの併用時にGraphが空になる問題への対応)。
+// section/document Node自身に内容Node用のタグ条件は要求しない(処理順3)。
+function graphApplyTagFilter(baseNodes, tagEligibleEdgeIds) {
+  if (!tagEligibleEdgeIds || !dataset) return baseNodes;
+  const baseIds = new Set(baseNodes.map(n => n.node_id));
+  const eligibleContentIds = new Set();
+  for (const e of dataset.edges) {
+    if (!tagEligibleEdgeIds.has(e.edge_id)) continue;
+    eligibleContentIds.add(e.source_node_id);
+    eligibleContentIds.add(e.target_node_id);
+  }
+  const parentMap = structuralParentMap();
+  const keepIds = new Set(eligibleContentIds);
+  for (const id of eligibleContentIds) {
+    let cur = parentMap.get(id);
+    while (cur) {
+      if (baseIds.has(cur)) keepIds.add(cur);
+      cur = parentMap.get(cur);
+    }
+  }
+  return baseNodes.filter(n => keepIds.has(n.node_id));
+}
+
+// 表示粒度・個別折りたたみを反映した、実際に描画するNodeのnode_id集合(§4-§5)。
+// 「文書内の階層関係も表示」がOFFの間はAlpha0.1.2までと同じ(折りたたみの概念自体を持ち込まない)。
+function computeVisibleGraphNodeIds(baseCandidates, parentMap) {
+  const baseIds = new Set(baseCandidates.map(n => n.node_id));
+  if (!$('graphShowStructural').checked) return baseIds;
+  const visible = new Set();
+  function isVisible(nodeId) {
+    let cur = parentMap.get(nodeId);
+    while (cur) {
+      if (graphStructuralCollapsed.has(cur)) return false;
+      cur = parentMap.get(cur);
+    }
+    return true;
+  }
+  for (const id of baseIds) if (isVisible(id)) visible.add(id);
+  return visible;
+}
+
+// 折りたたみによって選択中Nodeが非表示になった場合、可視Ancestorへ選択を委譲する(§17)。
+// フィルタ(文書/種別/タグ)によって対象外になった場合はAlpha0.1.2までと同じ挙動を維持し、ここでは扱わない。
+function reconcileGraphSelection(baseCandidateIds, visibleNodeIds, parentMap) {
+  selectedGraphNodeIsCollapsedProxy = false;
+  if (!selectedGraphNodeId) return;
+  if (!$('graphShowStructural').checked) return;
+  if (!baseCandidateIds.has(selectedGraphNodeId)) return;
+  if (visibleNodeIds.has(selectedGraphNodeId)) return;
+  const ancestor = resolveVisibleAncestor(selectedGraphNodeId, visibleNodeIds, parentMap);
+  if (ancestor && ancestor !== selectedGraphNodeId) {
+    selectedGraphNodeId = ancestor;
+    selectedGraphNodeIsCollapsedProxy = true;
+  } else {
+    selectedGraphNodeId = null;
+  }
+}
+
+// semantic Edgeを、可視Ancestアペア単位でグループ化する(§7-§10)。「文書内の階層関係も表示」OFF時は
+// 集約は発生せず、Alpha0.1.2までと同じ個別Edge描画になる(1ペアにつき常に1件のsemantic edgeしか
+// 存在しないため、edges.length>1にもならない)。
+function computeGraphEdgeGroups(visibleNodeIds, parentMap, tagEligibleEdgeIds) {
+  if (!dataset) return [];
+  const structuralOn = $('graphShowStructural').checked;
+  const showActive = $('graphShowActive').checked, showCandidates = $('graphShowCandidates').checked;
+  const resolve = id => structuralOn ? resolveVisibleAncestor(id, visibleNodeIds, parentMap) : (visibleNodeIds.has(id) ? id : null);
+  const pairMap = new Map();
+  for (const e of dataset.edges) {
+    if (e.relation_category !== 'semantic') continue;
+    // タグフィルタ適用中は、事前に確定した対象edge_id集合だけを対象にする。これにより、
+    // Ancestor解決が無関係な祖先(例: 同じ文書内の別section)を経由して他のEdgeを
+    // 巻き込むことを防ぐ(不具合修正)。
+    if (tagEligibleEdgeIds && !tagEligibleEdgeIds.has(e.edge_id)) continue;
+    const aId = resolve(e.source_node_id), bId = resolve(e.target_node_id);
+    if (!aId || !bId) continue;
+    const key = aId + ' ' + bId;
+    if (!pairMap.has(key)) pairMap.set(key, { aId, bId, edges: [] });
+    pairMap.get(key).edges.push(e);
+  }
+  const result = [];
+  for (const { aId, bId, edges } of pairMap.values()) {
+    const hasVisibleEdge = edges.some(e => (e.lifecycle === 'active' && showActive) || (e.lifecycle === 'candidate' && showCandidates));
+    if (!hasVisibleEdge) continue;
+    const isAggregate = edges.length > 1 || edges.some(e => e.source_node_id !== aId || e.target_node_id !== bId);
+    result.push({ aId, bId, edges, isAggregate });
+  }
+  return result;
+}
+
+// 集約Edgeの件数・状態内訳(§9)。全semantic edge(却下含む)をdedupなしのedge_idベースで数える。
+// confidenceは却下済みを除く個別値の最小/最大のみを参考情報として返す(単純平均はしない。§11)。
+function aggregateStats(edges) {
+  const total = edges.length;
+  const active = edges.filter(e => e.lifecycle === 'active').length;
+  const candidate = edges.filter(e => e.lifecycle === 'candidate').length;
+  const rejected = edges.filter(e => e.lifecycle === 'rejected').length;
+  const staleCount = edges.filter(e => KnowledgeStore.isEdgeStale(dataset, e)).length;
+  const confs = edges.filter(e => e.lifecycle !== 'rejected').map(e => e.confidence);
+  return {
+    total, active, candidate, rejected, staleCount,
+    confMin: confs.length ? Math.min(...confs) : null,
+    confMax: confs.length ? Math.max(...confs) : null,
+  };
+}
+
+function toggleStructuralCollapse(nodeId) {
+  if (graphStructuralCollapsed.has(nodeId)) graphStructuralCollapsed.delete(nodeId);
+  else graphStructuralCollapsed.add(nodeId);
+  renderGraph();
+}
+
+function selectAggregate(group) {
+  selectedAggregateInfo = group;
+  selectedGraphNodeId = null;
+  selectedGraphNodeIsCollapsedProxy = false;
+  renderGraph();
+}
+
+function applyGranularityBaseline(granularity) {
+  graphStructuralCollapsed = new Set();
+  if (!dataset) return;
+  if (granularity === 'document') {
+    dataset.nodes.filter(n => n.node_type === 'document').forEach(n => graphStructuralCollapsed.add(n.node_id));
+  } else if (granularity === 'section') {
+    dataset.nodes.filter(n => n.node_type === 'section').forEach(n => graphStructuralCollapsed.add(n.node_id));
+  }
+  // 'item'は折りたたみなし(現行どおり全展開)。
+}
+
+function renderGraph() {
+  const svg = $('graphSvg');
+  svg.innerHTML = '';
+  $('graphFilterActiveBadge').style.display = isGraphFilterActive() ? 'inline-block' : 'none';
+  if (!dataset) {
+    $('graphNodeCount').textContent = '0'; $('graphEdgeCount').textContent = '0';
+    renderGraphSelectedInfo(); renderGraphAggregateInfo();
+    return;
+  }
+
+  const structuralOn = $('graphShowStructural').checked;
+  const preTagCandidates = graphCandidateNodes();
+  const tagEligibleEdgeIds = graphTagFilterEligibleEdgeIds(preTagCandidates);
+  const baseCandidates = graphApplyTagFilter(preTagCandidates, tagEligibleEdgeIds);
+  const baseCandidateIds = new Set(baseCandidates.map(n => n.node_id));
+  const parentMap = structuralParentMap();
+  const visibleIdsFromCollapse = computeVisibleGraphNodeIds(baseCandidates, parentMap);
+
+  reconcileGraphSelection(baseCandidateIds, visibleIdsFromCollapse, parentMap);
+
+  let nodeCandidates = baseCandidates.filter(n => visibleIdsFromCollapse.has(n.node_id));
+  let drawLines = computeGraphEdgeGroups(visibleIdsFromCollapse, parentMap, tagEligibleEdgeIds);
+
+  // 選択Nodeの周辺だけを表示するモード: 選択Node + 直接つながるNode(集約後)のみへ絞り込む。
+  const focusMode = $('graphFocusMode').checked && selectedGraphNodeId;
+  if (focusMode) {
+    const connected = new Set([selectedGraphNodeId]);
+    for (const g of drawLines) {
+      if (g.aId === selectedGraphNodeId) connected.add(g.bId);
+      if (g.bId === selectedGraphNodeId) connected.add(g.aId);
+    }
+    nodeCandidates = nodeCandidates.filter(n => connected.has(n.node_id));
+    const focusIdSet = new Set(nodeCandidates.map(n => n.node_id));
+    drawLines = drawLines.filter(g => focusIdSet.has(g.aId) && focusIdSet.has(g.bId));
+  }
+
+  const nodeIdSet = new Set(nodeCandidates.map(n => n.node_id));
+  let structuralEdges = structuralOn ? dataset.edges.filter(e => e.relation_category === 'structural') : [];
+  structuralEdges = structuralEdges.filter(e => nodeIdSet.has(e.source_node_id) && nodeIdSet.has(e.target_node_id));
+
+  const listA = nodeCandidates.filter(n => n.provenance.source_document_id === docAId);
+  const listB = nodeCandidates.filter(n => n.provenance.source_document_id === docBId);
+
+  $('graphNodeCount').textContent = String(nodeCandidates.length);
+  $('graphEdgeCount').textContent = String(drawLines.length + structuralEdges.length);
+
+  const showStructural = structuralOn;
+  const pos = new Map();
+  const marginY = 30, stepY = Math.max(28, Math.min(60, 560 / Math.max(1, Math.max(listA.length, listB.length))));
+  // レイアウト(§2.1): 中央のEdge描画コーパスと、外側のNodeラベル帯を分離する。
+  // ラベル・折りたたみトグルはNodeの外側(左側=文書A/右側=文書B)、Edgeはコーパス側(内側)に接続する。
+  const svgWidth = 1300, centerX = svgWidth / 2;
+  const baseA = 230, baseB = 1070, indentStep = showStructural ? 24 : 0;
+  listA.forEach((n, i) => pos.set(n.node_id, { x: baseA + (showStructural ? nodeTypeDepth(n) * indentStep : 0), y: marginY + i * stepY }));
+  listB.forEach((n, i) => pos.set(n.node_id, { x: baseB - (showStructural ? nodeTypeDepth(n) * indentStep : 0), y: marginY + i * stepY }));
+
+  const height = Math.max(600, marginY * 2 + Math.max(listA.length, listB.length) * stepY);
+  svg.setAttribute('height', String(height));
+  svg.setAttribute('width', String(svgWidth));
+
+  const ns = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    const e = document.createElementNS(ns, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function textApproxWidth(text, fontSize) {
+    let w = 0;
+    for (const ch of String(text)) w += /[　-ヿ㐀-鿿＀-￯]/.test(ch) ? fontSize : fontSize * 0.58;
+    return w;
+  }
+  function nodeOuterRadius(node) {
+    const { shape, size } = nodeShapeSize(node);
+    return shape === 'rect' ? size / 2 : size;
+  }
+  // outwardSign: Nodeから見てラベル帯側(中央コーパスの反対側)への方向。文書Aは左(-1)、文書Bは右(+1)。
+  function outwardSign(p) { return p.x < centerX ? -1 : 1; }
+  // Edgeが接続すべきNode境界点(中央コーパス側の境界。ラベル帯とは反対側なので、ラベル文字と交差しない)。
+  function corridorPoint(node, p) {
+    const r = nodeOuterRadius(node);
+    return { x: p.x - outwardSign(p) * r, y: p.y };
+  }
+
+  const connectedToSelection = new Set();
+  if (selectedGraphNodeId) {
+    connectedToSelection.add(selectedGraphNodeId);
+    for (const g of drawLines) {
+      if (g.aId === selectedGraphNodeId) connectedToSelection.add(g.bId);
+      if (g.bId === selectedGraphNodeId) connectedToSelection.add(g.aId);
+    }
+  }
+
+  const nodeById = new Map(nodeCandidates.map(n => [n.node_id, n]));
+
+  for (const edge of structuralEdges) {
+    const n1 = nodeById.get(edge.source_node_id), n2 = nodeById.get(edge.target_node_id);
+    const p1raw = pos.get(edge.source_node_id), p2raw = pos.get(edge.target_node_id);
+    if (!p1raw || !p2raw || !n1 || !n2) continue;
+    const p1 = corridorPoint(n1, p1raw), p2 = corridorPoint(n2, p2raw);
+    const isHighlighted = !selectedGraphNodeId || edge.source_node_id === selectedGraphNodeId || edge.target_node_id === selectedGraphNodeId;
+    const line = el('line', {
+      x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, stroke: '#bbb',
+      'stroke-width': isHighlighted ? 1.6 : 1, opacity: isHighlighted ? '1' : '0.18', class: 'graph-structural-line'
+    });
+    const title = el('title', {});
+    title.textContent = `文書内の階層関係: ${edge.relation_type}`;
+    line.appendChild(title);
+    svg.appendChild(line);
+  }
+
+  // レイアウト(§2.2): 集約線の自然な中点が近接/一致する場合に備え、決定的なレーンオフセットを割り当てる。
+  // グリッドで近接する集約線をまとめ、安定キー(可視Source/Target短縮ID)でソートしてから対称オフセットを与える。
+  function laneOffsets(n) {
+    if (n <= 1) return [0];
+    if (n === 2) return [-12, 12];
+    if (n === 3) return [-24, 0, 24];
+    const step = 16;
+    return Array.from({ length: n }, (_, i) => Math.round((i - (n - 1) / 2) * step));
+  }
+  const aggOffsetByGroup = new Map();
+  {
+    const aggItems = [];
+    for (const g of drawLines) {
+      if (!g.isAggregate) continue;
+      const p1 = pos.get(g.aId), p2 = pos.get(g.bId);
+      if (!p1 || !p2) continue;
+      aggItems.push({ g, mx: (p1.x + p2.x) / 2, my: (p1.y + p2.y) / 2 });
+    }
+    const buckets = new Map();
+    for (const item of aggItems) {
+      const key = Math.round(item.mx / 50) + ',' + Math.round(item.my / 20);
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(item);
+    }
+    for (const items of buckets.values()) {
+      items.sort((a, b) => {
+        const ka = shortId(nodeById.get(a.g.aId)) + '|' + shortId(nodeById.get(a.g.bId));
+        const kb = shortId(nodeById.get(b.g.aId)) + '|' + shortId(nodeById.get(b.g.bId));
+        return ka < kb ? -1 : ka > kb ? 1 : 0;
+      });
+      const offs = laneOffsets(items.length);
+      items.forEach((item, idx) => aggOffsetByGroup.set(item.g, offs[idx]));
+    }
+  }
+
+  function drawLabelBackground(x, y, text, fontSize, anchor) {
+    const w = textApproxWidth(text, fontSize) + 6;
+    const h = fontSize + 6;
+    const rx = anchor === 'end' ? x - w : (anchor === 'middle' ? x - w / 2 : x);
+    svg.appendChild(el('rect', {
+      x: rx, y: y - fontSize + 1, width: w, height: h, fill: '#fff', opacity: '0.85', rx: 2, class: 'graph-label-bg'
+    }));
+  }
+
+  function drawAggregateLine(g, p1raw, p2raw, n1, n2, isHighlighted, offsetY) {
+    const stats = aggregateStats(g.edges);
+    const isSelected = selectedAggregateInfo && selectedAggregateInfo.aId === g.aId && selectedAggregateInfo.bId === g.bId;
+    const color = stats.staleCount > 0 ? '#c62828' : (stats.active > 0 ? '#2e7d32' : '#e0a800');
+    const p1 = corridorPoint(n1, p1raw), p2 = corridorPoint(n2, p2raw);
+    const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2 + offsetY;
+    const d = `M ${p1.x} ${p1.y} L ${mx} ${my} L ${p2.x} ${p2.y}`;
+    const path = el('path', {
+      d, fill: 'none', stroke: '#7a4fd1',
+      'stroke-width': (isSelected ? 5 : 4) * (isHighlighted ? 1 : 0.6),
+      'stroke-dasharray': stats.active > 0 && stats.staleCount === 0 ? '' : '6,3',
+      opacity: isHighlighted ? '1' : '0.18', class: 'graph-agg-line'
+    });
+    // ホバー時ツールチップ(§4): 全関連件数・採用済み・未処理・stale件数を最低限含める。
+    // 常時表示の件数ラベルは可読性優先で廃止し(是正Checkpoint)、内訳確認はホバー/クリックへ集約する。
+    const tooltipLines = [
+      `関連 ${stats.total}件`,
+      `採用済み ${stats.active}`,
+      `未処理 ${stats.candidate}`,
+      `stale ${stats.staleCount}`
+    ];
+    if (stats.rejected) tooltipLines.push(`却下 ${stats.rejected}`);
+    if (stats.confMin !== null) tooltipLines.push(`confidence ${stats.confMin.toFixed(2)}〜${stats.confMax.toFixed(2)}`);
+    const titleText = tooltipLines.join('\n');
+    const title = el('title', {}); title.textContent = titleText; path.appendChild(title);
+    path.style.cursor = 'pointer';
+    path.addEventListener('click', () => selectAggregate(g));
+    svg.appendChild(path);
+
+    const markerR = isSelected ? 9 : 7;
+    const marker = el('circle', {
+      cx: mx, cy: my, r: markerR, fill: '#fff', stroke: color, 'stroke-width': 2,
+      opacity: isHighlighted ? '1' : '0.3', style: 'cursor:pointer;', class: 'graph-agg-marker'
+    });
+    const markerTitle = el('title', {}); markerTitle.textContent = titleText; marker.appendChild(markerTitle);
+    marker.addEventListener('click', () => selectAggregate(g));
+    svg.appendChild(marker);
+  }
+
+  for (const g of drawLines) {
+    const p1raw = pos.get(g.aId), p2raw = pos.get(g.bId);
+    const n1 = nodeById.get(g.aId), n2 = nodeById.get(g.bId);
+    if (!p1raw || !p2raw || !n1 || !n2) continue;
+    const isHighlighted = !selectedGraphNodeId || g.aId === selectedGraphNodeId || g.bId === selectedGraphNodeId;
+    if (!g.isAggregate) {
+      const edge = g.edges[0];
+      const stale = KnowledgeStore.isEdgeStale(dataset, edge);
+      const color = stale ? '#c62828' : (edge.lifecycle === 'candidate' ? '#e0a800' : '#2e7d32');
+      const p1 = corridorPoint(n1, p1raw), p2 = corridorPoint(n2, p2raw);
+      const line = el('line', {
+        x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, stroke: color,
+        'stroke-width': (edge.lifecycle === 'active' ? 2 : 1) * (isHighlighted ? 1.6 : 1),
+        'stroke-dasharray': (edge.lifecycle === 'candidate' || stale) ? '4,3' : '',
+        opacity: isHighlighted ? '1' : '0.18', class: 'graph-edge-line'
+      });
+      const title = el('title', {});
+      title.textContent = `文書間の関連: ${edge.relation_type} (${LIFECYCLE_LABEL[edge.lifecycle] || edge.lifecycle}${stale ? '・stale' : ''}) conf=${edge.confidence.toFixed(2)}`;
+      line.appendChild(title);
+      svg.appendChild(line);
+    } else {
+      drawAggregateLine(g, p1raw, p2raw, n1, n2, isHighlighted, aggOffsetByGroup.get(g) || 0);
+    }
+  }
+
+  function drawNode(node, p) {
+    const color = nodeColor(node);
+    const { shape, size } = nodeShapeSize(node);
+    const r = nodeOuterRadius(node);
+    const sign = outwardSign(p);
+    const isSelected = node.node_id === selectedGraphNodeId;
+    const isDimmed = selectedGraphNodeId && !connectedToSelection.has(node.node_id);
+    const commonAttrs = {
+      fill: color, stroke: isSelected ? '#000' : '#fff', 'stroke-width': isSelected ? 3 : 1.5,
+      opacity: isDimmed ? '0.25' : '1', style: 'cursor:pointer;', class: 'graph-node-shape'
+    };
+    let shapeEl;
+    if (shape === 'rect') {
+      shapeEl = el('rect', { x: p.x - size / 2, y: p.y - size / 2, width: size, height: size, ...commonAttrs });
+    } else {
+      shapeEl = el('circle', { cx: p.x, cy: p.y, r: size, ...commonAttrs });
+    }
+    const title = el('title', {});
+    title.textContent = `[${shortId(node)}] ${node.node_type}: ${node.title || node.text}`;
+    shapeEl.appendChild(title);
+    shapeEl.addEventListener('click', () => {
+      selectedAggregateInfo = null;
+      selectedGraphNodeId = (selectedGraphNodeId === node.node_id) ? null : node.node_id;
+      selectedGraphNodeIsCollapsedProxy = false;
+      renderGraph();
+    });
+    svg.appendChild(shapeEl);
+
+    // 折りたたみ・展開トグル(§3・§5): Nodeとラベルの間(外側寄り)に表示する。子Nodeを持つdocument/sectionのみ。
+    const hasToggle = showStructural && (node.node_type === 'document' || node.node_type === 'section') && structuralHasChildren(node.node_id);
+    let toggleOuterEdge = r;
+    if (hasToggle) {
+      const isCollapsed = graphStructuralCollapsed.has(node.node_id);
+      const tx = p.x + sign * (r + 12);
+      const toggle = el('circle', { cx: tx, cy: p.y, r: 7, fill: '#fff', stroke: '#556', 'stroke-width': 1, style: 'cursor:pointer;', class: 'graph-toggle-circle' });
+      const toggleTitle = el('title', {}); toggleTitle.textContent = isCollapsed ? '展開' : '折りたたむ'; toggle.appendChild(toggleTitle);
+      toggle.addEventListener('click', (ev) => { ev.stopPropagation(); toggleStructuralCollapse(node.node_id); });
+      svg.appendChild(toggle);
+      const toggleLabel = el('text', { x: tx, y: p.y + 3, 'font-size': 9, 'text-anchor': 'middle', fill: '#334', style: 'cursor:pointer; user-select:none;', class: 'graph-toggle-label' });
+      toggleLabel.textContent = isCollapsed ? '▶' : '▼';
+      toggleLabel.addEventListener('click', (ev) => { ev.stopPropagation(); toggleStructuralCollapse(node.node_id); });
+      svg.appendChild(toggleLabel);
+      toggleOuterEdge = r + 24;
+    }
+
+    // ラベル(§2.1): Nodeの外側(ラベル帯)に配置し、中央のEdge描画コーパスとは重ならない。背景を敷いてEdgeとの視覚的な交差を防ぐ。
+    const labelText = `[${shortId(node)}] ${(node.title || node.text).slice(0, 18)}`;
+    const lx = p.x + sign * (toggleOuterEdge + 6);
+    const ly = p.y + 4;
+    const anchor = sign < 0 ? 'end' : 'start';
+    drawLabelBackground(lx, ly, labelText, 10, anchor);
+    const label = el('text', {
+      x: lx, y: ly, 'font-size': 10, fill: isDimmed ? '#bbb' : '#333', 'text-anchor': anchor, class: 'graph-node-label'
+    });
+    label.textContent = labelText;
+    svg.appendChild(label);
+  }
+  for (const n of listA) drawNode(n, pos.get(n.node_id));
+  for (const n of listB) drawNode(n, pos.get(n.node_id));
+
+  renderGraphSelectedInfo();
+  renderGraphAggregateInfo();
+}
+
+function renderGraphSelectedInfo() {
+  const box = $('graphSelectedInfo');
+  if (!selectedGraphNodeId || !dataset) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  const node = dataset.nodes.find(n => n.node_id === selectedGraphNodeId);
+  if (!node) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  box.dataset.selectedNodeId = node.node_id;
+  let html = `<strong>選択中Node: [${esc(shortId(node))}] ${esc(node.title || '')}</strong><br>` +
+    `${esc(node.text)}<br><span class="muted" style="font-size:10px;">node_id: ${esc(node.node_id)}</span>`;
+  if (selectedGraphNodeIsCollapsedProxy) {
+    html += `<br><span class="muted" style="font-size:11px;">配下の内容Nodeを集約表示中</span>`;
+  }
+  html += `<br><button id="btnJumpToNodeList" class="small secondary" style="margin-top:6px;">この項目を変換結果一覧で確認</button>`;
+  if (node.node_type === 'section') {
+    html += ` <button id="btnDrillDownFromSection" class="small secondary" style="margin-top:6px;">この範囲の関連候補を確認</button>`;
+  }
+  box.innerHTML = html;
+  $('btnJumpToNodeList').addEventListener('click', () => jumpToNodeInList(node.node_id));
+  if (node.node_type === 'section') {
+    $('btnDrillDownFromSection').addEventListener('click', () => jumpToRelationScreenWithScope(sectionDrillDownScope(node)));
+  }
+}
+
+// section Node配下の内容Nodeへ絞り込むRelation画面用の範囲を作る(§13.1)。
+function sectionDrillDownScope(sectionNode) {
+  const side = sectionNode.provenance.source_document_id === docAId ? 'A' : 'B';
+  const nodeIds = descendantContentNodeIds(sectionNode.node_id);
+  const label = `文書${side}「${sectionNode.title || sectionNode.text}」`;
+  return { kind: 'section', side, nodeIds, label };
+}
+
+// 集約Edgeに含まれる元のedge_id集合へ絞り込むRelation画面用の範囲を作る(§13.2)。
+function aggregateDrillDownScope(group) {
+  const aNode = dataset.nodes.find(n => n.node_id === group.aId);
+  const bNode = dataset.nodes.find(n => n.node_id === group.bId);
+  const edgeIds = new Set(group.edges.map(e => e.edge_id));
+  const label = `「${esc(aNode ? (aNode.title || aNode.text) : group.aId)}」→「${esc(bNode ? (bNode.title || bNode.text) : group.bId)}」`;
+  return { kind: 'aggregate', edgeIds, label };
+}
+
+function renderGraphAggregateInfo() {
+  const box = $('graphAggregateInfo');
+  if (!selectedAggregateInfo || !dataset) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  const { aId, bId, edges } = selectedAggregateInfo;
+  const aNode = dataset.nodes.find(n => n.node_id === aId);
+  const bNode = dataset.nodes.find(n => n.node_id === bId);
+  const stats = aggregateStats(edges);
+  const confText = stats.confMin === null ? '該当なし' : `${stats.confMin.toFixed(2)}～${stats.confMax.toFixed(2)}`;
+  box.style.display = 'block';
+  box.innerHTML = `<strong>集約Edge: [${esc(shortId(aNode))}] ${esc(aNode ? (aNode.title || aNode.text) : aId)} → ` +
+    `[${esc(shortId(bNode))}] ${esc(bNode ? (bNode.title || bNode.text) : bId)}</strong><br>` +
+    `関連 ${stats.total}件<br>採用済み ${stats.active} / 未処理 ${stats.candidate} / 却下 ${stats.rejected} / stale ${stats.staleCount}<br>` +
+    `confidence ${confText}（参考値。単純平均ではなく、正式なRelation判定値でもありません）<br>` +
+    `<button id="btnToggleAggregateDetail" class="small secondary" style="margin-top:6px;">集約内容を確認</button> ` +
+    `<button id="btnDrillDownFromAggregate" class="small secondary" style="margin-top:6px;">この範囲の関連候補を確認</button>` +
+    `<div id="graphAggregateDetailTable" style="display:none; margin-top:6px;"></div>`;
+  $('btnToggleAggregateDetail').addEventListener('click', () => {
+    const detailBox = $('graphAggregateDetailTable');
+    if (detailBox.style.display !== 'none') { detailBox.style.display = 'none'; detailBox.innerHTML = ''; return; }
+    detailBox.innerHTML = renderAggregateDetailTableHtml(edges);
+    detailBox.style.display = 'block';
+  });
+  $('btnDrillDownFromAggregate').addEventListener('click', () => jumpToRelationScreenWithScope(aggregateDrillDownScope(selectedAggregateInfo)));
+}
+
+// §12: 「集約内容を確認」= 元の個別Edgeの一覧表示のみ。一括採用/却下・保存・relation type変更は追加しない。
+function renderAggregateDetailTableHtml(edges) {
+  const rows = edges.map(e => {
+    const s = dataset.nodes.find(n => n.node_id === e.source_node_id);
+    const t = dataset.nodes.find(n => n.node_id === e.target_node_id);
+    const stale = KnowledgeStore.isEdgeStale(dataset, e);
+    const evidenceText = e.evidence.features.map(f => f.feature).join(', ');
+    return `<tr><td><code class="small" title="${esc(e.edge_id)}">${esc(e.edge_id.slice(0, 10))}…</code></td>` +
+      `<td>${esc(shortId(s))}</td><td>${esc(shortId(t))}</td>` +
+      `<td>${esc(LIFECYCLE_LABEL[e.lifecycle] || e.lifecycle)}</td><td>${stale ? 'stale' : '-'}</td>` +
+      `<td>${e.confidence.toFixed(2)}</td><td>${esc(evidenceText)}</td></tr>`;
+  }).join('');
+  return `<table class="detail-mini-table"><thead><tr>` +
+    `<th>edge_id</th><th>Source短縮ID</th><th>Target短縮ID</th><th>lifecycle</th><th>freshness</th><th>confidence</th><th>evidence</th>` +
+    `</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// Graphの選択範囲から「3. 文書間の関連を確認」へ移動する(§13・§14)。edge_id/node_idの集合を渡すだけで、
+// Candidateの再生成やsource/targetの入れ替えは行わない。
+function jumpToRelationScreenWithScope(scope) {
+  graphRelationScope = scope;
+  renderEdgeTable();
+  const banner = $('edgeScopeBanner');
+  if (banner) banner.scrollIntoView({ block: 'start' });
+}
+
+// Knowledge Graphの選択Nodeから「2. 変換結果を確認・修正」の該当行へ移動する(§18)。
+// Node一覧の絞り込みを短縮ID検索へ切り替えるだけで、Knowledge JSONには一切影響しない。
+function jumpToNodeInList(nodeId) {
+  const node = dataset && dataset.nodes.find(n => n.node_id === nodeId);
+  if (!node) return;
+  resetNodeFilters();
+  selectedConfirmMenu = null;
+  if (node.node_type === 'document' || node.node_type === 'section') $('showStructural').checked = true;
+  $('nodeSearch').value = shortId(node);
+  jumpHighlightNodeId = nodeId;
+  $('nodeAdvancedFilters').open = false;
+  renderNodeTable();
+  const row = document.querySelector(`#nodeTableBody tr[data-node-id="${CSS.escape(nodeId)}"]`);
+  if (row) row.scrollIntoView({ block: 'center' });
+}
+
+function resetGraphFiltersAndRender() {
+  resetGraphFilters();
+  renderGraph();
+}
+
+// §15: 「全件数が増えても、人の操作件数を減らせたか」を確認するための最小限の集計。
+// すべてdataset.operations(既存のOperation History。§6.4)から導出し、専用の状態を二重管理しない。
+// nodeTouchLogのみUI専用の補助ログ(選択または修正したことがあるNode)で、保存JSONには含まれない。
+// touchedNodeCountは「内容を実際に確認した」ことを保証するものではなく、あくまで
+// 選択または修正によって操作対象にしたNodeの重複除外件数(§注記参照)。
+function computeMetrics() {
+  if (!dataset) return null;
+  const totalNodes = contentNodes().length;
+  const editedNodeIds = new Set(dataset.operations.filter(op => op.target_kind === 'node' && op.actor.type === 'human' &&
+    ['UPDATE_NODE_TEXT', 'ADD_TAG', 'REMOVE_TAG', 'CHANGE_NODE_TYPE'].includes(op.command_type)).map(op => op.target_id));
+  const touchedNodeIds = new Set([...nodeTouchLog, ...editedNodeIds]);
+  const semanticEdges = dataset.edges.filter(e => e.relation_category === 'semantic');
+  const totalCandidates = semanticEdges.length;
+  const individualDecisions = dataset.operations.filter(op => op.target_kind === 'edge' && op.actor.type === 'human' &&
+    (op.command_type === 'PROMOTE_CANDIDATE' || op.command_type === 'REJECT_CANDIDATE') && op.params?.via !== 'bulk').length;
+  const bulkAccepted = dataset.operations.filter(op => op.command_type === 'PROMOTE_CANDIDATE' && op.params?.via === 'bulk').length;
+  const bulkRejected = dataset.operations.filter(op => op.command_type === 'REJECT_CANDIDATE' && op.params?.via === 'bulk').length;
+  const activeEdges = semanticEdges.filter(e => e.lifecycle === 'active').length;
+  return {
+    totalNodes, touchedNodeCount: touchedNodeIds.size, editedNodeCount: editedNodeIds.size,
+    totalCandidates, individualDecisions, bulkAccepted, bulkRejected, activeEdges
+  };
+}
+
+function renderMetrics() {
+  const grid = $('metricsGrid');
+  grid.innerHTML = '';
+  const m = computeMetrics();
+  if (!m) return;
+  const cards = [
+    ['全Node数', m.totalNodes],
+    ['操作対象にしたNode数', m.touchedNodeCount],
+    ['個別修正したNode数', m.editedNodeCount],
+    ['関連候補 総数', m.totalCandidates],
+    ['人が個別判断した候補数', m.individualDecisions],
+    ['一括採用件数', m.bulkAccepted],
+    ['一括却下件数', m.bulkRejected],
+    ['最終 採用済みEdge数', m.activeEdges]
+  ];
+  for (const [label, value] of cards) {
+    const card = document.createElement('div');
+    card.className = 'metric-card';
+    card.innerHTML = `<div class="value">${value}</div><div class="label">${esc(label)}</div>`;
+    grid.appendChild(card);
+  }
+}
+
+async function saveKnowledgeJson() {
+  if (!dataset) { $('saveStatus').textContent = 'まず取込を実行してください。'; return; }
+  const diagnostics = KnowledgeStore.validateDataset(dataset);
+  const errors = diagnostics.filter(d => d.severity === 'error');
+  if (errors.length) {
+    $('saveStatus').textContent = `検証エラー ${errors.length}件のため保存を中止しました: ${errors[0].detail}`;
+    return;
+  }
+  const clone = JSON.parse(JSON.stringify(dataset));
+  await KnowledgeStore.finalizeDataset(clone);
+  const text = JSON.stringify(clone, null, 2);
+  const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `knowledge_dataset_${clone.dataset_id}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  $('saveStatus').textContent = `保存しました: ${a.download}（diagnostics: warning ${diagnostics.length}件）`;
+}
+
+function renderAll() {
+  renderNodeTable();
+  renderEdgeTable();
+  renderGraph();
+  renderMetrics();
+}
+
+$('btnIngest').addEventListener('click', ingest);
+$('btnGenerateCandidates').addEventListener('click', generateCandidates);
+$('btnSave').addEventListener('click', saveKnowledgeJson);
+
+for (const side of ['A', 'B']) {
+  $('inputMode' + side).addEventListener('change', (ev) => setInputMode(side, ev.target.value));
+  $('fileExcel' + side).addEventListener('change', () => onExcelFileChange(side));
+  $('btnPreviewExcel' + side).addEventListener('click', () => previewExcel(side));
+  $('sheetList' + side).addEventListener('change', () => onSheetSelectionChange(side));
+  $('filePdf' + side).addEventListener('change', () => onPdfFileChange(side));
+  $('btnPreviewPdf' + side).addEventListener('click', () => previewPdf(side));
+}
+$('fileVocab').addEventListener('change', onVocabFileChange);
+
+$('showStructural').addEventListener('change', renderNodeTable);
+$('nodeDetailMode').addEventListener('change', renderNodeTable);
+$('nodeSearch').addEventListener('input', renderNodeTable);
+$('nodeDocFilter').addEventListener('change', renderNodeTable);
+$('nodeTypeFilter').addEventListener('change', renderNodeTable);
+$('nodeTagFilter').addEventListener('change', renderNodeTable);
+$('nodeSelectAll').addEventListener('change', toggleAllNodeSelection);
+$('btnBulkAddTag').addEventListener('click', bulkAddTag);
+$('btnBulkRemoveTag').addEventListener('click', bulkRemoveTag);
+$('btnNodeResetFilter').addEventListener('click', resetNodeFiltersAndRender);
+
+$('edgeGroupBasis').addEventListener('change', () => {
+  candidateGroupBasis = $('edgeGroupBasis').value;
+  expandedGroups = new Set();
+  renderEdgeTable();
+});
+$('edgeStatusFilter').addEventListener('change', renderEdgeTable);
+$('edgeSearch').addEventListener('input', renderEdgeTable);
+$('edgeStaleOnly').addEventListener('change', renderEdgeTable);
+$('edgeEvidenceFilter').addEventListener('change', renderEdgeTable);
+$('edgeConfMin').addEventListener('input', renderEdgeTable);
+$('edgeConfMax').addEventListener('input', renderEdgeTable);
+$('edgeSort').addEventListener('change', renderEdgeTable);
+$('edgeSelectAll').addEventListener('change', toggleAllEdgeSelection);
+$('btnBulkAccept').addEventListener('click', bulkAcceptEdges);
+$('btnBulkReject').addEventListener('click', bulkRejectEdges);
+$('btnExpandAllGroups').addEventListener('click', expandAllGroups);
+$('btnCollapseAllGroups').addEventListener('click', collapseAllGroups);
+$('btnEdgeResetFilter').addEventListener('click', resetEdgeFiltersAndRender);
+
+$('graphShowActive').addEventListener('change', renderGraph);
+$('graphShowCandidates').addEventListener('change', renderGraph);
+$('graphShowStructural').addEventListener('change', () => {
+  const on = $('graphShowStructural').checked;
+  $('graphGranularity').disabled = !on;
+  // §6: 「文書内の階層関係も表示」を今回のNodeセットに対して初めてONにした場合は、章・節単位を初期粒度にする
+  // (内容Nodeを全展開した混雑状態へ戻さない)。2回目以降のON/OFFでは、直前の粒度・折りたたみ状態を保つ。
+  if (on && !graphStructuralEverShown) {
+    graphStructuralEverShown = true;
+    graphGranularity = 'section';
+    $('graphGranularity').value = 'section';
+    applyGranularityBaseline('section');
+  }
+  renderGraph();
+});
+$('graphGranularity').addEventListener('change', () => {
+  graphGranularity = $('graphGranularity').value;
+  applyGranularityBaseline(graphGranularity);
+  renderGraph();
+});
+$('graphDocFilter').addEventListener('change', renderGraph);
+$('graphTypeFilter').addEventListener('change', renderGraph);
+$('graphTagFilter').addEventListener('change', renderGraph);
+$('graphFocusMode').addEventListener('change', renderGraph);
+$('btnGraphResetFilter').addEventListener('click', resetGraphFiltersAndRender);
+</script>
+</body>
+</html>

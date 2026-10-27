@@ -1,0 +1,24 @@
+{
+  "file_name": "09_HIERARCHY_B.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "1.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "HIER-B-PARENT",
+      "part_code": "P-101",
+      "match_text": "P-101",
+      "display_name": "親: 冷却水ポンプ(P-101)"
+    },
+    {
+      "trace_id": "HIER-B-CHILD",
+      "part_code": "P-101-SIG",
+      "parent_code": "P-101",
+      "match_text": "P-101 冷却水ポンプ運転信号",
+      "display_name": "子: P-101運転信号"
+    }
+  ]
+}

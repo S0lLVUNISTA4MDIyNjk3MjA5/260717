@@ -1,0 +1,26 @@
+{
+  "file_name": "14_ML_FEEDBACK_A.json",
+  "trace_format": "reviewer-method-sample-v1",
+  "schema_version": "1.0",
+  "generator": {
+    "name": "OpenAI independent reviewer sample authoring",
+    "version": "2.0"
+  },
+  "_trace_records": [
+    {
+      "trace_id": "ML-A1",
+      "trace_title": "給気ファン SAF-101",
+      "trace_text": "給気ファン SAF-101 風量1200"
+    },
+    {
+      "trace_id": "ML-A2",
+      "trace_title": "排気ファン EAF-201",
+      "trace_text": "排気ファン EAF-201 風量900"
+    },
+    {
+      "trace_id": "ML-A3",
+      "trace_title": "冷却水ポンプ P-301",
+      "trace_text": "冷却水ポンプ P-301 流量300"
+    }
+  ]
+}

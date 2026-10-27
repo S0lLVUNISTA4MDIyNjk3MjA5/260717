@@ -1,0 +1,29 @@
+{
+  "case_id": "03_CODE",
+  "title": "コード一致 (code)",
+  "manual_key_pairs": [
+    {
+      "sysField": "code_and_name",
+      "plmField": "code_and_name",
+      "method": "code",
+      "enabled": true
+    }
+  ],
+  "expected": {
+    "accepted_edges": [
+      [
+        "CODE-A1",
+        "CODE-B1"
+      ],
+      [
+        "CODE-A2",
+        "CODE-B2"
+      ]
+    ],
+    "expected_result_method": "code",
+    "wrong_edges": 0
+  },
+  "notes": [
+    "field全体は一致させず、構造化identifier自体でcode methodを発生させる。"
+  ]
+}

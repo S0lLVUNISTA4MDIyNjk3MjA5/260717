@@ -1,0 +1,6 @@
+# Regenerable working directories (rebuilt by build_standalone_html.js / build_package.js).
+# Not committed to keep the diff focused on the actual deliverables (scripts, case data/output,
+# next-version docs, reconciliation, and the final candidate package/manifest/SHA256SUMS).
+work/
+package/staging/
+package/.ziplist.txt

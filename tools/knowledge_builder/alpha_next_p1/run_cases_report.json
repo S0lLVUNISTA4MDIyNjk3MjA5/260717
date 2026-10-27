@@ -1,0 +1,104 @@
+[
+  {
+    "case_id": "case_01_pdf_excel",
+    "input_a": {
+      "file": "train_hvac_customer_requirements.pdf",
+      "mode": "pdf",
+      "sha256": "27a68f00ef94df9346735c712f794587281003ff1e98a1c6c0293aa9e785730c"
+    },
+    "input_b": {
+      "file": "train_hvac_design_review.xlsx",
+      "mode": "excel",
+      "sha256": "e23a3349e19a65b2d411abf9bf5a4296bd037550495da59e8d4fba64fbfb2820"
+    },
+    "steps": [
+      "goto HTML",
+      "document A preview: プレビュー取り込み完了: 総ページ数2 / section14件 / statement候補12件 / 警告0件。内容を確認し、問題なければ「Knowledge Nodeを生成してStep 2へ」を押してください。",
+      "document B preview: プレビュー取り込み完了: 1シート、非空データ行 合計13件。内容を確認し、問題なければ「Knowledge Nodeを生成してStep 2へ」を押してください。",
+      "ingest: 取込完了: 文書A「train_hvac_customer_requirements.pdf」Node 27件 / 文書B「train_hvac_design_review.xlsx」Node 15件"
+    ],
+    "not_tested": [],
+    "preview_ok": true,
+    "ingest_ok": true,
+    "node_breakdown_by_document": [
+      {
+        "file_name": "train_hvac_customer_requirements.pdf",
+        "source_document_id": "sd-fc09552693112062242f1fd4f07756f6",
+        "document": 1,
+        "section": 14,
+        "statement": 12
+      },
+      {
+        "file_name": "train_hvac_design_review.xlsx",
+        "source_document_id": "sd-4fa1014245c27e092619bd7280f70d22",
+        "document": 1,
+        "section": 1,
+        "statement": 13
+      }
+    ],
+    "total_nodes": 42,
+    "structural_edge_count": 40,
+    "candidate_count": 7,
+    "json_parse_ok": true,
+    "json_reload_ok": true,
+    "error_count": 0,
+    "warning_count": 0,
+    "output_file": "output/case_01_pdf_excel_dataset.json",
+    "output_sha256": "b00b8a55d0ef8dfedf48988ebd2ebe44b8c49981f92bb5d6c044962a78e25df7",
+    "console_errors": [],
+    "console_error_count": 0,
+    "external_network_requests": [],
+    "external_network_request_count": 0
+  },
+  {
+    "case_id": "case_02_pdf_pdf",
+    "input_a": {
+      "file": "train_hvac_customer_requirements.pdf",
+      "mode": "pdf",
+      "sha256": "27a68f00ef94df9346735c712f794587281003ff1e98a1c6c0293aa9e785730c"
+    },
+    "input_b": {
+      "file": "train_hvac_unit_purchase_specification.pdf",
+      "mode": "pdf",
+      "sha256": "666765aa64013a601963442de5ed350da87c5fb8e81055ccef9deaad25c13796"
+    },
+    "steps": [
+      "goto HTML",
+      "document A preview: プレビュー取り込み完了: 総ページ数2 / section14件 / statement候補12件 / 警告0件。内容を確認し、問題なければ「Knowledge Nodeを生成してStep 2へ」を押してください。",
+      "document B preview: プレビュー取り込み完了: 総ページ数2 / section16件 / statement候補13件 / 警告0件。内容を確認し、問題なければ「Knowledge Nodeを生成してStep 2へ」を押してください。",
+      "ingest: 取込完了: 文書A「train_hvac_customer_requirements.pdf」Node 27件 / 文書B「train_hvac_unit_purchase_specification.pdf」Node 30件"
+    ],
+    "not_tested": [],
+    "preview_ok": true,
+    "ingest_ok": true,
+    "node_breakdown_by_document": [
+      {
+        "file_name": "train_hvac_customer_requirements.pdf",
+        "source_document_id": "sd-fc09552693112062242f1fd4f07756f6",
+        "document": 1,
+        "section": 14,
+        "statement": 12
+      },
+      {
+        "file_name": "train_hvac_unit_purchase_specification.pdf",
+        "source_document_id": "sd-407b1a07f56218d9e0ade8f59754a4a7",
+        "document": 1,
+        "section": 16,
+        "statement": 13
+      }
+    ],
+    "total_nodes": 57,
+    "structural_edge_count": 55,
+    "candidate_count": 33,
+    "json_parse_ok": true,
+    "json_reload_ok": true,
+    "error_count": 0,
+    "warning_count": 0,
+    "output_file": "output/case_02_pdf_pdf_dataset.json",
+    "output_sha256": "03f3c621e326e9c90d32f8318cc4fb7f69e8b88ecec6be342c49bbfa59689a4a",
+    "console_errors": [],
+    "console_error_count": 0,
+    "external_network_requests": [],
+    "external_network_request_count": 0
+  }
+]

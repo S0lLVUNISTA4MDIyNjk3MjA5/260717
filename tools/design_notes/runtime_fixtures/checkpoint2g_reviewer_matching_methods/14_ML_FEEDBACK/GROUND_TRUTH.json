@@ -1,0 +1,21 @@
+{
+  "case_id": "14_ML_FEEDBACK",
+  "title": "フィードバック学習 / ML scoring workflow",
+  "setup": [
+    "通常照合で候補を生成",
+    "MLタブで照合ペア一覧を生成",
+    "A1-B1/A2-B2/A3-B3を正例、無関係pairを負例としてHumanラベル",
+    "学習実行",
+    "モデル適用ON/OFFで予測表示と元rule scoreを比較"
+  ],
+  "expected": {
+    "required_behavior": [
+      "教師ラベル由来がHuman/手動として保持される",
+      "学習後も元ルールスコアを追跡可能",
+      "モデル適用OFFで通常rule behaviorへ戻る"
+    ]
+  },
+  "notes": [
+    "MLは照合method enumではなくスコアリング補助機能なので、method sampleとは別枠。"
+  ]
+}
